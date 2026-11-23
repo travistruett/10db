@@ -366,6 +366,11 @@ export interface ApiServices extends PlanRecordServices {
   /** OpenRouter's decision models; ConflictError with the judge off, UpstreamError when OpenRouter can't be read. */
   listDecisionModels(): Promise<DecisionModelListDto>;
   listProjects(): ProjectViewDto[];
+  /** Projects the builder archived, for Restore. */
+  listArchivedProjects(): ProjectDto[];
+  /** Hides the project and stops its activity; ConflictError while work runs in it. Nothing is deleted. */
+  archiveProject(projectId: ProjectId): void;
+  restoreProject(projectId: ProjectId): void;
   /** Registers the project and allows the registries its package files name. */
   createProject(input: ProjectInput): Promise<ProjectDto>;
   listTasks(projectId: ProjectId): TaskDto[];

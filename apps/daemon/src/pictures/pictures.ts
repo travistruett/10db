@@ -721,12 +721,13 @@ export function startPictures(deps: PicturesDeps): Pictures {
   if (swept > 0) log.info({ removed: swept }, 'removed pictures a stopped write left half written');
   const logs = sweepLoginLogs(deps.dataDir);
   if (logs > 0) log.info({ removed: logs }, 'removed dev login logs a stopped daemon left');
+  // Every project, archived included: a restored project keeps its saved sign-in.
   const projects = listProjects(db);
   for (const project of projects) {
     appUrls.set(project.id, project.appUrl);
     devLogins.set(project.id, project.devLoginCommand);
   }
-  if (projects.some((p) => p.appUrl !== null)) prepareBrowser();
+  if (projects.some((p) => p.archivedAt === null && p.appUrl !== null)) prepareBrowser();
   syncBrowser();
   // A pass a restart finds closing or being abandoned holds its afters back, as it did before.
   for (const pass of listLivePasses(db)) {

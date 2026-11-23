@@ -6,7 +6,7 @@ import {
   lastTakeOut,
   listHolds,
   listPassTasks,
-  listProjects,
+  listActiveProjects,
   listUnfinishedAbandons,
   listUnfinishedTakeOuts,
   openHolds,
@@ -79,7 +79,7 @@ async function settleHolds(deps: TakeOutDeps, pass: PassDto, repo: string): Prom
  */
 export async function resumePassWork(deps: TakeOutDeps & SignOffDeps): Promise<void> {
   const db = deps.state.db;
-  for (const project of listProjects(db)) {
+  for (const project of listActiveProjects(db)) {
     const pass = findOpenPass(db, project.id);
     if (pass === undefined) continue;
     try {

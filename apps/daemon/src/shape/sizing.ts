@@ -20,7 +20,7 @@ import {
   listShapeLinks,
   listShapeProposals,
   listShapes,
-  listProjects,
+  listActiveProjects,
   type DbReader,
   type ShapeLinkRow,
   type ShapeProposalRow,
@@ -242,7 +242,7 @@ export function sizingMeasure(db: DbReader): SizingMeasureDto {
     buckets: { S: empty(), M: empty(), L: empty(), XL: empty() },
     overrides: 0,
   };
-  for (const project of listProjects(db))
+  for (const project of listActiveProjects(db))
     for (const shape of listShapes(db, project.id))
       for (const s of sizedTasks(db, shape.id)) {
         if (s.actualHours === null) continue;

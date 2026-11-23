@@ -69,6 +69,8 @@ const KNOWLEDGE: readonly QueryKey[] = [['knowledge'], ['proposals'], ['provenan
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // 10db adds to a project's hazards by itself, so the page that lists the additions follows the project.
   // Your folder's holders, a chat's wait among them, change with a hold event, which is the project's.
+  // Archive and Restore refresh the lists across projects from their own mutations (`archive-queries.ts`): a
+  // project event also fires for every hazard 10db adds, and refetching the Board on each would cut a drag.
   project: [
     queryKeys.projects,
     CANDIDATES,

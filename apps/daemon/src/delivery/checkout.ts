@@ -65,6 +65,7 @@ export function batchCheckout(db: DbReader, batch: BatchDto): string {
 /** Every registered checkout and every live batch or chat worktree: what every sandbox denies writes to. */
 export function allCheckouts(db: DbReader): string[] {
   return [
+    // Archived projects stay in the deny list on purpose: their folders remain protected.
     ...listProjects(db).map((project) => project.repoPath),
     ...listLiveWorktrees(db).flatMap((batch) => (batch.worktreePath ? [batch.worktreePath] : [])),
     ...chatWorktreePaths(db),

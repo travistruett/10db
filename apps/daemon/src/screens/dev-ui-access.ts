@@ -45,6 +45,7 @@ export const DEV_UI_READS: readonly string[] = [
   '/slack',
   '/stakeholders/timers',
   '/projects/:projectId/integrations',
+  '/projects/archived',
   '/tasks/:taskId/question-routes',
   '/inbox/:id/compose',
   '/model-profiles',

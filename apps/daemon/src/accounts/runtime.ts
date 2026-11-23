@@ -10,6 +10,7 @@ import {
   findOpenByFoldKey,
   getAccountRow,
   getProject,
+  listActiveProjects,
   listProjects,
   type AccountRow,
 } from '@10db/db';
@@ -142,7 +143,7 @@ export function createAccountRuntime(opts: {
       const held = opts.pauses.pausedFor(accountId);
       const ends = held ? held.until : until;
       const foldKey = accountFoldKey(accountId, AccountPauseReason.UsageLimit);
-      const carded = listProjects(db).filter(
+      const carded = listActiveProjects(db).filter(
         (p) => p.accountId === accountId && findOpenByFoldKey(db, p.id, foldKey),
       );
       const projects = new Map(

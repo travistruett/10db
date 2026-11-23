@@ -43,7 +43,7 @@ import {
   getWorkstreamRow,
   lastTakeOut,
   listBatches,
-  listProjects,
+  listActiveProjects,
   listSessions,
   listWorkstreams,
   latestPassTurn,
@@ -256,7 +256,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
    * changes nothing.
    */
   function showPassFolders(snapshot: CheckoutSnapshot, folderHeld: ReadonlySet<PassId>): void {
-    for (const project of listProjects(db)) {
+    for (const project of listActiveProjects(db)) {
       const pass = findOpenPass(db, project.id);
       if (pass?.state !== PassState.Open || !snapshot.branches.has(project.repoPath)) continue;
       const found = snapshot.branches.get(project.repoPath) ?? null;
@@ -614,7 +614,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       else missing.add(batch.worktreePath);
     }
     // A pass's folder card is withdrawn once Your folder is back, though no page of it is queued.
-    for (const project of listProjects(db)) {
+    for (const project of listActiveProjects(db)) {
       const pass = findOpenPass(db, project.id);
       if (pass?.state === PassState.Open && folderCardOpen(db, pass))
         checkouts.add(project.repoPath);

@@ -464,6 +464,15 @@ export function createApp(deps: ApiDeps) {
       ),
     )
     .get('/projects', (c) => c.json(deps.services.listProjects()))
+    .get('/projects/archived', (c) => c.json(deps.services.listArchivedProjects()))
+    .post('/projects/:projectId/archive', (c) => {
+      deps.services.archiveProject(ProjectId.parse(c.req.param('projectId')));
+      return c.body(null, 204);
+    })
+    .post('/projects/:projectId/restore', (c) => {
+      deps.services.restoreProject(ProjectId.parse(c.req.param('projectId')));
+      return c.body(null, 204);
+    })
     .post(
       '/projects',
       validator('json', (value): ProjectInput => ProjectInput.parse(value)),

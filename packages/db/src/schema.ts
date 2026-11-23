@@ -234,6 +234,8 @@ export const projects = sqliteTable('projects', {
   id: text('id').$type<ProjectId>().primaryKey(),
   name: text('name').notNull(),
   repoPath: text('repo_path').notNull().unique(),
+  /** When the builder archived the project; null while it is live. An archived project keeps every row. */
+  archivedAt: text('archived_at'),
   gateCommand: text('gate_command'),
   changedCheckCommand: text('changed_check_command'),
   /** Runs in place of the gate when the base has required checks; set only with a gate command. */

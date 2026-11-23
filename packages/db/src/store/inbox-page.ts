@@ -17,6 +17,7 @@ import * as schema from '../schema';
 import { toInboxItemDto } from './inbox';
 import { openRowsPage, type InboxPlacement } from './inbox-open-rows';
 import { SENT_AT, sendIsOut, textMatches } from './inbox-sql';
+import { ofActiveProject } from './projects';
 import type { DbReader } from './store';
 
 const items = schema.inboxItems;
@@ -77,6 +78,7 @@ function whereOf(
       ),
     );
   if (q.project !== undefined) where.push(eq(items.projectId, q.project));
+  else where.push(ofActiveProject(items.projectId));
   if (q.kind !== undefined) where.push(eq(items.kind, q.kind));
   if (q.outcome !== undefined) where.push(sql`${OUTCOME} = ${q.outcome}`);
   if (q.person !== undefined)

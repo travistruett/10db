@@ -113,6 +113,7 @@ export function createHazardAssessor(deps: AssessorDeps): HazardAssessor {
   ): Promise<AssessOutcome> {
     if (deps.asker === null) return fail('There is no model to read the project with.');
     const project = getProject(deps.state.db, projectId);
+    if (project.archivedAt) return fail('This project is archived.');
     const text = await readRepoText(deps.git, project.repoPath);
     if (text === null) return fail("10db couldn't read this project's files.");
     // What the builder took out in Settings since the last look is declined before anything is proposed.

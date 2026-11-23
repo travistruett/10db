@@ -53,6 +53,7 @@ import {
   insertPlanSession,
   latestWorkstreamOf,
   moveChatTab,
+  listActiveProjects,
   openChats,
   patchConversation,
   recentChats,
@@ -73,6 +74,7 @@ import { keepBuilderMessage, type ExploreEngine, type PastedFile } from '../conv
 import type { StateStore } from '../events';
 import { chatWorktreePinKey } from '../git';
 import { withdrawCard } from '../inbox';
+import { refuseArchived } from '../projects';
 import type { FolderHold, ServeResult } from '../folder-hold';
 import type { Logger } from '../log';
 import type { PendingOpens } from '../pass';
@@ -366,7 +368,12 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     get: dtoOf,
 
-    open: () => openChats(state.db).map((row) => dtoOf(row.id)),
+    open: () => {
+      const live = new Set(listActiveProjects(state.db).map((p) => p.id));
+      return openChats(state.db)
+        .filter((row) => live.has(row.projectId))
+        .map((row) => dtoOf(row.id));
+    },
 
     search(query) {
       const page = searchChats(state.db, {
@@ -497,8 +504,9 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     },
 
     send(conversationId, input, folder) {
-      const item = post(conversationId, input);
       const chat = requireChat(conversationId);
+      refuseArchived(state.db, chat.projectId);
+      const item = post(conversationId, input);
       dispatch(chat, conversationId, folder);
       deps.planHeard?.(conversationId, item.id);
       return item;
@@ -534,6 +542,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     async redo(conversationId, input, folder) {
       const chat = requireChat(conversationId);
+      refuseArchived(state.db, chat.projectId);
       refuseWhileDoing(chat.id);
       if (chat.workPlace === WorkPlace.Moving) throw new ConflictError(MOVING_WORDS);
       deps.folderHold.cancelWait(chat.id);

@@ -1,7 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { Delivery, type ProjectDto } from '@10db/contracts';
-import { hasAnsweredByFoldKey, listProjects } from '@10db/db';
+import { hasAnsweredByFoldKey, listActiveProjects } from '@10db/db';
 import { handMadeWorktreeFolder, samePath, surelyInside, WorktreeNotOursError } from '../git';
 import { githubRepoOf, PrState } from '../github';
 import { keepSpotlightOut, SPOTLIGHT_MARKER } from '../sandbox';
@@ -90,7 +90,7 @@ export async function offerHandMadeFolders(
   ctx: DeliveryContext,
   signal: AbortSignal,
 ): Promise<void> {
-  for (const project of listProjects(ctx.state.db)) {
+  for (const project of listActiveProjects(ctx.state.db)) {
     if (project.delivery !== Delivery.PullRequest || !existsSync(project.repoPath)) continue;
     const folder = folderOf(project);
     if (folder === null) continue;

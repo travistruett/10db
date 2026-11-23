@@ -15,6 +15,7 @@ import { and, eq, exists, inArray, not, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import { INBOX_URGENCY_ORDER, toInboxItemDto } from './inbox';
 import { sendIsOut, textMatches } from './inbox-sql';
+import { ofActiveProject } from './projects';
 import type { DbReader } from './store';
 
 const items = schema.inboxItems;
@@ -47,6 +48,7 @@ export function openRowsPage(
 ): InboxPageDto {
   const where: (SQL | undefined)[] = [eq(items.state, InboxState.Open)];
   if (q.project !== undefined) where.push(eq(items.projectId, q.project));
+  else where.push(ofActiveProject(items.projectId));
   if (q.kind !== undefined) where.push(eq(items.kind, q.kind));
   if (placement.connectedTeams.length > 0)
     where.push(

@@ -1,5 +1,5 @@
 import { BRANCH_PREFIX, type BatchDto, type PassId, type ProjectDto } from '@10db/contracts';
-import { listProjects } from '@10db/db';
+import { listActiveProjects } from '@10db/db';
 import { existsSync } from 'node:fs';
 import { existsAsEntry } from '../git';
 import type { GateResult } from '../verify';
@@ -116,7 +116,7 @@ export async function removeScratchLeftovers(
   ctx: Pick<DeliveryContext, 'state' | 'git' | 'logger'>,
 ): Promise<string[]> {
   const removed: string[] = [];
-  for (const project of listProjects(ctx.state.db)) {
+  for (const project of listActiveProjects(ctx.state.db)) {
     if (!existsSync(project.repoPath)) continue;
     try {
       // git lists refs by whole path parts, so the scratch branches are picked from all of 10db's.

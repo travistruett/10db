@@ -34,7 +34,7 @@ import {
   listSharedChanges,
   listPassTasks,
   listPermissionRules,
-  listProjects,
+  listActiveProjects,
   listWorkstreamCommitShas,
   listWorkstreams,
   setAppSetting,
@@ -691,7 +691,7 @@ export function createWatcher(deps: {
   // such write under the same card is carded (allowedWrites).
   const settling = new Set<string>();
   const usedCards = new Set<string>(
-    listProjects(db).flatMap((p) =>
+    listActiveProjects(db).flatMap((p) =>
       cardUseKeys(
         listInbox(db, {
           states: [...ANSWERED_STATES],

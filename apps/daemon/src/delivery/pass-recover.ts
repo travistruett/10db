@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { InboxState, PassId } from '@10db/contracts';
-import { findPass, listInbox, listProjects } from '@10db/db';
+import { findPass, listInbox, listActiveProjects } from '@10db/db';
 import type { CheckoutReturnDeps } from './checkout-return';
 import { PASS_UNOPENED_DETAIL, passCards } from './cards';
 import { raise } from './context';
@@ -20,7 +20,7 @@ function passIdOf(ref: string): PassId | null {
  */
 export async function recoverUnopenedPasses(deps: CheckoutReturnDeps): Promise<void> {
   const db = deps.state.db;
-  for (const project of listProjects(db)) {
+  for (const project of listActiveProjects(db)) {
     if (!existsSync(project.repoPath)) continue;
     try {
       // A card whose branch the builder deleted since has nothing left to say: it closes.

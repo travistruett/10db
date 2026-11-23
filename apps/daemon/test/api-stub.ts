@@ -15,6 +15,9 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
   };
   return {
     listProjects: () => [],
+    listArchivedProjects: () => [],
+    archiveProject: none,
+    restoreProject: none,
     createProject: none,
     listTasks: () => [],
     createTask: track('createTask'),

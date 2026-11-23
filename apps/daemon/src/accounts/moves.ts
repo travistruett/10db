@@ -18,7 +18,7 @@ import {
   getAccountRow,
   getProject,
   listAccounts,
-  listProjects,
+  listActiveProjects,
   listWorkstreams,
   patchProject,
   setMoveBack,
@@ -78,7 +78,7 @@ export interface AccountMoves {
 /** Projects on the account with work in flight: a workstream that is not done, failed or cancelled. */
 export function projectsWithWork(db: DbReader, accountId: AccountId): ProjectDto[] {
   const busy = new Set(listWorkstreams(db, { states: [...ACTIVE_STATES] }).map((w) => w.projectId));
-  return listProjects(db).filter((p) => p.accountId === accountId && busy.has(p.id));
+  return listActiveProjects(db).filter((p) => p.accountId === accountId && busy.has(p.id));
 }
 
 /** The accounts a project could move to now: not archived, not its own, not paused. */

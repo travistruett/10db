@@ -91,7 +91,11 @@ import {
   listModelProfiles,
   listPeople,
   listPersonas,
+  archiveProject,
+  listActiveProjects,
+  listArchivedProjects,
   listProjects,
+  restoreProject,
   listProjectViews,
   listRoutingRules,
   listTasks,
@@ -201,6 +205,7 @@ import {
 } from '../team';
 import type { Pictures } from '../pictures';
 import type { Preview } from '../preview';
+import { refuseArchived, refuseArchiveWhileRunning } from '../projects';
 import type { TaskThread } from '../conversation';
 import type { GithubApiServices } from './github-services';
 import type { JudgeApiServices } from './judge-services';
@@ -451,6 +456,21 @@ export function createServices(deps: {
   }
   return {
     listProjects: () => listProjectViews(db),
+    listArchivedProjects: () => listArchivedProjects(db),
+    archiveProject(projectId) {
+      refuseArchiveWhileRunning(db, projectId);
+      // A pass waiting to open holds no work yet, so it is cancelled rather than refused.
+      deps.openWhenBusy.pendingOpens.cancel(projectId);
+      // The preview and the hazard look stop on the change this write announces.
+      deps.state.write((ctx) => {
+        archiveProject(ctx, projectId);
+      });
+    },
+    restoreProject(projectId) {
+      deps.state.write((ctx) => {
+        restoreProject(ctx, projectId);
+      });
+    },
     async createProject(input) {
       const config = ProjectInput.parse(input);
       if (!existsSync(join(config.repoPath, '.git'))) {
@@ -473,6 +493,7 @@ export function createServices(deps: {
     },
     listTasks: (projectId) => listTasks(db, projectId),
     async createTask(projectId, input, rigorSource) {
+      refuseArchived(db, projectId);
       await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
       const task = deps.state.write((ctx) => {
         const known = listKinds(ctx.tx);
@@ -496,6 +517,7 @@ export function createServices(deps: {
     holdTask: (taskId) => deps.state.write((ctx) => holdTask(ctx, taskId)),
     settleSizing: (taskIds) => deps.sizing.settled(taskIds, deps.sizingWaitMs),
     startTask(taskId, input) {
+      refuseArchived(db, getTask(db, taskId).projectId);
       // A held task already has its run, and its batch and worktree if it has them: it only queues again.
       const held = latestWorkstreamOf(db, taskId);
       if (held?.state === WorkstreamState.Held) {
@@ -538,11 +560,15 @@ export function createServices(deps: {
       deps.scheduler.requestTick();
       return result;
     },
-    startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
+    startBatch(projectId, input) {
+      refuseArchived(db, projectId);
+      return deps.starter.startBatch(projectId, input);
+    },
     // The store lists oldest first; the API answers newest first.
     listBatches: (projectId) => listBatches(db, { projectId }).reverse(),
-    openPass: (projectId, input) =>
-      openWhenBusy(deps.openWhenBusy, {
+    openPass(projectId, input) {
+      refuseArchived(db, projectId);
+      return openWhenBusy(deps.openWhenBusy, {
         projectId,
         name: input.name,
         chatId: null,
@@ -576,7 +602,8 @@ export function createServices(deps: {
           deps.scheduler.requestTick();
           return { ...opened, dirt: [...opened.dirt], waiting: [...opened.waiting] };
         },
-      }),
+      });
+    },
     cancelPendingOpen: (projectId) => deps.openWhenBusy.pendingOpens.cancel(projectId),
     passView: (passId) => passView(db, passId),
     async takeOutPage(passId, taskId, input) {
@@ -749,7 +776,12 @@ export function createServices(deps: {
     abandonBatch: (id) => deps.shipper.abandon(id),
     adoptGoal: (projectId, input) => adoptGoal(deps, projectId, input),
     getGoal: (id) => getGoal(db, id),
-    listWorkstreams: ({ active }) => listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}),
+    listWorkstreams({ active }) {
+      const live = new Set(listActiveProjects(db).map((p) => p.id));
+      return listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}).filter((w) =>
+        live.has(w.projectId),
+      );
+    },
     async cancelWorkstream(id) {
       await deps.runner.cancel(id);
       return getWorkstream(db, id);
@@ -765,7 +797,10 @@ export function createServices(deps: {
       deps.scheduler.requestTick();
       return ws;
     },
-    listInbox: ({ states }) => listInbox(db, states ? { states } : {}),
+    listInbox({ states }) {
+      const live = new Set(listActiveProjects(db).map((p) => p.id));
+      return listInbox(db, states ? { states } : {}).filter((i) => live.has(i.projectId));
+    },
     pageInbox: (query) =>
       pageInbox(db, query, {
         connectedTeams: deps.slackConnections.connectedTeams(),
@@ -794,7 +829,7 @@ export function createServices(deps: {
       if (recheck) await deps.agents?.retry();
       const checked = markGhRequired(
         await lastCheck,
-        listProjects(db).some((p) => p.delivery === Delivery.PullRequest),
+        listActiveProjects(db).some((p) => p.delivery === Delivery.PullRequest),
       );
       return {
         // The pinned copies are read per request: they are fetched in the background and upstream moves on.
