@@ -110,7 +110,7 @@ export function SettingRow({
       ) : (
         <Group justify="space-between" wrap="nowrap" gap="xl">
           {text}
-          <Box w={260} style={{ flex: 'none' }}>
+          <Box miw={260} style={{ flex: 'none' }}>
             {children}
           </Box>
         </Group>
