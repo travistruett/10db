@@ -2,7 +2,11 @@ import type { ShapeAttachmentDto, ShapeId, ShapeProposalDto } from '@10db/contra
 import { Anchor, Button, Group, Stack, Text } from '@mantine/core';
 import { IconCheck } from '@tabler/icons-react';
 import { createContext, use } from 'react';
-import { useApproveAttachment } from '../../../../daemon/shape-queries';
+import {
+  useApproveAttachment,
+  useFigmaPress,
+  useOpenFigmaFrame,
+} from '../../../../daemon/shape-queries';
 import { AttachmentView } from './attachment-view';
 
 // Shape spec §10.3: an opened row shows what the session attached to it, each rendered inert. The
@@ -97,6 +101,7 @@ export function RowAttachments({
               >
                 Ask for Changes
               </Button>
+              <FigmaButtons shapeId={shapeId} attachment={a} title={title} />
               {/* Approved, the undo is a quiet link at the right: the state is what matters. */}
               {a.approved ? (
                 <Group ml="auto">
@@ -108,6 +113,67 @@ export function RowAttachments({
         </Stack>
       ))}
     </Stack>
+  );
+}
+
+/** A mock-up's trip to Figma: send it, then once linked, send again, bring it back and follow the frame link. */
+function FigmaButtons({
+  shapeId,
+  attachment,
+  title,
+}: {
+  readonly shapeId: ShapeId;
+  readonly attachment: ShapeAttachmentDto;
+  readonly title: string;
+}) {
+  const press = useFigmaPress(shapeId);
+  const open = useOpenFigmaFrame(shapeId);
+  const linked = attachment.figma !== null;
+  return (
+    <>
+      <Button
+        variant="default"
+        size="xs"
+        loading={press.isPending && press.variables.action === 'open'}
+        aria-label={`${linked ? 'Send again to Figma' : 'Open in Figma'}: ${title}`}
+        onClick={() => {
+          press.mutate({ attachmentId: attachment.id, action: 'open' });
+        }}
+      >
+        {linked ? 'Send Again to Figma' : 'Open in Figma'}
+      </Button>
+      {linked ? (
+        <>
+          <Button
+            variant="default"
+            size="xs"
+            loading={press.isPending && press.variables.action === 'bring-back'}
+            aria-label={`Bring back from Figma: ${title}`}
+            onClick={() => {
+              press.mutate({ attachmentId: attachment.id, action: 'bring-back' });
+            }}
+          >
+            Bring Back from Figma
+          </Button>
+          <Anchor
+            component="button"
+            type="button"
+            fz={12}
+            aria-label={`Open the Figma frame of mock-up: ${title}`}
+            onClick={() => {
+              open.mutate(attachment.id);
+            }}
+          >
+            Figma Frame
+          </Anchor>
+        </>
+      ) : null}
+      {press.isError ? (
+        <Text size="xs" c="red">
+          {press.error.message}
+        </Text>
+      ) : null}
+    </>
   );
 }
 

@@ -1,6 +1,7 @@
 import { Stack, Text } from '@mantine/core';
 import { AaCard } from './sign-ins/aa-card';
 import { GithubCard } from './sign-ins/github-card';
+import { FigmaCard } from './sign-ins/figma-card';
 import { LinearCard } from './sign-ins/linear-card';
 import { SlackCard } from './sign-ins/slack-card';
 
@@ -30,6 +31,7 @@ export function IntegrationsSection() {
         service through its MCP servers or connectors.
       </Text>
       <LinearCard />
+      <FigmaCard />
     </Stack>
   );
 }

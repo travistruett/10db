@@ -13,6 +13,7 @@ import {
   type MilestoneCut,
   type ProjectId,
   type ShapeAcceptId,
+  type FigmaAction,
   type ShapeAttachmentId,
   type ShapeFindingId,
   type ShapeId,
@@ -157,6 +158,41 @@ export function useApproveAttachment(shapeId: ShapeId) {
       );
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+  });
+}
+
+/** Open in Figma or Bring Back from Figma on a mock-up: asks the session to do it. */
+export function useFigmaPress(shapeId: ShapeId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      readonly attachmentId: ShapeAttachmentId;
+      readonly action: FigmaAction;
+    }) =>
+      readJson(
+        await client.shapes[':shapeId'].attachments[':attachmentId'].figma.$post({
+          param: { shapeId, attachmentId: input.attachmentId },
+          json: { action: input.action },
+        }),
+        z.object({ status: z.enum(['started', 'running']) }),
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+  });
+}
+
+/** Opens a mock-up's Figma frame in the builder's browser; the daemon does the opening. */
+export function useOpenFigmaFrame(shapeId: ShapeId) {
+  const { client } = useDaemon();
+  return useMutation({
+    mutationFn: async (attachmentId: ShapeAttachmentId) => {
+      await readJson(
+        await client.shapes[':shapeId'].attachments[':attachmentId'].figma.open.$post({
+          param: { shapeId, attachmentId },
+        }),
+        z.null(),
+      );
+    },
   });
 }
 
