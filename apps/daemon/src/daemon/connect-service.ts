@@ -97,6 +97,8 @@ export interface ProjectMcpServers {
   readonly loaded: Readonly<Record<string, YourMcpServerKey>>;
   /** The project's effective Your MCP servers switch. */
   readonly on: boolean;
+  /** Remote servers of installed plugins the project's switches leave out: there, but not loaded. */
+  readonly offPluginServers: readonly { readonly pluginName: string; readonly url: string }[];
 }
 
 export interface ServiceConnector {
@@ -213,6 +215,12 @@ export function createServiceConnector(deps: {
       };
       let server = own();
       if (server === undefined) {
+        // A plugin that brings the service but is off for this project is turned on, never doubled.
+        const off = deps.mcp(projectId).offPluginServers.find((s) => hostOf(s.url) === host);
+        if (off !== undefined)
+          throw new ConflictError(
+            `${label} comes from the ${off.pluginName} plugin, which is off for this project, so it was not added again. Turn the plugin on under Settings › Trust.`,
+          );
         const source =
           harness === Provider.Codex ? YourMcpSource.CodexConfig : YourMcpSource.ClaudeJson;
         const clash = deps
