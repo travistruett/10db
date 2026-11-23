@@ -1,4 +1,4 @@
-import { FigmaVia, type FigmaSignInRowDto, type ProjectDto } from '@10db/contracts';
+import type { FigmaSignInRowDto, ProjectDto } from '@10db/contracts';
 import { Alert, Skeleton, Text } from '@mantine/core';
 import { IconVectorBezier2 } from '@tabler/icons-react';
 import { useProjects } from '../../../daemon/queries';
@@ -6,14 +6,9 @@ import { useFigmaSignIns } from '../../../daemon/sign-in-queries';
 import { IntegrationCard, StateText } from './integration-card';
 import { ProjectRow, ProjectRows } from './project-rows';
 
-/** What a project's account has with Figma: the way it reaches it, or where to sign in. */
+/** What a project's account has with Figma, in the daemon's words. */
 function figmaWords(row: FigmaSignInRowDto | undefined): string {
-  if (row === undefined) return "This project's account was not read.";
-  if (row.via === FigmaVia.None) return row.note ?? "This project's account has no Figma sign-in.";
-  if (row.signedIn === false) return row.note ?? 'Sign in in Settings › Trust.';
-  return row.via === FigmaVia.Connector
-    ? "Through Claude's Figma connector."
-    : 'Through its Figma server.';
+  return row?.note ?? 'Checked when the agent first uses Figma';
 }
 
 /** Settings › Integrations › Figma: how each project's account reaches Figma, and where to sign in. */

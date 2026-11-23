@@ -16,11 +16,14 @@ import type { YourMcpPlan } from '../session-setup';
 
 const FIGMA_HOST = 'mcp.figma.com';
 
-/** What to tell the builder when an account has no Figma, . */
-const HINT_CLAUDE_PLAN = 'Sign in to Figma in Claude Code: `/mcp`.';
-const HINT_CLAUDE_OTHER = "Add Figma's server to Claude Code, then `/mcp`.";
-const HINT_CODEX = 'Sign in in Settings › Trust.';
-const NOT_CHECKED = 'Your Figma sign-in is checked when the agent first uses it.';
+/** What the card says about an account, in plain words. */
+const NOT_SIGNED_IN_CLAUDE = 'Not signed in: run /mcp in Claude Code';
+const NOT_SIGNED_IN_CODEX = 'Not signed in: Settings › Trust';
+const VIA_PLUGIN = "Signed in through Claude Code's Figma plugin";
+const VIA_SERVER = "Signed in through Claude Code's Figma server";
+const VIA_CONNECTOR = 'Signed in through the claude.ai Figma connector';
+const VIA_CODEX = 'Signed in through Codex';
+const NOT_CHECKED = 'Checked when the agent first uses Figma';
 const NOT_READ = "Couldn't read this account's claude.ai connectors.";
 
 /** Whether a remote server's url is Figma's own host. */
@@ -53,6 +56,10 @@ export function createFigmaSignIns(deps: {
       const servers = Object.entries(deps.plan().remote)
         .filter(([, remote]) => isFigmaServer(remote.url))
         .map(([name]) => name);
+      // A plugin's server is registered under `plugin:<plugin>:<server>`.
+      const serverNote = servers.every((name) => name.startsWith('plugin:'))
+        ? VIA_PLUGIN
+        : VIA_SERVER;
       const accounts = listAccounts(deps.state.db).flatMap((account) => {
         const harness = harnessOf(account);
         return harness === null ? [] : [{ ...account, harness }];
@@ -68,23 +75,23 @@ export function createFigmaSignIns(deps: {
             (r) => r.accountId === account.id && servers.includes(r.name),
           );
           if (own.length === 0)
-            return { ...base, via: FigmaVia.None, signedIn: null, note: HINT_CODEX };
+            return { ...base, via: FigmaVia.None, signedIn: null, note: NOT_SIGNED_IN_CODEX };
           const signedIn = own.some((r) => r.state === McpSignInState.SignedIn);
           return {
             ...base,
             via: FigmaVia.Server,
             signedIn,
-            note: signedIn ? null : HINT_CODEX,
+            note: signedIn ? VIA_CODEX : NOT_SIGNED_IN_CODEX,
           };
         }
         if (account.kind === AccountKind.ClaudeSubscription) {
           const names = deps.connectorNames(account);
           if (names?.some((name) => /figma/i.test(name)) === true)
-            return { ...base, via: FigmaVia.Connector, signedIn: null, note: null };
+            return { ...base, via: FigmaVia.Connector, signedIn: null, note: VIA_CONNECTOR };
           if (servers.length > 0)
-            return { ...base, via: FigmaVia.Server, signedIn: null, note: null };
+            return { ...base, via: FigmaVia.Server, signedIn: null, note: serverNote };
           const note =
-            names === undefined ? NOT_CHECKED : names === null ? NOT_READ : HINT_CLAUDE_PLAN;
+            names === undefined ? NOT_CHECKED : names === null ? NOT_READ : NOT_SIGNED_IN_CLAUDE;
           return {
             ...base,
             via: FigmaVia.None,
@@ -94,8 +101,8 @@ export function createFigmaSignIns(deps: {
           };
         }
         return servers.length > 0
-          ? { ...base, via: FigmaVia.Server, signedIn: null, note: null }
-          : { ...base, via: FigmaVia.None, signedIn: null, note: HINT_CLAUDE_OTHER };
+          ? { ...base, via: FigmaVia.Server, signedIn: null, note: serverNote }
+          : { ...base, via: FigmaVia.None, signedIn: null, note: NOT_SIGNED_IN_CLAUDE };
       });
       return { rows };
     },

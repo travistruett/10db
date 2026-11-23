@@ -1,5 +1,5 @@
 import type { ShapeAttachmentDto, ShapeId, ShapeProposalDto } from '@10db/contracts';
-import { Anchor, Button, Group, Menu, Stack, Text } from '@mantine/core';
+import { Anchor, Button, Loader, Group, Menu, Stack, Text } from '@mantine/core';
 import { IconCheck, IconChevronDown } from '@tabler/icons-react';
 import { createContext, use } from 'react';
 import {
@@ -134,12 +134,25 @@ function FigmaButtons({
   const send = (): void => {
     press.mutate({ attachmentId: attachment.id, action: 'open' });
   };
-  const error = press.isError ? (
-    <Text size="xs" c="red">
-      {press.error.message}
-    </Text>
-  ) : null;
-  if (attachment.figma === null)
+  const busy = press.data?.status === 'running' ? 'Another Figma request is still running.' : null;
+  const message = press.isError ? press.error.message : open.isError ? open.error.message : busy;
+  const error =
+    message === null ? null : (
+      <Text size="xs" c="red">
+        {message}
+      </Text>
+    );
+  const pending = attachment.figma?.pending ?? null;
+  if (pending !== null)
+    return (
+      <Group gap={6} wrap="nowrap" role="status">
+        <Loader size={12} />
+        <Text size="xs" c="dimmed">
+          {pending === 'open' ? 'Sending to Figma…' : 'Bringing back from Figma…'}
+        </Text>
+      </Group>
+    );
+  if ((attachment.figma?.fileUrl ?? null) === null)
     return (
       <>
         <Button
