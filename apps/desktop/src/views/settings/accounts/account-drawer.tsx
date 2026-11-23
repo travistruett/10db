@@ -1,4 +1,5 @@
 import {
+  accountDisplayName,
   needsSecret,
   harnessOf,
   signsInWithLogin,
@@ -147,12 +148,14 @@ export function AccountDrawer({
       title={
         account ? (
           <Group component="span" gap="xs" wrap="nowrap">
-            <span>{account.label}</span>
-            <Badge size="sm" variant="light" color="gray" {...WHOLE_BADGE}>
+            {/* The drawer is named by its title: the label and the identity, as the accounts table says it.
+                The badges repeat the kind and Default for the eye, so they stay out of the name. */}
+            <span>{accountDisplayName(account)}</span>
+            <Badge size="sm" variant="light" color="gray" aria-hidden {...WHOLE_BADGE}>
               {ACCOUNT_KIND_LABEL[account.kind]}
             </Badge>
             {account.isDefault ? (
-              <Badge size="sm" variant="light" color="gray" {...WHOLE_BADGE}>
+              <Badge size="sm" variant="light" color="gray" aria-hidden {...WHOLE_BADGE}>
                 Default
               </Badge>
             ) : null}
