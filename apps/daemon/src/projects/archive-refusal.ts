@@ -20,7 +20,7 @@ const plural = (n: number, one: string, many: string): string =>
   `${String(n)} ${n === 1 ? one : many}`;
 
 /** What is still running in the project, as phrases for the refusal; empty when it is idle. */
-export function runningInProject(db: DbReader, projectId: ProjectId): string[] {
+function runningInProject(db: DbReader, projectId: ProjectId): string[] {
   const running: string[] = [];
   const workstreams = listWorkstreams(db, { projectId, states: ACTIVE_STATES }).length;
   if (workstreams > 0) running.push(plural(workstreams, 'task in progress', 'tasks in progress'));

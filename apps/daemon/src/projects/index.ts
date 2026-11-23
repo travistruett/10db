@@ -1,1 +1,1 @@
-export { refuseArchiveWhileRunning, runningInProject } from './archive-refusal';
+export { refuseArchiveWhileRunning } from './archive-refusal';
