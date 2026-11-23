@@ -1,5 +1,6 @@
 import { hazardScope, HazardScope, type ProjectDto } from '@10db/contracts';
-import { Button, Group, Stack, Text } from '@mantine/core';
+import { ActionIcon, Button, Group, Stack, Text, Tooltip } from '@mantine/core';
+import { IconWand } from '@tabler/icons-react';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
 import { useLookAgainAtHazards } from '../../daemon/hazard-queries';
@@ -110,23 +111,31 @@ export function HazardsSection({ project }: { readonly project: ProjectDto }) {
           <Group gap="xs" wrap="nowrap">
             <Button
               data-keeps-drawer
-              variant="subtle"
-              color="gray"
-              loading={look.isPending}
-              onClick={() => {
-                look.mutate();
-              }}
-            >
-              Look Again
-            </Button>
-            <Button
-              data-keeps-drawer
               onClick={() => {
                 request(null);
               }}
             >
               Add Hazard
             </Button>
+            <Tooltip
+              position="left"
+              multiline
+              w={240}
+              label="Look Again: read the project's files for the commands and files that change lockfiles and migrations."
+            >
+              <ActionIcon
+                data-keeps-drawer
+                variant="default"
+                size="input-sm"
+                aria-label="Look Again"
+                loading={look.isPending}
+                onClick={() => {
+                  look.mutate();
+                }}
+              >
+                <IconWand size={18} stroke={1.5} />
+              </ActionIcon>
+            </Tooltip>
           </Group>
         }
       />
