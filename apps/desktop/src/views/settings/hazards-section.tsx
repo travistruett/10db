@@ -28,7 +28,10 @@ export function HazardsSection({ project }: { readonly project: ProjectDto }) {
     setEditing(to);
   };
   const request = (to: Hazard | null) => {
-    if (dirty && (adding || editing !== null) && editing?.name !== to?.name) setSwitchTo({ to });
+    const drawerOpen = adding || editing !== null;
+    // The open row again changes nothing, and keeps its edits.
+    if (drawerOpen && editing?.name === to?.name) return;
+    if (dirty && drawerOpen) setSwitchTo({ to });
     else show(to);
   };
   const open = (row: Hazard) => {
@@ -97,6 +100,7 @@ export function HazardsSection({ project }: { readonly project: ProjectDto }) {
         action={
           <Group gap="xs" wrap="nowrap">
             <Button
+              data-keeps-drawer
               variant="subtle"
               color="gray"
               loading={look.isPending}
@@ -107,6 +111,7 @@ export function HazardsSection({ project }: { readonly project: ProjectDto }) {
               Look Again
             </Button>
             <Button
+              data-keeps-drawer
               onClick={() => {
                 request(null);
               }}

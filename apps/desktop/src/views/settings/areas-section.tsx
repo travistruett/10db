@@ -51,7 +51,10 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
     setEditing(to);
   };
   const request = (to: Area | null) => {
-    if (dirty && (adding || editing !== null) && editing?.name !== to?.name) setSwitchTo({ to });
+    const drawerOpen = adding || editing !== null;
+    // The open row again changes nothing, and keeps its edits.
+    if (drawerOpen && editing?.name === to?.name) return;
+    if (dirty && drawerOpen) setSwitchTo({ to });
     else show(to);
   };
   const open = (row: Area) => {
@@ -121,6 +124,7 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
         }
         action={
           <Button
+            data-keeps-drawer
             onClick={() => {
               request(null);
             }}
