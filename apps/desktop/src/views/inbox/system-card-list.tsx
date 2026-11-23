@@ -31,8 +31,8 @@ export function cardText(card: SystemCard): { readonly title: string; readonly b
       };
     case SystemCardKind.SlackRefused:
       return {
-        title: "Slack refused 10db's token",
-        body: 'Reconnect it in Settings › Integrations. Questions already sent stay in your Open tab until it works again, so you can answer them yourself.',
+        title: `Slack refused 10db's token for ${card.teamName}`,
+        body: 'Reconnect it in Settings › Integrations. Questions already sent there stay in your Open tab until it works again, so you can answer them yourself.',
       };
   }
 }

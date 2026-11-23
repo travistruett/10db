@@ -3,7 +3,7 @@ import { Alert, Stack, Text } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useInboxRows } from '../../daemon/inbox-queries';
-import { useSlackConnection } from '../../daemon/people';
+import { useSlackStatus } from '../../daemon/people';
 import { useFrameSlots } from '../../shell/frame-slots';
 import { useNow } from '../../shell/relative';
 import { InboxEmpty } from './inbox-empty';
@@ -183,10 +183,10 @@ export function ListedInbox({
   readonly listHost: HTMLElement | null;
   readonly onClearFilters: () => void;
 }) {
-  const connection = useSlackConnection();
+  const slack = useSlackStatus();
   if (state === InboxListState.Waiting) {
-    if (connection.data === undefined) return null;
-    if (connection.data.state !== 'connected')
+    if (slack.data === undefined) return null;
+    if (!slack.data.workspaces.some((w) => w.state === 'connected'))
       return <Text c="dimmed">Slack isn't connected, so questions sent there wait in Open.</Text>;
   }
   return (
