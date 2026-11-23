@@ -25,7 +25,6 @@ import {
   TaskStatus,
   taskLandingFor,
   Title,
-  Headline,
   Why,
   WorkstreamId,
   WorkstreamState,
@@ -279,8 +278,6 @@ export function insertGoalTask(
   goalId: GoalId,
   input: {
     readonly title: string;
-    /** Absent or empty: none. */
-    readonly headline?: string;
     readonly why?: string;
     readonly description: string;
     readonly acceptanceCriteria: readonly string[];
@@ -296,7 +293,6 @@ export function insertGoalTask(
   return writeTask(ctx, projectId, {
     ...(input.external === undefined ? {} : { external: input.external }),
     title: Title.parse(input.title),
-    headline: Headline.parse(input.headline ?? ''),
     why: Why.parse(input.why ?? ''),
     description: input.description,
     acceptanceCriteria: [...input.acceptanceCriteria],
@@ -608,11 +604,8 @@ export function appendRetryLimitFindings(
 function writeTask(
   ctx: WriteContext,
   projectId: ProjectId,
-  config: Omit<
-    TaskConfig,
-    'landing' | 'workspaceMode' | 'headline' | 'why' | 'rigor' | 'kinds' | 'effortPin'
-  > &
-    Partial<Pick<TaskConfig, 'headline' | 'why' | 'rigor' | 'kinds' | 'effortPin'>> &
+  config: Omit<TaskConfig, 'landing' | 'workspaceMode' | 'why' | 'rigor' | 'kinds' | 'effortPin'> &
+    Partial<Pick<TaskConfig, 'why' | 'rigor' | 'kinds' | 'effortPin'>> &
     Placement & {
       readonly landing: TaskLanding;
       readonly proposalId: ProposalId | null;
@@ -632,7 +625,6 @@ function writeTask(
     id: mintId('Task'),
     projectId,
     title: config.title,
-    headline: config.headline ?? '',
     why: config.why ?? '',
     description: config.description,
     acceptanceCriteria: config.acceptanceCriteria,
@@ -779,7 +771,6 @@ function toTaskDto(
     id: row.id,
     projectId: row.projectId,
     title: row.title,
-    headline: row.headline,
     why: row.why,
     description: row.description,
     acceptanceCriteria: row.acceptanceCriteria,

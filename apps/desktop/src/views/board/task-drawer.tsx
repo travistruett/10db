@@ -91,7 +91,7 @@ import { EffortPinSelect, KindSources, KindsSelect, RigorSelect } from './task-f
 import { canCancelRun } from './task-cancel';
 import { holdOption, isHeld, type HoldOption } from './task-hold';
 import { isSpent } from './task-spent';
-import { HeadlineField, PullRequestTitleField, WhyField } from './task-words-fields';
+import { TitleField, WhyField } from './task-words-fields';
 import {
   canCloseRun,
   canRetryRun,
@@ -185,9 +185,8 @@ export function TaskDrawer({
   const landingEditable = task.workstreamId === null;
   const initialCriteria = task.acceptanceCriteria.join('\n');
   const [title, setTitle] = useState(task.title);
-  const [headline, setHeadline] = useState(task.headline);
   const [why, setWhy] = useState(task.why);
-  const wordsChanged = headline.trim() !== task.headline || why.trim() !== task.why;
+  const wordsChanged = why.trim() !== task.why;
   const [description, setDescription] = useState(task.description);
   const [criteria, setCriteria] = useState(initialCriteria);
   // Rigor and kinds follow the live task until the builder edits them, so a judge answer that lands while the
@@ -220,14 +219,10 @@ export function TaskDrawer({
   const limitLine = shippedAtLimitLine(workstream);
   // Overview is where a drawer opens; the form and its Save bar are on Edit alone.
   const [tab, setTab] = useState<DrawerTab>('overview');
-  // With a headline the header says it and What it promises says the title; without one the title is
-  // the header and What it promises is only the criteria, so the title shows once.
-  const hasHeadline = task.headline !== '';
   const rounds = reviewRounds(workstream?.steps ?? []);
 
   const dirty =
     title !== task.title ||
-    headline !== task.headline ||
     why !== task.why ||
     description !== task.description ||
     criteria !== initialCriteria ||
@@ -251,9 +246,7 @@ export function TaskDrawer({
 
   const save = () => {
     const lines = criteriaLines(criteria);
-    // An empty pull request title takes the Title; the task needs one of them.
-    const gitTitle = title.trim() || headline.trim();
-    if (gitTitle === '') {
+    if (title.trim() === '') {
       setError('Give the task a title');
       return;
     }
@@ -278,13 +271,13 @@ export function TaskDrawer({
       {
         taskId: task.id,
         patch: {
-          title: gitTitle,
+          title: title.trim(),
           description: description.trim(),
           acceptanceCriteria: lines,
           ...(rigor !== task.rigor ? { rigor } : {}),
           ...(kindsChanged ? { kinds } : {}),
           ...(effortPin !== task.effortPin ? { effortPin } : {}),
-          ...(wordsChanged ? { headline: headline.trim(), why: why.trim() } : {}),
+          ...(wordsChanged ? { why: why.trim() } : {}),
           ...(areasChanged ? { areas } : {}),
           ...(modelSettingChanged ? { modelSetting } : {}),
           ...(changesLanding && where.ok ? { landing: where.landing } : {}),
@@ -323,27 +316,13 @@ export function TaskDrawer({
         />
         <Stack gap={4}>
           <Title order={3} size={16} fw={600}>
-            {hasHeadline ? task.headline : task.title}
+            {task.title}
           </Title>
           {task.why ? (
             <Text size="sm" c="dimmed">
               {task.why}
             </Text>
           ) : null}
-          {hasHeadline ? null : (
-            <Anchor
-              component="button"
-              type="button"
-              size="xs"
-              c="dimmed"
-              style={{ alignSelf: 'flex-start' }}
-              onClick={() => {
-                setTab('edit');
-              }}
-            >
-              Add a Headline
-            </Anchor>
-          )}
         </Stack>
         <TaskNotices
           taskId={task.id}
@@ -400,11 +379,9 @@ export function TaskDrawer({
           </Tabs.List>
           <Tabs.Panel value="overview" pt="lg">
             <Stack gap="xl">
-              {hasHeadline || task.acceptanceCriteria.length > 0 ? (
+              {task.acceptanceCriteria.length > 0 ? (
                 <Stack gap="xs">
                   <SectionLabel>What It Promises</SectionLabel>
-                  {/* Without a headline the title is the header above; saying it twice is noise. */}
-                  {hasHeadline ? <Text size="sm">{task.title}</Text> : null}
                   {task.acceptanceCriteria.length > 0 ? (
                     <List size="sm" spacing={2}>
                       {task.acceptanceCriteria.map((line, index) => (
@@ -463,7 +440,7 @@ export function TaskDrawer({
           </Tabs.Panel>
           <Tabs.Panel value="edit" pt="md">
             <Stack gap="lg">
-              <HeadlineField value={headline} onChange={setHeadline} placeholder={task.title} />
+              <TitleField value={title} onChange={setTitle} />
               <WhyField value={why} onChange={setWhy} />
               {areasEditable ? (
                 <MultiSelect
@@ -543,7 +520,6 @@ export function TaskDrawer({
                 value={effortPin}
                 onChange={setEffortPin}
               />
-              <PullRequestTitleField value={title} onChange={setTitle} />
               {pullRequestBase === undefined ? null : landingEditable ? (
                 <LandingField
                   baseBranch={pullRequestBase}

@@ -130,7 +130,6 @@ function goalBrief(goal: PlanGoal): GoalBrief {
     tasks: goal.tasks.map((t) => ({
       key: t.key,
       title: t.title,
-      headline: t.headline,
       why: t.why,
       description: t.description,
       criteria: t.criteria,
@@ -583,7 +582,6 @@ export function convertProposals(
       }
       const base = {
         title: task.title,
-        headline: task.headline,
         why: task.why,
         description: task.description,
         dependsOn: task.dependsOn.flatMap((key) => taskIds.get(key) ?? []),

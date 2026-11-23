@@ -136,7 +136,6 @@ export function createBuilderTools(
         .map((task) => ({
           id: task.id,
           title: task.title,
-          headline: task.headline,
           why: task.why,
           description: task.description,
           acceptanceCriteria: task.acceptanceCriteria,
@@ -155,7 +154,6 @@ export function createBuilderTools(
         // The agent names kinds by key; who set them is 10db's to record. Keys no kind has are refused.
         kinds: named.map(({ key }) => ({ key, source: TaskKindSource.Builder })),
         title: loose.title.trim(),
-        headline: loose.headline.trim(),
         why: loose.why.trim(),
         description: loose.description.trim(),
         acceptanceCriteria: normaliseCriteria(loose.acceptanceCriteria),
@@ -176,7 +174,6 @@ export function createBuilderTools(
         );
       }
       if (changes.title !== undefined) patch['title'] = changes.title.trim();
-      if (changes.headline !== undefined) patch['headline'] = changes.headline.trim();
       if (changes.why !== undefined) patch['why'] = changes.why.trim();
       if (changes.description !== undefined) patch['description'] = changes.description.trim();
       if (changes.acceptanceCriteria !== undefined) {

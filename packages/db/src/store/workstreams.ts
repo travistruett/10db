@@ -105,7 +105,7 @@ function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
     .where(eq(schema.sessions.workstreamId, row.id))
     .get();
   const task = db
-    .select({ title: schema.tasks.title, headline: schema.tasks.headline })
+    .select({ title: schema.tasks.title })
     .from(schema.tasks)
     .where(eq(schema.tasks.id, row.taskId))
     .get();
@@ -113,7 +113,6 @@ function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
     id: row.id,
     taskId: row.taskId,
     taskTitle: task?.title ?? '',
-    taskHeadline: task?.headline ?? '',
     projectId: row.projectId,
     batchId: row.batchId,
     state: row.state,

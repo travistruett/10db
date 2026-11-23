@@ -34,7 +34,6 @@ function tasksNamed(
         id: idOf(name),
         projectId: mintId('Project'),
         title: name,
-        headline: '',
         why: '',
         description: '',
         acceptanceCriteria: ['it works'],

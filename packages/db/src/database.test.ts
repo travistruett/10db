@@ -450,11 +450,11 @@ describe('migrating a database that has a gate command and evidence', () => {
   });
 });
 
-describe('migrating to task headlines', () => {
-  it('gives a task made before it an empty headline and why, and keeps its title', () => {
+describe('migrating a task headline into its title', () => {
+  it('makes the headline the title where one exists and keeps the title otherwise', () => {
     const AT = '2026-11-02T12:00:00.000Z';
-    // The last migration before tasks had a headline and a why.
-    migrateDatabase(db, migrationsThrough('0024_goal_visit_started_at'));
+    // The last migration before the headline was merged into the title.
+    migrateDatabase(db, migrationsThrough('0103_lying_pete_wisdom'));
     const run = (sql: string, ...args: string[]): void => {
       db.$client.prepare(sql).run(...args);
     };
@@ -471,16 +471,24 @@ describe('migrating to task headlines', () => {
       AT,
       AT,
     );
-    run(
-      `INSERT INTO tasks (id, project_id, title, description, acceptance_criteria, areas, status, board_order,
-         workspace_mode, created_at, updated_at)
-       VALUES ('tsk_a', 'prj_a', 'The promise', '', '[]', '[]', 'open', 1, 'shared', ?, ?)`,
-      AT,
-      AT,
-    );
+    const insertTask = (id: string, title: string, headline: string): void => {
+      run(
+        `INSERT INTO tasks (id, project_id, title, headline, description, acceptance_criteria, areas, status,
+           board_order, workspace_mode, created_at, updated_at)
+         VALUES (?, 'prj_a', ?, ?, '', '[]', '[]', 'open', 1, 'shared', ?, ?)`,
+        id,
+        title,
+        headline,
+        AT,
+        AT,
+      );
+    };
+    insertTask('tsk_a', 'A long precise promise for git', 'Odd files cannot freeze 10db');
+    insertTask('tsk_b', 'No headline here', '');
     migrateDatabase(db);
-    expect(db.$client.prepare('SELECT title, headline, why FROM tasks').all()).toEqual([
-      { title: 'The promise', headline: '', why: '' },
+    expect(db.$client.prepare('SELECT id, title FROM tasks ORDER BY id').all()).toEqual([
+      { id: 'tsk_a', title: 'Odd files cannot freeze 10db' },
+      { id: 'tsk_b', title: 'No headline here' },
     ]);
   });
 });

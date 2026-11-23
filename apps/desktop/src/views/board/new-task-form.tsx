@@ -12,7 +12,7 @@ import { criteriaLines } from './areas-text';
 import { LabelWithHelp } from './field-help';
 import { draftFor, landingFromDraft, type LandingDraft } from './landing-draft';
 import { LandingField } from './landing-field';
-import { HeadlineField, PullRequestTitleField, WhyField } from './task-words-fields';
+import { TitleField, WhyField } from './task-words-fields';
 
 const CRITERIA_PLACEHOLDER =
   'One per line, for example:\nSearch shows results in under a second with 10,000 tasks';
@@ -46,7 +46,6 @@ export function NewTaskForm({
   const create = useCreateTask(project.id);
   const criteriaId = useId();
   const areasId = useId();
-  const [headline, setHeadline] = useState('');
   const [title, setTitle] = useState(initial?.title ?? '');
   const [why, setWhy] = useState('');
   const [description, setDescription] = useState('');
@@ -68,7 +67,7 @@ export function NewTaskForm({
   const submit = (event: SyntheticEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const acceptanceCriteria = criteriaLines(criteriaText);
-    if (title.trim() === '' && headline.trim() === '') {
+    if (title.trim() === '') {
       setFormError('Give the task a title');
       return;
     }
@@ -87,9 +86,7 @@ export function NewTaskForm({
     setLandingError(null);
     create.mutate(
       {
-        // An empty pull request title takes the Title.
-        title: title.trim() || headline.trim(),
-        headline: headline.trim(),
+        title: title.trim(),
         why: why.trim(),
         description: description.trim(),
         acceptanceCriteria,
@@ -115,7 +112,7 @@ export function NewTaskForm({
   return (
     <form id={formId} onSubmit={submit} noValidate>
       <Stack>
-        <HeadlineField value={headline} onChange={setHeadline} />
+        <TitleField value={title} onChange={setTitle} />
         <WhyField value={why} onChange={setWhy} />
         <Textarea
           label="Description"
@@ -190,7 +187,6 @@ export function NewTaskForm({
           searchable
           clearable
         />
-        <PullRequestTitleField value={title} onChange={setTitle} />
         {pullRequests ? (
           <LandingField
             baseBranch={project.baseBranch}

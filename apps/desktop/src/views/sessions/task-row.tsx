@@ -25,7 +25,6 @@ export interface TaskRowContext {
 /** What each field of a task is called in "Changed the title and the criteria". */
 const FIELD_WORDS: Readonly<Record<keyof TaskEditPrevious, string>> = {
   title: 'the title',
-  headline: 'the headline',
   why: 'the why',
   description: 'the description',
   acceptanceCriteria: 'the criteria',

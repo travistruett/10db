@@ -295,7 +295,7 @@ export function LiveList({
                 project={nameOf(ws.projectId)}
                 // A finished run whose pull request is open is in review: blue, never done's green.
                 dot={group === LiveGroup.InReview ? 'blue' : STATE_COLORS[ws.state]}
-                title={ws.taskHeadline === '' ? ws.taskTitle : ws.taskHeadline}
+                title={ws.taskTitle}
                 detail={group === LiveGroup.InReview ? 'Pull request open' : doing(ws)}
                 when={shortAgo(lastMoment(ws), now)}
                 action={

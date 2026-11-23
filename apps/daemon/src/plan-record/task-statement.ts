@@ -12,7 +12,6 @@ import { canonicalJson } from './lookup';
 
 export interface TaskStatement {
   readonly title: string;
-  readonly headline: string;
   readonly why: string;
   readonly description: string;
   readonly criteria: readonly string[];
@@ -28,7 +27,6 @@ export type StatementField = keyof TaskStatement;
 
 export const STATEMENT_FIELDS: readonly StatementField[] = [
   'title',
-  'headline',
   'why',
   'description',
   'criteria',
@@ -45,7 +43,6 @@ const sorted = (keys: readonly string[]): string[] => [...keys].sort();
 export function bundleStatement(task: BundleTask, planRef: PlanRef | null): TaskStatement {
   return {
     title: task.title,
-    headline: task.headline,
     why: task.why,
     description: task.description,
     criteria: task.criteria,
@@ -72,7 +69,6 @@ export function statedInGoal(goalBody: string, key: string): TaskStatement | nul
   if (task === undefined) return null;
   return {
     title: task.title,
-    headline: task.headline,
     why: task.why,
     description: task.description,
     criteria: task.criteria,
@@ -90,7 +86,6 @@ export function statedAsTask(taskBody: string): TaskStatement | null {
   if (!task.success) return null;
   return {
     title: task.data.title,
-    headline: task.data.headline,
     why: task.data.why,
     description: task.data.description,
     criteria: task.data.criteria,
@@ -106,7 +101,6 @@ export function statedAsTask(taskBody: string): TaskStatement | null {
 function statedFields(now: TaskStatement) {
   return {
     title: now.title,
-    headline: now.headline,
     why: now.why,
     description: now.description,
     criteria: [...now.criteria],

@@ -191,7 +191,7 @@ function indicatorsOf(
 }
 
 /**
- * A board card (readable board spec §5): the headline (the title when there is none), the why, a
+ * A board card (readable board spec §5): the title, the why, a
  * status line only when the task needs the builder or has failed, then the indicator row, which
  * starts with the goal's badge.
  * Everything else about the task is in its drawer; `cardSummary` still speaks it.
@@ -248,9 +248,9 @@ export function TaskCard({
       }
     >
       <Stack gap="xs">
-        {/* The card's menu sits over the top-right corner, outside this element; the headline leaves room. */}
+        {/* The card's menu sits over the top-right corner, outside this element. */}
         <Text size="sm" fw={500} pr={28} lineClamp={3}>
-          {task.headline || task.title}
+          {task.title}
         </Text>
         {task.why ? (
           <Text size="xs" c="dimmed" lineClamp={2} data-testid="task-card-why">

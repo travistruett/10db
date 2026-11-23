@@ -46,7 +46,6 @@ function goalOf(specs: Record<string, GoalTask>): Map<string, TaskDto> {
         tasks: keys.map((key) => ({
           key,
           title: key.toUpperCase(),
-          headline: '',
           why: '',
           description: '',
           criteria: ['it works'],

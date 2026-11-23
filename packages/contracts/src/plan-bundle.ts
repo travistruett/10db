@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Headline, Title, Why } from './entities';
+import { Title, Why } from './entities';
 import { BriefKey, GoalBriefCriterion } from './goals';
 import { ChatId, ProjectId, ShapeId } from './ids';
 import {
@@ -140,7 +140,6 @@ export type BundleQuestion = z.infer<typeof BundleQuestion>;
 export const BundleTask = z.strictObject({
   key: BriefKey,
   title: Title,
-  headline: Headline.default(''),
   why: Why.default(''),
   description: z.string().default(''),
   criteria: z.array(Text).default([]),

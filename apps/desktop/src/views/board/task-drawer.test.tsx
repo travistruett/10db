@@ -33,15 +33,13 @@ function follows(before: HTMLElement, after: HTMLElement): boolean {
 }
 
 describe('TaskDrawer', () => {
-  const FIFO = 'Reject FIFOs in the worktree walk';
   const withHeadline = {
-    title: FIFO,
-    headline: "Odd files can't freeze 10db",
+    title: "Odd files can't freeze 10db",
     why: 'A FIFO could hang every lane.',
     acceptanceCriteria: ['A FIFO is skipped', 'A huge file is skipped'],
   };
 
-  it('opens on Overview: one status line, headline and why, the tabs, then what it promises and the shared branch', async () => {
+  it('opens on Overview: one status line, title and why, the tabs, then what it promises and the shared branch', async () => {
     server.use(...baseHandlers());
     const batch = batchDto({ prUrl: 'https://github.com/acme/widgets/pull/9' });
     const ws = workstreamDto({ batchId: batch.id, state: 'QUEUED' });
@@ -53,7 +51,6 @@ describe('TaskDrawer', () => {
     const status = within(d).getByTestId('status-line');
     const tabs = within(d).getByRole('tablist');
     const promises = within(d).getByText('What It Promises');
-    const title = within(d).getByText(FIFO);
     const abandon = within(d).getByRole('button', { name: 'Abandon' });
     expect(within(status).getByText('Queued')).toBeTruthy();
     expect(
@@ -61,7 +58,7 @@ describe('TaskDrawer', () => {
         .getAllByRole('listitem')
         .map((li) => li.textContent),
     ).toEqual(['A FIFO is skipped', 'A huge file is skipped']);
-    const inOrder = [status, headline, why, tabs, promises, title, abandon];
+    const inOrder = [status, headline, why, tabs, promises, abandon];
     for (let i = 1; i < inOrder.length; i += 1) {
       const before = inOrder[i - 1];
       const after = inOrder[i];

@@ -367,7 +367,7 @@ function nextOf(db: DbReader, tasks: readonly TaskRow[], facts: Facts): DigestNe
 }
 
 function nextEntry(task: TaskRow, waitsOn: DigestNext['waitsOn']): DigestNext {
-  return { taskId: task.id, title: task.title, headline: task.headline, waitsOn };
+  return { taskId: task.id, title: task.title, waitsOn };
 }
 
 /**

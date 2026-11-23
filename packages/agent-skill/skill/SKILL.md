@@ -40,10 +40,9 @@ task as soon as it is drafted, then report it. No confirmation step: a wrong tas
 1. **Project.** Run `context`. One match (`"matched": 1`): use it. Several: ask which. None: it
    lists every project; ask which, or say this repo isn't a 10db project.
 2. **Draft** from the conversation and the code it touches:
-   - **title**: one line, under 200 characters, says the outcome ("Keep the Board's scrollbar off
-     the columns"), not the activity ("Fix scrollbar bug").
-   - **headline**: always. The plain-words what, a few words on one line, at most 80 characters
-     ("Odd files can't freeze 10db"). The Board names the card by it; the title stays the PR's.
+   - **title**: the plain-words what, a few words on one line, under 200 characters ("Odd files
+     can't freeze 10db"). It is the task's one name, shown everywhere and the PR's title; 10db adds
+     the commit prefix, so leave off `feat:` and the like. Say the outcome, not the activity.
    - **why**: always; `create` refuses a draft without one. One sentence, one line, at most 200
      characters, on why the task matters to the user: what they get, or what goes wrong for them
      until it's done, in their words where they gave them. It's what tells them later why the task
@@ -78,7 +77,7 @@ Several tasks from one conversation: create each, then report them together.
 
 ## Edit, remove, start
 
-- **Edit** an open task's title, headline, why, description, criteria, rigor or kinds with a patch file holding only
+- **Edit** an open task's title, why, description, criteria, rigor or kinds with a patch file holding only
   the fields that change. Areas and dependencies can't be edited: remove the task and create it again
   while it hasn't started.
 - **Remove** works only on a task that has never started and that no open task depends on. A task

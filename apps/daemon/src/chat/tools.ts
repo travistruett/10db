@@ -81,7 +81,6 @@ const BOARD_WORDS: Readonly<Record<BoardStatus, string>> = {
 
 const EDITED_FIELDS = [
   'title',
-  'headline',
   'why',
   'description',
   'acceptanceCriteria',

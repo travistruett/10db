@@ -97,7 +97,6 @@ export function insertGoal(
       goalId,
       {
         title: task.title,
-        headline: task.headline,
         why: task.why,
         description: task.description,
         acceptanceCriteria: task.criteria,

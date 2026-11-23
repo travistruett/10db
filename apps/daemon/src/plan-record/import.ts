@@ -184,7 +184,6 @@ function taskFields(task: BundleTask, numbering: Numbering) {
   return {
     key: task.key,
     title: task.title,
-    headline: task.headline,
     why: task.why,
     description: task.description,
     criteria: task.criteria,
@@ -271,7 +270,6 @@ function boardStatement(was: ConvertedTask, now: TaskStatement): TaskStatement {
 /** The `change_task` field each statement field is carried by; null for one it can't carry. */
 const CARRIED_AS: Record<StatementField, string | null> = {
   title: 'title',
-  headline: null,
   why: null,
   description: 'description',
   criteria: 'acceptanceCriteria',
