@@ -4,20 +4,18 @@ import { JudgeKind, TRUST_SWITCH_KEYS, type LimitName, type TrustSwitchKey } fro
 export interface TrustRow {
   readonly key: TrustSwitchKey;
   readonly label: string;
-  /** What comes along with the switch on; ends saying when a change applies. */
+  /** One short line on what comes along with the switch on. */
   readonly description: string;
-  /** What the switch does on Claude and on Codex, and what each still lacks. */
+  /** The long version: what the switch does on Claude and on Codex. Shown behind a help button. */
   readonly providers: string;
   /** What a provider still lacks while the switch is on; null when nothing waits. */
   readonly whileOn: string | null;
 }
 
-const NEXT = 'Applies from the next session.';
-
 const ROWS: Readonly<Record<TrustSwitchKey, Omit<TrustRow, 'key'>>> = {
   web: {
     label: 'Web',
-    description: `Lets sessions search and fetch the web. ${NEXT}`,
+    description: 'Lets sessions search and fetch the web.',
     providers:
       "On: Claude in auto mode judges each search and fetch, with no card; Claude on a model auto mode doesn't run is judged by 10db's judge. Off: no session searches or fetches without asking.",
     whileOn:
@@ -25,42 +23,43 @@ const ROWS: Readonly<Record<TrustSwitchKey, Omit<TrustRow, 'key'>>> = {
   },
   projectInstructions: {
     label: 'Project Instructions',
-    description: `The project's AGENTS.md, CLAUDE.md and .claude/rules, in each session's instructions. ${NEXT}`,
+    description: "The project's AGENTS.md, CLAUDE.md and rules.",
     providers:
-      'Claude: in the system prompt. Codex: as developer instructions, since Codex reads no AGENTS.md in a checkout 10db keeps untrusted.',
+      "The project's AGENTS.md, CLAUDE.md and .claude/rules, in each session's instructions. Claude: in the system prompt. Codex: as developer instructions, since Codex reads no AGENTS.md in a checkout 10db keeps untrusted.",
     whileOn: null,
   },
   yourInstructions: {
     label: 'Your Instructions',
-    description: `Your ~/.claude/CLAUDE.md, after the project's. ${NEXT}`,
+    description: "Your ~/.claude/CLAUDE.md, after the project's.",
     providers: "Claude and Codex: after the project's instructions, in the same place.",
     whileOn: null,
   },
   yourSkills: {
     label: 'Your Skills',
-    description: `The skills in ~/.claude/skills and ~/.agents/skills, which sessions read but never change. ${NEXT}`,
+    description: 'Skills from ~/.claude/skills and ~/.agents/skills.',
     providers:
-      'A skill kept directly in your home (~/x), under a hidden folder (~/.something) or in a project folder is left out; Comes along says why.',
+      'Sessions read these skills but never change them. A skill kept directly in your home (~/x), under a hidden folder (~/.something) or in a project folder is left out; Comes along says why.',
     whileOn: null,
   },
   yourPlugins: {
     label: 'Your Plugins',
-    description: `The plugins Claude Code has installed for you, each switchable below. ${NEXT}`,
+    description: 'Plugins Claude Code has installed, each switchable below.',
     providers:
-      "Claude: skills, agents, commands and hooks, as Claude Code runs them. Their MCP servers are listed under Your MCP servers. Codex: skills, and the plugins' MCP servers.",
+      "Claude: skills, agents, commands and hooks, as Claude Code runs them. Their MCP servers are listed under Your MCP Servers. Codex: skills, and the plugins' MCP servers.",
     whileOn: null,
   },
   yourMcpServers: {
     label: 'Your MCP Servers',
-    description: `The MCP servers in your ~/.claude.json, ~/.codex/config.toml and plugins. Each runs as Claude Code runs it, outside 10db's sandbox, from your home folder, and every call to it is judged. ${NEXT}`,
+    description: 'Servers from your Claude and Codex configs and plugins.',
     providers:
-      "Claude and Codex sessions both get every approved server. Tool filters from config.toml apply in Codex sessions only. Servers that sign in with OAuth use the sign-in Claude Code or Codex keeps. Sessions on a Claude plan also get your claude.ai connectors. API key, Bedrock and Codex sessions don't, yet.",
+      "Each runs as Claude Code runs it, outside 10db's sandbox, from your home folder, and every call to it is judged. Claude and Codex sessions both get every approved server. Tool filters from config.toml apply in Codex sessions only. Servers that sign in with OAuth use the sign-in Claude Code or Codex keeps. Sessions on a Claude plan also get your claude.ai connectors. API key, Bedrock and Codex sessions don't, yet.",
     whileOn: null,
   },
   projectSkills: {
     label: 'Project Skills, Commands and Agents',
-    description: `The project's .claude/skills, commands and agents, copied with only the frontmatter that describes them. ${NEXT}`,
-    providers: 'Codex: skills only.',
+    description: "The project's skills, commands and agents.",
+    providers:
+      "Copied from the project's .claude folder with only the frontmatter that describes them. Codex: skills only.",
     whileOn: null,
   },
 };
@@ -90,7 +89,8 @@ export const NATIVE_JUDGE_NOTE =
   "On a model auto mode doesn't run, a session falls back to 10db's rules and says so in its thread.";
 
 /** The project's Live systems input: what an entry is, and when a change applies. */
-export const LIVE_SYSTEMS_DESCRIPTION = `Hosts, cloud profiles and namespaces the judge treats as live, such as api.example.com or the prod AWS profile. Names with prod or production count already. ${NEXT}`;
+export const LIVE_SYSTEMS_DESCRIPTION =
+  'Hosts, cloud profiles and namespaces the judge treats as live, such as api.example.com or the prod AWS profile. Names with prod or production count already. Applies from the next session.';
 
 /** A grant's limit as the project's Allowed in this project list names it; null is any limit. */
 export const GRANT_LIMIT_LABELS: Readonly<Record<LimitName, string>> = {

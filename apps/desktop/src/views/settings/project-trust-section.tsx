@@ -308,6 +308,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
             label={row.label}
             description={
               <TrustRowText
+                label={row.label}
                 description={
                   row.key === 'web' && onOpenRouter
                     ? `${row.description} ${OPENROUTER_WEB}`
