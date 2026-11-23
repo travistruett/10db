@@ -30,8 +30,11 @@ export type FigmaAction = (typeof FigmaAction)[keyof typeof FigmaAction];
 export const FigmaPressInput = z.strictObject({ action: z.enum(FigmaAction) });
 export type FigmaPressInput = z.infer<typeof FigmaPressInput>;
 
-/** What a mock-up shows of its frame: the link to it. */
-export const FigmaLinkDto = z.strictObject({ fileUrl: z.string() });
+/** What a mock-up shows of Figma: the link to its frame once sent, and the press waiting to be carried out. */
+export const FigmaLinkDto = z.strictObject({
+  fileUrl: z.string().nullable(),
+  pending: z.enum(FigmaAction).nullable(),
+});
 export type FigmaLinkDto = z.infer<typeof FigmaLinkDto>;
 
 /** How an account reaches Figma: a claude.ai connector, a server of the builder's, or not at all. */

@@ -5,6 +5,9 @@ import {
   ShapeMessageKind,
   ShapeProposalBody,
   ShapeProposalKind,
+  type FigmaAction,
+  type FigmaLinkDto,
+  type ShapeAttachmentId,
   type ShapeAttachTarget,
   type ShapeAttachmentDto,
   type ShapeId,
@@ -89,15 +92,22 @@ function attachmentOf(kind: string, body: string): ShapeAttachment | null {
   return parsed.success ? parsed.data : null;
 }
 
-/** The frame link a mock-up shows; null for any other attachment and for a mock-up never sent. */
-function figmaLinkOf(db: DbReader, row: ShapeAttachmentRow): { fileUrl: string } | null {
+/** What a mock-up shows of Figma: its frame link, and the press not carried out yet. */
+function figmaOf(
+  db: DbReader,
+  row: ShapeAttachmentRow,
+  pending: (id: ShapeAttachmentId) => FigmaAction | null,
+): FigmaLinkDto | null {
   if (row.kind !== 'mockup') return null;
-  const frame = frameOf(db, row.id);
-  return frame === null ? null : { fileUrl: frame.fileUrl };
+  return { fileUrl: frameOf(db, row.id)?.fileUrl ?? null, pending: pending(row.id) };
 }
 
 /** The view's attachments: diagrams, charts and mockups, oldest first. */
-export function attachmentsOf(db: DbReader, shapeId: ShapeId): ShapeAttachmentDto[] {
+export function attachmentsOf(
+  db: DbReader,
+  shapeId: ShapeId,
+  pending: (id: ShapeAttachmentId) => FigmaAction | null = () => null,
+): ShapeAttachmentDto[] {
   return listShapeAttachments(db, shapeId).flatMap((row) => {
     const attachment = attachmentOf(row.kind, row.body);
     return attachment === null
@@ -110,7 +120,7 @@ export function attachmentsOf(db: DbReader, shapeId: ShapeId): ShapeAttachmentDt
             taskId: row.taskId,
             attachment,
             approved: row.approvedAt !== null,
-            figma: figmaLinkOf(db, row),
+            figma: figmaOf(db, row, pending),
           },
         ];
   });

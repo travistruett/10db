@@ -3103,11 +3103,29 @@
                 "type": "object",
                 "properties": {
                   "fileUrl": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "pending": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "open",
+                          "bring-back"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
-                  "fileUrl"
+                  "fileUrl",
+                  "pending"
                 ],
                 "additionalProperties": false
               },

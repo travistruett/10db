@@ -92,7 +92,7 @@ import { convertProposals, type ConvertOutcome, type JoiningProblem } from './co
 import { checkDroppedFile, readyToKeep, storeFile } from './dropped-files';
 import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
 import { bringBackNote, openInFigmaNote } from './figma-press';
-import { fileOf, frameOf, isFigmaDesignUrl, openWithSystem } from './figma';
+import { createFigmaPresses, fileOf, frameOf, isFigmaDesignUrl, openWithSystem } from './figma';
 import { designTargets, runDesignReview } from './design-review';
 import { createPlanParts, type PlanParts, type PlanTurnState } from './plan-parts';
 import type { ShapeJev } from './jev';
@@ -460,8 +460,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       ...(deps.models === undefined ? {} : { models: deps.models(projectId) }),
     };
   };
-  const worldOfShape = (shapeId: ShapeId): ViewWorld =>
-    worldOf(getShape(state.db, shapeId).projectId);
+  const figmaPresses = createFigmaPresses(() => clock.now().getTime());
+  const worldOfShape = (shapeId: ShapeId): ViewWorld => ({
+    ...worldOf(getShape(state.db, shapeId).projectId),
+    figmaPending: (id) => figmaPresses.pending(shapeId, id),
+  });
 
   const limitsFor = deps.limitsFor ?? pictureLimitsFor;
   /**
@@ -495,6 +498,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               },
             }),
         world: worldOfShape,
+        figmaPresses,
         ...(deps.figmaFetch === undefined ? {} : { figmaFetch: deps.figmaFetch }),
         ...(deps.owedRules === undefined ? {} : { owedRules: deps.owedRules }),
         ...(deps.reviewOf === undefined ? {} : { reviewOf: deps.reviewOf }),
@@ -774,7 +778,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           : ShapeMessageKind.FigmaBringBack;
       if (
         pressPending(shapeId, ShapeEventKind.FigmaOpen) ||
-        pressPending(shapeId, ShapeEventKind.FigmaBringBack)
+        pressPending(shapeId, ShapeEventKind.FigmaBringBack) ||
+        figmaPresses.pending(shapeId, mockup.id) !== null
       )
         return { status: 'running' };
       const frame = frameOf(state.db, mockup.id);
@@ -793,6 +798,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           );
         press = bringBackNote(mockup, frame);
       }
+      // The mark is what lets the session's Figma tool run once; it is left before the ask is queued.
+      figmaPresses.add(shapeId, mockup.id, input.action);
       state.write((ctx) =>
         insertShapeMessage(ctx, shapeId, {
           author: ShapeMessageAuthor.Note,
@@ -897,6 +904,13 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     view(shapeId) {
       const conversation = conversationOf(shapeId);
       const live = engine.view(conversation);
+      // A press whose ask is no longer queued and whose turn has ended can no longer be carried out.
+      if (
+        !turnRuns(conversation) &&
+        !pressPending(shapeId, ShapeEventKind.FigmaOpen) &&
+        !pressPending(shapeId, ShapeEventKind.FigmaBringBack)
+      )
+        figmaPresses.clear(shapeId);
       return buildShapeView(
         state.db,
         shapeId,

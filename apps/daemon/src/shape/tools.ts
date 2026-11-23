@@ -23,7 +23,7 @@ import type { StateStore } from '../events';
 import type { ShapeToolHandlers } from '../mcp';
 import type { ScreenService } from '../screens';
 import { attach } from './attach';
-import { createFigmaTools } from './figma';
+import { createFigmaTools, type FigmaPresses } from './figma';
 import { reconcileDraft } from './rounds';
 import { stampReview, type ShapeReviewTurn } from './review-turn';
 import { reportFinding, resolveFinding, writeSpec } from './review';
@@ -45,6 +45,8 @@ export interface ShapeToolDeps {
   };
   /** The `fetch` that posts a mock-up to Figma and reads its assets; the real one by default. */
   readonly figmaFetch?: typeof fetch;
+  /** The builder's Figma presses not yet carried out: the two Figma tools run only against one. */
+  readonly figmaPresses: FigmaPresses;
   /** Takes the planning rules the calling session is owed, once (`ChatLive.planRules`). */
   readonly owedRules?: (conversationId: ConversationId, sessionId: SessionId) => string | null;
   /** Whether the calling session runs no subagents (`ChatLive.inSession`). */
@@ -116,7 +118,7 @@ export function createShapeToolHandlers(
 ): ShapeToolHandlers {
   const { screens } = deps;
   const figma = createFigmaTools(
-    { state: deps.state, fetch: deps.figmaFetch ?? fetch },
+    { state: deps.state, fetch: deps.figmaFetch ?? fetch, presses: deps.figmaPresses },
     chat.projectId,
   );
   const planNow = (): ShapeId | null => planOfChat(deps.state.db, chat.chatId);

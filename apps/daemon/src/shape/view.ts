@@ -7,6 +7,8 @@ import {
   ShapeProposalKind,
   ShapeProposalState,
   ShapeRoundMark,
+  type FigmaAction,
+  type ShapeAttachmentId,
   type ShapeCeremonyDto,
   type ShapeConvertedDto,
   type ShapeFileDto,
@@ -172,6 +174,8 @@ export interface ViewWorld {
   readonly oneWayNames: ReadonlySet<string>;
   /** The models the conversation's picker offers (§5.1); none when no account is known. */
   readonly models?: ShapeModelsDto;
+  /** The Figma press waiting on a mock-up, if any. */
+  readonly figmaPending?: (id: ShapeAttachmentId) => FigmaAction | null;
 }
 
 const NO_WORLD: ViewWorld = { oneWayNames: new Set() };
@@ -295,7 +299,7 @@ export function buildShapeView(
       rehearsed: marked.has(`${t.taskKey}\0${t.hash}`),
     })),
     preview: buildPreview(db, shapeId, now),
-    attachments: attachmentsOf(db, shapeId),
+    attachments: attachmentsOf(db, shapeId, world.figmaPending),
     tokens: shapeTokens(db, shapeId),
     lastAccept: lastAcceptOf(db, shapeId),
   };

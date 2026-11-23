@@ -154,7 +154,7 @@ export const ShapeAttachmentDto = z.object({
   attachment: ShapeAttachment,
   /** Whether the builder approved a mock-up as the design target. */
   approved: z.boolean(),
-  /** The Figma frame a mock-up was sent to; null for any other attachment and for a mock-up never sent. */
+  /** A mock-up's Figma state; null for any other attachment. */
   figma: FigmaLinkDto.nullable(),
 });
 export type ShapeAttachmentDto = z.infer<typeof ShapeAttachmentDto>;

@@ -3,6 +3,8 @@ import {
   FigmaFile,
   FigmaFrame,
   InvalidError,
+  UpstreamError,
+  FigmaAction,
   figmaFileKey,
   figmaFrameKey,
   mockupDocument,
@@ -32,6 +34,9 @@ import type { StateStore } from '../events';
 const SEND_TIMEOUT_MS = 60_000;
 const ASSET_TIMEOUT_MS = 20_000;
 const ASSET_MAX_BYTES = 5 * 1024 * 1024;
+const ASSETS_MAX_COUNT = 30;
+const ASSETS_MAX_BYTES = 10 * 1024 * 1024;
+const PRESS_TTL_MS = 15 * 60_000;
 
 const SUBMIT_HOST = 'mcp.figma.com';
 const SUBMIT_PATH = /^\/mcp\/html_to_figma\/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\/submit$/i;
@@ -105,12 +110,61 @@ export function openWithSystem(url: string): Promise<void> {
   });
 }
 
+/**
+ * The builder's presses that have not been used yet. A press of Open in Figma or Bring Back from Figma
+ * leaves one mark for its mock-up and action; the matching tool runs only against a live mark and uses it
+ * up, so an agent can never send or file on its own. Kept in memory: a press lost to a restart is pressed
+ * again, and a mark that nobody uses lapses after 15 minutes.
+ */
+export interface FigmaPresses {
+  add(shapeId: ShapeId, attachmentId: ShapeAttachmentId, action: FigmaAction): void;
+  holds(shapeId: ShapeId, attachmentId: ShapeAttachmentId, action: FigmaAction): boolean;
+  consume(shapeId: ShapeId, attachmentId: ShapeAttachmentId): void;
+  /** The action pressed on a mock-up and not used yet. */
+  pending(shapeId: ShapeId, attachmentId: ShapeAttachmentId): FigmaAction | null;
+  /** Drops a plan's marks, for a plan whose presses are no longer queued or running. */
+  clear(shapeId: ShapeId): void;
+}
+
+export function createFigmaPresses(now: () => number): FigmaPresses {
+  const marks = new Map<string, { readonly action: FigmaAction; readonly at: number }>();
+  const keyOf = (shapeId: ShapeId, attachmentId: ShapeAttachmentId): string =>
+    `${shapeId}\0${attachmentId}`;
+  const live = (key: string): FigmaAction | null => {
+    const mark = marks.get(key);
+    if (mark === undefined) return null;
+    if (now() - mark.at > PRESS_TTL_MS) {
+      marks.delete(key);
+      return null;
+    }
+    return mark.action;
+  };
+  return {
+    add: (shapeId, attachmentId, action) =>
+      marks.set(keyOf(shapeId, attachmentId), { action, at: now() }),
+    holds: (shapeId, attachmentId, action) => live(keyOf(shapeId, attachmentId)) === action,
+    consume: (shapeId, attachmentId) => marks.delete(keyOf(shapeId, attachmentId)),
+    pending: (shapeId, attachmentId) => live(keyOf(shapeId, attachmentId)),
+    clear(shapeId) {
+      for (const key of marks.keys()) if (key.startsWith(`${shapeId}\0`)) marks.delete(key);
+    },
+  };
+}
+
+const NO_PRESS =
+  'The builder starts this: they press the button on the mock-up in the Plan, and nothing was filed or sent.';
+
 export interface FigmaDeps {
   readonly state: StateStore;
   readonly fetch: typeof fetch;
+  readonly presses: FigmaPresses;
 }
 
-async function assetDataUri(fetchFn: typeof fetch, url: string): Promise<string> {
+async function assetDataUri(
+  fetchFn: typeof fetch,
+  url: string,
+  budget: { left: number },
+): Promise<string> {
   const type = ASSET_TYPES[url.slice(url.lastIndexOf('.') + 1).toLowerCase()];
   if (type === undefined) throw new InvalidError(`${url} is not an image 10db can inline`);
   let bytes: Uint8Array;
@@ -124,9 +178,11 @@ async function assetDataUri(fetchFn: typeof fetch, url: string): Promise<string>
     if (length > ASSET_MAX_BYTES) throw new Error('is over 5 MB');
     bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength > ASSET_MAX_BYTES) throw new Error('is over 5 MB');
+    budget.left -= bytes.byteLength;
+    if (budget.left < 0) throw new Error('takes the assets past 10 MB together');
   } catch (error) {
     const why = error instanceof Error ? error.message : 'could not be read';
-    throw new InvalidError(`The Figma asset ${url} ${why}; nothing was filed.`);
+    throw new UpstreamError(`The Figma asset ${url} ${why}; nothing was filed.`);
   }
   return `data:${type};base64,${Buffer.from(bytes).toString('base64')}`;
 }
@@ -155,6 +211,7 @@ export function createFigmaTools(deps: FigmaDeps, projectId: ProjectId) {
       input: { readonly attachmentId: ShapeAttachmentId; readonly submitUrl: string },
     ): Promise<{ readonly fileUrl: string; readonly nodeId: string }> {
       const row = mockupOf(shapeId, input.attachmentId);
+      if (!deps.presses.holds(shapeId, row.id, FigmaAction.Open)) throw new InvalidError(NO_PRESS);
       const url = checkedSubmitUrl(input.submitUrl);
       let answer: z.infer<typeof SubmitAnswer>;
       try {
@@ -171,15 +228,22 @@ export function createFigmaTools(deps: FigmaDeps, projectId: ProjectId) {
       } catch (error) {
         const why = error instanceof Error ? error.message : 'did not answer';
         line(shapeId, `send_mockup_to_figma · refused · ${why}`);
-        throw new InvalidError(`Figma did not take the mock-up: ${why}`);
+        throw new UpstreamError(`Figma did not take the mock-up: ${why}`);
       }
       const fileKey = designFileKey(answer.fileUrl);
       const nodeId = answer.nodeIds[0];
       if (!answer.success || fileKey === null || nodeId === undefined)
-        throw new InvalidError('Figma answered without a frame link for the mock-up');
+        throw new UpstreamError('Figma answered without a frame link for the mock-up');
+      // The project's draft file is the first one a send made; a later answer from another file is refused.
+      const kept = fileOf(state.db, projectId);
+      if (kept !== null && kept.fileKey !== fileKey)
+        throw new UpstreamError(
+          `Figma answered with another file than this project's draft file, so nothing was kept.`,
+        );
+      deps.presses.consume(shapeId, row.id);
       state.write((ctx) => {
         setAppSetting(ctx, figmaFrameKey(row.id), { fileKey, nodeId, fileUrl: answer.fileUrl });
-        setAppSetting(ctx, figmaFileKey(projectId), { fileKey });
+        if (kept === null) setAppSetting(ctx, figmaFileKey(projectId), { fileKey });
         insertShapeMessage(ctx, shapeId, {
           author: ShapeMessageAuthor.Claude,
           kind: ShapeMessageKind.Tool,
@@ -195,15 +259,23 @@ export function createFigmaTools(deps: FigmaDeps, projectId: ProjectId) {
       input: { readonly attachmentId: ShapeAttachmentId; readonly html: string },
     ): Promise<{ readonly attachmentId: ShapeAttachmentId; readonly fileUrl: string }> {
       const row = mockupOf(shapeId, input.attachmentId);
+      if (!deps.presses.holds(shapeId, row.id, FigmaAction.BringBack))
+        throw new InvalidError(NO_PRESS);
       const frame = frameOf(state.db, row.id);
       if (frame === null)
         throw new InvalidError(
           'That mock-up was never sent to Figma, so there is no frame to bring back.',
         );
       const urls = [...new Set(input.html.match(ASSET_URL) ?? [])];
+      if (urls.length > ASSETS_MAX_COUNT)
+        throw new InvalidError(
+          `The HTML names ${String(urls.length)} Figma assets; at most ${String(ASSETS_MAX_COUNT)} are inlined, so nothing was filed.`,
+        );
       const uris = new Map<string, string>();
-      for (const url of urls) uris.set(url, await assetDataUri(deps.fetch, url));
+      const budget = { left: ASSETS_MAX_BYTES };
+      for (const url of urls) uris.set(url, await assetDataUri(deps.fetch, url, budget));
       const html = input.html.replace(ASSET_URL, (url) => uris.get(url) ?? url);
+      deps.presses.consume(shapeId, row.id);
       const made = state.write((ctx) => {
         const next = insertShapeAttachment(ctx, {
           shapeId,
