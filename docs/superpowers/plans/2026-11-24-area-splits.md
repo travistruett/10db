@@ -36,8 +36,8 @@ Before, one area serialized every backend task.
   writes mid-run. Narrowing is yours, per task.
 - The core is renamed `<area>-shared` and the old name retired: an area called `backend` that holds only config
   and tests would read as the whole backend to you, to an agent tagging a task and to the sizing judge. A
-  routing rule, a kind's "implied by" or a knowledge record that names `backend` no longer matches; rename it by
-  hand if it should follow.
+  routing rule, a kind's "implied by" or a knowledge record that names `backend` no longer matches, and a goal
+  brief or plan bundle that names it is refused until edited; rename it by hand if it should follow.
 - A folder added later under the split root (a new app) belongs to no part: it falls to the catch-all, and a
   task that writes there asks for the catch-all's claim, where before `backend` held it.
 - Packages named `core`, `common`, `shared`, `base`, `lib` or `utils` stay in the core, as does everything outside
