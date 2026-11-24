@@ -3240,7 +3240,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 tmpDir: laneSession.tmpDir,
                 secretFiles: laneSession.fileAccess.secretFiles ?? [],
                 preExisting,
-                setupReads: laneSession.setup.reads,
+                setupReads: laneSession.fileAccess.setupReads ?? [],
               },
               policy,
               allowLines: () => [

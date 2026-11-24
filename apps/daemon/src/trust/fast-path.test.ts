@@ -38,6 +38,9 @@ beforeAll(() => {
   mkdirSync(join(root, 'skills', 'tool'), { recursive: true });
   writeFileSync(join(root, 'skills', 'tool', 'SKILL.md'), '# tool\n');
   writeFileSync(join(root, 'skills', 'tool', 'id_rsa'), 'key\n');
+  writeFileSync(join(root, 'skills', 'tool', 'config.json'), '{"apiKey":"k"}\n');
+  mkdirSync(join(checkout, '.env.d'));
+  writeFileSync(join(checkout, '.env.d', 'token'), 't\n');
   mkdirSync(join(root, 'setup', 'yours', 'skills'), { recursive: true });
   symlinkSync(join(root, 'skills', 'tool'), join(root, 'setup', 'yours', 'skills', 'tool'));
   // The sandbox's own list: each `.env*` file, and each `.env*` link with its target.
@@ -45,7 +48,7 @@ beforeAll(() => {
   ctx = {
     checkout,
     tmpDir,
-    secretFiles: [join(checkout, '.env')],
+    secretFiles: [join(checkout, '.env'), join(checkout, '.env.d')],
     preExisting: ['data/', 'notes.md'],
     setupReads: [join(root, 'setup'), join(root, 'skills', 'tool')],
   };
@@ -203,6 +206,13 @@ describe('fastPathAllows', () => {
       bash('cat <root>/setup/yours/skills/tool/id_rsa'),
       false,
     ],
+    [
+      'cat a config file in a skill folder',
+      'Bash',
+      bash('cat <root>/skills/tool/config.json'),
+      false,
+    ],
+    ['cat a file in a secret folder', 'Bash', bash('cat .env.d/token'), false],
     ['a climb out of the setup dir', 'Bash', bash('cat <root>/setup/../outside.txt'), false],
     ['a write in a skill folder', 'Write', { file_path: '<root>/skills/tool/SKILL.md' }, false],
     [

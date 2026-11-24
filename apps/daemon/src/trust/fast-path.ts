@@ -1,5 +1,5 @@
 import { lstatSync, statSync } from 'node:fs';
-import { basename, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, extname, isAbsolute, join, resolve, sep } from 'node:path';
 import {
   foldPathCase,
   isSecretFileName,
@@ -39,8 +39,9 @@ export interface FastPathContext {
    */
   readonly preExisting: readonly string[];
   /**
-   * What the session's setup opens read-only (`SessionSetup.reads`): its setup dir and the builder's kept skill
-   * and plugin folders, already judged free of secrets. A read there crosses no limit; an edit is never fast-pathed.
+   * The folders the session's profile opens of its setup (`FileAccessContext.setupReads`): its setup dir and the
+   * builder's kept skill and plugin folders, less any that is or lies in a secret. Only a Markdown file there, a
+   * skill's instructions and references, is read with no model; anything else in them goes to the judge.
    */
   readonly setupReads: readonly string[];
 }
@@ -80,15 +81,21 @@ function foldedSecrets(secretFiles: readonly string[]): Set<string> {
 }
 
 /**
- * Whether `path` (absolute) may name a secret: its last segment is one, or a real path it leads to is in the
- * session's secret files or is one. A path that can't be resolved counts as one.
+ * Whether `path` (absolute) may name a secret: its last segment is one, or a real path it leads to is one, is
+ * one of the session's secret files, or lies in one (a secret folder). A path that can't be resolved counts as one.
  */
 export function namesSecret(path: string, secretFiles: readonly string[]): boolean {
   if (nameIsSecret(path)) return true;
   const readings = realPathReadings(path);
   if (!readings.complete) return true;
-  const secrets = foldedSecrets(secretFiles);
-  return readings.paths.some((real) => nameIsSecret(real) || secrets.has(foldPathCase(real)));
+  const secrets = [...foldedSecrets(secretFiles)];
+  return readings.paths.some((real) => {
+    const folded = foldPathCase(real);
+    // A secret folder (`.env.d/`) holds secrets under any name.
+    return (
+      nameIsSecret(real) || secrets.some((s) => folded === s || folded.startsWith(`${s}${sep}`))
+    );
+  });
 }
 
 function field(input: Readonly<Record<string, unknown>>, name: string): string | null {
@@ -127,11 +134,14 @@ function staysIn(path: string, cwd: string, ctx: FastPathContext): boolean {
   return [ctx.checkout, ctx.tmpDir].some((dir) => isWithinOnEveryReading(dir, written));
 }
 
-/** Whether every reading of a path is inside one of the session's setup reads. */
+/** Whether a path is a Markdown file whose every reading is inside one of the session's setup reads. */
 function inSetup(path: string, cwd: string, ctx: FastPathContext): boolean {
   const written = isAbsolute(path) ? path : `${cwd}${sep}${path}`;
+  if (!isMarkdown(written)) return false;
   return ctx.setupReads.some((dir) => isWithinOnEveryReading(dir, written));
 }
+
+const isMarkdown = (path: string): boolean => extname(path).toLowerCase() === '.md';
 
 /** Whether a read or a listing stays where the session may read freely: inside, or in its setup. */
 const readStaysIn = (path: string, cwd: string, ctx: FastPathContext): boolean =>
