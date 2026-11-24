@@ -73,6 +73,9 @@ import { roomForLane } from './lane-room';
 import { passLaunch, PassLaunch } from './pass-launch';
 import { FREE_SESSION_WAIT_KEY, freeSessionWait, laneToYield, type WarmLane } from './warm-yield';
 
+/** The notice key of a queued task that waits for a claim another task holds. */
+const CLAIM_WAIT_NOTICE_KEY = 'claim-wait';
+
 export interface SchedulerOptions {
   readonly state: StateStore;
   /** Who holds Your folder: a chat's turn or a waiting chat keeps a Your-folder task from starting. */
@@ -293,6 +296,33 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     opts.state.write((ctx) => {
       setWorkstreamNotice(ctx, id, next);
     });
+  }
+
+  /**
+   * Shows on a queued task which task holds the area or hazard it needs; never over another notice, and
+   * logged once per change of holder.
+   */
+  function waitForClaim(
+    id: WorkstreamId,
+    conflict: NonNullable<ReturnType<typeof claimConflict>>,
+  ): void {
+    const notice = getWorkstreamRow(db, id).notice;
+    if (notice !== null && notice.key !== CLAIM_WAIT_NOTICE_KEY) return;
+    const holder = getTask(db, getWorkstreamRow(db, conflict.heldBy).taskId);
+    const line = `Waits for ${holder.title} to finish with ${conflict.name}`;
+    if (notice?.line === line) return;
+    opts.state.write((ctx) => {
+      setWorkstreamNotice(ctx, id, {
+        key: CLAIM_WAIT_NOTICE_KEY,
+        tone: 'info',
+        line,
+        body: `Another task holds the ${conflict.name} ${conflict.kind === ClaimKind.Hazard ? 'hazard' : 'area'}. This task starts once that task finishes.`,
+      });
+    });
+    opts.logger.info(
+      { component: 'scheduler', workstreamId: id, heldBy: conflict.heldBy, claim: conflict.name },
+      'queued task waits for a claim',
+    );
   }
 
   /**
@@ -556,7 +586,12 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       };
       // Last, just before the claim, and only with the claim free: a put-back starts only for a run
       // that would launch now, and never writes where another lane holds the area.
-      if (claimConflict(db, ask) !== null || !opts.keptWork.ready(ws)) continue;
+      const conflict = claimConflict(db, ask);
+      if (conflict !== null) {
+        waitForClaim(ws.id, conflict);
+        continue;
+      }
+      if (!opts.keptWork.ready(ws)) continue;
       const fence = opts.state.write((ctx) => {
         // The take and the start are both synchronous: read again here, a chat can't slip between.
         if (firstInFolder && chatHolders(project.id).length > 0) return null;
@@ -572,7 +607,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         return f;
       });
       if (fence === null) continue;
-      if (ws.notice?.key === FREE_SESSION_WAIT_KEY)
+      if (ws.notice?.key === FREE_SESSION_WAIT_KEY || ws.notice?.key === CLAIM_WAIT_NOTICE_KEY)
         opts.state.write((ctx) => {
           setWorkstreamNotice(ctx, ws.id, null);
         });
