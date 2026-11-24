@@ -1,10 +1,11 @@
-import { SendState, type InboxItemDto, type PersonDto } from '@10db/contracts';
-import { Alert, Anchor, Button, Group, Loader, Paper, Stack, Text } from '@mantine/core';
-import { useState } from 'react';
+import { SendState, type AskedQuestion, type InboxItemDto, type PersonDto } from '@10db/contracts';
+import { Alert, Anchor, Button, Group, Loader, Paper, Stack, Text, Textarea } from '@mantine/core';
+import { useState, type ReactNode } from 'react';
 import {
   useCompose,
   useKeepWaiting,
   useSlackStatus,
+  useStakeholderReply,
   useStakeholderTimers,
 } from '../../daemon/people';
 import { useProjectIntegrations } from '../../daemon/sign-in-queries';
@@ -161,6 +162,83 @@ const OUTAGE_NOTICES: Readonly<Record<string, string>> = {
     "Slack can't be reached right now. Replies are read again when it is; you can answer this yourself meanwhile.",
 };
 
+const DECLINED_REASONS: Readonly<Record<NonNullable<AskedQuestion['declined']>, string>> = {
+  not_answerable: "10db couldn't answer this from what it holds.",
+  held: "10db's answer was held by the outbound check.",
+  too_long: "10db's answer was too long to send.",
+  unparseable: "10db couldn't put an answer together.",
+  failed: "10db couldn't write an answer.",
+  no_account: "The project's account is paused, so 10db couldn't answer.",
+  provider: "10db can't answer on Codex yet.",
+};
+
+/** The question a stakeholder asked, with a reply box that says the builder's words in their thread. */
+function AskedQuestionBox({
+  item,
+  asked,
+  slackReady,
+  actions,
+}: {
+  readonly item: InboxItemDto;
+  readonly asked: AskedQuestion;
+  readonly slackReady: boolean;
+  readonly actions: ReactNode;
+}) {
+  const reply = useStakeholderReply();
+  const [text, setText] = useState('');
+  const first = asked.name.split(' ')[0] ?? asked.name;
+  return (
+    <Alert color="yellow" variant="light" title={`${asked.name} asked`}>
+      <Stack gap="sm">
+        <Text size="sm" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+          {`“${asked.text}”`}
+        </Text>
+        {asked.declined === null ? null : (
+          <Text size="xs" c="dimmed">
+            {DECLINED_REASONS[asked.declined]}
+          </Text>
+        )}
+        <Textarea
+          label={`Reply To ${first}`}
+          autosize
+          minRows={2}
+          maxRows={8}
+          value={text}
+          disabled={!slackReady}
+          onChange={(event) => {
+            setText(event.currentTarget.value);
+          }}
+        />
+        <Group gap="xs">
+          <Button
+            size="xs"
+            disabled={text.trim() === '' || !slackReady}
+            loading={reply.isPending}
+            onClick={() => {
+              reply.mutate(
+                { id: item.id, text },
+                {
+                  onSuccess: () => {
+                    setText('');
+                  },
+                },
+              );
+            }}
+          >
+            Send Reply
+          </Button>
+          {actions}
+        </Group>
+        {reply.isError ? (
+          <Text size="xs" c="red">
+            {reply.error.message}
+          </Text>
+        ) : null}
+      </Stack>
+    </Alert>
+  );
+}
+
 /**
  * Why a question that was sent is back with the builder: nobody answered in time, the recipients
  * disagree, or Slack can't be read. Answer Myself is the card's own options below.
@@ -182,7 +260,63 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
       ))}
     </Stack>
   );
+  const workspace = status.data?.workspaces.find((w) => w.teamId === send.teamId);
+  // The send's own workspace: another one being down says nothing about this question.
+  const state =
+    status.data === undefined ? undefined : status.data.off ? 'off' : (workspace?.state ?? 'none');
+  const notice = state === undefined ? undefined : OUTAGE_NOTICES[state];
+  const actions = (
+    <>
+      <Button
+        size="xs"
+        variant="default"
+        loading={keepWaiting.isPending}
+        onClick={() => {
+          keepWaiting.mutate(item.id);
+        }}
+      >
+        Keep Waiting
+      </Button>
+      <Button
+        size="xs"
+        variant="default"
+        onClick={() => {
+          setTakingBack(true);
+        }}
+      >
+        Take Back
+      </Button>
+    </>
+  );
   if (send.returnedAt !== null) {
+    if (send.asked !== null)
+      return (
+        <Stack gap="xs">
+          <AskedQuestionBox
+            item={item}
+            asked={send.asked}
+            slackReady={notice === undefined}
+            actions={actions}
+          />
+          {notice === undefined ? null : (
+            <Alert color="yellow" variant="light">
+              {notice}
+            </Alert>
+          )}
+          {keepWaiting.isError ? (
+            <Text size="xs" c="red">
+              {keepWaiting.error.message}
+            </Text>
+          ) : null}
+          <TakeBackModal
+            item={item}
+            opened={takingBack}
+            onClose={() => {
+              setTakingBack(false);
+            }}
+          />
+        </Stack>
+      );
     const title =
       send.returnedReason === 'disagreed'
         ? `${joinNames(names)} disagree`
@@ -191,27 +325,7 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
       <Alert color="yellow" variant="light" title={title}>
         <Stack gap="sm">
           {quote}
-          <Group gap="xs">
-            <Button
-              size="xs"
-              variant="default"
-              loading={keepWaiting.isPending}
-              onClick={() => {
-                keepWaiting.mutate(item.id);
-              }}
-            >
-              Keep Waiting
-            </Button>
-            <Button
-              size="xs"
-              variant="default"
-              onClick={() => {
-                setTakingBack(true);
-              }}
-            >
-              Take Back
-            </Button>
-          </Group>
+          <Group gap="xs">{actions}</Group>
           {keepWaiting.isError ? (
             <Text size="xs" c="red">
               {keepWaiting.error.message}
@@ -228,11 +342,6 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
       </Alert>
     );
   }
-  const workspace = status.data?.workspaces.find((w) => w.teamId === send.teamId);
-  // The send's own workspace: another one being down says nothing about this question.
-  const state =
-    status.data === undefined ? undefined : status.data.off ? 'off' : (workspace?.state ?? 'none');
-  const notice = state === undefined ? undefined : OUTAGE_NOTICES[state];
   return notice === undefined ? null : (
     <Alert color="yellow" variant="light">
       <Stack gap="xs">

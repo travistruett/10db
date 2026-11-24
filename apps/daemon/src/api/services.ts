@@ -99,6 +99,7 @@ import type {
   RigorFiguresDto,
   RigorFiguresPeriod,
   InboxAnswer,
+  StakeholderReplyInput,
   AskSomeoneInput,
   ComposePreviewDto,
   InboxItemDto,
@@ -951,6 +952,8 @@ export interface ApiServices extends PlanRecordServices {
   askSomeone(id: InboxItemId, input: AskSomeoneInput): InboxItemDto;
   takeBack(id: InboxItemId): Promise<InboxItemDto>;
   keepWaiting(id: InboxItemId): InboxItemDto;
+  /** The builder's reply to a stakeholder's question, posted in its thread. */
+  stakeholderReply(id: InboxItemId, input: StakeholderReplyInput): Promise<InboxItemDto>;
   composeFor(id: InboxItemId, personIds: PersonId[]): ComposePreviewDto;
   listModelProfiles(): ModelProfileDto[];
   patchModelProfile(id: ModelProfileId, patch: ModelProfilePatch): ModelProfileDto;

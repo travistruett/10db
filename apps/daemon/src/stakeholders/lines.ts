@@ -83,3 +83,8 @@ export function automatedAnswerLine(
 ): string {
   return `🤖 *10db (automated reply):* ${escapeMrkdwn(answer)}\n\n_${escapeMrkdwn(builderName)} hasn't reviewed this. ${replyWithLine(letters)}_`;
 }
+
+/** The builder's own reply to a stakeholder's question, said by 10db's bot under the builder's name. */
+export function builderReplyLine(builderName: string, text: string): string {
+  return `*${escapeMrkdwn(builderName)} (via 10db):* ${escapeMrkdwn(text)}`;
+}

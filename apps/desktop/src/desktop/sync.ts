@@ -43,6 +43,7 @@ import {
 } from './notify-pass';
 import {
   answeredNotice,
+  askedNotices,
   disagreementNotices,
   shouldNotifyOpened,
   triagedToBuilder,
@@ -217,9 +218,12 @@ export function useDesktopSync(): void {
   const inboxItems = useInbox().data;
   useEffect(() => {
     if (inboxItems === undefined) return;
-    for (const notice of disagreementNotices(openBefore.current, inboxItems))
+    for (const notice of [
+      ...disagreementNotices(openBefore.current, inboxItems),
+      ...askedNotices(openBefore.current, inboxItems),
+    ])
       notifyText(notice.title, notice.body).catch((error: unknown) => {
-        console.warn('10db: could not notify about a disagreement', error);
+        console.warn('10db: could not notify about a stakeholder', error);
       });
     openBefore.current = inboxItems;
   }, [inboxItems]);

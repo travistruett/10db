@@ -280,3 +280,14 @@ export function useKeepWaiting() {
     readJson(await client.inbox[':id']['keep-waiting'].$post({ param: { id } }), InboxItemDto),
   );
 }
+
+export function useStakeholderReply() {
+  const { client } = useDaemon();
+  return useInboxMutation(
+    async ({ id, text }: { readonly id: InboxItemId; readonly text: string }) =>
+      readJson(
+        await client.inbox[':id']['stakeholder-reply'].$post({ param: { id }, json: { text } }),
+        InboxItemDto,
+      ),
+  );
+}

@@ -1,4 +1,11 @@
-import { InboxKind, ProjectId, QuestionCategory, Urgency, WorkstreamState } from '@10db/contracts';
+import {
+  AskedQuestion,
+  InboxKind,
+  ProjectId,
+  QuestionCategory,
+  Urgency,
+  WorkstreamState,
+} from '@10db/contracts';
 import {
   createStore,
   insertDraft,
@@ -7,6 +14,7 @@ import {
   insertTask,
   insertWorkstream,
   markSending,
+  markAsked,
   markSent,
   openDatabase,
   transitionWorkstream,
@@ -22,6 +30,13 @@ const Seed = z.object({
   projectId: ProjectId,
   taskTitle: z.string().min(1),
   area: z.string().min(1),
+  /** When given, the send is returned with this question from Mark. */
+  asked: z
+    .object({
+      text: z.string().min(1),
+      declined: AskedQuestion.shape.declined.default('not_answerable'),
+    })
+    .optional(),
 });
 
 const [databasePath, json] = process.argv.slice(2);
@@ -91,3 +106,12 @@ store.write((ctx) => {
     at: sentAt,
   });
 });
+if (seed.asked !== undefined) {
+  const { text, declined } = seed.asked;
+  store.write((ctx) => {
+    markAsked(ctx, send.id, {
+      asked: { userId: 'U1', name: mark.name, text, ts: '1.5', declined },
+      throughTs: '1.5',
+    });
+  });
+}

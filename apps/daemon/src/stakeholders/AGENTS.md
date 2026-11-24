@@ -30,3 +30,8 @@
   never auto-answers; any question there replaces `asked`. A `ConflictError` from a route ends that send's turn only.
 - The lane is told the whole exchange (the recipient's messages, `auto_answer` lines as "10db (automated)" and
   `builder_reply` lines under the builder's name) once the cursor has moved or a which-way line was posted.
+- The builder answers a waiting question with `POST /inbox/:id/stakeholder-reply` (`replyAsBuilder`): it needs a
+  `sent` send with `asked` set, the send's own signed-in workspace and a binding that still holds, holds the text for
+  secrets only, posts a `builder_reply` line keyed on the question's `ts` and the text's hash (found again with
+  `findLine` after a crash), then `answerAsked` clears the return in one write. A newer question makes that write a
+  no-op and stays.
