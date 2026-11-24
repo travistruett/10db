@@ -30,6 +30,8 @@ export interface RouteRow {
   readonly subject: string;
   readonly categories: readonly string[];
   readonly people: readonly string[];
+  /** Who answers, by id, in the order of `people`. */
+  readonly personIds: readonly string[];
   /** The rules the row stands for, so Remove drops exactly these. */
   readonly ruleIds: readonly string[];
 }
@@ -55,14 +57,29 @@ export function routeRows(
   // Per scope, subject and category (or the topic itself): who is asked.
   const byKind = new Map<
     string,
-    { scope: RouteScope; subject: string; category: string; people: string[]; ruleIds: string[] }
+    {
+      scope: RouteScope;
+      subject: string;
+      category: string;
+      people: string[];
+      personIds: string[];
+      ruleIds: string[];
+    }
   >();
   for (const rule of rules) {
     const { scope, subject } = scopeOf(rule);
     const category = rule.category ?? '';
     const key = [scope, subject, category].join('\u0000');
-    const entry = byKind.get(key) ?? { scope, subject, category, people: [], ruleIds: [] };
+    const entry = byKind.get(key) ?? {
+      scope,
+      subject,
+      category,
+      people: [],
+      personIds: [],
+      ruleIds: [],
+    };
     entry.people.push(nameOf(rule.personId));
+    entry.personIds.push(rule.personId);
     entry.ruleIds.push(rule.id);
     byKind.set(key, entry);
   }
@@ -79,6 +96,7 @@ export function routeRows(
         ...(entry.category === '' ? [] : [entry.category]),
       ].sort((a, b) => CATEGORY_ORDER.indexOf(a) - CATEGORY_ORDER.indexOf(b)),
       people: entry.people,
+      personIds: entry.personIds,
       ruleIds: [...(row?.ruleIds ?? []), ...entry.ruleIds],
     });
   }
