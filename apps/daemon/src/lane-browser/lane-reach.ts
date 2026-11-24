@@ -81,13 +81,6 @@ export function laneProxyTarget(request: {
   return refused('the proxy takes an absolute http:// address or a tunnel only');
 }
 
-/** One listening socket as `netstat` shows it. */
-export interface PortSocket {
-  readonly family: 'tcp4' | 'tcp6' | 'tcp46';
-  readonly address: string;
-  readonly pid: number;
-}
-
 export interface PortReadings {
   /** `lsof`'s listeners on the port: each one's address and its process chain, itself first, up to launchd. */
   readonly listeners:
@@ -97,12 +90,16 @@ export interface PortReadings {
       }[]
     | 'unread';
   /**
-   * Every listener on the port from `netstat`, whoever's: its family and bound address (`*` for all
-   * addresses) and the pid that holds it. `lsof` run as the builder cannot see another user's socket,
-   * so this is the view that shows a root-owned `127.0.0.1:P` beside a lane's wildcard one. 'unread'
-   * when `netstat` failed or passed its deadline.
+   * Who answered a byteless connection to the address `portVerdict` asked to probe: every process but
+   * the daemon that holds the connection's other end, each with its chain. `'pending'` before the probe,
+   * `'unaccepted'` when nothing accepted it in time (a server `lsof` cannot see, another user's, answers
+   * this way too), `'unread'` when the probe failed.
    */
-  readonly sockets: readonly PortSocket[] | 'unread';
+  readonly acceptors:
+    | readonly { readonly chain: readonly { readonly pid: number; readonly startedAt: string }[] }[]
+    | 'pending'
+    | 'unaccepted'
+    | 'unread';
   /**
    * Each publication of the port by a running container: its compose working dir (null without the label)
    * and the host address Docker bound (`127.0.0.1`, `0.0.0.0`, `::`, or another); null when Docker is off for
@@ -134,8 +131,13 @@ export type PortVerdict =
   | { readonly kind: 'owned'; readonly connectTo: '127.0.0.1' | '::1' }
   | { readonly kind: 'refused'; readonly why: string };
 
-/** How long a port's verdict is kept, and how many fresh checks a session gets a minute. */
+/** A verdict, or, while `acceptors` is `'pending'`, the address whose acceptor must be identified first. */
+export type PortJudgement =
+  PortVerdict | { readonly kind: 'probe'; readonly connectTo: '127.0.0.1' | '::1' };
+
+/** How long an owned verdict and a refusal are kept, and how many fresh checks a session gets a minute. */
 export const PORT_CACHE_MS = 5_000;
+export const PORT_REFUSAL_CACHE_MS = 1_000;
 export const PORT_CHECKS_PER_MINUTE = 20;
 
 /** The ports no lane may reach, answered before anything is read. */
@@ -157,46 +159,61 @@ function isEqualOrUnder(path: string, dir: string): boolean {
   return path === dir || path.startsWith(dir.endsWith('/') ? dir : `${dir}/`);
 }
 
-/** The ownership rule. The daemon's and every lane proxy's port are refused before any reading. */
+/**
+ * The ownership rule. The daemon's and every lane proxy's port are refused before any reading. A port the
+ * rules would own is answered `probe` until `acceptors` says who answers a connection to it: the listeners
+ * `lsof` shows are the lane's, and the process that accepts must be one of them (a root-owned
+ * `127.0.0.1:P` beside the lane's wildcard socket accepts first, and `lsof` cannot see it).
+ */
 export function portVerdict(input: {
   readonly port: number;
   readonly daemonPort: number | null;
   readonly proxyPorts: ReadonlySet<number>;
   readonly session: PortSession;
   readonly readings: PortReadings;
-}): PortVerdict {
+}): PortJudgement {
   const { port, session, readings } = input;
   const fixed = fixedPortRefusal(port, input.daemonPort, input.proxyPorts);
   if (fixed !== null) return { kind: 'refused', why: fixed };
-  const { listeners, compose, sockets } = readings;
+  const { listeners, compose, acceptors } = readings;
   if (listeners === 'unread') {
     return { kind: 'refused', why: `the listeners on ${String(port)} could not be read` };
-  }
-  if (sockets === 'unread') {
-    return { kind: 'refused', why: `the sockets on ${String(port)} could not be read` };
   }
   if (listeners.length === 0) return { kind: 'refused', why: `nothing listens on ${String(port)}` };
 
   const ownedByLedger = (chain: (typeof listeners)[number]['chain']): boolean =>
     chain.some((p) => session.members.has(`${String(p.pid)}:${p.startedAt}`)) &&
     !chain.some((p) => session.browserPids.has(p.pid));
+  const accepted = (connectTo: '127.0.0.1' | '::1', byLane: boolean): PortJudgement => {
+    if (acceptors === 'pending') return { kind: 'probe', connectTo };
+    if (acceptors === 'unread') {
+      return { kind: 'refused', why: `the process answering on ${String(port)} could not be read` };
+    }
+    if (acceptors === 'unaccepted') {
+      return { kind: 'refused', why: `${String(port)} did not accept in time` };
+    }
+    const listenerPids = new Set(listeners.map((l) => l.chain[0]?.pid));
+    const answers = acceptors.every(
+      (a) => listenerPids.has(a.chain[0]?.pid) && (!byLane || ownedByLedger(a.chain)),
+    );
+    if (acceptors.length === 0 || !answers) {
+      return { kind: 'refused', why: `another process answers on port ${String(port)}` };
+    }
+    return { kind: 'owned', connectTo };
+  };
+
   const ledgerOwners = session.loopback ? listeners.filter((l) => ownedByLedger(l.chain)) : [];
   if (session.loopback && ledgerOwners.length === listeners.length) {
-    // Every socket on the port must be one of the lane's own, whoever lsof could see.
-    const lanePids = new Set(listeners.map((l) => l.chain[0]?.pid));
-    if (sockets.some((socket) => !lanePids.has(socket.pid))) {
-      return { kind: 'refused', why: `another process listens on port ${String(port)}` };
-    }
-    const connectTo = addressCovered(sockets);
+    const connectTo = addressCovered(listeners.map((l) => bare(l.address)));
     if (connectTo === null) {
       return { kind: 'refused', why: `${String(port)} is not bound to loopback` };
     }
-    return { kind: 'owned', connectTo };
+    return accepted(connectTo, true);
   }
 
   const pubs: NonNullable<Exclude<PortReadings['compose'], 'unanswered'>> =
     compose === null || compose === 'unanswered' ? [] : compose;
-  const ipv4Loopback = sockets.some((socket) => bare(socket.address) === '127.0.0.1');
+  const ipv4Loopback = listeners.some((l) => bare(l.address) === '127.0.0.1');
   if (pubs.length > 0) {
     const ips = pubs.map((c) => bare(c.hostIp));
     const known = ips.every((ip) => ip === '127.0.0.1' || ip === '0.0.0.0' || ip === '::');
@@ -210,7 +227,7 @@ export function portVerdict(input: {
           why: `${String(port)} is published on :: only; 127.0.0.1:${String(port)} may be another server's`,
         };
       }
-      return { kind: 'owned', connectTo: '127.0.0.1' };
+      return accepted('127.0.0.1', false);
     }
   }
 
@@ -240,16 +257,14 @@ export function portVerdict(input: {
   return { kind: 'refused', why: `${String(port)} is not a server this lane started` };
 }
 
-/** The loopback address one of the lane's own sockets answers on, IPv4 first; null when none does. */
-function addressCovered(sockets: readonly PortSocket[]): '127.0.0.1' | '::1' | null {
-  const v4 = sockets.some(
-    (s) => s.family !== 'tcp6' && ['127.0.0.1', '*', '0.0.0.0'].includes(bare(s.address)),
-  );
-  if (v4) return '127.0.0.1';
-  const v6 = sockets.some(
-    (s) => s.family !== 'tcp4' && ['::1', '*', '::'].includes(bare(s.address)),
-  );
-  return v6 ? '::1' : null;
+/**
+ * The loopback address a connection to a lane's listener goes to, IPv4 first; null when none of the
+ * addresses `lsof` printed (`*` for all of them) is loopback.
+ */
+function addressCovered(addresses: readonly string[]): '127.0.0.1' | '::1' | null {
+  if (addresses.some((a) => ['127.0.0.1', '*', '0.0.0.0'].includes(a))) return '127.0.0.1';
+  if (addresses.some((a) => ['::1', '::'].includes(a))) return '::1';
+  return null;
 }
 
 function isInsideCopy(dir: string | null, session: PortSession): boolean {

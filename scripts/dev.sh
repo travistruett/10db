@@ -26,8 +26,6 @@ if [ "${TENDB_FAKE_SLACK:-off}" = on ]; then
   FAKE_SLACK_PORT="$fake_port" node scripts/fake-slack.mjs &
   export TENDB_SLACK=on TENDB_SLACK_API="http://127.0.0.1:$fake_port"
 fi
-# netstat's socket table comes back empty under this script's ad-hoc-signed pnpm, so the lane browser reads ports from lsof.
-export TENDB_LANE_NETSTAT="${TENDB_LANE_NETSTAT:-off}"
 export TENDB_DATA_DIR="${TENDB_DATA_DIR:-$PWD/.dev/data}"
 export VITE_DAEMON_URL="${VITE_DAEMON_URL:-http://127.0.0.1:${TENDB_PORT:-4317}}"
 exec pnpm -r --parallel --if-present run dev

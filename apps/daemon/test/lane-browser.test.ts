@@ -69,10 +69,7 @@ it('a lane browser reaches the server its lane started and is refused one that i
   const readers: PortReaders = {
     listeners: (port) =>
       Promise.resolve([{ pid: port === a.port ? LANE_PID : OTHER_PID, address: '127.0.0.1' }]),
-    sockets: (port) =>
-      Promise.resolve([
-        { family: 'tcp4', address: '127.0.0.1', pid: port === a.port ? LANE_PID : OTHER_PID },
-      ]),
+    acceptors: (_address, port) => Promise.resolve([port === a.port ? LANE_PID : OTHER_PID]),
     // The lane's own process (its claude) and a stranger's: only the first is in the session's ledger.
     table: () =>
       Promise.resolve([

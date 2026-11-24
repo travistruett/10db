@@ -1,15 +1,17 @@
-import { describe, expect, it } from 'vitest';
-import { ManualClock } from '../clock';
-import type { ProcessMember } from '../sandbox';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { createServer } from 'node:net';
+import { afterEach, describe, expect, it } from 'vitest';
+import { ManualClock, systemClock } from '../clock';
+import { systemProcessTable, type ProcessMember } from '../sandbox';
 import {
   laneProxyTarget,
   laneUrlTarget,
   portVerdict,
+  type PortJudgement,
   type PortReadings,
   type PortSession,
-  type PortVerdict,
 } from './lane-reach';
-import { createPortOwner, type PortReaders } from './port-owner';
+import { createPortOwner, systemPortReaders, type PortReaders } from './port-owner';
 import type { LaneBrowserSession } from './session';
 
 const port = (p: number) => ({ kind: 'port', port: p });
@@ -74,20 +76,14 @@ const session = (over: Partial<PortSession> = {}): PortSession => ({
 const chain = (...pids: [number, string][]) => pids.map(([pid, startedAt]) => ({ pid, startedAt }));
 const mine = chain([200, 't1'], [100, 't0'], [1, 'x']);
 const others = chain([300, 't2'], [250, 't9'], [1, 'x']);
-type Readings = Omit<PortReadings, 'sockets'> & { sockets?: PortReadings['sockets'] };
-// Unless a row says otherwise, netstat shows exactly what lsof attributed.
-const judge = (given: Readings, s: PortSession = session(), p = 3000): PortVerdict => {
+type Readings = Omit<PortReadings, 'acceptors'> & { acceptors?: PortReadings['acceptors'] };
+// Unless a row says otherwise, the acceptor is the process lsof showed listening.
+const judge = (given: Readings, s: PortSession = session(), p = 3000): PortJudgement => {
   const readings: PortReadings = {
     ...given,
-    sockets:
-      given.sockets ??
-      (given.listeners === 'unread'
-        ? []
-        : given.listeners.map((l) => ({
-            family: l.address.includes(':') ? ('tcp6' as const) : ('tcp4' as const),
-            address: l.address.replace(/^\[|\]$/g, ''),
-            pid: l.chain[0]?.pid ?? 0,
-          }))),
+    acceptors:
+      given.acceptors ??
+      (given.listeners === 'unread' ? [] : given.listeners.map((l) => ({ chain: l.chain }))),
   };
   return portVerdict({
     port: p,
@@ -158,43 +154,52 @@ describe('portVerdict: the ledger rule', () => {
       { kind: 'refused', why: "3000 is shared with a server that isn't this lane's" },
     ],
     [
-      'a wildcard lane listener beside an unattributed 127.0.0.1',
+      'a wildcard lane listener beside an unseen 127.0.0.1 that accepts first',
       {
         listeners: [listener('*')],
-        sockets: [
-          { family: 'tcp4', address: '*', pid: 200 },
-          { family: 'tcp4', address: '127.0.0.1', pid: 5 },
-        ],
+        acceptors: [{ chain: chain([5, 'r'], [1, 'x']) }],
         compose: null,
       },
       {},
-      { kind: 'refused', why: 'another process listens on port 3000' },
+      { kind: 'refused', why: 'another process answers on port 3000' },
     ],
     [
-      'a lone wildcard lane listener',
+      'an acceptor that is a ledger member but not a listener',
       {
         listeners: [listener('*')],
-        sockets: [{ family: 'tcp4', address: '*', pid: 200 }],
+        acceptors: [{ chain: chain([201, 't1'], [100, 't0']) }],
         compose: null,
       },
       {},
-      owned('127.0.0.1'),
+      { kind: 'refused', why: 'another process answers on port 3000' },
     ],
     [
-      'a netstat failure',
-      { listeners: [listener('127.0.0.1')], sockets: 'unread', compose: null },
-      {},
-      { kind: 'refused', why: 'the sockets on 3000 could not be read' },
-    ],
-    [
-      'an IPv6-only wildcard reached on ::1',
+      "a listener and a second holder that is not the lane's",
       {
         listeners: [listener('*')],
-        sockets: [{ family: 'tcp6', address: '*', pid: 200 }],
+        acceptors: [{ chain: mine }, { chain: others }],
         compose: null,
       },
       {},
-      owned('::1'),
+      refused,
+    ],
+    [
+      'no acceptor in time',
+      { listeners: [listener('127.0.0.1')], acceptors: 'unaccepted', compose: null },
+      {},
+      { kind: 'refused', why: '3000 did not accept in time' },
+    ],
+    [
+      'a failed probe',
+      { listeners: [listener('127.0.0.1')], acceptors: 'unread', compose: null },
+      {},
+      refused,
+    ],
+    [
+      'before the probe',
+      { listeners: [listener('*')], acceptors: 'pending', compose: null },
+      {},
+      { kind: 'probe', connectTo: '127.0.0.1' },
     ],
     [
       'a socket bound to another address',
@@ -262,6 +267,15 @@ describe('portVerdict: the compose rule', () => {
       { listeners: foreign, compose: 'unanswered' },
       { why: 'Docker did not answer in 5 s' },
     ],
+    [
+      'a wildcard publication whose acceptor is not a listener',
+      {
+        listeners: foreign,
+        acceptors: [{ chain: chain([5, 'r'], [1, 'x']) }],
+        compose: [dir('/work/copy', '0.0.0.0')],
+      },
+      { kind: 'refused', why: 'another process answers on port 3000' },
+    ],
     ['docker off', { listeners: foreign, compose: null }, refused],
   ])('%s', (_name, readings, expected) => {
     expect(judge(readings)).toMatchObject(expected);
@@ -284,12 +298,12 @@ describe('createPortOwner', () => {
     const clock = new ManualClock();
     let owner = 200;
     let reads = 0;
+    let listening = true;
     const readers: PortReaders = {
-      sockets: () =>
-        Promise.resolve([{ family: 'tcp4' as const, address: '127.0.0.1', pid: owner }]),
+      acceptors: () => Promise.resolve([owner]),
       listeners: () => {
         reads += 1;
-        return Promise.resolve([{ pid: owner, address: '127.0.0.1' }]);
+        return Promise.resolve(listening ? [{ pid: owner, address: '127.0.0.1' }] : []);
       },
       table: () =>
         Promise.resolve([
@@ -309,7 +323,13 @@ describe('createPortOwner', () => {
       },
       lane(),
     );
-    return { clock, portOwner, give: (pid: number) => (owner = pid), reads: () => reads };
+    return {
+      clock,
+      portOwner,
+      give: (pid: number) => (owner = pid),
+      reads: () => reads,
+      silence: () => (listening = false),
+    };
   };
 
   it('keeps a verdict 5 s, then reads again so a port that changed hands is refused', async () => {
@@ -323,11 +343,75 @@ describe('createPortOwner', () => {
   });
 
   it('refuses the twenty-first fresh check in a minute but still answers cached ones', async () => {
-    const { portOwner } = setup();
+    const { portOwner, silence } = setup();
+    silence();
     for (let p = 4000; p < 4020; p += 1) await portOwner.check(p);
     const verdict = await portOwner.check(5000);
     expect(verdict.kind).toBe('refused');
     expect(verdict.kind === 'refused' ? verdict.why : '').toContain('20 ports in a minute');
-    expect((await portOwner.check(4000)).kind).toBe('owned');
+    expect(await portOwner.check(4000)).toMatchObject({ why: 'nothing listens on 4000' });
+  });
+});
+
+describe('createPortOwner against a real server and the real readers', () => {
+  const children: ChildProcess[] = [];
+  afterEach(() => {
+    for (const child of children.splice(0)) child.kill('SIGKILL');
+  });
+
+  async function freePort(): Promise<number> {
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    await new Promise((resolve) => server.close(resolve));
+    return port;
+  }
+
+  async function serve(port: number): Promise<void> {
+    const child = spawn(
+      process.execPath,
+      ['-e', `require('node:http').createServer().listen(${String(port)}); console.log('up')`],
+      { stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    children.push(child);
+    await new Promise((resolve) => child.stdout.once('data', resolve));
+  }
+
+  const ownerFor = (members: () => readonly ProcessMember[]) => {
+    const lane = {
+      copy: '/work/copy',
+      tempDir: '/work/tmp',
+      registeredCheckouts: [],
+      loopback: true,
+      docker: false,
+      members,
+    } as unknown as LaneBrowserSession;
+    return createPortOwner(
+      {
+        clock: systemClock,
+        readers: systemPortReaders(
+          process.env['HOME'] ?? '',
+          process.env,
+          systemProcessTable,
+          systemClock,
+        ),
+        daemonPort: () => null,
+        proxyPorts: () => new Set(),
+        browserPids: () => new Set(),
+      },
+      lane,
+    );
+  };
+
+  it("owns a listening server of the lane and refuses one that is not a member's descendant", async () => {
+    const port = await freePort();
+    await serve(port);
+    const me = (await systemProcessTable()).find((row) => row.pid === process.pid);
+    if (me === undefined) throw new Error('the test process is not in the process table');
+    const mine = ownerFor(() => [{ pid: me.pid, startedAt: me.startedAt, pgid: me.pgid }]);
+    expect(await mine.check(port)).toEqual({ kind: 'owned', connectTo: '127.0.0.1' });
+    const stranger = ownerFor(() => [{ pid: 1, startedAt: 'launchd', pgid: 1 }]);
+    expect(await stranger.check(port)).toMatchObject({ kind: 'refused' });
   });
 });

@@ -1354,7 +1354,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           readers:
             opts.laneBrowser.kind === 'given'
               ? opts.laneBrowser.readers
-              : systemPortReaders(homedir(), process.env, laneProcesses.table),
+              : systemPortReaders(homedir(), process.env, laneProcesses.table, clock),
           daemonPort: () => listenPort,
           clock,
           logger: logger.child({ component: 'lane-browser' }),

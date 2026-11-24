@@ -7,23 +7,25 @@ The browser a lane drives against its own servers. This part holds its reach: wh
   refused by name, and `file:`, `view-source:`, `chrome:`, `filesystem:`, `javascript:`, `data:` and
   `blob:` refused. The proxy takes only `CONNECT host:port` or an absolute `http://` request.
 - **Fixed refusals**: the daemon's port and every lane proxy's, before anything is read.
-- **The ledger rule**: with the project's localhost switch on, a port is owned when every `lsof` listener's
-  process chain (from one process-table reading, by pid and start time) reaches a member of the session's
-  ledger and none of the chain is a lane browser's pid. `lsof` run as the builder cannot see another user's
-  socket, so `netstat -anv -p tcp` supplies every listener on the port (family, address, pid): one whose pid
-  is not a lane listener's refuses "another process listens on port P", and a `netstat` failure or
-  timeout refuses. The proxy connects to an address a lane socket covers: `127.0.0.1` for tcp4, `*` or
-  tcp46, else `::1`; a socket bound to anything else is refused. macOS answers
-  netstat's socket table with nothing when a process's ancestors include an ad-hoc-signed program (pnpm, so
-  `make dev`; a one-line C program reproduces it), which reads as a refusal. `TENDB_LANE_NETSTAT=off`, set by
-  `scripts/dev.sh`, reads sockets from `lsof` alone: other users' sockets go unseen. The installed app leaves it unset.
+- **The ledger rule**: with the project's localhost switch on, a port is owned when every `lsof -sTCP:LISTEN`
+  listener's process chain (from one process-table reading, by pid and start time) reaches a member of the
+  session's ledger and none of the chain is a lane browser's pid, and the listener addresses include a loopback
+  one (`127.0.0.1`, `*` or `0.0.0.0` connects to `127.0.0.1`, else `[::1]`, `::` to `::1`).
+- **The probe** (`PortReaders.acceptors`), only after a rule passes: the daemon makes a byteless connection to
+  exactly the address the proxy would use and holds it. The acceptor exists only once the server calls accept,
+  so `lsof -nP -iTCP:<the probe's local port>` is polled up to about a second; every holder but the daemon must
+  be a ledger member or descendant (ledger rule) and one of the pids `lsof` showed listening (both rules). No
+  holder in time refuses "did not accept in time"; an acceptor `lsof` cannot see (a root-owned `127.0.0.1:P`
+  beside a lane's wildcard socket) refuses the same way, as does a failed probe. A one-shot listener
+  (`nc -l`) is consumed by the probe. The proxy's own connection that follows is the same window as the cache.
 - **The compose rule**: with Docker on, a port is owned when every publication of it is a Compose stack whose
   working dir (a real path) is in the session's copy or temp dir and in no registered checkout, bound to
-  `127.0.0.1`; or `0.0.0.0` or `::` while no `netstat` socket on the port is bound to `127.0.0.1` (a `::`
-  counts only beside `0.0.0.0` or `127.0.0.1`). Any other address is refused.
-- **Cache and rate** (`port-owner.ts`): a verdict is kept `PORT_CACHE_MS`; a session gets
-  `PORT_CHECKS_PER_MINUTE` fresh checks a minute, past which a new port is refused (cached ones still
-  answer). A failed reading (`lsof`, `docker ps`, the process table) is a refusal that says so.
+  `127.0.0.1`; or `0.0.0.0` or `::` while no `lsof` listener on the port is bound to `127.0.0.1` (a `::`
+  counts only beside `0.0.0.0` or `127.0.0.1`). Any other address is refused. The probe's acceptor must be
+  one of the `lsof` listeners (Docker's own process, never the lane's).
+- **Cache and rate** (`port-owner.ts`): an owned verdict is kept `PORT_CACHE_MS`, a refusal
+  `PORT_REFUSAL_CACHE_MS`; a session gets `PORT_CHECKS_PER_MINUTE` fresh checks a minute, counting only ports
+  with no owned verdict in the last minute, past which a new port is refused (cached ones still answer). A failed reading (`lsof`, `docker ps`, the process table) is a refusal that says so.
 - **The proxy holds** (`lane-proxy.ts`): Playwright's routing is a first check; the proxy answers every
   connection by asking `PortOwner.check` and connects only to the address it returns, never a name.
   `lsof` and `docker ps` run through `execFile` with an argument list, a 5 s deadline and a fixed env.
@@ -55,8 +57,7 @@ The browser a lane drives against its own servers. This part holds its reach: wh
   `ariaSnapshot({ mode: 'ai' })` cut at `SNAPSHOT_MAX_CHARS`. A call stopped by its signal probes the current
   page; one that will not answer throws `BrowserStuckError`, so the browser closes.
 - **Live test**: `pictures/browser.live.test.ts` (`TENDB_LIVE_BROWSER=1`) runs a lane browser against two
-  loopback servers, one in the session's ledger. Run it with `TENDB_LANE_NETSTAT=off`
-  when vitest runs under pnpm: netstat's socket table is empty there, which reads as a refusal.
+  loopback servers, one in the session's ledger.
 - **The tools** (`mcp/browser-tools.ts`, offered by `mcp/server.ts` `laneTools` when `McpDeps.laneBrowser` and
   `dataDir` are given): `browser_upload` reads each file itself in `mcp/browser-files.ts` (`O_NOFOLLOW`,
   a regular file, a fresh `readAccess` that must land in the copy, temp dir or setup reads, the same dev and

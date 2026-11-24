@@ -742,7 +742,12 @@ describe.skipIf(!live)('the pinned browser, live', () => {
       launches: createBrowserLaunches(),
       build: { ready: () => Promise.resolve(exe), fetching: () => false },
       launch: launchPlaywrightDriver,
-      readers: systemPortReaders(process.env['HOME'] ?? '', process.env, systemProcessTable),
+      readers: systemPortReaders(
+        process.env['HOME'] ?? '',
+        process.env,
+        systemProcessTable,
+        systemClock,
+      ),
       daemonPort: () => daemon.port,
       clock: systemClock,
       logger: recordingLogger(laneLogs),

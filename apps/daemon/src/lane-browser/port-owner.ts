@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createConnection, type Socket } from 'node:net';
 import { realpath } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { promisify } from 'node:util';
@@ -9,9 +10,10 @@ import {
   fixedPortRefusal,
   PORT_CACHE_MS,
   PORT_CHECKS_PER_MINUTE,
+  PORT_REFUSAL_CACHE_MS,
   portVerdict,
+  type PortJudgement,
   type PortReadings,
-  type PortSocket,
   type PortSession,
   type PortVerdict,
 } from './lane-reach';
@@ -20,13 +22,19 @@ import type { LaneBrowserSession } from './session';
 const run = promisify(execFile);
 const READ_DEADLINE_MS = 5_000;
 const LSOF = '/usr/sbin/lsof';
-const NETSTAT = '/usr/sbin/netstat';
+const ACCEPT_WAIT_MS = 1_000;
+const ACCEPT_POLL_MS = 50;
 
 export interface PortReaders {
   /** `lsof -nP -a -iTCP:<port> -sTCP:LISTEN`, each listener's pid and address; rejects on failure. */
   listeners(port: number): Promise<readonly { readonly pid: number; readonly address: string }[]>;
-  /** `netstat -anv -p tcp` for the port: every user's listeners, with family, address and pid; rejects on failure. */
-  sockets(port: number): Promise<readonly PortSocket[]>;
+  /**
+   * Connects to `address:port` without sending a byte, holds the connection, and names the processes
+   * other than the daemon that hold its other end (`lsof -nP -iTCP:<the connection's local port>`): the
+   * acceptor exists only once the server calls accept, so it waits up to about a second and answers
+   * `'unaccepted'` after. Rejects when the connection fails.
+   */
+  acceptors(address: '127.0.0.1' | '::1', port: number): Promise<readonly number[] | 'unaccepted'>;
   /** The process table, for each listener's chain and start times. */
   readonly table: ProcessTable;
   /** `docker ps` for the port's publications: compose working dir and host address; null when no docker is found. */
@@ -52,45 +60,15 @@ function parseListeners(output: string): { pid: number; address: string }[] {
   return found;
 }
 
-/**
- * Parses `netstat -anv -p tcp` for the listeners on `port`. A listening line of the port that does not
- * parse throws, so a view that may be incomplete is never taken for a whole one.
- */
-function parseSockets(output: string, port: number): PortSocket[] {
-  if (!output.includes('Proto')) throw new Error('netstat printed no table');
-  const found: PortSocket[] = [];
+/** The pids of an `lsof -F p` listing. */
+function parsePids(output: string): number[] {
+  const pids: number[] = [];
   for (const line of output.split('\n')) {
-    if (!line.includes('LISTEN')) continue;
-    const cols = line.trim().split(/\s+/);
-    const local = cols[3];
-    if (local === undefined) throw new Error('netstat line without an address');
-    const dot = local.lastIndexOf('.');
-    if (local.slice(dot + 1) !== String(port)) continue;
-    const family = cols[0];
-    // The pid is the end of the `process:pid` column, whose name may hold spaces; an older netstat
-    // printed the pid alone after the two window sizes.
-    const named = /LISTEN\s+\d+\s+\d+\s+\d+\s+\d+\s+.*:(\d+)\s+\S+\s+\S+\s/.exec(line)?.[1];
-    const pid = Number(named ?? cols[8]);
-    if ((family !== 'tcp4' && family !== 'tcp6' && family !== 'tcp46') || !Number.isInteger(pid)) {
-      throw new Error('netstat line not understood');
-    }
-    found.push({ family, address: local.slice(0, dot), pid });
+    if (!line.startsWith('p')) continue;
+    const pid = Number(line.slice(1));
+    if (Number.isInteger(pid)) pids.push(pid);
   }
-  return found;
-}
-
-/**
- * The sockets as `lsof` alone shows them, for a daemon whose process tree netstat's socket table does not
- * answer (see `TENDB_LANE_NETSTAT`): the same listeners without other users' sockets.
- */
-function socketsFromListeners(
-  listeners: readonly { readonly pid: number; readonly address: string }[],
-): PortSocket[] {
-  return listeners.map(({ pid, address }) => ({
-    pid,
-    address,
-    family: address === '*' ? 'tcp46' : address.includes(':') ? 'tcp6' : 'tcp4',
-  }));
+  return pids;
 }
 
 /** The mappings of a `docker ps` `.Ports` column that publish exactly `port`: each one's host address. */
@@ -114,11 +92,60 @@ async function realOrNull(path: string): Promise<string | null> {
   }
 }
 
+/** A connection to `address:port` that sends nothing; rejects when it cannot connect. */
+function connect(address: string, port: number): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({ host: address, port });
+    socket.once('connect', () => {
+      socket.removeAllListeners('error');
+      // A server that resets the held connection must not crash the daemon.
+      socket.on('error', () => undefined);
+      resolve(socket);
+    });
+    socket.once('error', (error) => {
+      socket.destroy();
+      reject(error);
+    });
+  });
+}
+
+/** `lsof` for every process holding a TCP socket whose either end is `port`. */
+async function lsofHolders(port: number): Promise<string> {
+  try {
+    const { stdout } = await run(LSOF, ['-nP', `-iTCP:${String(port)}`, '-F', 'pn'], {
+      env: { LC_ALL: 'C' },
+      timeout: READ_DEADLINE_MS,
+      killSignal: 'SIGKILL',
+    });
+    return stdout;
+  } catch (error) {
+    // lsof exits 1 when nothing matches: no holder yet. Output beside a failure is a partial view.
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 1 &&
+      'stdout' in error &&
+      error.stdout === ''
+    ) {
+      return '';
+    }
+    throw error;
+  }
+}
+
+function sleep(clock: Clock, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    clock.setTimeout(resolve, ms);
+  });
+}
+
 /** `execFile` readers for lsof and docker: an argument list, a 5 s deadline and a fixed env, never a shell. */
 export function systemPortReaders(
   home: string,
   env: Readonly<Record<string, string | undefined>>,
   table: ProcessTable,
+  clock: Clock,
 ): PortReaders {
   const docker = findDocker(home);
   const dockerEnv: Record<string, string> = {};
@@ -153,16 +180,21 @@ export function systemPortReaders(
         throw error;
       }
     },
-    async sockets(port) {
-      if (defined['TENDB_LANE_NETSTAT'] === 'off')
-        return socketsFromListeners(await readers.listeners(port));
-      const { stdout } = await run(NETSTAT, ['-anv', '-p', 'tcp'], {
-        env: { LC_ALL: 'C' },
-        timeout: READ_DEADLINE_MS,
-        killSignal: 'SIGKILL',
-        maxBuffer: 64 * 1024 * 1024,
-      });
-      return parseSockets(stdout, port);
+    async acceptors(address, port) {
+      const probe = await connect(address, port);
+      try {
+        const local = probe.localPort;
+        if (local === undefined) throw new Error('the probe has no local port');
+        const until = clock.now().getTime() + ACCEPT_WAIT_MS;
+        for (;;) {
+          const holders = parsePids(await lsofHolders(local)).filter((pid) => pid !== process.pid);
+          if (holders.length > 0) return holders;
+          if (clock.now().getTime() >= until) return 'unaccepted';
+          await sleep(clock, ACCEPT_POLL_MS);
+        }
+      } finally {
+        probe.destroy();
+      }
     },
     table,
     compose:
@@ -205,8 +237,9 @@ export function systemPortReaders(
 
 export interface PortOwner {
   /**
-   * The verdict for a connection now: cached `PORT_CACHE_MS`, read again after, at most
-   * `PORT_CHECKS_PER_MINUTE` fresh reads a minute (past it, refused).
+   * The verdict for a connection now: an owned one cached `PORT_CACHE_MS`, a refusal `PORT_REFUSAL_CACHE_MS`,
+   * read again after. A port with no owned verdict in the last minute counts as a fresh check, at most
+   * `PORT_CHECKS_PER_MINUTE` a minute (past it, refused).
    */
   check(port: number): Promise<PortVerdict>;
 }
@@ -225,7 +258,8 @@ export function createPortOwner(
 ): PortOwner {
   const cache = new Map<number, { verdict: PortVerdict; until: number }>();
   const inFlight = new Map<number, Promise<PortVerdict>>();
-  let fresh: number[] = [];
+  const ownedAt = new Map<number, number>();
+  let fresh: { port: number; at: number }[] = [];
 
   const read = async (port: number): Promise<PortVerdict> => {
     const portSession: PortSession = {
@@ -236,7 +270,7 @@ export function createPortOwner(
       registeredCheckouts: session.registeredCheckouts,
       loopback: session.loopback,
     };
-    const judge = (readings: PortReadings): PortVerdict =>
+    const judge = (readings: PortReadings): PortJudgement =>
       portVerdict({
         port,
         daemonPort: deps.daemonPort(),
@@ -244,45 +278,64 @@ export function createPortOwner(
         session: portSession,
         readings,
       });
+    let rows: ReadonlyMap<number, { pid: number; ppid: number; startedAt: string }> | null = null;
+    const chainOf = async (pid: number): Promise<{ pid: number; startedAt: string }[]> => {
+      rows ??= new Map((await deps.readers.table()).map((row) => [row.pid, row]));
+      const chain: { pid: number; startedAt: string }[] = [];
+      const seen = new Set<number>();
+      for (let at = rows.get(pid); at !== undefined && !seen.has(at.pid); at = rows.get(at.ppid)) {
+        seen.add(at.pid);
+        chain.push({ pid: at.pid, startedAt: at.startedAt });
+        if (at.pid === 1) break;
+      }
+      return chain;
+    };
 
     let listeners: PortReadings['listeners'];
     try {
       const found = await deps.readers.listeners(port);
-      const rows = new Map((await deps.readers.table()).map((row) => [row.pid, row]));
-      listeners = found.map(({ pid, address }) => {
-        const chain: { pid: number; startedAt: string }[] = [];
-        const seen = new Set<number>();
-        for (
-          let at = rows.get(pid);
-          at !== undefined && !seen.has(at.pid);
-          at = rows.get(at.ppid)
-        ) {
-          seen.add(at.pid);
-          chain.push({ pid: at.pid, startedAt: at.startedAt });
-          if (at.pid === 1) break;
-        }
-        return { address, chain };
-      });
+      listeners = await Promise.all(
+        found.map(async ({ pid, address }) => ({ address, chain: await chainOf(pid) })),
+      );
     } catch {
       listeners = 'unread';
     }
-    let sockets: PortReadings['sockets'];
-    try {
-      sockets = await deps.readers.sockets(port);
-    } catch {
-      sockets = 'unread';
-    }
-    const first = judge({ listeners, sockets, compose: null });
+    // Reads who accepts a connection to the address the judgement named, then judges again.
+    const probed = async (
+      judgement: PortJudgement,
+      readings: PortReadings,
+    ): Promise<PortVerdict> => {
+      if (judgement.kind !== 'probe') return judgement;
+      let acceptors: PortReadings['acceptors'];
+      // The acceptor may have started after the first reading.
+      rows = null;
+      try {
+        const pids = await deps.readers.acceptors(judgement.connectTo, port);
+        acceptors =
+          pids === 'unaccepted'
+            ? pids
+            : await Promise.all(pids.map(async (pid) => ({ chain: await chainOf(pid) })));
+      } catch {
+        acceptors = 'unread';
+      }
+      const final = judge({ ...readings, acceptors });
+      // A probe answer is final: asking for it again would loop.
+      return final.kind === 'probe'
+        ? { kind: 'refused', why: 'the probe was not answered' }
+        : final;
+    };
+
+    const base: PortReadings = { listeners, acceptors: 'pending', compose: null };
+    const first = judge(base);
     const compose = deps.readers.compose;
     if (
-      first.kind === 'owned' ||
+      first.kind !== 'refused' ||
       !session.docker ||
       compose === null ||
       listeners === 'unread' ||
-      sockets === 'unread' ||
       listeners.length === 0
     ) {
-      return first;
+      return probed(first, base);
     }
     let publications: PortReadings['compose'];
     try {
@@ -290,7 +343,8 @@ export function createPortOwner(
     } catch {
       publications = 'unanswered';
     }
-    return judge({ listeners, sockets, compose: publications });
+    const withCompose: PortReadings = { ...base, compose: publications };
+    return probed(judge(withCompose), withCompose);
   };
 
   return {
@@ -302,16 +356,28 @@ export function createPortOwner(
       if (cached !== undefined && now < cached.until) return cached.verdict;
       const pending = inFlight.get(port);
       if (pending !== undefined) return pending;
-      fresh = fresh.filter((at) => now - at < MINUTE_MS);
-      if (fresh.length >= PORT_CHECKS_PER_MINUTE) {
+      fresh = fresh.filter((entry) => now - entry.at < MINUTE_MS);
+      // A port this lane owned in the last minute is its own server read again: it costs nothing.
+      const lastOwned = ownedAt.get(port);
+      const free = lastOwned !== undefined && now - lastOwned < MINUTE_MS;
+      if (!free && fresh.length >= PORT_CHECKS_PER_MINUTE) {
         return {
           kind: 'refused',
           why: `this lane checked ${String(PORT_CHECKS_PER_MINUTE)} ports in a minute; wait before trying another`,
         };
       }
-      fresh.push(now);
+      const entry = { port, at: now };
+      if (!free) fresh.push(entry);
       const reading = read(port).then((verdict) => {
-        cache.set(port, { verdict, until: now + PORT_CACHE_MS });
+        const done = deps.clock.now().getTime();
+        if (verdict.kind === 'owned') {
+          ownedAt.set(port, done);
+          fresh = fresh.filter((e) => e !== entry);
+        }
+        cache.set(port, {
+          verdict,
+          until: done + (verdict.kind === 'owned' ? PORT_CACHE_MS : PORT_REFUSAL_CACHE_MS),
+        });
         return verdict;
       });
       inFlight.set(port, reading);
