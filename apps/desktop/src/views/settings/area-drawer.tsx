@@ -1,10 +1,9 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Alert, Button, Checkbox, Group, Stack, Textarea, TextInput } from '@mantine/core';
+import { Alert, Button, Stack, Switch, Textarea, TextInput } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
-import { AreaRoleFields } from './area-role-fields';
+import { AreaKindField } from './area-kind-field';
 import { areaDraft, areaOf, EMPTY_AREA, lines, type AreaDraft } from './list-drafts';
-import { HelpHint } from './help-hint';
 import { ChangedAlert, PathMeanings } from './table-cells';
 import { useListPatch } from './use-list-patch';
 
@@ -88,54 +87,62 @@ export function AreaDrawer({
       opened
       onClose={onClose}
       label={area === null ? 'Add Area' : `Area ${area.name}`}
+      title={area === null ? 'Add Area' : area.name}
       closeOnClickOutside
+      footer={
+        <>
+          <Button variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button loading={saving} onClick={submit}>
+            {area === null ? 'Add Area' : 'Save Area'}
+          </Button>
+        </>
+      }
     >
-      <Stack gap="md">
+      <Stack gap="lg">
         <TextInput
           label="Name"
+          description="What tasks call this area."
           aria-label="Area name"
-          placeholder="name"
+          placeholder="backend"
           data-autofocus
           value={draft.name}
           onChange={(e) => {
             change({ name: e.currentTarget.value });
           }}
         />
-        <Textarea
-          label="Paths"
-          aria-label="Area paths"
-          placeholder="src/api/**"
-          description="One pattern per line"
-          autosize
-          minRows={2}
-          value={draft.paths}
-          onChange={(e) => {
-            change({ paths: e.currentTarget.value });
-          }}
-        />
-        <PathMeanings paths={lines(draft.paths)} />
-        <Group gap={4} wrap="nowrap">
-          <Checkbox
-            aria-label="Area is the catch-all"
-            label="Catch-All"
-            checked={draft.catchAll}
+        <Stack gap={6}>
+          <Textarea
+            label="Paths"
+            aria-label="Area paths"
+            placeholder={'apps/api/**\napps/api/.*'}
+            description="The files it holds, one pattern per line."
+            autosize
+            minRows={3}
+            styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)' } }}
+            value={draft.paths}
             onChange={(e) => {
-              change({ catchAll: e.currentTarget.checked });
+              change({ paths: e.currentTarget.value });
             }}
           />
-          <HelpHint label="Catch-All">
-            Holds every file no other area holds, such as a new package, app or folder, so a task
-            that adds one can still change it. A file another area holds is never in the catch-all.
-            Only one area can be.
-          </HelpHint>
-        </Group>
-        <AreaRoleFields
-          index={1}
+          <PathMeanings paths={lines(draft.paths)} />
+        </Stack>
+        <AreaKindField
           name={draft.name}
           role={draft.role}
           route={draft.route}
           label={draft.label}
           onChange={change}
+        />
+        <Switch
+          aria-label="Area is the catch-all"
+          label="Catch-All"
+          description="Also holds every file no other area holds, such as a new app or folder. Only one area can."
+          checked={draft.catchAll}
+          onChange={(e) => {
+            change({ catchAll: e.currentTarget.checked });
+          }}
         />
         {changed ? <ChangedAlert noun="area" onShowLatest={showLatest} /> : null}
         {gone ? (
@@ -148,14 +155,6 @@ export function AreaDrawer({
             {problem}
           </Alert>
         ) : null}
-        <Group justify="flex-end">
-          <Button variant="default" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button loading={saving} onClick={submit}>
-            {area === null ? 'Add Area' : 'Save Area'}
-          </Button>
-        </Group>
       </Stack>
     </SurfaceDrawer>
   );

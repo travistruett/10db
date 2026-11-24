@@ -1,10 +1,15 @@
 import { AreaRole, type ProjectDto } from '@10db/contracts';
-import { Button, Group, Stack, Text } from '@mantine/core';
+import { Group, Menu, Stack, Text } from '@mantine/core';
+import { IconSparkles } from '@tabler/icons-react';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
 import { ConfirmModal } from '../../shell/confirm-modal';
 import { AreaDrawer } from './area-drawer';
-import { ReviewSuggestions } from './review-suggestions';
+import { useWorkbenchSetup } from '../../daemon/pass-queries';
+import { CountBadge } from '../../shell/count-badge';
+import { WorkbenchSetupModal } from '../workbench/setup/setup-modal';
+import { setUpCount } from '../workbench/setup/setup-rules';
+import { SplitButton } from './split-button';
 import { SectionHeading } from './section-heading';
 import { PathSummary, Pill, RowActions } from './table-cells';
 import { useListPatch } from './use-list-patch';
@@ -42,6 +47,9 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
   const [editing, setEditing] = useState<Area | null>(null);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<Area | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const setup = useWorkbenchSetup(project.id);
+  const suggestions = setup.data === undefined ? 0 : setUpCount(setup.data, project.leftOutPages);
   const remove = useListPatch(project);
   // Unsaved edits in the open drawer, and the row asked for while they stand.
   const [dirty, setDirty] = useState(false);
@@ -124,17 +132,24 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
           </>
         }
         action={
-          <Group gap="sm" wrap="nowrap">
-            <ReviewSuggestions project={project} />
-            <Button
-              data-keeps-drawer
+          <SplitButton
+            label="Add Area"
+            menuLabel="More ways to add areas"
+            count={suggestions}
+            onClick={() => {
+              request(null);
+            }}
+          >
+            <Menu.Item
+              leftSection={<IconSparkles size={16} stroke={1.5} />}
+              rightSection={suggestions > 0 ? <CountBadge count={suggestions} /> : null}
               onClick={() => {
-                request(null);
+                setSuggesting(true);
               }}
             >
-              Add Area
-            </Button>
-          </Group>
+              Suggest from the repository…
+            </Menu.Item>
+          </SplitButton>
         }
       />
       <DataTable<Area>
@@ -168,6 +183,13 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
           }}
         />
       ) : null}
+      <WorkbenchSetupModal
+        project={project}
+        opened={suggesting}
+        onClose={() => {
+          setSuggesting(false);
+        }}
+      />
       <ConfirmModal
         opened={switchTo !== null}
         title="Discard Changes"

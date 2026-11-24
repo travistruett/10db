@@ -1,9 +1,8 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Alert, Button, Checkbox, Group, Stack, Textarea, TextInput } from '@mantine/core';
+import { Alert, Button, Input, SegmentedControl, Stack, Textarea, TextInput } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { EMPTY_HAZARD, hazardDraft, hazardOf, lines, type HazardDraft } from './list-drafts';
-import { HelpHint } from './help-hint';
 import { ChangedAlert, PathMeanings } from './table-cells';
 import { useListPatch } from './use-list-patch';
 
@@ -86,59 +85,81 @@ export function HazardDrawer({
       opened
       onClose={onClose}
       label={hazard === null ? 'Add Hazard' : `Hazard ${hazard.name}`}
+      title={hazard === null ? 'Add Hazard' : hazard.name}
       closeOnClickOutside
+      footer={
+        <>
+          <Button variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button loading={saving} onClick={submit}>
+            {hazard === null ? 'Add Hazard' : 'Save Hazard'}
+          </Button>
+        </>
+      }
     >
-      <Stack gap="md">
+      <Stack gap="lg">
         <TextInput
           label="Name"
+          description="What tasks take turns on."
           aria-label="Hazard name"
-          placeholder="name"
+          placeholder="deps"
           data-autofocus
           value={draft.name}
           onChange={(e) => {
             change({ name: e.currentTarget.value });
           }}
         />
-        <Textarea
-          label="Paths"
-          aria-label="Hazard paths"
-          placeholder="**/package.json"
-          description="One pattern per line"
-          autosize
-          minRows={2}
-          value={draft.paths}
-          onChange={(e) => {
-            change({ paths: e.currentTarget.value });
-          }}
-        />
-        <PathMeanings paths={lines(draft.paths)} />
+        <Stack gap={6}>
+          <Textarea
+            label="Paths"
+            aria-label="Hazard paths"
+            placeholder={'**/package.json\npnpm-lock.yaml'}
+            description="Files only one task changes at a time, one pattern per line."
+            autosize
+            minRows={3}
+            styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)' } }}
+            value={draft.paths}
+            onChange={(e) => {
+              change({ paths: e.currentTarget.value });
+            }}
+          />
+          <PathMeanings paths={lines(draft.paths)} />
+        </Stack>
         <Textarea
           label="Commands"
           aria-label="Hazard commands"
-          placeholder="pnpm add"
-          description="One per line, from the start"
+          placeholder={'pnpm add\npnpm install'}
+          description="Commands that change those files, one per line, matched from the start."
           autosize
-          minRows={2}
+          minRows={3}
+          styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)' } }}
           value={draft.commands}
           onChange={(e) => {
             change({ commands: e.currentTarget.value });
           }}
         />
-        <Group gap={4} wrap="nowrap">
-          <Checkbox
-            aria-label="Hazard is held per copy"
-            label="Held Per Copy"
-            checked={draft.perCopy}
-            onChange={(e) => {
-              change({ perCopy: e.currentTarget.checked });
+        <Input.Wrapper
+          label="Scope"
+          description={
+            draft.perCopy
+              ? 'Tasks in separate copies (worktrees) change these files at the same time; their pull requests settle a clash.'
+              : 'One task at a time across the project. Right for something every copy shares, such as a database or a port.'
+          }
+        >
+          <SegmentedControl
+            mt={6}
+            aria-label="Hazard scope"
+            data={[
+              { value: 'project', label: 'Project' },
+              { value: 'copy', label: 'Per Copy' },
+            ]}
+            value={draft.perCopy ? 'copy' : 'project'}
+            onChange={(value) => {
+              change({ perCopy: value === 'copy' });
             }}
           />
-          <HelpHint label="Held Per Copy">
-            Tasks working in separate copies of the project (worktrees) may change these files at
-            the same time, and a clash is settled when their pull requests merge. Leave it off for
-            something every copy shares, such as a database or a port.
-          </HelpHint>
-        </Group>
+        </Input.Wrapper>
         {changed ? <ChangedAlert noun="hazard" onShowLatest={showLatest} /> : null}
         {gone ? (
           <Alert color="yellow" title="This hazard changed">
@@ -150,14 +171,6 @@ export function HazardDrawer({
             {problem}
           </Alert>
         ) : null}
-        <Group justify="flex-end">
-          <Button variant="default" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button loading={saving} onClick={submit}>
-            {hazard === null ? 'Add Hazard' : 'Save Hazard'}
-          </Button>
-        </Group>
       </Stack>
     </SurfaceDrawer>
   );
