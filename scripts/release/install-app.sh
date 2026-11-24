@@ -267,12 +267,41 @@ while :; do
     fail "gh could not list the finished builds: $(cat "$gh_err")"
   fi
 
+  # The app updates itself only to a commit whose CI run finished green, so a staged build is never
+  # one that main's own checks failed, were cancelled on or have not finished.
+  ci_green=""
+  if [ "$mode" = stage ]; then
+    if ! ci_green="$(gh api "repos/{owner}/{repo}/actions/workflows/ci.yml/runs?branch=$ref&event=push&status=success&per_page=100" \
+      --jq '.workflow_runs[].head_sha' 2> "$gh_err")"; then
+      fail "gh could not list the commits with green CI: $(cat "$gh_err")"
+    fi
+    # The head to follow is the newest commit with green CI: a build is waited for only for it.
+    green_head=""
+    while IFS= read -r commit; do
+      if grep -qx "$commit" <<< "$ci_green"; then green_head="$commit"; break; fi
+    done <<< "$commits"
+    if [ -z "$green_head" ]; then
+      if [ -n "$running_commit" ]; then
+        # Nothing newer has green CI yet: the app stays as it is, with no failure to report.
+        step=current
+        echo "No recent commit of $ref has green CI; nothing was fetched."
+        exit 0
+      fi
+      fail "no recent commit of $ref has green CI"
+    fi
+    sha="$green_head"
+  fi
+
   run_id=""
   built=""
   behind=0
   position=0
   while IFS= read -r commit; do
     [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || continue
+    if [ "$mode" = stage ] && ! grep -qx "$commit" <<< "$ci_green"; then
+      position=$((position + 1))
+      continue
+    fi
     for id in $(awk -v commit="$commit" '$2 == commit { print $1 }' <<< "$finished"); do
       [[ "$id" =~ ^[0-9]+$ ]] || continue
       live="$(gh api "repos/{owner}/{repo}/actions/runs/$id/artifacts" \

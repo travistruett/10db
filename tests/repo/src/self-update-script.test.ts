@@ -62,6 +62,25 @@ describe('install-app.sh --stage', () => {
     ).toEqual([]);
   });
 
+  it('stages only a commit whose CI finished green, and nothing when none has', () => {
+    const OLD = 'f'.repeat(40);
+    // The head has a finished build but red CI; the commit before it is green.
+    const result = stage({
+      STUB_COMMITS: `${HEAD_SHA} ${OLD}`,
+      STUB_CI_GREEN: OLD,
+      STUB_RUNS: `201@${OLD}`,
+    });
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(stageDir, 'commit'), 'utf8').trim()).toBe(OLD);
+
+    const none = run(['--stage', join(box.root, 'other'), '--running', OLD], {
+      STUB_COMMITS: `${HEAD_SHA} ${OLD}`,
+      STUB_CI_GREEN: '',
+    });
+    expect(none.status).toBe(0);
+    expect(existsSync(join(box.root, 'other', 'commit'))).toBe(false);
+  });
+
   it.each([
     {
       name: 'GitHub cannot be reached',
