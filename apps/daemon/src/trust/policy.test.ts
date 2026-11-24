@@ -81,6 +81,13 @@ describe('buildTrustPolicy', () => {
       project: 'amps',
       services: ['backend', 'db', 'frontend'],
       containerNames: [],
+      makeTargets: [
+        {
+          name: 'db-prepare',
+          about: ['Sets up the db.'],
+          recipe: ['docker compose run --rm db-prepare'],
+        },
+      ],
     };
     const on = buildTrustPolicy(
       input({ devAccess: { docker: true, localhost: true, compose: amps } }),
@@ -98,10 +105,27 @@ describe('buildTrustPolicy', () => {
     expect
       .soft(on.join('\n'), 'what still destroys data')
       .toMatch(/drop.*table.*down -v.*volume rm/is);
+    expect
+      .soft(containers[0], 'a container forwarding to a remote system is that system')
+      .toMatch(/cloud-sql-proxy.*is that system/is);
+    expect
+      .soft(on.join('\n'), 'a make command is judged by its recipe')
+      .toContain('"db-prepare" ("Sets up the db.") runs "docker compose run --rm db-prepare"');
     const routine = on.filter((l) => l.startsWith('Routine in them:'));
     expect
       .soft(routine, 'where a command runs is no pass for what it does')
       .toEqual([expect.stringMatching(/by itself.*four limits.*\.env.*host outside this Mac/is)]);
+
+    // The shared-database limit holds with compose unread, whenever Docker or loopback is open.
+    const noCompose = buildTrustPolicy(
+      input({ devAccess: { docker: false, localhost: true, compose: null } }),
+    ).environment;
+    expect
+      .soft(noCompose.join('\n'), 'what still destroys data, compose unread')
+      .toMatch(/Still a limit.*migrations.*down -v/is);
+    expect
+      .soft(localhost(noCompose).join(' '), 'a tunnel on loopback is the remote system')
+      .toMatch(/ssh -L.*judged as the remote system/is);
 
     const off = buildTrustPolicy(input()).environment;
     expect

@@ -73,14 +73,22 @@ function devAccessLines(access: DevAccess): string[] {
         ? ''
         : `, or by their container_name ${compose.containerNames.map(quotedValue).join(', ')}`;
     lines.push(
-      `Local dev containers: the compose services ${compose.services.map(quotedValue).join(', ')}${project === null ? '' : ` of the compose project ${project}`}, from ${compose.files.map(quotedValue).join(', ')} at the project's base. Their containers are ${named}${containers}. They are this project's local dev environment on this Mac, not live systems.`,
+      `Local dev containers: the compose services ${compose.services.map(quotedValue).join(', ')}${project === null ? '' : ` of the compose project ${project}`}, from ${compose.files.map(quotedValue).join(', ')} at the project's base. Their containers are ${named}${containers}. They are this project's local dev environment on this Mac, and their own processes are not live systems. A container that forwards to a remote system (a cloud-sql-proxy, a kubectl port-forward, an ssh -L tunnel, a service proxying to a hosted database or API) is that system: judge what it forwards to, not that it runs here.`,
       "Routine in them: running a command in one of these containers (docker exec, docker compose exec or run), or in docker run --rm with only this checkout or this session's temp folder mounted, crosses no limit by itself. Listing and reading the project's source there, and running its tests, linters, formatters, type checks, builds and file generators, such as making migration files or an API client that land in the checkout, are routine. What the command does is still judged under the four limits, as if the session ran it: reading a .env file, a key or a credential there is reading secrets, and reaching a host outside this Mac is judged by what it sends or writes there.",
-      "Still a limit in them: their databases and volumes are shared by this project's sessions and hold data this session didn't create. Dropping or truncating a table, deleting rows, applying migrations to their database (migrate), resetting or re-seeding it, docker compose down -v and docker volume rm destroy data.",
+      ...(compose.makeTargets.length === 0
+        ? []
+        : [
+            `Make targets of the project's Makefile at its base, with the commands their recipes run. Judge a make command by its recipe, not its name: ${compose.makeTargets.map((t) => `${quotedValue(t.name)}${t.about.length === 0 ? '' : ` (${quotedValue(t.about.join(' '))})`} runs ${t.recipe.map(quotedValue).join(' then ')}`).join('; ')}.`,
+          ]),
     );
   }
+  if (access.docker || access.localhost)
+    lines.push(
+      "Still a limit on this Mac: a local database, in a container or on a loopback port, may be shared by this project's sessions and hold data this session didn't create. Dropping or truncating a table, deleting or updating rows, applying migrations to it (migrate), resetting or re-seeding it, docker compose down -v and docker volume rm destroy data.",
+    );
   lines.push(
     access.localhost
-      ? "Localhost: open to this session. Loopback addresses (localhost, 127.0.0.1, a dev server, a container's published port) are this Mac, not live systems."
+      ? "Localhost: open to this session. Loopback addresses (localhost, 127.0.0.1, a dev server, a container's published port) are this Mac, unless something there forwards to a remote system (a cloud-sql-proxy, a kubectl port-forward, an ssh -L tunnel, a container proxying to a hosted service): that is judged as the remote system."
       : 'Localhost: closed to this session; its commands reach no loopback address.',
   );
   return lines;
