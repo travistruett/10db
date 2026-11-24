@@ -68,7 +68,7 @@ export { resolveBranchReadyCards } from './branch-ready';
 export { createStartCardAnswers } from './start-card';
 export { createLostMigrationsAnswers } from './lost-migrations';
 export { removeMergedBranches } from './branch-sweep';
-export { createHandMadeFolderLook } from './hand-made-worktrees';
+export { closeGoneMergedWorktreeCards, createHandMadeFolderLook } from './hand-made-worktrees';
 export {
   batchLaunchVerdict,
   flagWorktreeMissing,
@@ -92,6 +92,7 @@ export { createWorktreeGenerators } from './worktree-generated';
 export { readPnpmVersion, resolvePnpm } from './pnpm-binary';
 export {
   applySkippedChoice,
+  closeFinishedSkippedCards,
   raiseSkippedCard,
   SKIPPED_DETAIL,
   SkippedChoice,

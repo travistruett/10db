@@ -1,9 +1,16 @@
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { Delivery, type ProjectDto } from '@10db/contracts';
-import { hasAnsweredByFoldKey, listActiveProjects } from '@10db/db';
+import {
+  getInboxItem,
+  hasAnsweredByFoldKey,
+  listActiveProjects,
+  listOpenFlagRows,
+  type DbReader,
+} from '@10db/db';
 import { handMadeWorktreeFolder, samePath, surelyInside, WorktreeNotOursError } from '../git';
 import { githubRepoOf, PrState } from '../github';
+import type { InboxService } from '../inbox';
 import { keepSpotlightOut, SPOTLIGHT_MARKER } from '../sandbox';
 import { looseWork } from './build-output';
 import { detailOf } from './cards';
@@ -13,6 +20,8 @@ import {
   handMadeCards,
   handMadeKey,
   handMadeNotices,
+  MERGED_KEY_PREFIX,
+  mergedCardPaths,
   type MergedHandMade,
 } from './hand-made-cards';
 import { ghDown } from './pr-watch';
@@ -90,6 +99,7 @@ export async function offerHandMadeFolders(
   ctx: DeliveryContext,
   signal: AbortSignal,
 ): Promise<void> {
+  closeGoneMergedWorktreeCards(ctx.state.db, ctx.inbox);
   for (const project of listActiveProjects(ctx.state.db)) {
     if (project.delivery !== Delivery.PullRequest || !existsSync(project.repoPath)) continue;
     const folder = folderOf(project);
@@ -110,6 +120,28 @@ export async function offerHandMadeFolders(
       ctx.logger.warn({ projectId: project.id, err: detailOf(error) }, 'hand-made folder not read');
     }
   }
+}
+
+/** The reason a merged-worktrees card closes by itself. */
+const WORKTREES_GONE_REASON = 'The worktrees it named no longer exist.';
+
+/**
+ * Closes each open merged-worktrees card none of whose worktrees still exists on disk: its offer
+ * has nothing left to remove. A card whose paths can't all be told stays. Returns how many closed.
+ */
+export function closeGoneMergedWorktreeCards(
+  db: DbReader,
+  inbox: Pick<InboxService, 'resolve'>,
+): number {
+  let closed = 0;
+  for (const row of listOpenFlagRows(db)) {
+    if (row.foldKey?.startsWith(MERGED_KEY_PREFIX) !== true) continue;
+    const paths = mergedCardPaths(getInboxItem(db, row.id));
+    if (paths === null || paths.some((path) => existsSync(path))) continue;
+    inbox.resolve(row.id, WORKTREES_GONE_REASON);
+    closed += 1;
+  }
+  return closed;
 }
 
 /**

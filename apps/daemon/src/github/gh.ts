@@ -150,6 +150,11 @@ export interface Gh {
     input: { readonly repo: string; readonly ref: string },
     call: GhCall,
   ): Promise<PullRequest | null>;
+  /** The pull request's body, or null when GitHub has no pull request there. */
+  prBody(
+    input: { readonly repo: string; readonly ref: string },
+    call: GhCall,
+  ): Promise<string | null>;
   /**
    * The pull request's state and checks, or null when GitHub has none there for this account: none
    * at that number, or its repository is gone or closed to the account.
@@ -755,6 +760,14 @@ export function createGh(exec: GhExec): Gh {
       if (out.exitCode !== 0) throw failure(args, out);
       const view = parseOutput(PrView, args, out.stdout);
       return { url: view.url, state: view.state, isDraft: view.isDraft, baseRef: view.baseRefName };
+    },
+    async prBody({ repo, ref }, call) {
+      const args = ['pr', 'view', ref, '-R', repo, '--json', 'body'];
+      const out = await exec(args, call);
+      if (out.exitCode !== 0 && (NO_PR.test(out.stderr) || PR_NOT_FOUND.test(out.stderr)))
+        return null;
+      if (out.exitCode !== 0) throw failure(args, out);
+      return parseOutput(z.object({ body: z.string() }), args, out.stdout).body;
     },
     async prBranches({ repo, ref }, call) {
       const args = ['pr', 'view', ref, '-R', repo, '--json', 'headRefName,baseRefName'];
