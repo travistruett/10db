@@ -1298,12 +1298,14 @@ export function patchTask(
       );
   }
   if (fields.areas !== undefined) checkAreasCanChange(ctx.tx, getTask(ctx.tx, id), fields.areas);
-  if (fields.workspaceMode !== undefined) {
+  if (fields.workspaceMode !== undefined) checkPlacementCanChange(ctx.tx, getTask(ctx.tx, id));
+  // A task that is in a copy of a local project, or is moving into one, meets the copy's rules again
+  // whenever its landing or placement changes, so an edit can't leave a copy that never lands.
+  if (fields.workspaceMode !== undefined || landing !== undefined) {
     const task = getTask(ctx.tx, id);
-    checkPlacementCanChange(ctx.tx, task);
     const project = getProject(ctx.tx, task.projectId);
     if (
-      fields.workspaceMode === WorkspaceMode.Worktree &&
+      (fields.workspaceMode ?? task.workspaceMode) === WorkspaceMode.Worktree &&
       project.delivery !== Delivery.PullRequest
     ) {
       const refusal = copyRefusal(project, landing ?? task.landing);
