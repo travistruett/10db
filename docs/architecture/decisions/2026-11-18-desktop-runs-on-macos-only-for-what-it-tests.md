@@ -27,8 +27,7 @@ more than 100 commits. This relies on main's runs never cancelling each other (`
 run by its own commit), so every push is compared against its own `before`; if runs could be cancelled, a later
 push would hide an earlier push's desktop change.
 
-The job still runs whenever the files cannot be known: a `merge_group` or `workflow_dispatch` event, a missing or malformed repository or number, a failing `gh`, an empty list, or one of 300 or more
-entries. A failed `desktop-scope` leaves an empty output, which is not `'false'`, so `desktop` runs.
+The job still runs whenever the files cannot be known: a `merge_group` or `workflow_dispatch` event, a missing or malformed repository or number, a failing `gh`, an empty list, or a list at its API's cap (3000 paths for a pull request's files, 300 for a push's compare). A failed `desktop-scope` leaves an empty output, which is not `'false'`, so `desktop` runs.
 
 **What counts**, grouped as `scripts/desktop-scope.mjs` lists it:
 

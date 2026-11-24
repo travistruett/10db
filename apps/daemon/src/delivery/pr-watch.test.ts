@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
-import { GhError, type CheckRollupItem, type Gh } from '../github';
+import { GhError, PrState, type CheckRollupItem, type Gh } from '../github';
 import { prCardKey } from './cards';
 import { raiseIn } from './context';
 import { createPrWatch, subscribePrWatch, type PrWatch } from './index';
@@ -208,6 +208,45 @@ describe('the pull request watch', () => {
     await round(w, INTERVAL * 4);
     expect(polls()).toBe(before);
     expect(h.cards()).toHaveLength(1);
+  });
+
+  it("raises the checks card when the pull request's own check fails after a spell the base alone held back", async () => {
+    setup();
+    const { prUrl } = shipped(
+      h.project.id,
+      'Alpha',
+      h.gh.openPr('10db/Alpha', PrState.Open, 'main'),
+    );
+    const job = (name: string) => ({
+      name,
+      link: `https://github.com/acme/widgets/actions/runs/1/job/${name}`,
+      jobId: name,
+      runId: '1',
+      description: null,
+    });
+    h.gh.baseFailing.add('e2e');
+    h.gh.setChecks(prUrl, [run('e2e', 'FAILURE')]);
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'failing',
+      failing: [job('e2e')],
+      pending: [],
+      cancelled: [],
+    });
+    const w = createPrWatch({
+      ctx: h.ctx,
+      clock,
+      intervalMs: INTERVAL,
+      ciFix: { dataDir: h.dataDir },
+    });
+    watches.push(w);
+    w.start();
+    await w.idle();
+    // Every failure is the base's: its card covers them, so this pull request raises none.
+    expect(h.cards().filter((c) => c.title.startsWith('Pull request checks failed'))).toEqual([]);
+
+    h.gh.setChecks(prUrl, [run('e2e', 'FAILURE'), run('lint', 'FAILURE')]);
+    await round(w);
+    expect(h.cards().map((c) => c.title)).toContain('Pull request checks failed for "Alpha": lint');
   });
 
   describe('a pull request 10db lands', () => {

@@ -323,6 +323,11 @@ export function createPrWatch(input: {
       readonly checks: readonly string[];
     }
   >();
+  /**
+   * The batches whose failing spell has no checks card yet because the base's card covers every
+   * failing check; the card is raised when a check fails that the base does not.
+   */
+  const heldBack = new Set<BatchId>();
   /** Each open pull request with a cancelled required check, by its root batch. */
   const cancelledRuns = new Map<BatchId, CancelledRun>();
   /**
@@ -379,21 +384,29 @@ export function createPrWatch(input: {
     batch: BatchDto,
     next: PullRequestStatusDto,
     cards = true,
-    /** The failing checks that are not the base's too; a failure all the base's raises no card here. */
-    ownFailing: readonly FailingCheckDto[] = next.failingChecks,
+    /** The failing checks the card names; empty when the base's card covers every one. */
+    cardChecks: readonly FailingCheckDto[] = next.failingChecks,
   ): void {
     recordPullRequestStatus(write, batch.id, next);
     if (!cards) return;
     const wasChecks = batch.pr?.checks ?? null;
     const wasState = batch.pr?.state ?? null;
+    if (
+      next.state !== PullRequestState.Unknown &&
+      !(next.state === PullRequestState.Open && next.checks === PullRequestChecks.Failing)
+    )
+      heldBack.delete(batch.id);
     if (next.state === PullRequestState.Open && next.checks === PullRequestChecks.Failing) {
-      if (ownFailing.length > 0) {
-        const card = prCards.checksFailed(batch, ownFailing);
-        if (wasChecks !== PullRequestChecks.Failing) raiseIn(write, batch.projectId, card);
+      if (cardChecks.length > 0) {
+        const card = prCards.checksFailed(batch, cardChecks);
+        // A failing spell raises its card once. A spell the base alone held back raises it when
+        // the pull request's own check fails; a card dismissed since stays dismissed.
+        if (wasChecks !== PullRequestChecks.Failing || heldBack.delete(batch.id))
+          raiseIn(write, batch.projectId, card);
         // An open card names the checks that fail now and links their latest runs, however they
-        // changed since it was raised; a dismissed one stays dismissed.
+        // changed since it was raised.
         rewriteIn(write, batch.projectId, card);
-      }
+      } else heldBack.add(batch.id);
     } else if (
       // An unknown read keeps the last known checks, so it says nothing new about them.
       next.state !== PullRequestState.Unknown &&
@@ -1349,7 +1362,7 @@ export function createPrWatch(input: {
       // Whether this round withdrew the catch-up card: the stored sign that the merge is still to ask.
       let catchUpCardWasOpen = false;
       // A failure the base has too is the base's card (`prCards.baseRed`), not one per pull request.
-      let ownFailing: readonly FailingCheckDto[] | undefined;
+      let cardChecks: readonly FailingCheckDto[] | undefined;
       if (
         read?.state === PrState.Open &&
         read.checks === PullRequestChecks.Failing &&
@@ -1358,7 +1371,20 @@ export function createPrWatch(input: {
       ) {
         try {
           const base = await readBase(root.repo, read.baseRef, baseReads, signal);
-          if (base !== null) ownFailing = read.failingChecks.filter((c) => !base.has(c.name));
+          if (base !== null) {
+            const own = read.failingChecks.filter((c) => !base.has(c.name));
+            // The base's card covers a failure all the base's only when 10db follows the base for this
+            // pull request: a fix-capable watch, a required check, no queue, no conflict.
+            const covered =
+              ciFix !== undefined &&
+              root.ciFixOf === null &&
+              queue === false &&
+              read.mergeBlocked !== MergeBlocked.Conflicts &&
+              read.mergeable !== PrMergeable.Conflicting &&
+              required?.state === 'failing' &&
+              read.failingChecks.every((c) => required.failing.some((job) => job.name === c.name));
+            cardChecks = own.length > 0 ? own : covered ? [] : read.failingChecks;
+          }
         } catch (error) {
           if (controller.signal.aborted) return;
           if (ghDown(error)) ended = { error, at: root.id };
@@ -1366,7 +1392,7 @@ export function createPrWatch(input: {
       }
       ctx.state.write((write) => {
         for (const batch of members) {
-          record(write, batch, answer(batch, read), batch.id === root.id, ownFailing);
+          record(write, batch, answer(batch, read), batch.id === root.id, cardChecks);
           followConflict(write, batch, read);
         }
         if (read !== null) storeRequired(write, root, read, required, queue);
