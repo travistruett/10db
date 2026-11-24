@@ -27,6 +27,12 @@ export function fromNow(at: number | string, now: number = Date.now()): string {
 }
 
 /** The exact local time, for a tooltip beside a relative one. */
+/** A time of day, with the date only when it is not today: `22:29`, or `Nov 24 09:05`. */
+export function clockTime(at: number | string, now: number = Date.now()): string {
+  const when = dayjs(at);
+  return when.isSame(now, 'day') ? when.format('HH:mm') : when.format('MMM D HH:mm');
+}
+
 export function absoluteTime(at: number | string): string {
   return dayjs(at).format('YYYY-MM-DD HH:mm:ss');
 }

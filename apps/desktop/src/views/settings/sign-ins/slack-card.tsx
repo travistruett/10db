@@ -101,10 +101,12 @@ function SetupStep({
 function SetupSteps({
   adding,
   onConnected,
+  onCancel,
 }: {
   /** Another workspace beside the ones already listed. */
   readonly adding: boolean;
   readonly onConnected?: () => void;
+  readonly onCancel?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -141,7 +143,7 @@ function SetupSteps({
         </Group>
       </SetupStep>
       <SetupStep n={3} title="Paste its Bot User OAuth Token.">
-        <TokenField connectLabel="Connect" onDone={onConnected} />
+        <TokenField connectLabel="Connect" onDone={onConnected} onCancel={onCancel} />
       </SetupStep>
     </Stack>
   );
@@ -155,10 +157,13 @@ function TokenField({
   teamId,
   connectLabel,
   onDone,
+  onCancel,
 }: {
   readonly teamId?: string;
   readonly connectLabel: string;
   readonly onDone?: (() => void) | undefined;
+  /** Shown beside the action, so backing out sits where the eye already is. */
+  readonly onCancel?: (() => void) | undefined;
 }) {
   const setter = useSetSlackToken();
   const [token, setToken] = useState('');
@@ -200,6 +205,11 @@ function TokenField({
       >
         {connectLabel}
       </Button>
+      {onCancel ? (
+        <Button variant="default" onClick={onCancel}>
+          Cancel
+        </Button>
+      ) : null}
     </Group>
   );
 }
@@ -222,7 +232,7 @@ function WorkspaceRow({
   const contact = builder === undefined ? null : contactIn(builder, workspace.teamId);
   const note = stateNote(workspace);
   const connected = workspace.state === 'connected';
-  const youLabel = `Which One Is You in ${workspace.teamName}?`;
+  const youLabel = `Who Are You in ${workspace.teamName}?`;
   return (
     <Stack gap={4}>
       <Group justify="space-between" wrap="nowrap" mih={30}>
@@ -282,6 +292,13 @@ function WorkspaceRow({
           onDone={() => {
             setReplacing(false);
           }}
+          onCancel={
+            replacing
+              ? () => {
+                  setReplacing(false);
+                }
+              : undefined
+          }
         />
       ) : null}
       {builder ? (
@@ -352,7 +369,7 @@ function SlackProjects() {
 }
 
 /**
- * Settings › Integrations › Slack. One row per signed-in workspace, each with Which One Is You behind a person
+ * Settings › Integrations › Slack. One row per signed-in workspace, each with Who Are You behind a person
  * icon and a small menu, and the three setup steps: shown alone while none is signed in, behind Add Workspace
  * after that. Under them, the Select per project.
  */
@@ -396,26 +413,15 @@ export function SlackCard() {
       {data && !off && workspaces.length === 0 ? <SetupSteps adding={false} /> : null}
       {data && !off && workspaces.length > 0 ? (
         adding ? (
-          <Stack gap="xs">
-            <SetupSteps
-              adding
-              onConnected={() => {
-                setAdding(false);
-              }}
-            />
-            <Group>
-              <Button
-                size="xs"
-                variant="subtle"
-                color="gray"
-                onClick={() => {
-                  setAdding(false);
-                }}
-              >
-                Cancel
-              </Button>
-            </Group>
-          </Stack>
+          <SetupSteps
+            adding
+            onConnected={() => {
+              setAdding(false);
+            }}
+            onCancel={() => {
+              setAdding(false);
+            }}
+          />
         ) : (
           <Group>
             <Button

@@ -36,7 +36,7 @@ export function WhichIsYouModal({
     onClose();
   };
   return (
-    <Modal opened={opened} onClose={close} title={`Which One Is You in ${teamName}?`} centered>
+    <Modal opened={opened} onClose={close} title={`Who Are You in ${teamName}?`} centered>
       <Stack gap="md">
         <Text size="sm" c="dimmed">
           Messages 10db sends in {teamName} carry your name.

@@ -6,7 +6,6 @@ import {
   type InboxItemId,
   type ProjectId,
   type ProjectIntegrationsDto,
-  type SlackChannelDto,
   type SlackMemberDto,
 } from '@10db/contracts';
 import {
@@ -150,8 +149,6 @@ export function createStakeholderApiServices(deps: {
     return list;
   }
 
-  const channels = new Map<string, { readonly at: number; readonly list: SlackChannelDto[] }>();
-
   return {
     slackStatus: () => deps.connections.list(),
 
@@ -187,7 +184,6 @@ export function createStakeholderApiServices(deps: {
         recordBot(ctx, identity, 'token');
       });
       members.delete(identity.teamId);
-      channels.delete(identity.teamId);
       // The watch's check sets the state.
       await deps.watches.reconnect(identity.teamId);
       return deps.connections.list();
@@ -234,7 +230,6 @@ export function createStakeholderApiServices(deps: {
         });
       });
       members.delete(teamId);
-      channels.delete(teamId);
       deps.connections.drop(teamId);
       await deps.watches.drop(teamId);
       return deps.connections.list();
@@ -246,13 +241,9 @@ export function createStakeholderApiServices(deps: {
       const client = deps.slack?.clientFor(teamId) ?? null;
       if (teamId === null || client === null)
         throw new ConflictError('Slack is not connected for this project');
-      const now = deps.clock.now().getTime();
-      const cached = channels.get(teamId);
-      if (cached && now - cached.at < MEMBERS_TTL_MS) return { state: 'ok', channels: cached.list };
+      // Read fresh each time: the picker asks when it opens, so a channel made a moment ago is listed.
       try {
-        const list = await client.listChannels();
-        channels.set(teamId, { at: now, list });
-        return { state: 'ok', channels: list };
+        return { state: 'ok', channels: await client.listChannels() };
       } catch (error) {
         // Not remembered: the builder adds the scopes and asks again at once.
         if (slackLacksScope(error)) return { state: 'missing_scope' };

@@ -23,11 +23,11 @@ import {
   useSetSelfUpdate,
   useSetSelfUpdateWait,
 } from '../../daemon/self-update-queries';
-import { absoluteTime } from '../../shell/relative';
+import { clockTime } from '../../shell/relative';
 import { HelpText } from './help-hint';
 import { SettingsSectionKey } from './sections';
 import { SettingRow, SettingsCard } from './setting-row';
-import { updateWaitsFor } from './update-waits-for';
+import { updateDeadline, updateWaitsFor } from './update-waits-for';
 
 /** The sentence the daemon's reasons use to send the builder to GitHub's card. */
 const SIGN_IN_SENTENCE = 'Settings › Integrations';
@@ -54,9 +54,13 @@ export function updateProgressText(data: SelfUpdateStatusDto): string | null {
     return `Nothing is staged for ${build} and GitHub cannot be reached, so 10db is not fetching it now. 10db looks again every minute and fetches the build of ${build} once GitHub answers, then installs it when nothing is running.`;
   const waitsFor = updateWaitsFor(data);
   if (data.draining && data.drainingSince !== null)
-    return `Draining since ${absoluteTime(data.drainingSince)}: 10db is starting no new steps, sessions, gates or ships while what is running finishes, then it installs ${build} and restarts. Lanes that were queued pick up again after. ${waitsFor}`;
-  const since = data.waitingSince === null ? '' : ` since ${absoluteTime(data.waitingSince)}`;
-  return `${build} is waiting${since} for a moment when nothing is mid-session. If it is still waiting after ${String(data.waitMinutes)} minutes, 10db stops starting new steps until it has installed. ${waitsFor}`.trimEnd();
+    return `Paused new work at ${clockTime(data.drainingSince)} to install ${build}: no new steps, sessions, gates or ships start while what is running finishes, then 10db restarts with the update and queued lanes pick up again. ${waitsFor}`;
+  const deadline = updateDeadline(data);
+  const pause =
+    deadline === null
+      ? `If it waits ${String(data.waitMinutes)} minutes, 10db stops starting new steps so it can install.`
+      : `If it is still waiting at ${deadline}, 10db stops starting new steps so it can install.`;
+  return `${build} is ready. 10db installs it as soon as nothing is running. ${pause} ${waitsFor}`.trimEnd();
 }
 
 /**

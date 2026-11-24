@@ -185,7 +185,7 @@ up. Paste the answers, with the token and ids removed, at the end of
 ## 4. In 10db (once built)
 
 1. **Settings › Integrations**: on the Slack card, paste the `xoxb-` token and press **Connect**. 10db checks it
-   with Slack and lists the workspace. Under its row, **Which one is you?**: pick yourself and press
+   with Slack and lists the workspace. Under its row, **Who are you?**: pick yourself and press
    **That's Me**, so every message carries your name. The row then reads
    "Acme · posts as @10db · you're @you". Then, under the workspace's row, choose which projects send through it
    with each project's **Slack** field (Off sends nothing).

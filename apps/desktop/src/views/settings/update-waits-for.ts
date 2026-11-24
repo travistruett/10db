@@ -1,4 +1,5 @@
 import { SHAPE_HOLD_WAY_OUT, type SelfUpdateStatusDto } from '@10db/contracts';
+import { clockTime } from '../../shell/relative';
 
 type MidSession = SelfUpdateStatusDto['midSession'];
 
@@ -62,5 +63,11 @@ export function updateWaitsFor(data: SelfUpdateStatusDto): string {
       ? `${count(waitingOnCard, 'lane', 'lanes')} waiting on a card (answer it, or it stops holding the update once lanes pause)`
       : null,
   ].filter((part) => part !== null);
-  return `Holding it now: ${joined(holding)}.`;
+  return `Waiting on ${joined(holding)}.`;
+}
+
+/** When a waiting update stops waiting and pauses new work, as a time of day; null when it is not waiting. */
+export function updateDeadline(data: SelfUpdateStatusDto): string | null {
+  if (data.waitingSince === null) return null;
+  return clockTime(Date.parse(data.waitingSince) + data.waitMinutes * 60_000);
 }
