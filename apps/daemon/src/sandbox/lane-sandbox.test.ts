@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { mintId, Provider } from '@10db/contracts';
+import { CopyId, mintId, Provider } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createTempRepo,
@@ -28,6 +28,7 @@ import { pinnedToolsRoot, SECRET_VARIABLES } from '../environment';
 import { createGit } from '../git';
 import {
   codexLaneTempRoot,
+  createGateSandbox,
   createLaneSandbox,
   fileAccessJudge,
   MAX_SANDBOX_TMP_BYTES,
@@ -724,6 +725,69 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       session.dispose();
     }
     expect(existsSync(join(session.tmpDir, 'cache'))).toBe(false);
+  });
+
+  it("puts the journal's copy id in every command of a resumed session and gate, and no other", async () => {
+    const copyId = CopyId.parse('0123456789ab');
+    const other = 'ffffffffffff';
+    const gates = createGateSandbox({
+      home,
+      dataDir,
+      loginConfigDir: null,
+      tmpRoot,
+      filesRoot,
+      codexLaneTempRoot: lanesRoot,
+      pnpmLockDir: join(root, 'pnpm-locks'),
+      gitDirs: (path) => git.gitDirs(path),
+      systemPrefixes: [],
+      runtime: FAKE_SRT,
+      log: { warn: () => undefined },
+    });
+    const session = await sandbox().forSession(
+      input({
+        copyId,
+        resumeProviderSessionId: 'resumed',
+        env: { PATH: '/usr/bin:/bin', HOME: home, TENDB_COPY_ID: other },
+        mcpServers: {
+          probe: { command: '/usr/bin/true', args: [], env: { TENDB_COPY_ID: other }, hosts: [] },
+        },
+      }),
+    );
+    const gate = await gates.forRun({
+      project: { repoPath: repo.path, sandboxLoopback: false },
+      env: { PATH: '/usr/bin:/bin', HOME: home },
+      rules: [],
+      checkouts: [repo.path],
+      command: 'true',
+      copyId,
+    });
+    const bare = await gates.forRun({
+      project: { repoPath: repo.path, sandboxLoopback: false },
+      env: { PATH: '/usr/bin:/bin', HOME: home, TENDB_COPY_ID: other },
+      rules: [],
+      checkouts: [repo.path],
+      command: 'true',
+      copyId: null,
+    });
+    try {
+      const exported = `export TENDB_COPY_ID='${copyId}'`;
+      expect(readFileSync(session.spec.env['CLAUDE_ENV_FILE'] ?? '', 'utf8')).toContain(exported);
+      expect(session.spec.shellEnv['TENDB_COPY_ID']).toBe(copyId);
+      const inner = session.mcpServers['probe']?.launch().args.at(-1) ?? '';
+      const serverEnvFile = /'\. "\$0" && exec "\$@"' '([^']+)'/.exec(inner)?.[1] ?? '';
+      const serverEnv = readFileSync(serverEnvFile, 'utf8');
+      expect(serverEnv).toContain(exported);
+      expect(serverEnv).not.toContain(other);
+      expect(gate.commandEnv['TENDB_COPY_ID']).toBe(copyId);
+      expect(bare.commandEnv).not.toHaveProperty('TENDB_COPY_ID');
+      expect(session.spec.settings.credentials.envVars.map((entry) => entry.name)).not.toContain(
+        'TENDB_COPY_ID',
+      );
+    } finally {
+      session.dispose();
+      await gate.dispose();
+      await bare.dispose();
+    }
   });
 
   it("gives the lane its own global mise config, holding only the builder's tool versions", async () => {
