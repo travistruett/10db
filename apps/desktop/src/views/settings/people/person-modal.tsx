@@ -328,7 +328,6 @@ function ContactBlock({
         {askedInSlack ? (
           <Radio.Group
             label="Before 10db Messages Them"
-            description="The first message is always shown to you."
             value={contact.sendMode}
             onChange={(value) => {
               onChange({ sendMode: value === SendMode.Auto ? SendMode.Auto : SendMode.Review });
