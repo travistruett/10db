@@ -202,10 +202,14 @@ export function PeopleSection() {
                       <Table.Td>
                         <Group gap="sm" wrap="nowrap">
                           <Initials person={person} />
-                          <Text size="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>
-                            {rowName(person)}
-                          </Text>
-                          <ReachChip person={person} />
+                          <Stack gap={4} align="flex-start">
+                            <Text size="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>
+                              {rowName(person)}
+                            </Text>
+                            <Group gap={4} wrap="nowrap">
+                              <ReachChip person={person} />
+                            </Group>
+                          </Stack>
                         </Group>
                       </Table.Td>
                       <Table.Td style={{ whiteSpace: 'nowrap' }}>{howSent(person)}</Table.Td>

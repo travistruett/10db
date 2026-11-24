@@ -1,9 +1,10 @@
 import type { PersonDto, ProjectViewDto, RoutingRuleDto } from '@10db/contracts';
-import { Anchor, Stack, Text } from '@mantine/core';
+import { Badge, Group, Text, Tooltip } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useProjects } from '../../../daemon/queries';
 import { useRoutingRulesOfProjects } from '../../../daemon/people';
 import { categoryWord } from '../../inbox/route-line';
+import { ProjectTile } from '../../../shell/project-tile';
 import { useSelectedProject } from '../../../shell/selected-project';
 import { SettingsSectionKey } from '../sections';
 
@@ -28,37 +29,47 @@ interface Line {
   readonly words: string;
 }
 
-/** The routes a person answers, one line per project, each a link to where the routes live. */
+/**
+ * The projects a person answers for, one chip each (the project's tile and name) that opens its Question Routing;
+ * what they answer there is in the chip's tooltip, so a person routed in many projects stays one short row.
+ */
 export function PersonAnswers({ person }: { readonly person: PersonDto }) {
   const projects = useProjects().data ?? [];
   const rules = useRoutingRulesOfProjects(projects.map((p) => p.id));
   const { select } = useSelectedProject();
-  if (person.isBuilder) return <Text size="sm">everything not routed</Text>;
+  if (person.isBuilder) return <Text size="sm">Everything not routed</Text>;
   const lines: Line[] = projects.flatMap((project, index) => {
     const mine = (rules[index]?.data ?? []).filter((r) => r.personId === person.id);
     return mine.length === 0 ? [] : [{ project, words: mine.map(scopeWords).join(', ') }];
   });
   if (lines.length === 0) return <Text size="sm">—</Text>;
   return (
-    <Stack gap={0}>
+    <Group gap={6}>
       {lines.map(({ project, words }) => (
-        <Anchor
-          key={project.id}
-          size="sm"
-          renderRoot={(props) => (
-            <Link
-              {...props}
-              to="/settings/$section"
-              params={{ section: SettingsSectionKey.RoutingRules }}
-              onClick={() => {
-                select(project.id);
-              }}
-            />
-          )}
-        >
-          {`${project.name} · ${words}`}
-        </Anchor>
+        <Tooltip key={project.id} label={`${project.name}: ${words}`} withArrow>
+          <Badge
+            variant="default"
+            size="md"
+            tt="none"
+            fw={500}
+            leftSection={<ProjectTile name={project.name} size={14} />}
+            aria-label={`${project.name}: ${words}. Open its Question Routing`}
+            style={{ cursor: 'pointer' }}
+            renderRoot={(props) => (
+              <Link
+                {...props}
+                to="/settings/$section"
+                params={{ section: SettingsSectionKey.RoutingRules }}
+                onClick={() => {
+                  select(project.id);
+                }}
+              />
+            )}
+          >
+            {project.name}
+          </Badge>
+        </Tooltip>
       ))}
-    </Stack>
+    </Group>
   );
 }
