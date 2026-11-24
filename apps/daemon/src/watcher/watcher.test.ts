@@ -11,6 +11,7 @@ import {
 import { dirname, join } from 'node:path';
 import {
   ConflictError,
+  TaskStatus,
   WorkstreamState,
   type BatchId,
   type InboxItemDto,
@@ -33,6 +34,7 @@ import {
   transitionBatch,
   releaseClaims,
   seedProject,
+  setTaskStatus,
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -169,6 +171,47 @@ describe('watcher', () => {
       targets: [{ workstreamId: workstream.id, sessionId: null }],
     });
     expect(open[0]?.detail).toMatchObject({ path: 'docs/stray.md', candidates: [workstream.id] });
+  });
+
+  describe('a stray card with nothing left to do', () => {
+    const raiseStray = async (rel: string) => {
+      watcher.sync();
+      touch(rel);
+      emit(rel);
+      await watcher.flush();
+      expect(flags()).toHaveLength(1);
+    };
+    const commit = (rel: string) => {
+      execFileSync('git', ['add', rel], { cwd: repo.path, env: isolatedGitEnv() });
+      execFileSync('git', ['commit', '-q', '-m', `Add ${rel}`], {
+        cwd: repo.path,
+        env: isolatedGitEnv(),
+      });
+    };
+
+    it('closes once its path is committed and clean or no unfinished task could own it, but not while a lane could', async () => {
+      const { task, workstream } = running();
+      await raiseStray('docs/stray.md');
+      expect(await watcher.resolveSettledStrays()).toBe(0);
+      commit('docs/stray.md');
+      expect(await watcher.resolveSettledStrays()).toBe(1);
+      expect(flags()).toEqual([]);
+
+      touch('docs/other.md');
+      emit('docs/other.md');
+      await watcher.flush();
+      expect(flags()).toHaveLength(1);
+      base.write((ctx) => {
+        transitionWorkstream(ctx, workstream.id, { to: WorkstreamState.Failed, fence: null });
+      });
+      // A failed run of an open task can be retried, so it could still own the write.
+      expect(await watcher.resolveSettledStrays()).toBe(0);
+      expect(flags()).toHaveLength(1);
+      base.write((ctx) => {
+        setTaskStatus(ctx, task.id, TaskStatus.Cancelled);
+      });
+      expect(await watcher.resolveSettledStrays()).toBe(1);
+    });
   });
 
   it('flags a write under a nested node_modules that git reports', async () => {

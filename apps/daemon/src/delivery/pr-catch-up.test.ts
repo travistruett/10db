@@ -1437,6 +1437,41 @@ describe('a shipped pull request whose head never got its required checks', () =
   });
 });
 
+describe('a shipped pull request that failed the checks its base failed too', () => {
+  it('has the base merged in and pushed once, so its checks run on a head that holds the base', async () => {
+    const batch = await shippedWith();
+    const branch = batch.branch ?? '';
+    const url = batch.prUrl ?? '';
+    h.gh.setHead(url, tipOnOrigin(branch));
+    h.gh.setChecks(url, [
+      {
+        __typename: 'CheckRun' as const,
+        name: 'e2e',
+        status: 'COMPLETED',
+        conclusion: 'FAILURE',
+        detailsUrl: null,
+      },
+    ]);
+    const before = tipOnOrigin(branch);
+    const teammate = h.teammatePush('main', 'src/other.ts', 'export {};\n');
+
+    // The never-started restart leaves a head that has checks alone.
+    h.shipper.restartCi(batch.id);
+    await h.jobs.idle();
+    expect(tipOnOrigin(branch)).toBe(before);
+
+    expect(h.shipper.catchUpToBase(batch.id)).toBe(true);
+    await h.jobs.idle();
+    const tip = tipOnOrigin(branch);
+    expect(tip).not.toBe(before);
+    expect(h.origin$('log', '-1', '--format=%P', tip)).toBe(`${before} ${teammate}`);
+    expect(h.cards()).toEqual([]);
+    expect(h.only(getBatch(h.store.db, batch.id).notices)).toMatchObject({
+      key: 'pull-request-update',
+    });
+  });
+});
+
 describe('a merge GitHub refused for a reason that has gone', () => {
   it('is retried, not again at once when GitHub refuses it again, and merged on the retry after that', async () => {
     h.gh.noRequiredChecks = true;

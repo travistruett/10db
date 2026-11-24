@@ -986,6 +986,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       });
       if (marker.commit === deps.runningCommit) {
         logger.info({ commit: marker.commit }, 'updated the app');
+        // An install that took leaves every earlier failure behind, whichever build it was for.
+        resolveStaleCards(state.db, inbox, null, (when) =>
+          when.event === 'update_installed' ? `10db ${short(marker.commit)} is installed` : null,
+        );
         return;
       }
       const failure = status && !status.ok ? status : null;

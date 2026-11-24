@@ -146,7 +146,6 @@ import {
   openItemsForWorkstream,
   openPassTurn,
   passAreasOf,
-  passHoldingTask,
   passPageAreas,
   patchWorkstream,
   questionRoutesForTask,
@@ -235,6 +234,7 @@ import {
   accountAgentOf,
 } from '../environment';
 import { createPassGitSession, type Git } from '../git';
+import { claimedChanges as claimedChangesOf, yieldClaimsWhileWaiting } from './claim-yield';
 import { anotherWritersRound, readStartDirt, withoutStartDirt } from './start-dirt';
 import {
   answerUnattended,
@@ -257,7 +257,7 @@ import {
 } from '../inbox';
 import type { Judge } from '../judge';
 import type { Logger } from '../log';
-import { mintSessionToken, type ToolImages } from '../mcp';
+import { mintSessionToken, TOOL_PICTURES_CAPTION, type ToolImages } from '../mcp';
 import {
   closeHoldsOf,
   foldHandEdits,
@@ -340,7 +340,6 @@ import {
   type GateRunner,
   type Hold,
 } from '../verify';
-import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
 import { checkCoverage, coverageNote, type CheckCoverage } from './check-coverage';
@@ -395,10 +394,6 @@ const HANDOFF_BASELINE_MARGIN_PCT = 5;
 
 /** A hook call's input, as the agent sent it: read as a record where a skip keys it. */
 const ToolInputRecord = z.record(z.string(), z.unknown());
-
-/** The words sent with a tool's pictures to a Codex session; 10db's own, so no tool output speaks as the builder. */
-const TOOL_PICTURES_CAPTION =
-  'The pictures your last tool call returned. Its text came back as the tool result.';
 
 /** Why a lane is stopped; `closed` is the runner closing a pass task's session itself. */
 export type StopReason = 'cancelled' | 'paused' | 'shutdown' | 'closed';
@@ -1900,6 +1895,15 @@ export function createRunner(opts: RunnerOptions): Runner {
       else patchWorkstream(ctx, id, fence, { nextAction });
       clearLease(ctx, id);
     });
+    if (!answered)
+      void yieldClaimsWhileWaiting({ state: opts.state, git: opts.git }, id, inboxId).catch(
+        (error: unknown) => {
+          opts.logger.warn(
+            { component: 'runner', workstreamId: id, err: String(error) },
+            'could not let go of the claims of a task waiting on an answer',
+          );
+        },
+      );
   }
 
   /** Back to the queue with the next action as it was, and the lease released. */
@@ -3224,7 +3228,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       ...(provider === Provider.Codex
         ? {
             showImages: (shown: ToolImages) => {
-              if (shown.images.length > 0) handle?.send(TOOL_PICTURES_CAPTION, shown.images);
+              if (shown.images.length > 0)
+                handle?.send(TOOL_PICTURES_CAPTION, shown.images, undefined, { steerOnly: true });
             },
           }
         : {}),
@@ -4246,22 +4251,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     return outcome;
   }
 
-  /**
-   * The paths in the claims the workstream holds right now that git reports as changed, less those
-   * still exactly as the checkout held them when the task first launched.
-   */
-  async function claimedChanges(row: WorkstreamRow): Promise<string[]> {
-    const project = getProject(db, row.projectId);
-    const checkout = checkoutOf(db, row);
-    const changed = await opts.git.changedPaths(checkout);
-    const claims = activeClaims(db, row.id).map((c) => ({ kind: c.kind, name: c.name }));
-    // A pass lane's claims name the pass's own areas: the whole-project page for a pass of one.
-    const pass = passHoldingTask(db, getTask(db, row.taskId));
-    const areas = pass ? [...passAreasOf(db, pass.id)] : project.areas;
-    const claimed = findClaimed(changed, { areas, hazards: project.hazards }, claims);
-    const start = pass ? null : getTaskStartDirt(db, row.taskId);
-    return withoutStartDirt(claimed, checkout, start).sort();
-  }
+  const claimedChanges = (row: WorkstreamRow): Promise<string[]> =>
+    claimedChangesOf(db, opts.git, row);
 
   /**
    * A write step that ends with changes in its claims uncommitted goes back to the same step, which

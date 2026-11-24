@@ -55,6 +55,7 @@ import {
   getAppSetting,
   getJudgeConfig,
   getProject,
+  getSession,
   listPermissionRules,
   listActiveProjects,
   listProjects,
@@ -184,6 +185,8 @@ import {
   openPass,
   readPnpmVersion,
   recoverBatches,
+  closeFinishedSkippedCards,
+  closeGoneMergedWorktreeCards,
   createHandMadeFolderLook,
   removeMergedBranches,
   resolvePnpm,
@@ -427,6 +430,7 @@ import { createGateRunner, createGateSlots, GatePriority, limitGates } from '../
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { autoDocker } from './auto-docker';
+import { GATE_HOLD_RETRY_MS, holdStaleGates } from './gate-hold';
 import { MAX_DOCKER_SCAN_BYTES, originBaseCommit } from './docker-need';
 import { createProjectPinStore } from './checkout-pins';
 import { resolveNoticeCards } from './notice-sweep';
@@ -1367,21 +1371,36 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   );
   const gateSlots = createGateSlots(limits.gateSlots);
+  // A final gate that fails because the project's dev stack isn't up to date waits, with one card,
+  // instead of failing the task. It wraps the limiter, so a waiting gate holds no slot.
+  const gateHoldDeps = {
+    clock,
+    state,
+    inbox,
+    logger: logger.child({ component: 'gate' }),
+    retryMs: GATE_HOLD_RETRY_MS,
+  };
   // A task's gate has no hold here: the runner holds it, for the load and the drain, before it takes
   // its batch's turn and its slot, so a held gate keeps neither.
-  const gate = limitGates(gateRunner, {
-    slots: gateSlots,
-    clock,
-    logger: logger.child({ component: 'gate' }),
-  });
+  const gate = holdStaleGates(
+    limitGates(gateRunner, {
+      slots: gateSlots,
+      clock,
+      logger: logger.child({ component: 'gate' }),
+    }),
+    gateHoldDeps,
+  );
   // A batch's shipping gate belongs to a ship that has begun, and a drain lets that finish: only
   // the load holds it. No new ship begins during the drain (`holdShips`).
-  const shipGate = limitGates(gateRunner, {
-    slots: gateSlots,
-    clock,
-    logger: logger.child({ component: 'gate' }),
-    hold: loadGuard,
-  });
+  const shipGate = holdStaleGates(
+    limitGates(gateRunner, {
+      slots: gateSlots,
+      clock,
+      logger: logger.child({ component: 'gate' }),
+      hold: loadGuard,
+    }),
+    gateHoldDeps,
+  );
   // The check after a Workbench turn is advice: same load hold and slots, but it waits behind any
   // gate that decides whether work lands.
   const turnCheckGate = limitGates(gateRunner, {
@@ -2191,6 +2210,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const skippedDeps = { state, git, log: logger.child({ component: 'skipped' }) };
   // The raises still reading a run's changed paths, which stop() waits for before the store closes.
   const skippedRaises = new Set<Promise<void>>();
+  // A card for a task's skipped calls, or for a write nobody could own, has nothing left to do once the
+  // task is finished or abandoned, or its run ends.
+  const unsubscribeSettled = bus.subscribe((event) => {
+    if (event.type === EventType.TaskChanged) {
+      closeFinishedSkippedCards(state.db, inbox);
+    } else if (
+      event.type === EventType.WorkstreamChanged &&
+      [WorkstreamState.Done, WorkstreamState.Failed, WorkstreamState.Cancelled].some(
+        (ended) => ended === event.data['to'],
+      )
+    ) {
+      watcher?.resolveSettledStrays().catch((error: unknown) => {
+        logger.warn({ err: error }, 'could not close the stray-write cards of an ended run');
+      });
+    }
+  });
   const unsubscribeSkipped = bus.subscribe((event) => {
     if (event.type !== EventType.WorkstreamChanged) return;
     const to = event.data['to'];
@@ -2210,6 +2245,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     skippedRaises.add(raised);
   });
   await sweepUnlistedRuns(skippedDeps);
+  // Cards an earlier daemon left open that have nothing left to do close now, so a backlog clears
+  // without the builder. The stray-write cards close once the watcher has been synced, below.
+  const closedAtStart =
+    closeFinishedSkippedCards(state.db, inbox) + closeGoneMergedWorktreeCards(state.db, inbox);
+  if (closedAtStart > 0)
+    logger.info({ closed: closedAtStart }, 'closed open cards with nothing left');
   // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets
   // one. A send that was mid-post is looked for by its workspace's reply watch.
   for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
@@ -2474,6 +2515,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const unsubscribeYields = forgetEndedYields(bus, claimWaits);
   keepAwake.refresh();
   watcher?.sync();
+  watcher
+    ?.resolveSettledStrays()
+    .then((closed) => {
+      if (closed > 0) logger.info({ closed }, 'closed stray-write cards with nothing left');
+    })
+    .catch((error: unknown) => {
+      logger.warn({ err: error }, 'could not close the settled stray-write cards');
+    });
 
   const token = opts.uiToken ?? randomBytes(32).toString('base64url');
   const areaNamer = createAreaNamer({ adapter, launcher, db: state.db, scratchRoot: tmpdir() });
@@ -3063,7 +3112,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
-      showImages: (id, images) => live.get(id)?.showImages?.(images),
+      showImages: (id, images) => {
+        const lane = live.get(id);
+        if (lane !== undefined) {
+          lane.showImages?.(images);
+          return;
+        }
+        // A chat's or plan's session is no lane: it is found by its conversation.
+        const conversationId = getSession(db, id).conversationId;
+        if (conversationId !== null) chatLive.get(conversationId, id)?.showImages?.(images);
+      },
       awayFor: (id) => live.get(id)?.away,
       claimWaits,
       deliverMessage: (taskId, messageId) =>
@@ -3292,6 +3350,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A tick asked for before the stop may still be reading the branches; it launches nothing now,
       // but it reads and writes the database until it ends.
       await createdScheduler.idle();
+      unsubscribeSettled();
       unsubscribeSkipped();
       await Promise.all(skippedRaises);
       state.write((ctx) => {
