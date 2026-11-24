@@ -227,13 +227,14 @@ export async function raiseSkippedCard(
         : undefined;
     if (failed !== undefined) {
       rewordCard(ctx, failed.id, `${failed.body}\n\n${bodyOf(skips, written)}`, {
-        options:
-          skipIds.length === 0
-            ? failed.options
-            : [
-                ...failed.options,
-                runOption(followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait'),
-              ],
+        // Closing itself adds to the card; the builder can still dismiss a notice they have read.
+        options: [
+          ...failed.options.filter((o) => o.label !== DISMISS.label),
+          ...(skipIds.length === 0
+            ? []
+            : [runOption(followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait')]),
+          DISMISS,
+        ],
         detail: { ...failed.detail, [SKIPPED_DETAIL]: workstreamId, skipIds },
       });
       markListed(ctx, workstreamId, through, failed.id, configHead);

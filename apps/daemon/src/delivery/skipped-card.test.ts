@@ -21,12 +21,12 @@ afterEach(() => {
 
 describe('the skipped-calls item of a run', () => {
   it('rides on the failed card of a failed run rather than making a second one, and closes with its task', async () => {
-    const test = createTestStore();
-    close = test.close;
-    const state = createStateStore(test.store, createEventBus());
+    const world = createTestStore();
+    close = world.close;
+    const state = createStateStore(world.store, createEventBus());
     const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
-    const { project, task, workstream } = seedWorkstream(test.store);
-    test.store.write((ctx) => {
+    const { project, task, workstream } = seedWorkstream(world.store);
+    world.store.write((ctx) => {
       ctx.tx
         .update(schema.workstreams)
         .set({ state: 'FAILED' })
@@ -64,17 +64,17 @@ describe('the skipped-calls item of a run', () => {
       workstream.id,
     );
 
-    const open = listInbox(test.store.db, { states: [InboxState.Open] });
+    const open = listInbox(world.store.db, { states: [InboxState.Open] });
     expect(open.map((i) => i.id)).toEqual([failed.id]);
     expect(open[0]?.body).toContain('The gate failed 4 times');
     expect(open[0]?.body).toContain('fetch https://example.com');
     expect(open[0]?.options.map((o) => o.label)).toEqual([SkippedChoice.RunTheseNow]);
 
-    expect(closeFinishedSkippedCards(test.store.db, inbox)).toBe(0);
-    test.store.write((ctx) => {
+    expect(closeFinishedSkippedCards(world.store.db, inbox)).toBe(0);
+    world.store.write((ctx) => {
       setTaskStatus(ctx, task.id, TaskStatus.Done);
     });
-    expect(closeFinishedSkippedCards(test.store.db, inbox)).toBe(1);
-    expect(listInbox(test.store.db, { states: [InboxState.Open] })).toEqual([]);
+    expect(closeFinishedSkippedCards(world.store.db, inbox)).toBe(1);
+    expect(listInbox(world.store.db, { states: [InboxState.Open] })).toEqual([]);
   });
 });
