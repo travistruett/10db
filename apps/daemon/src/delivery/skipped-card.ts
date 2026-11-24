@@ -72,6 +72,8 @@ function clearedBy(kind: SkipKind): string {
       return 'make the change yourself';
     case SkipKind.SafetyCheck:
       return 'only you can run it';
+    case SkipKind.CantRunInLane:
+      return "can't run in a lane: its program is outside what lanes may read. Use 10db's browser, or run it yourself";
     case SkipKind.MonitorNoCommand:
     case SkipKind.UnreadEditPath:
       return 'the agent can write it another way';

@@ -64,6 +64,7 @@ export {
   type FileAccessContext,
   type ReadAccess,
 } from './file-access';
+export { programRunnable } from './program-reach';
 export {
   createGateSandbox,
   DOCKER_REFUSAL,

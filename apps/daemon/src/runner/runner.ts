@@ -301,6 +301,7 @@ import {
   type LaneSandbox,
   type LaneSession,
   SYSTEM_TEMP_ROOTS,
+  programRunnable,
 } from '../sandbox';
 import type { LaneBrowserSession } from '../lane-browser';
 import {
@@ -2980,6 +2981,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       inPass: pass !== null,
       attended: policy.attended,
       pictures: project.appUrl !== null && takesPictures(project, task),
+      browser: laneSession !== null && opts.endLaneBrowser !== undefined,
       sandboxed: Boolean(opts.laneSandbox),
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
       judged,
@@ -3224,7 +3226,23 @@ export function createRunner(opts: RunnerOptions): Runner {
       ? null
       : {
           skips: createSkipRecorder(
-            { state: opts.state, log: opts.logger },
+            {
+              state: opts.state,
+              log: opts.logger,
+              ...(laneSession === null
+                ? {}
+                : {
+                    runnable: (command: string) =>
+                      programRunnable(
+                        command,
+                        laneSession.spec.shellEnv['PATH'] ??
+                          laneSession.commandEnv['PATH'] ??
+                          launch.env['PATH'] ??
+                          '',
+                        laneSession.fileAccess,
+                      ),
+                  }),
+            },
             { workstreamId: id, sessionId: session.id },
           ),
           approvedKeys,

@@ -114,6 +114,8 @@ export interface PromptInput {
    * task in Your folder naming a routed page, on a project with an app address.
    */
   readonly pictures?: boolean;
+  /** The session has 10db's lane browser (every lane step, read-only ones included). */
+  readonly browser?: boolean;
   /**
    * For a `feedback` action: the builder's message as the session reads it, and the thread's digest a
    * session with no conversation to resume starts from (null for one that resumes it).
@@ -465,6 +467,16 @@ const PASS_RULES = [
   "The builder's messages each carry an id, and 10db may send one again: the same id is the same message, so act on it once.",
   HAND_OFF_RULE,
 ];
+
+/** Told to every lane step that has 10db's browser, read-only steps included. */
+const BROWSER_RULE =
+  "10db gives you a browser: browser_open, browser_snapshot, browser_click, browser_type and browser_screenshot. They reach only servers this lane started: a process of its own, or a Docker Compose stack started from its copy or temp dir, on localhost, 127.0.0.1 or [::1]. Start the app first, sign in through its own pages as a test user you created, and say what you saw. A screenshot is kept on the task as evidence; its PNG's path is in every answer. Start a stack that later steps should reuse from the copy, with an archive in an ignored folder under it, not the temp dir. This is the only browser a lane has: the builder's browser tools and skills (Aside, Chrome) don't run in a lane, so don't try them.";
+/** Codex's MCP tool results may drop an image, so it is told where the file is. */
+const CODEX_IMAGE_SENTENCE =
+  " If a screenshot's image doesn't show, open its path with view_image.";
+
+const browserRule = (provider: Provider | undefined): string =>
+  provider === Provider.Codex ? BROWSER_RULE + CODEX_IMAGE_SENTENCE : BROWSER_RULE;
 
 /** Told to a session whose pages 10db pictures for the builder (Workbench spec §10 "Which pages"). */
 const PICTURES_RULE =
@@ -984,12 +996,15 @@ export function buildSessionPrompt(input: PromptInput): string {
   const brief = input.brief ?? LaneBrief.Full;
   const claims = input.claims.map((c) => `${c.kind} ${c.name}`).join(', ') || '(none)';
   const lines = withSandboxRules(
-    input.step.tools === ToolAccess.ReadOnly
-      ? readOnlyRules(input.step.role)
-      : [
-          ...(input.inPass === true ? PASS_RULES : briefRules(RULES, brief, input.provider)),
-          ...(input.pictures === true ? [PICTURES_RULE] : []),
-        ],
+    [
+      ...(input.step.tools === ToolAccess.ReadOnly
+        ? readOnlyRules(input.step.role)
+        : [
+            ...(input.inPass === true ? PASS_RULES : briefRules(RULES, brief, input.provider)),
+            ...(input.pictures === true ? [PICTURES_RULE] : []),
+          ]),
+      ...(input.browser === true ? [browserRule(input.provider)] : []),
+    ],
     input.sandboxed === true,
     input.provider,
     {

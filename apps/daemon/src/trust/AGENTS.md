@@ -17,3 +17,9 @@
 - The hook judge that runs them is `inbox/hook-judge.ts` (`createHookJudge`, `LimitNotes`); the card a noted limit
   raises is `inbox/limit-card.ts`, with the three answers, and Always in this project stores a grant in the
   answer's write (`inbox/service.ts`).
+- `skip-recorder.ts` records each skipped call once. A skipped shell call (`Bash`, Codex's too) whose summary isn't cut and
+  whose program `sandbox/program-reach.ts` (`programRunnable`, handed in as the recorder's `runnable`) finds outside what the lane reads, by its real path on the lane's
+  `PATH` and `readAccess` (system roots such as `/usr` are always open, a program not found or a command that isn't
+  a plain first word counts as runnable), is recorded `cant_run_in_lane` in place of its own kind. No Run these now clears
+  it: the program fails in the sandbox however it is approved, and the card says to use 10db's browser or run it
+  yourself. `programRunnable` lives in the sandbox module, since the sandbox reaches the trust module through the guard.
