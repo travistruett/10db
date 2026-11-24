@@ -52,7 +52,7 @@ export { createSlackPicturePost, type SlackPicturePost } from './slack-picture-p
 export { createKeptWorkGate, subscribeKeptWorkLanding } from './kept-work-start';
 export { answerPassMoveCard, resumePassSettles, subscribePassSettles } from './pass-settle';
 export { createFailedRestarts } from './restart';
-export { stepCheck } from './local-check';
+export { finalCheck, stepCheck } from './local-check';
 export { fileFlakyTests, flakeNote, rerunFlaky, type FlakyTest } from './flaky-tests';
 export { prBody } from './pr-text';
 export { createShipper, type Shipper } from './ship';

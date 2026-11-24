@@ -583,6 +583,46 @@ describe('runner', () => {
     expect(check).toMatchObject({ kind: 'gate', command: 'true', exitCode: 0 });
   });
 
+  it('runs the full gate once after the last implement step of a Commit Directly task, before its review or Done, and a failing gate sends it back as a fix', async () => {
+    const gate = 'test -f src/api/fixed.txt || { echo FULL-GATE-MISSING; exit 2; }';
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [write('src/api/a.txt'), commit('op-full-1', ['src/api/a.txt']), turn],
+          [write('src/api/fixed.txt'), commit('op-full-2', ['src/api/fixed.txt']), turn],
+          [
+            {
+              do: 'mcp' as const,
+              tool: 'complete_step',
+              args: { opId: 'op-full-3', summary: 'Looks right.', verdict: 'approve' },
+            },
+            turn,
+          ],
+        ],
+      },
+      { delivery: 'local', gateCommand: gate, changedCheckCommand: 'true' },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'fix' } });
+
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', stepIndex: 1 });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[1]?.prompt).toContain('FULL-GATE-MISSING');
+    const checks = listEvidence(engine.store.db, workstream.id);
+    expect(checks.map((check) => [check.command, check.exitCode])).toEqual([
+      ['true', 0],
+      [gate, 2],
+      ['true', 0],
+      [gate, 0],
+    ]);
+  });
+
   it("checks a step with the project's changed-packages command, not its gate command, and sends a failed check back as a fix with its output", async () => {
     const changed = 'test -f src/api/fixed.txt || { echo MISSING-CHANGED-FILE; exit 2; }';
     engine = await createTestEngine(
@@ -592,7 +632,11 @@ describe('runner', () => {
           [write('src/api/fixed.txt'), commit('op-chg-fix-1', ['src/api/fixed.txt']), turn],
         ],
       },
-      { gateCommand: 'echo FULL-GATE-RAN; exit 3', changedCheckCommand: changed },
+      {
+        delivery: 'pull_request',
+        gateCommand: 'echo FULL-GATE-RAN; exit 3',
+        changedCheckCommand: changed,
+      },
     );
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);

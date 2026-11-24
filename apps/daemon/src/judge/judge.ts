@@ -20,6 +20,7 @@ import { askModel, type ModelQuestion } from './ask';
 import type { BedrockClientFactory } from './bedrock';
 import { ModelApi, modelApi, optionsText, type ModelAnswer } from './openrouter';
 import { NO_DECISION_CREDENTIAL, secretsOf, type JudgeCredential } from './credential';
+import type { JudgeCallHealth } from './outage';
 import { untilAborted } from './until-aborted';
 
 /** Logged calls are kept this long; older rows are deleted when the daemon starts. */
@@ -107,6 +108,8 @@ export interface JudgeDeps {
   readonly off: boolean;
   readonly logger: Logger;
   readonly timeoutMs?: number;
+  /** Told how each decision's call went, so an outage the builder must fix is raised once. */
+  readonly onCallHealth?: (health: JudgeCallHealth) => void;
 }
 
 const FALLBACK_OUTCOME = {
@@ -289,7 +292,12 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         }),
       });
 
-      if (deps.off) return fallback('off', 'Started with TENDB_JUDGE=off', null);
+      if (deps.off) {
+        deps.onCallHealth?.({ kind: 'off' });
+        return fallback('off', 'Started with TENDB_JUDGE=off', null);
+      }
+      // One decision switched off says nothing of the judge's health: only the whole judge off does.
+      if (!config.enabled) deps.onCallHealth?.({ kind: 'off' });
       if (!config.enabled || !decision.enabled)
         return fallback('off', 'Switched off in Settings', null);
 
@@ -302,8 +310,18 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       // A decision's own calls say whether the account is answering; a test of another model does not.
       if (config.accountId !== null && !(result.kind === 'fallback' && result.reason === 'stopped'))
         lastFallbacks.set(config.accountId, result.kind === 'fallback' ? result.detail : null);
-      if (result.kind === 'fallback')
+      if (result.kind === 'fallback') {
+        if (result.reason !== 'stopped')
+          deps.onCallHealth?.({
+            kind: 'failed',
+            reason: result.reason,
+            detail: result.detail,
+            ...(req.taskId === undefined ? {} : { taskId: req.taskId }),
+            ...(req.workstreamId === undefined ? {} : { workstreamId: req.workstreamId }),
+          });
         return fallback(result.reason, result.detail, result.latencyMs);
+      }
+      deps.onCallHealth?.({ kind: 'answered' });
       const { answer } = result;
       // Provisional: the decision that acts on the answer replaces it with `acted` or `below_floor`.
       const callId = log({

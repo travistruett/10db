@@ -217,6 +217,7 @@ import {
   MIGRATIONS_HAZARD,
   projectAtCheckout,
   rerunFlaky,
+  finalCheck,
   stepCheck,
   uncarriedSaid,
   type BaseUpdate,
@@ -4532,7 +4533,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
   }
 
-  async function verify(id: WorkstreamId, ctl: Control): Promise<void> {
+  async function verify(id: WorkstreamId, ctl: Control, final = false): Promise<void> {
     if (getWorkstreamRow(db, id).state !== S.Verifying) {
       opts.state.write((ctx) =>
         transitionWorkstream(ctx, id, {
@@ -4559,7 +4560,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     // runs it in place of the gate. Otherwise a project with a changed-packages check has each step
     // checked by it, and the ship gate runs the full gate command before the push. Without a gate
     // command the builder checks, as ever.
-    const gateCommand = stepCheck(project)?.command ?? null;
+    // `final`: the full gate a Commit Directly task runs after its last implement step's check.
+    const gateCommand =
+      (final ? finalCheck(project) : null)?.command ?? stepCheck(project)?.command ?? null;
     if (gateCommand === null) {
       await finishWithoutGate(id, ctl, row, checkout);
       return;
@@ -4791,6 +4794,28 @@ export function createRunner(opts: RunnerOptions): Runner {
       });
     if (result.exitCode === 0) {
       const step = currentStep(row);
+      // A Commit Directly task has no ship: once its last implement step's own check passed, the full
+      // gate runs before any review or Done, and the diff reads wait for that gate's pass.
+      if (!final && batchId === null && finalCheck(project) !== null) {
+        if (stopRequested(ctl) === 'cancelled') {
+          cancelNow(id, ctl.fence);
+          return;
+        }
+        if (stopRequested(ctl) === 'shutdown') return;
+        const deferred = opts.state.write((ctx) => {
+          const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
+          const implementLeft = current.steps
+            .slice(current.stepIndex + 1)
+            .some((s) => s.role === StepRole.Implement);
+          if (implementLeft) return false;
+          insertEvidence(ctx, evidence);
+          return true;
+        });
+        if (deferred) {
+          await verify(id, ctl, true);
+          return;
+        }
+      }
       // The diff is read before the write, which then adds the review it forces.
       const forced = await reviewForcedAfter(id, ctl, row, checkout);
       // With no Review after this step, the judge's flags on the new tests become follow-up tasks.
@@ -4807,15 +4832,15 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (stopRequested(ctl) === 'shutdown') return;
       opts.state.write((ctx) => {
         insertEvidence(ctx, evidence);
-        countFinished(ctx, step);
         // Planned again first, and the move chosen from those steps: a rigor changed while the gate ran
         // decides whether a Review follows or the work is done.
         const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
         const net = withSafetyNet(ctx.tx, ctl.accountId, current, forced);
-        if (!reviewFollows(net.steps, current.stepIndex))
-          fileTestValueFollowUps(ctx, row.taskId, testValue);
         const steps = net.steps;
         const after = moveAfter(steps, current.stepIndex);
+        countFinished(ctx, step);
+        if (!reviewFollows(net.steps, current.stepIndex))
+          fileTestValueFollowUps(ctx, row.taskId, testValue);
         const next = after.kind === 'advance' ? steps[after.to] : undefined;
         if (after.kind === 'advance' && next) {
           transitionWorkstream(ctx, id, {
