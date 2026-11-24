@@ -61,6 +61,6 @@
   `projectAt` resolves a worktree path to its project so refusals raise the project's cards.
 - A chat's worktree is owned by its chat (`decisions/2026-11-17-a-session-on-a-new-branch-is-the-same-conversation-in-its-own-worktree.md`): its lock reason is `10db cht_<chat id>` (`chatWorktreeLockReason`, `WORKTREE_LOCK_PREFIX`), `lockedOwner` reads it as `{ kind: 'chat' }`, and its pin is keyed by chat (`checkout_pin.<chat id>`, `chatWorktreePinKey`). The chat row names the worktree before it exists, and `pinOwner` (`daemon/checkout-pins.ts`) finds the owner of a pin by the row, so `addWorktree` can set the pin during the cut. Only `git/` makes and removes worktrees; `delivery/chat-worktree-cut.ts` calls it and is idempotent by path.
 - `handMadeWorktreeChanges`, `handMadeWorktreeIgnoredFiles` and `removeHandMadeWorktree` run the 10db-worktree checks of
-  `lockedWorktree` and `removeWorktree` through a `WorktreeScope`: the folder `handMadeWorktreeFolder(repo)` for 10db's
+  `lockedWorktree` and `removeWorktree` through a `WorktreeScope`: the one of `handMadeWorktreeFolders(repo)` (`<repo>-worktrees.noindex`, then the draining `<repo>-worktrees`) that holds the path, for 10db's
   root, an unlocked entry for a 10db lock, and a single `--force`. A scope is chosen inside `git.ts` and never passed
   in, so no caller can widen what the 10db calls touch.

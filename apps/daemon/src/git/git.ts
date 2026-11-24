@@ -47,7 +47,7 @@ import { localRemotePath, parseRemoteUrl } from './remote-url';
 import { GitError, runGit, runGitCapped, type RunOptions } from './run';
 import { GitTrustError, GitTrustFailure, type GitTrustDetail } from './trust-error';
 import { embeddedRepository, GitMode, isGitComponent } from './worktree-files';
-import { handMadeWorktreeFolder } from './hand-made-folder';
+import { handMadeWorktreeFolders } from './hand-made-folder';
 import { lockedOwner, parseWorktreeList, type WorktreeEntry } from './worktree-list';
 
 /** The trailer the commit tool writes on every commit it makes, naming the call's opId. */
@@ -1039,7 +1039,7 @@ export interface Git extends ChatGit {
   worktreeIgnoredFiles(repo: string, path: string): Promise<string[]>;
   /**
    * `worktreeChanges`, `worktreeIgnoredFiles` and `removeWorktree` for a worktree the builder made by
-   * hand, in the folder beside `repo` (`handMadeWorktreeFolder`). It must be listed by git, unlocked,
+   * hand, in the folder beside `repo` (`handMadeWorktreeFolders`). It must be listed by git, unlocked,
    * and pass the same checks of its git dir; anything else is refused with `WorktreeNotOursError`.
    * The removal leaves the branch.
    */
@@ -4109,10 +4109,19 @@ export function createGit(opts: GitOptions = {}): Git {
    * The builder's worktrees in the folder beside `repo`: under it and not locked, since a lock is the
    * builder's own mark that one is not to go. A single force removes an unlocked one.
    */
-  function handMadeScope(repo: string): WorktreeScope {
+  function handMadeScope(repo: string, path: string): WorktreeScope {
+    const folders = handMadeWorktreeFolders(realpathSync(repo));
+    const target = withRealParent(path);
+    const holding = folders.find((folder) => {
+      try {
+        return equalOrUnder(target, realPathOf(folder));
+      } catch {
+        return false;
+      }
+    });
     return {
-      root: handMadeWorktreeFolder(realpathSync(repo)),
-      rootName: 'the hand-made worktree folder',
+      root: holding ?? folders[0],
+      rootName: 'a hand-made worktree folder',
       refuses: (entry) => (entry.locked === null ? null : 'the worktree is locked'),
       forces: ['--force'],
     };
@@ -4777,10 +4786,10 @@ export function createGit(opts: GitOptions = {}): Git {
     removeWorktree: (repo, path) => removeWorktree(repo, path),
     worktreeChanges: (repo, path) => worktreeChanges(repo, path),
     worktreeIgnoredFiles: (repo, path) => worktreeIgnoredFiles(repo, path),
-    removeHandMadeWorktree: (repo, path) => removeWorktree(repo, path, handMadeScope(repo)),
-    handMadeWorktreeChanges: (repo, path) => worktreeChanges(repo, path, handMadeScope(repo)),
+    removeHandMadeWorktree: (repo, path) => removeWorktree(repo, path, handMadeScope(repo, path)),
+    handMadeWorktreeChanges: (repo, path) => worktreeChanges(repo, path, handMadeScope(repo, path)),
     handMadeWorktreeIgnoredFiles: (repo, path) =>
-      worktreeIgnoredFiles(repo, path, handMadeScope(repo)),
+      worktreeIgnoredFiles(repo, path, handMadeScope(repo, path)),
     async listWorktrees(repo) {
       return listWorktrees(await pinned(repo));
     },

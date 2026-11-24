@@ -10,7 +10,7 @@ export {
   ignoredBookkeepingWrite,
   isInsideClaudeCodeBookkeeping,
 } from './claude-code-bookkeeping';
-export { handMadeWorktreeFolder } from './hand-made-folder';
+export { handMadeWorktreeFolders, skippedBySpotlightByName } from './hand-made-folder';
 export { equalOrUnder, samePath, surelyInside } from './lane-writable';
 export { comparablePath, existsAsEntry } from './path-entries';
 export { withDaemonGitConfig } from './daemon-config';
