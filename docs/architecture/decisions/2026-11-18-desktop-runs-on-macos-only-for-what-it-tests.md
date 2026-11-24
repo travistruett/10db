@@ -27,7 +27,7 @@ more than 100 commits. This relies on main's runs never cancelling each other (`
 run by its own commit), so every push is compared against its own `before`; if runs could be cancelled, a later
 push would hide an earlier push's desktop change.
 
-The job still runs whenever the files cannot be known: a `merge_group` or `workflow_dispatch` event, a missing or malformed repository or number, a failing `gh`, an empty list, or one of 3000 or more
+The job still runs whenever the files cannot be known: a `merge_group` or `workflow_dispatch` event, a missing or malformed repository or number, a failing `gh`, an empty list, or one of 300 or more
 entries. A failed `desktop-scope` leaves an empty output, which is not `'false'`, so `desktop` runs.
 
 **What counts**, grouped as `scripts/desktop-scope.mjs` lists it:
@@ -71,6 +71,6 @@ would run the job on nearly every pull request again. That code runs alike on Li
 it. The list follows the first hop of what is macOS-relevant instead.
 
 Keeping the default to run was turned down because it is what ran the job on 80% of pull requests. The cost of
-the allowlist is that a file it misses can break only on macOS and merge; the next push to `main` runs the job
-and shows it. A dependency change cannot slip past, since a frozen-lockfile install means `pnpm-lock.yaml`
+the allowlist is that a file it misses can break only on macOS and merge; a red `desktop` on a push stays visible
+on that commit's run, and a later push that touches only docs skips the job. A dependency change cannot slip past, since a frozen-lockfile install means `pnpm-lock.yaml`
 changes with it.
