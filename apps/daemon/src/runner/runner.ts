@@ -342,6 +342,7 @@ import {
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
+import { checkCoverage, coverageNote } from './check-coverage';
 import { planOf, raisePlanApproval, waitsForPlanApproval } from './plan-approval';
 import { outstandingFixEvidence } from './fix-evidence';
 import { shipsAtRetryLimit } from './limit-ship';
@@ -4668,6 +4669,14 @@ export function createRunner(opts: RunnerOptions): Runner {
       const forced = await reviewForcedAfter(id, ctl, row, checkout);
       // With no Review after this step, the judge's flags on the new tests become follow-up tasks.
       const testValue = await testValueFollowUpsAfter(id, ctl, row, checkout, forced);
+      // Information only: a check that passed on less than the step changed says so in its record.
+      const note = coverageNote(
+        checkCoverage(
+          gateCommand,
+          await opts.git.changedFilesSince(checkout, row.baseHead ?? head).catch(() => []),
+        ),
+      );
+      if (note !== null) evidence.summary = `${note}\n\n${evidence.summary}`;
       // The read took time; a cancel that landed meanwhile must not be overwritten.
       if (stopRequested(ctl) === 'cancelled') {
         cancelNow(id, ctl.fence);
