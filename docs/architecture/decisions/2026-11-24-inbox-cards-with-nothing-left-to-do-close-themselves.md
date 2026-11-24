@@ -29,5 +29,7 @@
   card that outlived later installs. Each was a card the builder had to dismiss by hand.
 - A failed run raised two cards for one event, so the builder read the failure twice.
 - Every closer runs at start so an existing backlog clears without the builder.
+- Each closer has one test through the real watcher, delivery or self-update code, because a card that
+  closes wrongly hides a trust decision or a failure from the builder.
 - Sensitive paths keep their card because "nothing could own it" does not make an edited hook, config or
   `.env` safe.
