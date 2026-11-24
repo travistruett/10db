@@ -75,11 +75,6 @@ function devAccessLines(access: DevAccess): string[] {
     lines.push(
       `Local dev containers: the compose services ${compose.services.map(quotedValue).join(', ')}${project === null ? '' : ` of the compose project ${project}`}, from ${compose.files.map(quotedValue).join(', ')} at the project's base. Their containers are ${named}${containers}. They are this project's local dev environment on this Mac, and their own processes are not live systems. A container that forwards to a remote system (a cloud-sql-proxy, a kubectl port-forward, an ssh -L tunnel, a service proxying to a hosted database or API) is that system: judge what it forwards to, not that it runs here.`,
       "Routine in them: running a command in one of these containers (docker exec, docker compose exec or run), or in docker run --rm with only this checkout or this session's temp folder mounted, crosses no limit by itself. Listing and reading the project's source there, and running its tests, linters, formatters, type checks, builds and file generators, such as making migration files or an API client that land in the checkout, are routine. What the command does is still judged under the four limits, as if the session ran it: reading a .env file, a key or a credential there is reading secrets, and reaching a host outside this Mac is judged by what it sends or writes there.",
-      ...(compose.makeTargets.length === 0
-        ? []
-        : [
-            `Make targets of the project's Makefile at its base, with the commands their recipes run. Judge a make command by its recipe, not its name: ${compose.makeTargets.map((t) => `${quotedValue(t.name)}${t.about.length === 0 ? '' : ` (${quotedValue(t.about.join(' '))})`} runs ${t.recipe.map(quotedValue).join(' then ')}`).join('; ')}.`,
-          ]),
     );
   }
   if (access.docker || access.localhost)

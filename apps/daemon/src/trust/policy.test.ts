@@ -81,13 +81,6 @@ describe('buildTrustPolicy', () => {
       project: 'amps',
       services: ['backend', 'db', 'frontend'],
       containerNames: [],
-      makeTargets: [
-        {
-          name: 'db-prepare',
-          about: ['Sets up the db.'],
-          recipe: ['docker compose run --rm db-prepare'],
-        },
-      ],
     };
     const on = buildTrustPolicy(
       input({ devAccess: { docker: true, localhost: true, compose: amps } }),
@@ -108,9 +101,6 @@ describe('buildTrustPolicy', () => {
     expect
       .soft(containers[0], 'a container forwarding to a remote system is that system')
       .toMatch(/cloud-sql-proxy.*is that system/is);
-    expect
-      .soft(on.join('\n'), 'a make command is judged by its recipe')
-      .toContain('"db-prepare" ("Sets up the db.") runs "docker compose run --rm db-prepare"');
     const routine = on.filter((l) => l.startsWith('Routine in them:'));
     expect
       .soft(routine, 'where a command runs is no pass for what it does')

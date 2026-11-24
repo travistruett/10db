@@ -22,7 +22,6 @@ describe('composeServices', () => {
           project: 'amps',
           services: ['backend', 'db', 'frontend'],
           containerNames: ['amps-db'],
-          makeTargets: [],
         },
       ],
       [
@@ -38,7 +37,6 @@ describe('composeServices', () => {
           project: null,
           services: ['api', 'worker'],
           containerNames: [],
-          makeTargets: [],
         },
       ],
       ['malformed YAML', [['compose.yaml', 'services: [\n  - : :\n']], null],
@@ -54,7 +52,6 @@ describe('composeServices', () => {
           project: 'demo',
           services: ['db', 'web', 'worker'],
           containerNames: [],
-          makeTargets: [],
         },
       ],
     ];
@@ -64,18 +61,14 @@ describe('composeServices', () => {
 });
 
 describe('readComposeServices', () => {
-  it("reads the services and Makefile recipes from origin's base, and a lane's edit to its checkout changes nothing", async () => {
+  it("reads the services from origin's base, and a lane's edit to its checkout changes nothing", async () => {
     const remote = createTempRepoWithOrigin();
     const { repo } = remote;
     try {
       const git = (...args: string[]) =>
         execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' });
       writeFileSync(join(repo.path, 'compose.yaml'), 'name: demo\nservices:\n  web: {}\n');
-      writeFileSync(
-        join(repo.path, 'Makefile'),
-        '# Writes migration files.\nmigration:\n\t@docker compose exec web python manage.py makemigrations\n\ndb-prepare:\n\tdocker compose run --rm web python manage.py migrate\n',
-      );
-      git('add', 'compose.yaml', 'Makefile');
+      git('add', 'compose.yaml');
       git('commit', '-q', '-m', 'compose');
       git('push', '-q', 'origin', 'main');
       // The lane writes its checkout; the judge must not read it.
@@ -83,7 +76,6 @@ describe('readComposeServices', () => {
         join(repo.path, 'compose.yaml'),
         'name: demo\nservices:\n  web: {}\n  proxy: {}\n',
       );
-      writeFileSync(join(repo.path, 'Makefile'), 'migration:\n\techo nothing\n');
       expect(
         await readComposeServices(createGit(), { repoPath: repo.path, baseBranch: 'main' }),
       ).toEqual({
@@ -91,18 +83,6 @@ describe('readComposeServices', () => {
         project: 'demo',
         services: ['web'],
         containerNames: [],
-        makeTargets: [
-          {
-            name: 'migration',
-            about: ['Writes migration files.'],
-            recipe: ['docker compose exec web python manage.py makemigrations'],
-          },
-          {
-            name: 'db-prepare',
-            about: [],
-            recipe: ['docker compose run --rm web python manage.py migrate'],
-          },
-        ],
       });
     } finally {
       remote.cleanup();
