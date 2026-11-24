@@ -2523,17 +2523,30 @@ export function createRunner(opts: RunnerOptions): Runner {
         worktreeRoot: opts.worktreeRoot,
       });
     // A review step is told what the run skipped and what its check left out, so it can tell
-    // "could not" from "did not".
-    const reviewFacts = REVIEW_ROLES.includes(step.role)
-      ? {
-          skipped: listSkipsForWorkstream(db, id).map((k) => `${k.summary} (${k.reason})`),
-          checkNote:
-            listEvidence(db, id)
-              .filter((e) => e.kind === 'gate')
-              .map((e) => /^check covers [^\n]*/.exec(e.summary)?.[0] ?? null)
-              .at(-1) ?? null,
-        }
+    // "could not" from "did not". The coverage note is recomputed from the gate's command, never read
+    // back out of the gate's output, which the lane writes.
+    const gateRun = REVIEW_ROLES.includes(step.role)
+      ? listEvidence(db, id)
+          .filter((e) => e.kind === 'gate')
+          .at(-1)
       : undefined;
+    const reviewFacts =
+      gateRun === undefined && !REVIEW_ROLES.includes(step.role)
+        ? undefined
+        : {
+            skipped: listSkipsForWorkstream(db, id).map((k) => ({
+              what: `${k.toolName}, ${k.kind}, by ${k.source}`,
+              limit: k.limit,
+              reason: k.reason,
+              command: k.summary,
+            })),
+            checkNote:
+              gateRun?.command == null
+                ? null
+                : coverageNote(
+                    await coverageOf(row, checkout, await opts.git.head(checkout), gateRun.command),
+                  ),
+          };
     const batchNotices = row.batchId === null ? [] : getBatch(db, row.batchId).notices;
     const noticeBody = (key: string): string | null =>
       batchNotices.find((n) => n.key === key)?.body ?? null;
