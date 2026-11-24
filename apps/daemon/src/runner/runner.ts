@@ -2530,24 +2530,29 @@ export function createRunner(opts: RunnerOptions): Runner {
           .filter((e) => e.kind === 'gate')
           .at(-1)
       : undefined;
-    const reviewFacts =
-      gateRun === undefined && !REVIEW_ROLES.includes(step.role)
-        ? undefined
-        : {
-            skipped: listSkipsForWorkstream(db, id).map((k) => ({
-              tool: k.toolName,
-              what: `${k.kind}, by ${k.source}`,
-              limit: k.limit,
-              reason: k.reason,
-              command: k.summary,
-            })),
-            checkNote:
-              gateRun?.command == null
-                ? null
-                : coverageNote(
-                    await coverageOf(row, checkout, await opts.git.head(checkout), gateRun.command),
-                  ),
-          };
+    const reviewFacts = !REVIEW_ROLES.includes(step.role)
+      ? undefined
+      : {
+          skipped: listSkipsForWorkstream(db, id).map((k) => ({
+            tool: k.toolName,
+            what: `${k.kind}, by ${k.source}`,
+            kind: k.kind,
+            limit: k.limit,
+            judged:
+              k.kind === SkipKind.Classifier ||
+              k.kind === SkipKind.SafetyCheck ||
+              k.source === SkipSource.AutoMode ||
+              k.source === SkipSource.SafetyCheck ||
+              k.source === SkipSource.HostJudge ||
+              k.source === SkipSource.TendbJudge,
+            reason: k.reason,
+            command: k.summary,
+          })),
+          checkNote:
+            gateRun?.command == null
+              ? null
+              : coverageNote(await coverageOf(row, checkout, null, gateRun.command)),
+        };
     const batchNotices = row.batchId === null ? [] : getBatch(db, row.batchId).notices;
     const noticeBody = (key: string): string | null =>
       batchNotices.find((n) => n.key === key)?.body ?? null;
@@ -4350,11 +4355,12 @@ export function createRunner(opts: RunnerOptions): Runner {
   async function coverageOf(
     row: WorkstreamRow,
     checkout: string,
-    head: string,
+    knownHead: string | null,
     command: string,
   ): Promise<CheckCoverage | null> {
     if (checkCoverage(command, [], checkout) === null) return null;
     try {
+      const head = knownHead ?? (await opts.git.head(checkout));
       let own: string[];
       if (checkout !== getProject(db, row.projectId).repoPath) {
         // Read again: the gate's base update moves the task's base.
