@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { plainCommandWords } from '../guard';
@@ -11,13 +12,45 @@ const inside = (root: string, path: string): boolean => {
   return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel));
 };
 
-/** A regular file whose real path stays in the checkout and is not a secret. */
+const GIT_CHECK_MS = 5_000;
+
+/** Whether git tracks `path` and neither the index nor the working tree differs from HEAD at it. */
+function isCommittedUnmodified(checkout: string, path: string): boolean {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')),
+  );
+  const git = (args: readonly string[]): boolean => {
+    try {
+      execFileSync('git', ['-C', checkout, ...args, '--', path], {
+        env,
+        timeout: GIT_CHECK_MS,
+        stdio: 'ignore',
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  return git(['ls-files', '--error-unmatch']) && git(['diff', '--quiet', 'HEAD']);
+}
+
+/**
+ * A regular file that git tracks and has not changed since HEAD, whose real path stays in the checkout and is
+ * not a secret. A script the session wrote or edited is never one: the sandbox does not contain everything a
+ * script can do (a container the project's Docker access reaches), so only code the builder committed is
+ * exempt from the judge's floor.
+ */
 function isCheckoutFile(word: string, cwd: string, ctx: FastPathContext): boolean {
   if (word.startsWith('~') || word.startsWith('-')) return false;
   const path = resolve(cwd, word);
   try {
     if (!statSync(path).isFile()) return false;
-    return inside(ctx.checkout, realpathSync(path)) && !namesSecret(path, ctx.secretFiles);
+    const real = realpathSync(path);
+    return (
+      inside(realpathSync(ctx.checkout), real) &&
+      !namesSecret(path, ctx.secretFiles) &&
+      isCommittedUnmodified(realpathSync(ctx.checkout), real)
+    );
   } catch {
     return false;
   }
@@ -56,8 +89,8 @@ function segmentRunsCheckoutProgram(
 }
 
 /**
- * Whether a Bash call only runs programs that are files of the session's checkout, with operands that name
- * nothing outside it. The kernel sandbox contains such a program (writes stay in the checkout and temp dir,
+ * Whether a Bash call only runs programs that are committed, unmodified files of the session's checkout, with
+ * operands that name nothing outside it. The kernel sandbox contains such a program (writes stay in the checkout and temp dir,
  * credentials are closed, the network is the project's allowed hosts), so a judge unsure of a script it cannot
  * read is no reason to stop it: it is the repo's own code, which the repo's instructions tell agents to run.
  */

