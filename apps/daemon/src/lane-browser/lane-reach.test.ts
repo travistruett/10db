@@ -353,65 +353,69 @@ describe('createPortOwner', () => {
   });
 });
 
-describe('createPortOwner against a real server and the real readers', () => {
-  const children: ChildProcess[] = [];
-  afterEach(() => {
-    for (const child of children.splice(0)) child.kill('SIGKILL');
-  });
+// The readers call macOS's /usr/sbin/lsof and `ps -o lstart`; the daemon runs only on macOS.
+describe.skipIf(process.platform !== 'darwin')(
+  'createPortOwner against a real server and the real readers',
+  () => {
+    const children: ChildProcess[] = [];
+    afterEach(() => {
+      for (const child of children.splice(0)) child.kill('SIGKILL');
+    });
 
-  async function freePort(): Promise<number> {
-    const server = createServer();
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const address = server.address();
-    const port = typeof address === 'object' && address !== null ? address.port : 0;
-    await new Promise((resolve) => server.close(resolve));
-    return port;
-  }
+    async function freePort(): Promise<number> {
+      const server = createServer();
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      const port = typeof address === 'object' && address !== null ? address.port : 0;
+      await new Promise((resolve) => server.close(resolve));
+      return port;
+    }
 
-  async function serve(port: number): Promise<void> {
-    const child = spawn(
-      process.execPath,
-      ['-e', `require('node:http').createServer().listen(${String(port)}); console.log('up')`],
-      { stdio: ['ignore', 'pipe', 'ignore'] },
-    );
-    children.push(child);
-    await new Promise((resolve) => child.stdout.once('data', resolve));
-  }
+    async function serve(port: number): Promise<void> {
+      const child = spawn(
+        process.execPath,
+        ['-e', `require('node:http').createServer().listen(${String(port)}); console.log('up')`],
+        { stdio: ['ignore', 'pipe', 'ignore'] },
+      );
+      children.push(child);
+      await new Promise((resolve) => child.stdout.once('data', resolve));
+    }
 
-  const ownerFor = (members: () => readonly ProcessMember[]) => {
-    const lane = {
-      copy: '/work/copy',
-      tempDir: '/work/tmp',
-      registeredCheckouts: [],
-      loopback: true,
-      docker: false,
-      members,
-    } as unknown as LaneBrowserSession;
-    return createPortOwner(
-      {
-        clock: systemClock,
-        readers: systemPortReaders(
-          process.env['HOME'] ?? '',
-          process.env,
-          systemProcessTable,
-          systemClock,
-        ),
-        daemonPort: () => null,
-        proxyPorts: () => new Set(),
-        browserPids: () => new Set(),
-      },
-      lane,
-    );
-  };
+    const ownerFor = (members: () => readonly ProcessMember[]) => {
+      const lane = {
+        copy: '/work/copy',
+        tempDir: '/work/tmp',
+        registeredCheckouts: [],
+        loopback: true,
+        docker: false,
+        members,
+      } as unknown as LaneBrowserSession;
+      return createPortOwner(
+        {
+          clock: systemClock,
+          readers: systemPortReaders(
+            process.env['HOME'] ?? '',
+            process.env,
+            systemProcessTable,
+            systemClock,
+          ),
+          daemonPort: () => null,
+          proxyPorts: () => new Set(),
+          browserPids: () => new Set(),
+        },
+        lane,
+      );
+    };
 
-  it("owns a listening server of the lane and refuses one that is not a member's descendant", async () => {
-    const port = await freePort();
-    await serve(port);
-    const me = (await systemProcessTable()).find((row) => row.pid === process.pid);
-    if (me === undefined) throw new Error('the test process is not in the process table');
-    const mine = ownerFor(() => [{ pid: me.pid, startedAt: me.startedAt, pgid: me.pgid }]);
-    expect(await mine.check(port)).toEqual({ kind: 'owned', connectTo: '127.0.0.1' });
-    const stranger = ownerFor(() => [{ pid: 1, startedAt: 'launchd', pgid: 1 }]);
-    expect(await stranger.check(port)).toMatchObject({ kind: 'refused' });
-  });
-});
+    it("owns a listening server of the lane and refuses one that is not a member's descendant", async () => {
+      const port = await freePort();
+      await serve(port);
+      const me = (await systemProcessTable()).find((row) => row.pid === process.pid);
+      if (me === undefined) throw new Error('the test process is not in the process table');
+      const mine = ownerFor(() => [{ pid: me.pid, startedAt: me.startedAt, pgid: me.pgid }]);
+      expect(await mine.check(port)).toEqual({ kind: 'owned', connectTo: '127.0.0.1' });
+      const stranger = ownerFor(() => [{ pid: 1, startedAt: 'launchd', pgid: 1 }]);
+      expect(await stranger.check(port)).toMatchObject({ kind: 'refused' });
+    });
+  },
+);
