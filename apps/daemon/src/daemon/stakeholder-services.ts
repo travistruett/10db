@@ -114,6 +114,8 @@ export function createStakeholderApiServices(deps: {
   /** The login `gh` is signed in as, from its last check; null when signed out. */
   readonly githubLogin: () => Promise<string | null>;
   readonly linear: LinearImport;
+  /** Told after a project's Slack sharing setting is saved, so pictures a refused post held back go again. */
+  readonly onSlackSharingSaved: () => void;
   readonly reporter: Pick<LinearReporter, 'setSettings'>;
   /** What a draft made by a binding change runs after its write commits. */
   readonly draftOpts: { readonly afterDraft: (id: InboxItemId) => void; readonly log: Logger };
@@ -270,8 +272,16 @@ export function createStakeholderApiServices(deps: {
         throw new InvalidError(
           'Connect a Slack workspace to this project before picking a channel',
         );
+      const now = readSlackSharing(deps.state.db, projectId);
+      // Turned on now, or on before this was recorded: tasks finished earlier are never posted.
+      const enabledAt = !input.enabled
+        ? null
+        : now.enabled && now.enabledAt != null
+          ? now.enabledAt
+          : deps.clock.now().toISOString();
       const next = {
         enabled: input.enabled,
+        enabledAt,
         teamId: input.channelId === null ? null : teamId,
         channelId: input.channelId,
         channelName: input.channelId === null ? null : input.channelName,
@@ -279,6 +289,7 @@ export function createStakeholderApiServices(deps: {
       deps.state.write((ctx) => {
         writeSlackSharing(ctx, projectId, next);
       });
+      deps.onSlackSharingSaved();
       return next;
     },
 

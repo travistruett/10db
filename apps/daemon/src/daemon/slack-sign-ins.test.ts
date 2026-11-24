@@ -126,6 +126,7 @@ function services(w: ReturnType<typeof world>, fetchSlack: typeof fetch) {
     draftOpts: { afterDraft: () => undefined, log: silentLogger },
     githubLogin: () => Promise.resolve(null),
     linear: { startImport: () => Promise.reject(new Error('not used')) },
+    onSlackSharingSaved: () => undefined,
     reporter: { setSettings: () => undefined },
   });
 }

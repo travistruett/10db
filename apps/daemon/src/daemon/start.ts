@@ -166,6 +166,8 @@ import {
   answerPassMoveCard,
   createKeptWorkGate,
   createPassPullRequests,
+  createSlackPicturePost,
+  type SlackPicturePost,
   passGateKind,
   createShipper,
   createNodeModulesTemplates,
@@ -311,6 +313,7 @@ import {
   createPlaywrightCamera,
   launchChromium,
   refusedCamera,
+  MISSED_AFTER_MS,
   startPictures,
   startPruning,
   type PageCamera,
@@ -445,6 +448,8 @@ import { assertWorktreeRootAllowed, DEFAULT_WORKTREE_BASE, worktreeRootFor } fro
 
 /** How long one Slack call may take before it counts as unreachable. */
 const SLACK_TIMEOUT_MS = 15_000;
+/** How often a post Slack refused is tried again while its Inbox item is open. */
+const SLACK_PICTURE_RETRY_MS = 15 * 60_000;
 
 export interface DaemonOptions {
   readonly dataDir: string;
@@ -1455,6 +1460,32 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     isRunning: (id) => runner?.isRunning(id) ?? false,
     load: loadGuard,
   });
+  // Where a project's pictures go in Slack: a pass's pull request and a finished task each post once.
+  const picturePost: SlackPicturePost | null =
+    slackClients === null
+      ? null
+      : createSlackPicturePost({
+          state,
+          inbox,
+          logger: logger.child({ component: 'slack-pictures' }),
+          channelOf: (projectId) => {
+            const sharing = readSlackSharing(state.db, projectId);
+            // The channel belongs to the workspace it was picked in; another binding now leaves it unused.
+            if (
+              !sharing.enabled ||
+              sharing.teamId === null ||
+              sharing.channelId === null ||
+              projectSlack(state.db, projectId).teamId !== sharing.teamId
+            )
+              return null;
+            return {
+              teamId: sharing.teamId,
+              channelId: sharing.channelId,
+              enabledAt: sharing.enabledAt ?? null,
+            };
+          },
+          clientFor: (teamId) => slackClients.clientFor(teamId),
+        });
   // A pass's pull request: its push and draft in the delivery key, its gate and one review outside it.
   const passPullRequests = createPassPullRequests({
     ...delivery,
@@ -1464,24 +1495,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     dataDir: opts.dataDir,
     sessionEnv: () => launcher.projectEnv(),
     identifyProcess: (pid) => processes.identify(pid),
-    slack:
-      slackClients === null
-        ? null
-        : {
-            channelOf: (projectId) => {
-              const sharing = readSlackSharing(state.db, projectId);
-              // The channel belongs to the workspace it was picked in; another binding now leaves it unused.
-              if (
-                !sharing.enabled ||
-                sharing.teamId === null ||
-                sharing.channelId === null ||
-                projectSlack(state.db, projectId).teamId !== sharing.teamId
-              )
-                return null;
-              return { teamId: sharing.teamId, channelId: sharing.channelId };
-            },
-            clientFor: (teamId) => slackClients.clientFor(teamId),
-          },
+    slack: picturePost,
     review: {
       adapter,
       launch: (accountId, model) => {
@@ -2333,6 +2347,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onNoAnswer: (projectId) => {
       void previewNow.lost(projectId);
     },
+    // A finished task's pictures go to its project's Slack channel, once per after.
+    onAfterCapture: (taskId) => {
+      picturePost?.announceTask(taskId);
+    },
     // An on-demand picture (Design review, `check_design`) holds the preview up with no pass open.
     holdApp: (projectId, say) => previewNow.hold(projectId, say),
     // 10db's own dev UI draws nothing without the daemon, so its pictures read it as Open Page's tab does.
@@ -2355,6 +2373,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     clock,
     logger: logger.child({ component: 'pictures' }),
   });
+  // A task finished just before the daemon stopped, and a post Slack refused, are announced again.
+  picturePost?.catchUp(clock.now().getTime() - MISSED_AFTER_MS);
+  void picturePost?.retryTasks();
+  const pictureRetries = setInterval(() => {
+    void picturePost?.retryTasks();
+  }, SLACK_PICTURE_RETRY_MS);
+  pictureRetries.unref();
   // Turn pictures go 14 days after their task is done: swept now and once a day.
   const picturePruning = startPruning({
     planFilesDir: (shapeId) => join(shapesDir, shapeId),
@@ -2675,6 +2700,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       draftOpts,
       githubLogin: () => Promise.resolve(github.cachedLogin()),
       linear: linearImport,
+      onSlackSharingSaved: () => {
+        void picturePost?.retryTasks();
+      },
       reporter: {
         // Turning updates off also drops a Connect still waiting on a sign-in, which would turn them back on.
         setSettings: (projectId, input) => {
@@ -3186,6 +3214,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await rootsKeptOutOfBackups;
       // A pass's gate and review on its pushed tip run outside the delivery jobs, as its turn checks do.
       // A capture in flight is dropped; its browser closes with it.
+      clearInterval(pictureRetries);
       await pictures?.stop();
       // The dev server 10db started ends with it; a builder's own is never 10db's to stop.
       await preview?.stop();

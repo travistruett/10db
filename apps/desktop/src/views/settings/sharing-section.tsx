@@ -76,9 +76,9 @@ function SlackPictures({ project }: { readonly project: ProjectDto }) {
         label="Post Pictures to Slack"
         description={
           lack ??
-          'When a UI Workbench pull request opens, @10db posts its before and after pictures.'
+          'When a task that changes a page is done, or a UI Workbench pull request opens, @10db posts its before and after pictures.'
         }
-        help="One message per pull request: the signed-off pages' before and after pictures (up to 10 files), the pages and the pull request link. Everyone in the channel sees the pictures, data on the page included. Pages signed off after the pull request opens reach the pull request, not the channel."
+        help="One message per finished task (its before and after pictures, up to 10 files) or per UI Workbench pull request (the signed-off pages and the pull request link). Everyone in the channel sees the pictures, data on the page included. Only tasks finished after this is turned on are posted."
       >
         <Group justify="flex-end">
           <Switch

@@ -21,7 +21,10 @@ export function writeSlackSharing(
   projectId: ProjectId,
   setting: ProjectSlackSharingDto,
 ): void {
-  setAppSetting(ctx, sharingSetting(projectId), setting);
+  setAppSetting(ctx, sharingSetting(projectId), {
+    ...setting,
+    enabledAt: setting.enabledAt ?? null,
+  });
 }
 
 /** A workspace change takes the channel back: it belongs to the workspace it was picked in. */

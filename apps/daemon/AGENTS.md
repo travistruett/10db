@@ -45,11 +45,17 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   read a conversation); neither module ever sees the token outside `slack/client.ts`.
   A file upload is the exception to JSON writes: `files.getUploadURLExternal` takes query arguments, its bytes go
   to the returned address with no token, and one `files.completeUploadExternal` posts every file as one message.
-- `delivery/pass-slack-post.ts` posts a pass's pictures to the project's Slack channel when its pull request exists
-  and its URL is not yet in `slack-pictures-posted.<projectId>`. It is detached from the Ship job (`void`, its own
-  catch, the client's own timeouts), one in flight per pass, and a failure folds into one Inbox item per pass; the
-  next push retries. The setting (`slack-sharing.<projectId>`, `stakeholders/slack-sharing.ts`) is cleared of its
-  channel by `rebindProjectSlack`; the posted marks are written by no one else.
+- `delivery/slack-picture-post.ts` (`createSlackPicturePost`, made once in `daemon/start.ts`) posts pictures to the
+  project's Slack channel: a pass's when its pull request exists and its URL is not yet in
+  `slack-pictures-posted.<projectId>`, and a finished task's (`announceTask`, from the pictures service's
+  `onAfterCapture`) when its newest after picture's id is not the task's mark there. Posts are detached (`void`, own
+  catch, the client's own timeouts), one in flight per pass or task, and a failure folds into one Inbox item per
+  pass or task (`pictures-to-slack:<id>`). A pass retries at its next push; a task's `retryTasks` runs at start-up,
+  when Settings › Sharing is saved and every 15 minutes, and `catchUp` posts tasks done within `MISSED_AFTER_MS`. The
+  setting (`slack-sharing.<projectId>`, `stakeholders/slack-sharing.ts`) is cleared of its channel by
+  `rebindProjectSlack`; the posted marks are written by no one else. A task posts only when it is Done and its
+  after (and its Done time) is at or after the setting's `enabledAt`, set when the switch goes on and cleared when it
+  goes off; a setting with none posts no tasks until saved again.
 - `src/api/` is typechecked by the desktop app too (it imports `AppType`). Code there must not import
   `node:*` modules or `@10db/db`; receive services through the `ApiServices` interface (passed in `ApiDeps`).
 - The package entry (`src/index.ts`) exports types only.

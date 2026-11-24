@@ -35,7 +35,7 @@ import { ghCall, networkCall, pushCall, type DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
 import { createPassChecks } from './pass-checks';
-import { createPassSlackPost, type PassSlackPostDeps } from './pass-slack-post';
+import type { PassSlackPost } from './slack-picture-post';
 import { passHasReview, REVIEW_CUT_NOTICE, type PassReviewDeps } from './pass-review';
 import { PASS_PR_CLOSED_NOTICE } from './pass-watch';
 import { reviewHasUnread } from './review-left';
@@ -88,8 +88,8 @@ export interface PassPullRequestDeps extends ScratchGateDeps, DeliveryContext {
   readonly holdShips?: () => boolean;
   /** The one review's model; null runs no review. */
   readonly review: PassReviewDeps | null;
-  /** Where the pass's pictures go in Slack; absent or null with Slack off. */
-  readonly slack?: Pick<PassSlackPostDeps, 'channelOf' | 'clientFor'> | null;
+  /** Posts the pass's pictures to Slack; absent or null with Slack off. */
+  readonly slack?: PassSlackPost | null;
 }
 
 /** A pass's pull request: what the routes ask, and the close's steps. */
@@ -156,16 +156,7 @@ const message = (error: unknown): string =>
 
 export function createPassPullRequests(deps: PassPullRequestDeps): PassPullRequests {
   const db = deps.state.db;
-  const slackPost =
-    deps.slack == null
-      ? null
-      : createPassSlackPost({
-          state: deps.state,
-          inbox: deps.inbox,
-          logger: deps.logger,
-          channelOf: deps.slack.channelOf,
-          clientFor: deps.slack.clientFor,
-        });
+  const slackPost = deps.slack ?? null;
   /**
    * How each pass's body says it was checked, as its last gate left it. A pass with none here has
    * had no gate finish in this daemon's life.

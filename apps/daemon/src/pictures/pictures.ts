@@ -100,7 +100,7 @@ const BEFORE_WAIT_MS = 20_000;
 const FETCH_RETRY_MS = 10 * 60_000;
 
 /** How far back start-up looks for a finished Your-folder task whose after was missed. */
-const MISSED_AFTER_MS = 60 * 60_000;
+export const MISSED_AFTER_MS = 60 * 60_000;
 
 /** The start of the thread notice said once per task when a page lands elsewhere. */
 const ELSEWHERE_NOTICE = 'Pictures of this page landed on another page of the app';
@@ -156,6 +156,11 @@ export interface PicturesDeps {
   readonly logger: Logger;
   /** Told when a load found nothing answering at a project 10db runs the preview of. */
   readonly onNoAnswer?: (projectId: ProjectId) => void;
+  /**
+   * Told when an after picture's capture for a task outside a pass ended without being stopped, with
+   * whatever rows it kept, so a finished task's pictures can be shared.
+   */
+  readonly onAfterCapture?: (taskId: TaskId) => void;
   /**
    * 10db's own dev UI: the browser origin the daemon trusts as it, and its read-only token. A shot of
    * an app at that origin is handed the token and may read the daemon, since the dev UI draws nothing
@@ -320,6 +325,16 @@ export function startPictures(deps: PicturesDeps): Pictures {
         );
         current = null;
         apply({ kind: 'done' });
+        if (request.kind === ScreenKind.After && request.passId === null && !abort.signal.aborted) {
+          try {
+            deps.onAfterCapture?.(request.taskId);
+          } catch (error) {
+            log.warn(
+              { taskId: request.taskId, err: errorText(error) },
+              'after capture not announced',
+            );
+          }
+        }
         pump();
       });
   }
