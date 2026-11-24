@@ -16,8 +16,15 @@ request is one the job builds or tests, and a pull request whose files are all u
 top-level path, desktop UI code under `apps/desktop/src`, `apps/desktop/e2e`, daemon code outside the listed
 modules and the workspace packages under `packages/` all skip it.
 
-The job still runs whenever the files cannot be known: a non-`pull_request` event (so every push to `main`
-runs it), a missing or malformed repository or number, a failing `gh`, an empty list, or one of 3000 or more
+A push is decided the same way, from the files of the pushed commits: `desktop-scope` asks the compare API for
+`github.event.before...github.event.after` (a squash merge makes that the pull request's diff, and no checkout
+depth is needed) and applies the same file lists, so a push to `main` of a docs or UI change skips the job
+(amended 2026-11-24: 161 pushes a week each took a macOS runner, and a failed runner acquisition was 8 of 23
+failures on `main`). A `desktop` check stays required on pull requests. A push whose files cannot be known runs
+the job: a missing, malformed or all-zero `before` (a first push), a compare that is not `ahead` (a force
+push), a failing lookup, or an empty or 3000-entry list.
+
+The job still runs whenever the files cannot be known: a `merge_group` or `workflow_dispatch` event, a missing or malformed repository or number, a failing `gh`, an empty list, or one of 3000 or more
 entries. A failed `desktop-scope` leaves an empty output, which is not `'false'`, so `desktop` runs.
 
 **What counts**, grouped as `scripts/desktop-scope.mjs` lists it:
