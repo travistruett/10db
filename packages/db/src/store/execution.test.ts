@@ -1,4 +1,10 @@
-import { ConflictError, mintId, WorkstreamState as S, type BatchId } from '@10db/contracts';
+import {
+  ConflictError,
+  mintId,
+  TaskStatus,
+  WorkstreamState as S,
+  type BatchId,
+} from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   acquireClaims,
@@ -13,7 +19,8 @@ import {
 import { findToolOp, insertToolOp, replaceToolOp } from './tool-ops';
 import { getSession, getSessionByProviderId, insertSession, markSessionStarted } from './sessions';
 import type { Store } from './store';
-import { insertTask, patchTask } from './tasks';
+import { getProject, patchProject } from './projects';
+import { getTask, insertTask, patchTask, setTaskStatus } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import {
   acquireLease,
@@ -250,6 +257,52 @@ describe('claims', () => {
 
     store.write((ctx) => releaseClaims(ctx, ws.id));
     expect(retag().areas).toEqual(['ui']);
+  });
+
+  it('splits an area only while no run holds it, and every open task naming it names each part', () => {
+    const held = seedWorkstream('Held', ['api']);
+    const project = held.project;
+    const open = store.write((ctx) =>
+      insertTask(ctx, project.id, {
+        title: 'Open',
+        acceptanceCriteria: ['x'],
+        areas: ['ui', 'api'],
+      }),
+    ).value;
+    const done = store.write((ctx) =>
+      insertTask(ctx, project.id, { title: 'Done', acceptanceCriteria: ['x'], areas: ['api'] }),
+    ).value;
+    store.write((ctx) => {
+      setTaskStatus(ctx, done.id, TaskStatus.Done);
+    });
+    const split = () =>
+      store.write((ctx) =>
+        patchProject(ctx, project.id, {
+          areas: [
+            { name: 'api', globs: ['src/api/*'] },
+            { name: 'api-billing', globs: ['src/api/billing/**'] },
+            { name: 'ui', globs: ['src/ui/**'] },
+          ],
+          areaSplits: [{ from: 'api', into: ['api', 'api-billing'] }],
+        }),
+      );
+    store.write((ctx) =>
+      acquireClaims(ctx, {
+        projectId: project.id,
+        workstreamId: held.ws.id,
+        requests: claimRequestsForTask(held.task, project),
+        leaseExpiresAt: '2026-10-13T12:01:00.000Z',
+      }),
+    );
+    expect(split).toThrow(ConflictError);
+    expect(getTask(store.db, open.id).areas).toEqual(['ui', 'api']);
+    expect(getProject(store.db, project.id).areas.map((a) => a.name)).toEqual(['api', 'ui']);
+
+    store.write((ctx) => releaseClaims(ctx, held.ws.id));
+    split();
+    expect(getTask(store.db, open.id).areas).toEqual(['ui', 'api', 'api-billing']);
+    expect(getTask(store.db, held.task.id).areas).toEqual(['api', 'api-billing']);
+    expect(getTask(store.db, done.id).areas).toEqual(['api']);
   });
 
   it('is all-or-nothing and reports who holds a conflicting claim', () => {

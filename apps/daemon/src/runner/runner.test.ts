@@ -3420,6 +3420,37 @@ describe('the session guard', () => {
     expect(skipsOf(workstreamId)).toMatchObject([{ toolName: 'Read', source: 'broker' }]);
   });
 
+  // An area narrowed while a session runs: its guard judges the area as it is now, not as it was at
+  // the start, or a claim on the narrowed name would still cover another lane's files.
+  it('judges a write against the areas as they are now, not as the session started with them', async () => {
+    engine = await createTestEngine({ Alpha: [[{ do: 'hang' }]] });
+    const specs: LaneSessionSpec[] = [];
+    engine.adapter.seen = (spec) => {
+      specs.push(spec);
+      return {};
+    };
+    const { workstream } = engine.addTask('Alpha', ['api']);
+    engine.launch(workstream.id);
+    const spec = await waitFor(() => specs[0]);
+    const write = () =>
+      spec.preToolUse({
+        toolName: 'Write',
+        input: { file_path: join(engine.repoPath, 'src/api/billing/charge.ts'), content: 'x' },
+      }).decision;
+    expect(write()).toBe('allow');
+    engine.state.write((ctx) =>
+      patchProject(ctx, engine.project.id, {
+        areas: [
+          { name: 'api', globs: ['src/api/*'] },
+          { name: 'api-billing', globs: ['src/api/billing/**'] },
+          { name: 'ui', globs: ['src/ui/**'] },
+        ],
+      }),
+    );
+    expect(write()).toBe('deny');
+    await engine.runner.cancel(workstream.id);
+  });
+
   // T4 call 2: a guard ask in a lane is answered at once by the unattended table.
   it('skips a call the broker must see in a lane, whatever the permission mode', async () => {
     engine = await createTestEngine({ Alpha: [[{ do: 'hang' }]] });
