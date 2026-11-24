@@ -2541,6 +2541,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     void picturePost?.retryTasks();
   }, SLACK_PICTURE_RETRY_MS);
   pictureRetries.unref();
+  // A separate copy's landing that waits is looked at every minute on the injected clock: the folder
+  // watcher reports writes, not HEAD or ref moves, so the timer is the one contract.
+  const COPY_RECHECK_MS = 60_000;
+  let copyRecheck = clock.setTimeout(function recheckCopies() {
+    shipper.recheckCopies();
+    copyRecheck = clock.setTimeout(recheckCopies, COPY_RECHECK_MS);
+  }, COPY_RECHECK_MS);
   // Turn pictures go 14 days after their task is done: swept now and once a day.
   const picturePruning = startPruning({
     planFilesDir: (shapeId) => join(shapesDir, shapeId),
@@ -3398,6 +3405,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A pass's gate and review on its pushed tip run outside the delivery jobs, as its turn checks do.
       // A capture in flight is dropped; its browser closes with it.
       clearInterval(pictureRetries);
+      copyRecheck.cancel();
       await pictures?.stop();
       // The dev server 10db started ends with it; a builder's own is never 10db's to stop.
       await preview?.stop();

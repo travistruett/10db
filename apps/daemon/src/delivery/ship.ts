@@ -26,6 +26,10 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  getLocalCopy,
+  isLivePromoting,
+  isLocalCopy,
+  listOpenLocalCopies,
   clearBatchNotice,
   clearLease,
   getBatch,
@@ -68,6 +72,9 @@ import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 import { BATCH_CARD_DETAIL, type KeptRevert } from './batch-card';
 import { settleBranch } from './branch-cleanup';
 import { copyIdForBatch } from './copy-id';
+import { createCopyLanding } from './copy-landing';
+import { copyLandingCards, withdrawWaitCards } from './copy-landing-cards';
+import { resetCopyJournal } from './copy-reset';
 import {
   autoMergeOffKey,
   autoMergeRefusedKey,
@@ -105,7 +112,7 @@ import {
 import { fileFlakyTests, rerunFlaky, type FlakyTest } from './flaky-tests';
 import { readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
 import { jobKey, JobQueue } from './jobs';
-import { shipCheck } from './local-check';
+import { shipCheck, type LocalCheck } from './local-check';
 import {
   gateNotices,
   leftOutNotices,
@@ -200,6 +207,8 @@ export interface Shipper {
    */
   checkSupersededBatches(): void;
   resume(batchId: BatchId): void;
+  /** Rechecks every separate copy whose landing waits; the daemon's minute timer calls it. */
+  recheckCopies(): void;
   /** A task drawer on the Board: Ship anyway from OPEN, or Retry from FAILED, which reopens unfinished work. */
   ship(batchId: BatchId): BatchDto;
   /** A failed member's card: ships an open or failed batch whose work is settled, and never reopens one. */
@@ -506,11 +515,15 @@ export async function pushBranch(
 export function createShipper(deps: ShipperDeps): Shipper {
   const db = deps.state.db;
 
-  function resume(batchId: BatchId): void {
-    deps.jobs.run(jobKey(getBatch(db, batchId), JobQueue.Ship), (signal) =>
-      // One operation: the checkout's git dirs are read once for the ship, not once per git call.
-      deps.git.operation(() => shipSteps(batchId, signal)),
-    );
+  function resume(batchId: BatchId, settled?: () => void): void {
+    deps.jobs.run(jobKey(getBatch(db, batchId), JobQueue.Ship), async (signal) => {
+      try {
+        // One operation: the checkout's git dirs are read once for the ship, not once per git call.
+        await deps.git.operation(() => shipSteps(batchId, signal));
+      } finally {
+        settled?.();
+      }
+    });
   }
 
   function fail(batch: BatchDto, outcome: ShipFailure): void {
@@ -524,15 +537,25 @@ export function createShipper(deps: ShipperDeps): Shipper {
     reason: string,
     card: Card | null,
   ): void {
+    // A separate copy's landing that may have written the builder's folder fails as interrupted, with
+    // its journal kept, whatever else went wrong.
+    const copy = getLocalCopy(db, batch.id);
+    if (copy !== null && isLivePromoting(copy)) {
+      const interrupted = copyLandingCards.interruptedLanding(batch, [], batch.baseBranch);
+      failure = interrupted.failure;
+      card = interrupted.card;
+    }
     const moved = deps.state.write((w) => {
       if (getBatch(w.tx, batch.id).state !== BatchState.Shipping) return false;
       settleLeftOutCards(
         w,
         transitionBatch(w, batch.id, { to: BatchState.Failed, patch: { failure }, reason }),
       );
+      resetCopyJournal(w, batch.id);
       return true;
     });
     if (!moved) return;
+    if (copy !== null) withdrawWaitCards(deps, batch.projectId, batch.id);
     deps.logger.warn({ batchId: batch.id, failure, title: reason }, 'batch not shipped');
     // A later ship of the batch that succeeds makes the card stale.
     if (card) raise(deps.inbox, batch.projectId, card);
@@ -577,6 +600,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
           reason: 'a session resolves the merge',
         }),
       );
+      resetCopyJournal(w, batch.id);
       setTaskStatus(w, task.id, TaskStatus.Open);
       const next = insertPlannedWorkstream(
         w,
@@ -611,7 +635,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
         batch.id,
       );
       patchWorkstream(w, next.id, null, {
-        nextAction: { kind: 'merge', base: `origin/${batch.baseBranch}`, paths: [...update.paths] },
+        nextAction: {
+          kind: 'merge',
+          // A separate copy merges the local base; nothing is fetched for it.
+          base: isLocalCopy(w.tx, batch.id) ? batch.baseBranch : `origin/${batch.baseBranch}`,
+          paths: [...update.paths],
+        },
       });
       return 'sent';
     });
@@ -1068,6 +1097,172 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * in the project's checkout otherwise; the push always runs in the project's checkout, whose pin
    * holds the origin the builder trusted. Each step is safe to repeat, so a restart runs them all again.
    */
+  /**
+   * The check before a ship (the gate, or the pre-check in its place) on the batch's copy, in the batch's
+   * gate slot, with the base brought in first. Resolves true when it passed; false when it stopped, or a
+   * failure was recorded, or the batch was sent to merge. `afterBase` runs once the base update is done
+   * and before the gate starts; false stops the gate, and the caller says why.
+   */
+  async function runShipCheck(
+    batch: BatchDto,
+    project: ProjectDto,
+    checkout: string,
+    check: LocalCheck,
+    signal: AbortSignal,
+    afterBase?: (update: BaseUpdate) => Promise<boolean>,
+  ): Promise<boolean> {
+    const batchId = batch.id;
+    // A function, so a check after an await is not narrowed away by the one before it.
+    const stopped = (): boolean => signal.aborted;
+    const name: ShipCheckName = check.kind === 'precheck' ? 'pre-check' : 'gate';
+    // A notice from an earlier ship attempt's rerun says nothing of this one's gate.
+    hideNotices(deps.state, batchId, [NOTICE_KEY.gateRerun, NOTICE_KEY.gateFlaky]);
+    // Once the gate holds its slot and no other gate of the batch runs, so no other gate's
+    // merge changes the tree under it.
+    const gateOnce = async (): Promise<{
+      gate: GateResult;
+      note: string | null;
+      /** When the gate got to start, after any wait for a slot or for the Mac to calm down. */
+      startedAt: Date;
+    } | null> => {
+      const before: { update: BaseUpdate | null; startedAt: Date } = {
+        update: null,
+        startedAt: deps.clock.now(),
+      };
+      const gate = await deps.baseUpdates.gate(batchId, signal, () =>
+        runGate(deps, batch, projectAtCheckout(project, checkout), signal, async () => {
+          before.startedAt = deps.clock.now();
+          // The batch's last task is the session to send when the base's conflicts need one.
+          const update = await deps.baseUpdates.beforeGate(batchId, signal, {
+            inSession: true,
+            raisesUncarried: true,
+          });
+          before.update = update;
+          // Markers in the branch fail any gate, and the stale branch isn't what would merge. A
+          // broken install fails every tool of the gate, whatever the batch's code is. A lost
+          // custom migration fails none of them, which is why it stops the gate here. A separate
+          // copy never gates without the base, since only what the base holds can land.
+          if (
+            update.kind === 'aborted' ||
+            update.kind === 'conflicted' ||
+            update.kind === 'install_broken' ||
+            update.kind === 'uncarried' ||
+            (afterBase !== undefined && update.kind === 'not_merged')
+          )
+            return false;
+          return afterBase === undefined || (await afterBase(update));
+        }),
+      );
+      if (gate === null) {
+        if (before.update?.kind === 'not_merged' && afterBase !== undefined && !stopped())
+          fail(
+            batch,
+            shipCards.baseConflict(batch, before.update.held?.paths ?? [], before.update.note),
+          );
+        if (before.update?.kind === 'conflicted' && !stopped()) sendToMerge(batch, before.update);
+        if (before.update?.kind === 'install_broken' && !stopped())
+          fail(
+            batch,
+            shipCards.installBroken(batch, before.update.note, before.update.noPnpm === true),
+          );
+        if (before.update?.kind === 'uncarried' && !stopped())
+          fail(batch, shipCards.migrationsLost(batch, before.update));
+        return null;
+      }
+      return {
+        gate,
+        note: gateNote(before.update ?? { kind: 'up_to_date', note: null }),
+        startedAt: before.startedAt,
+      };
+    };
+    // A failed gate's card says so when the Mac was overloaded at any time while the gate ran.
+    const cardNote = (run: { note: string | null; startedAt: Date }): string | null => {
+      const load = deps.load?.overloadedSince(run.startedAt);
+      if (!load) return run.note;
+      return run.note === null ? overloadNote(load) : `${run.note}\n\n${overloadNote(load)}`;
+    };
+    const first = await gateOnce();
+    if (first === null) return false;
+    if (first.gate.timedOut) {
+      fail(
+        batch,
+        shipCards.gateTimedOut(
+          batch,
+          deps.limits.gateTimeoutMs,
+          first.gate.logPath,
+          cardNote(first),
+          name,
+        ),
+      );
+      return false;
+    }
+    // A check that failed only in tests is run again on just the failing files, once, before any
+    // card. A pass lets the batch ship with the flakes on record; a fail is the failure it was.
+    let flakesPassed = false;
+    if (first.gate.exitCode !== 0) {
+      const flaky = await rerunFlaky({
+        checkout,
+        output: first.gate.tail,
+        run: async (rerun) =>
+          deps.baseUpdates.gate(batchId, signal, () =>
+            runGate(
+              deps,
+              batch,
+              projectAtCheckout(project, checkout),
+              signal,
+              () => Promise.resolve(true),
+              rerun,
+            ),
+          ),
+      });
+      if (flaky.kind === 'stopped') return false;
+      if (flaky.kind === 'flaky') {
+        flakesPassed = true;
+        recordFlakes(batch, flaky.tests);
+      }
+    }
+    if (first.gate.exitCode !== 0 && !flakesPassed) {
+      const steps = await readGateFailures(checkout, first.gate.tail);
+      if (!(await outsideTheBatch(batchId, checkout, steps))) {
+        fail(batch, shipCards.gateFailed(batch, first.gate, cardNote(first), steps, false, name));
+        return false;
+      }
+      // Every failing test is one the batch couldn't have caused: one more run, by itself,
+      // before the builder hears of it, and never a fix session.
+      deps.logger.info(
+        { batchId, tests: steps.flatMap((s) => s.tests).length },
+        'ship gate failed only in tests the batch did not change; running it again',
+      );
+      const second = await gateOnce();
+      if (second === null) return false;
+      if (second.gate.timedOut) {
+        fail(
+          batch,
+          shipCards.gateTimedOut(
+            batch,
+            deps.limits.gateTimeoutMs,
+            second.gate.logPath,
+            cardNote(second),
+            name,
+          ),
+        );
+        return false;
+      }
+      if (second.gate.exitCode !== 0) {
+        const again = await readGateFailures(checkout, second.gate.tail);
+        fail(
+          batch,
+          (await outsideTheBatch(batchId, checkout, again))
+            ? shipCards.gateFailedUnrelated(batch, cardNote(second), again)
+            : shipCards.gateFailed(batch, second.gate, cardNote(second), again, true, name),
+        );
+        return false;
+      }
+      showNotice(deps.state, batchId, gateNotices.rerunPassed(steps));
+    }
+    return true;
+  }
+
   async function shipSteps(batchId: BatchId, signal: AbortSignal): Promise<void> {
     const batch = getBatch(db, batchId);
     // A function, so the check in the catch below is not narrowed away by this one.
@@ -1087,6 +1282,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
           failWith(batch, BatchFailure.WrongBranch, 'its worktree could not be made whole', null);
           return;
         }
+      }
+      // A separate copy has no origin: its landing owns the branch check and every step after it.
+      if (isLocalCopy(db, batchId)) {
+        step = 'landing in your folder';
+        await landing.land(batchId, signal);
+        return;
       }
       // 0. The branch and a clean checkout.
       step = 'checking the branch';
@@ -1160,146 +1361,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       if (check !== null) {
         const name: ShipCheckName = check.kind === 'precheck' ? 'pre-check' : 'gate';
         step = `the ${name}`;
-        // A notice from an earlier ship attempt's rerun says nothing of this one's gate.
-        hideNotices(deps.state, batchId, [NOTICE_KEY.gateRerun, NOTICE_KEY.gateFlaky]);
-        // Once the gate holds its slot and no other gate of the batch runs, so no other gate's
-        // merge changes the tree under it.
-        const gateOnce = async (): Promise<{
-          gate: GateResult;
-          note: string | null;
-          /** When the gate got to start, after any wait for a slot or for the Mac to calm down. */
-          startedAt: Date;
-        } | null> => {
-          const before: { update: BaseUpdate | null; startedAt: Date } = {
-            update: null,
-            startedAt: deps.clock.now(),
-          };
-          const gate = await deps.baseUpdates.gate(batchId, signal, () =>
-            runGate(deps, batch, projectAtCheckout(project, checkout), signal, async () => {
-              before.startedAt = deps.clock.now();
-              // The batch's last task is the session to send when the base's conflicts need one.
-              const update = await deps.baseUpdates.beforeGate(batchId, signal, {
-                inSession: true,
-                raisesUncarried: true,
-              });
-              before.update = update;
-              // Markers in the branch fail any gate, and the stale branch isn't what would merge. A
-              // broken install fails every tool of the gate, whatever the batch's code is. A lost
-              // custom migration fails none of them, which is why it stops the gate here.
-              return (
-                update.kind !== 'aborted' &&
-                update.kind !== 'conflicted' &&
-                update.kind !== 'install_broken' &&
-                update.kind !== 'uncarried'
-              );
-            }),
-          );
-          if (gate === null) {
-            if (before.update?.kind === 'conflicted' && !stopped())
-              sendToMerge(batch, before.update);
-            if (before.update?.kind === 'install_broken' && !stopped())
-              fail(
-                batch,
-                shipCards.installBroken(batch, before.update.note, before.update.noPnpm === true),
-              );
-            if (before.update?.kind === 'uncarried' && !stopped())
-              fail(batch, shipCards.migrationsLost(batch, before.update));
-            return null;
-          }
-          return {
-            gate,
-            note: gateNote(before.update ?? { kind: 'up_to_date', note: null }),
-            startedAt: before.startedAt,
-          };
-        };
-        // A failed gate's card says so when the Mac was overloaded at any time while the gate ran.
-        const cardNote = (run: { note: string | null; startedAt: Date }): string | null => {
-          const load = deps.load?.overloadedSince(run.startedAt);
-          if (!load) return run.note;
-          return run.note === null ? overloadNote(load) : `${run.note}\n\n${overloadNote(load)}`;
-        };
-        const first = await gateOnce();
-        if (first === null) return;
-        if (first.gate.timedOut) {
-          fail(
-            batch,
-            shipCards.gateTimedOut(
-              batch,
-              deps.limits.gateTimeoutMs,
-              first.gate.logPath,
-              cardNote(first),
-              name,
-            ),
-          );
-          return;
-        }
-        // A check that failed only in tests is run again on just the failing files, once, before any
-        // card. A pass lets the batch ship with the flakes on record; a fail is the failure it was.
-        let flakesPassed = false;
-        if (first.gate.exitCode !== 0) {
-          const flaky = await rerunFlaky({
-            checkout,
-            output: first.gate.tail,
-            run: async (rerun) =>
-              deps.baseUpdates.gate(batchId, signal, () =>
-                runGate(
-                  deps,
-                  batch,
-                  projectAtCheckout(project, checkout),
-                  signal,
-                  () => Promise.resolve(true),
-                  rerun,
-                ),
-              ),
-          });
-          if (flaky.kind === 'stopped') return;
-          if (flaky.kind === 'flaky') {
-            flakesPassed = true;
-            recordFlakes(batch, flaky.tests);
-          }
-        }
-        if (first.gate.exitCode !== 0 && !flakesPassed) {
-          const steps = await readGateFailures(checkout, first.gate.tail);
-          if (!(await outsideTheBatch(batchId, checkout, steps))) {
-            fail(
-              batch,
-              shipCards.gateFailed(batch, first.gate, cardNote(first), steps, false, name),
-            );
-            return;
-          }
-          // Every failing test is one the batch couldn't have caused: one more run, by itself,
-          // before the builder hears of it, and never a fix session.
-          deps.logger.info(
-            { batchId, tests: steps.flatMap((s) => s.tests).length },
-            'ship gate failed only in tests the batch did not change; running it again',
-          );
-          const second = await gateOnce();
-          if (second === null) return;
-          if (second.gate.timedOut) {
-            fail(
-              batch,
-              shipCards.gateTimedOut(
-                batch,
-                deps.limits.gateTimeoutMs,
-                second.gate.logPath,
-                cardNote(second),
-                name,
-              ),
-            );
-            return;
-          }
-          if (second.gate.exitCode !== 0) {
-            const again = await readGateFailures(checkout, second.gate.tail);
-            fail(
-              batch,
-              (await outsideTheBatch(batchId, checkout, again))
-                ? shipCards.gateFailedUnrelated(batch, cardNote(second), again)
-                : shipCards.gateFailed(batch, second.gate, cardNote(second), again, true, name),
-            );
-            return;
-          }
-          showNotice(deps.state, batchId, gateNotices.rerunPassed(steps));
-        }
+        if (!(await runShipCheck(batch, project, checkout, check, signal))) return;
       } else {
         // No gate brings the base in here, but a lane's launch may have, and lost a migration.
         const standing = await deps.baseUpdates.beforeGate(batchId, signal, {
@@ -1409,6 +1471,19 @@ export function createShipper(deps: ShipperDeps): Shipper {
     );
   }
 
+  /** A separate copy whose landing may have written the builder's folder takes no new run until it settles. */
+  function refuseWhileLanding(batch: BatchDto): void {
+    const copy = getLocalCopy(db, batch.id);
+    if (copy === null || !isLivePromoting(copy)) return;
+    if (batch.state === BatchState.Failed && batch.failure === BatchFailure.InterruptedLanding) {
+      // Retry settles it: it runs the classifier again, so only a run with unfinished work is refused.
+      if (unfinishedWork(batch) === null) return;
+    }
+    throw new ConflictError(
+      `Batch "${batch.title}": a landing is settling in your folder. Wait for it, or press Retry on its card.`,
+    );
+  }
+
   /** A ship the builder asked for begins nothing while an update drains the factory. */
   function refuseWhileHeld(batch: BatchDto): void {
     if (deps.holdShips?.())
@@ -1441,6 +1516,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         return shipping;
       }
       case BatchState.Failed: {
+        refuseWhileLanding(batch);
         if (unfinished) {
           // Never ship unfinished work: resume it; the batch ships itself when it settles. A
           // worktree batch reopens once its worktree is whole, in the cut queue.
@@ -2375,7 +2451,22 @@ export function createShipper(deps: ShipperDeps): Shipper {
     });
   }
 
+  const landing = createCopyLanding({
+    ctx: deps,
+    ...(deps.holdShips ? { holdShips: deps.holdShips } : {}),
+    check: (batch, project, checkout, check, signal, afterBase) =>
+      runShipCheck(batch, project, checkout, check, signal, afterBase),
+    fail,
+    resume,
+  });
+
   return {
+    recheckCopies() {
+      const projects = new Set(
+        listOpenLocalCopies(db).map((copy) => getBatch(db, copy.batchId).projectId),
+      );
+      for (const projectId of projects) landing.recheck(projectId);
+    },
     catchUp,
     restartCi,
     catchUpToBase,
@@ -2423,9 +2514,17 @@ export function createShipper(deps: ShipperDeps): Shipper {
     abandon(batchId) {
       const batch = getBatch(db, batchId);
       refusePassBatch(batch);
-      if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
+      const copy = getLocalCopy(db, batchId);
+      // A landing that waits (nothing written in the folder) can be given up; one that may have written
+      // it is settled first.
+      const waiting = batch.state === BatchState.Shipping && copy !== null && copy.wait !== null;
+      if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed && !waiting)
         throw new ConflictError(
           `Batch "${batch.title}" is ${batch.state.toLowerCase()}; only an open or failed batch can be abandoned`,
+        );
+      if (copy !== null && isLivePromoting(copy))
+        throw new ConflictError(
+          `Batch "${batch.title}": a landing is settling in your folder; press Retry on its card to settle it first`,
         );
       const all = listWorkstreams(db, { batchId });
       const running = all.filter(
@@ -2451,6 +2550,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
           releaseClaims(w, ws.id);
           clearLease(w, ws.id);
         }
+        if (batch.state === BatchState.Shipping) {
+          transitionBatch(w, batchId, { to: BatchState.Failed, reason: 'abandoned while waiting' });
+          resetCopyJournal(w, batchId);
+        }
         const moved = transitionBatch(w, batchId, {
           to: BatchState.Abandoned,
           reason: 'abandoned by the builder',
@@ -2459,6 +2562,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         return moved;
       });
       for (const ws of toCancel) deps.inbox.cancelForWorkstream(ws.id);
+      if (copy !== null) withdrawWaitCards(deps, batch.projectId, batchId);
       deps.jobs.run(jobKey(abandoned, JobQueue.Ship), async (signal) => {
         await afterEnd(batchId, abandoned.worktreePath, signal);
       });

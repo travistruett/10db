@@ -38,7 +38,9 @@ import {
   getWorkstream,
   getWorkstreamRow,
   insertBatch,
+  getLocalCopy,
   insertLocalCopy,
+  isLivePromoting,
   listBatches,
   listWorkstreams,
   patchBatch,
@@ -61,6 +63,7 @@ import {
 } from '../team';
 import { batchBranchName } from './branch-name';
 import { forTasks, startCards, wrongBranchCard, type CardText, type StartRequest } from './cards';
+import { resetCopyJournal } from './copy-reset';
 import { batchCheckout, lanesInProjectCheckout } from './checkout';
 import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
 import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from './deps';
@@ -669,7 +672,15 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     tasks: readonly TaskDto[],
     goal = false,
   ): StartStep {
-    if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
+    const copy = getLocalCopy(db, batch.id);
+    // A landing that may have written the builder's folder takes no new run until it settles.
+    if (copy !== null && isLivePromoting(copy))
+      throw new ConflictError(
+        `Batch "${batch.title}": a landing is settling in your folder. Start the task again once it has settled.`,
+      );
+    // A landing that waits wrote nothing, so a new run takes the batch back to open.
+    const waiting = batch.state === BatchState.Shipping && copy?.wait != null;
+    if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed && !waiting)
       throw new ConflictError(
         `Batch "${batch.title}" is ${batch.state.toLowerCase()}; add fix tasks to it once it is open`,
       );
@@ -686,7 +697,12 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       unfinishedDependencies(db, tasks, inBatch),
     );
     return {
-      write: () => batch,
+      write: (w) => {
+        if (!waiting) return batch;
+        transitionBatch(w, batch.id, { to: BatchState.Failed, reason: 'a fix task joined' });
+        resetCopyJournal(w, batch.id);
+        return getBatch(w.tx, batch.id);
+      },
       launch: () => {
         queueJoin(batch, tasks, plans, inBatch, goal);
       },

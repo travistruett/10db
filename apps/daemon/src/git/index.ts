@@ -21,6 +21,8 @@ export {
   WorktreeNotOursError,
   type BranchMerge,
   type FolderRead,
+  type Promotion,
+  type PromotionInput,
   type ChainCommit,
   type ChainCommitInput,
   type CheckoutPlace,
