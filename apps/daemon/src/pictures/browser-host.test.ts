@@ -10,6 +10,7 @@ import {
   reapLaneProcessLedgers,
   systemProcessTable,
   type LedgerSweep,
+  type ProcessRow,
 } from '../sandbox';
 import {
   BROWSER_CLOSE_MS,
@@ -21,6 +22,7 @@ import {
   type BrowserHost,
   type BrowserLaunch,
 } from './browser-host';
+import { browserRoot } from './browser-ledger';
 
 describe('launchOptions', () => {
   const options = launchOptions(
@@ -79,6 +81,25 @@ function alive(pid: number): boolean {
     return false;
   }
 }
+
+describe('browserRoot', () => {
+  it('answers the new browser, not an older child running the same executable', () => {
+    const row = (pid: number): ProcessRow => ({
+      pid,
+      ppid: 1,
+      pgid: pid,
+      startedAt: `start-${String(pid)}`,
+      comm: 'chrome',
+    });
+    const rows = [row(10), row(20)];
+    const commands = new Map([
+      [10, '/pinned/chrome'],
+      [20, '/pinned/chrome'],
+    ]);
+    // The old one was marked before the launch, or is held by another ledger.
+    expect(browserRoot(rows, commands, '/pinned/chrome', 1, new Set([10]))?.pid).toBe(20);
+  });
+});
 
 describe('the browser host', () => {
   let dir: TempDir;

@@ -1,4 +1,6 @@
 import {
+  Approval,
+  approvalOf,
   SKIP_SUMMARY_MAX,
   SkipKind,
   type LimitName,
@@ -35,15 +37,37 @@ export interface SkipRecorder {
   nextTurn(): void;
 }
 
+const CANT_RUN_REASON =
+  "This program is outside what a lane's sandbox reads, so it can't run in this lane's sandbox.";
+
 export function createSkipRecorder(
-  deps: { readonly state: StateStore; readonly log: Logger },
+  deps: {
+    readonly state: StateStore;
+    readonly log: Logger;
+    /** Whether a shell call's program can run under the lane's profile; absent, every program can. */
+    readonly runnable?: (command: string) => boolean;
+  },
   run: { readonly workstreamId: WorkstreamId; readonly sessionId: SessionId | null },
 ): SkipRecorder {
   let order: string[] = [];
   let skipped = new Map<string, { readonly limit: LimitName | null; readonly reason: string }>();
   let unnamed = 0;
+  // A shell call whose program the lane's profile can't read is a skip no approval can clear.
+  const laneCantRun = (skip: RecordedSkip): RecordedSkip =>
+    deps.runnable !== undefined &&
+    skip.toolName === 'Bash' &&
+    skip.summary.length <= SKIP_SUMMARY_MAX &&
+    // Only a call that would have run on approval, with no limit named: a hazard, secret or safety skip
+    // keeps its own kind and reason.
+    skip.limit === null &&
+    (approvalOf(skip.kind, false) === Approval.Intent ||
+      approvalOf(skip.kind, false) === Approval.Exact) &&
+    !deps.runnable(skip.summary)
+      ? { ...skip, kind: SkipKind.CantRunInLane, reason: `${CANT_RUN_REASON} (${skip.reason})` }
+      : skip;
   return {
-    record(skip) {
+    record(recorded) {
+      const skip = laneCantRun(recorded);
       const cut = skip.summary.length > SKIP_SUMMARY_MAX;
       deps.state.write((ctx) =>
         recordSkip(ctx, {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -49,6 +50,7 @@ import {
   type InboxItemId,
   type InboxTarget,
   type NextAction,
+  type ProjectDto,
   type ProjectId,
   type ReviewCardDetail,
   type SessionId,
@@ -300,7 +302,9 @@ import {
   type LaneSandbox,
   type LaneSession,
   SYSTEM_TEMP_ROOTS,
+  programRunnable,
 } from '../sandbox';
+import type { LaneBrowserSession } from '../lane-browser';
 import {
   SessionEndReason,
   skippedServersNote,
@@ -523,6 +527,11 @@ export interface RunnerOptions {
     set(id: WorkstreamId, dir: string): void;
     delete(id: WorkstreamId): void;
   };
+  /**
+   * Closes the session's lane browser and its proxy. Run as the session ends, before its processes
+   * are stopped; absent where lanes get no browser.
+   */
+  readonly endLaneBrowser?: (sessionId: SessionId) => Promise<void>;
 }
 
 /** What has to happen after the write that changed a workstream has committed. */
@@ -803,6 +812,56 @@ async function stopLaneProcesses(
       'the processes a lane session started could not be stopped',
     );
   }
+}
+
+/** The path as the kernel sees it; one that won't resolve is kept as written. */
+function realPathOr(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/** Closes the session's lane browser; a failure is logged, never thrown, so the session still ends. */
+async function endLaneBrowser(
+  end: ((sessionId: SessionId) => Promise<void>) | undefined,
+  sessionId: SessionId,
+  logger: Logger,
+): Promise<void> {
+  if (end === undefined) return;
+  try {
+    await end(sessionId);
+  } catch (error) {
+    logger.warn(
+      { sessionId, err: error instanceof Error ? error.message : String(error) },
+      "the lane session's browser could not be closed",
+    );
+  }
+}
+
+/** What the session's sandbox lends its browser. */
+function laneBrowserSession(
+  laneSession: LaneSession,
+  sessionId: SessionId,
+  project: ProjectDto,
+  taskId: TaskId,
+  workstreamId: WorkstreamId,
+  projects: readonly ProjectDto[],
+): LaneBrowserSession {
+  return {
+    sessionId,
+    projectId: project.id,
+    taskId,
+    workstreamId,
+    copy: realPathOr(laneSession.spec.checkout),
+    tempDir: realPathOr(laneSession.tmpDir),
+    fileAccess: laneSession.fileAccess,
+    registeredCheckouts: projects.map((other) => realPathOr(other.repoPath)),
+    loopback: project.sandboxLoopback,
+    docker: project.sandboxDocker,
+    members: () => laneSession.processMembers(),
+  };
 }
 
 /** A failure as the workstream records it: its kind, which the desktop words, and the detail. */
@@ -2961,6 +3020,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       inPass: pass !== null,
       attended: policy.attended,
       pictures: project.appUrl !== null && takesPictures(project, task),
+      browser: laneSession !== null && opts.endLaneBrowser !== undefined,
       sandboxed: Boolean(opts.laneSandbox),
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
       judged,
@@ -3206,7 +3266,24 @@ export function createRunner(opts: RunnerOptions): Runner {
       ? null
       : {
           skips: createSkipRecorder(
-            { state: opts.state, log: opts.logger },
+            {
+              state: opts.state,
+              log: opts.logger,
+              ...(laneSession === null
+                ? {}
+                : {
+                    runnable: (command: string) =>
+                      programRunnable(
+                        command,
+                        laneSession.spec.shellEnv['PATH'] ??
+                          laneSession.commandEnv['PATH'] ??
+                          launch.env['PATH'] ??
+                          '',
+                        laneSession.spec.settings.filesystem.allowRead,
+                        laneSession.spec.checkout,
+                      ),
+                  }),
+            },
             { workstreamId: id, sessionId: session.id },
           ),
           approvedKeys,
@@ -3234,6 +3311,18 @@ export function createRunner(opts: RunnerOptions): Runner {
           }
         : {}),
       ...(unattended === null ? {} : { away: unattended }),
+      ...(laneSession === null
+        ? {}
+        : {
+            browser: laneBrowserSession(
+              laneSession,
+              session.id,
+              project,
+              task.id,
+              id,
+              listProjects(db),
+            ),
+          }),
     });
     const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
     /** The guard's answer for a lane's call under `judge`, with the unattended answer and skip in a lane. */
@@ -4161,6 +4250,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         items.unserve();
       }
       opts.live.unregister(session.id);
+      await endLaneBrowser(opts.endLaneBrowser, session.id, opts.logger);
       // However the session ended (finished, cancelled, handed off, the daemon stopping), nothing
       // its commands started keeps running: a background loop would otherwise outlive the session
       // and hold the Mac busy.

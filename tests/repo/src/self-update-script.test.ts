@@ -62,6 +62,44 @@ describe('install-app.sh --stage', () => {
     ).toEqual([]);
   });
 
+  it('stages only a commit whose CI finished green, and nothing when none has', () => {
+    const OLD = 'f'.repeat(40);
+    // The head has a finished build but red CI; the commit before it is green.
+    const result = stage({
+      STUB_COMMITS: `${HEAD_SHA} ${OLD}`,
+      STUB_CI_GREEN: OLD,
+      STUB_RUNS: `201@${OLD}`,
+    });
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(stageDir, 'commit'), 'utf8').trim()).toBe(OLD);
+
+    const none = run(['--stage', join(box.root, 'other'), '--running', OLD], {
+      STUB_COMMITS: `${HEAD_SHA} ${OLD}`,
+      STUB_CI_GREEN: '',
+    });
+    expect(none.status).toBe(0);
+    expect(existsSync(join(box.root, 'other', 'commit'))).toBe(false);
+
+    // The running commit is newer than the newest green one: nothing to fetch or build.
+    const ahead = run(['--stage', join(box.root, 'ahead'), '--running', HEAD_SHA], {
+      STUB_COMMITS: `${HEAD_SHA} ${OLD}`,
+      STUB_CI_GREEN: OLD,
+    });
+    expect(ahead.status).toBe(0);
+    expect(existsSync(join(box.root, 'ahead', 'commit'))).toBe(false);
+    expect(box.calls().filter((call) => call.startsWith('gh workflow run'))).toEqual([]);
+
+    // The green commit has no live build, so a build of the ref's head is waited for: it is of a
+    // commit with red CI, and is not staged.
+    const dispatched = run(['--stage', join(box.root, 'waited'), '--running', 'e'.repeat(40)], {
+      STUB_COMMITS: `${HEAD_SHA} ${OLD}`,
+      STUB_CI_GREEN: OLD,
+      STUB_SUCCESS_RUN: '',
+    });
+    expect(dispatched.status).toBe(0);
+    expect(existsSync(join(box.root, 'waited', 'commit'))).toBe(false);
+  });
+
   it.each([
     {
       name: 'GitHub cannot be reached',

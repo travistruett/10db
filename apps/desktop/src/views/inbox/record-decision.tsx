@@ -43,7 +43,7 @@ export function RecordDecision({
 }) {
   const areas = useProjects().data?.find((p) => p.id === item.projectId)?.areas ?? [];
   return (
-    <Group gap="sm" align="flex-end">
+    <Group gap="sm" align="center">
       <Checkbox
         label="Record as a Decision"
         checked={value !== null}

@@ -132,7 +132,8 @@ function pushedFiles(repository, before, after) {
   const lines = result.stdout.split('\n').filter((line) => line !== '');
   if (lines.some((line) => line.startsWith('status:') && line !== 'status:ahead')) return undefined;
   const commits = lines.find((line) => line.startsWith('commits:'));
-  if (commits === undefined || Number(commits.slice(8)) > COMPARE_COMMITS_LIMIT) return undefined;
+  if (commits === undefined || !(Number(commits.slice(8)) <= COMPARE_COMMITS_LIMIT))
+    return undefined;
   const files = lines
     .filter((line) => line.startsWith('file:') && line.length > 5)
     .map((line) => line.slice(5));
