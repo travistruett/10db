@@ -22,7 +22,7 @@ import type { BaseUpdate } from './base-update';
 import { shipCards, wrongBranchCard, type ShipFailure } from './cards';
 import {
   copyLandingCards,
-  raiseMigrationsCard,
+  raiseMigrationsForLanding,
   raiseWaitCard,
   withdrawWaitCards,
 } from './copy-landing-cards';
@@ -364,20 +364,7 @@ export function createCopyLanding(deps: CopyLandingDeps): CopyLanding {
     ctx.logger.info({ batchId: batch.id, branch: batch.baseBranch }, 'batch landed');
     withdrawWaitCards(ctx, batch.projectId, batch.id);
     resolveShipCards(db, ctx.inbox, getBatch(db, batch.id));
-    try {
-      const files = await ctx.git.filesChangedBetween(
-        project.repoPath,
-        input.expected,
-        input.candidate,
-      );
-      const migrations = hits(project, 'migrations', files);
-      if (migrations.length > 0) raiseMigrationsCard(ctx.inbox, getBatch(db, batch.id), migrations);
-    } catch (error) {
-      ctx.logger.warn(
-        { batchId: batch.id, err: error instanceof Error ? error.message : String(error) },
-        'migrations card not raised',
-      );
-    }
+    await raiseMigrationsForLanding(ctx, batch, project, input.expected, input.candidate);
     patch(batch.id, { step: CopyStep.Retiring });
     await retireCopy(ctx, batch.id, signal);
     return 'done';

@@ -33,7 +33,7 @@ import {
 import { realPathOf } from '../guard';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { COPY_REFS_PREFIX, batchOfTeardownRef } from './copy-teardown-ref';
+import { COPY_REFS_PREFIX, batchOfTeardownRef } from './copy-refs';
 import { looseWork } from './build-output';
 import { keptWorktreeKey, worktreeCards } from './cards';
 import type { ChatMergedCheck } from './chat-worktree-merged';

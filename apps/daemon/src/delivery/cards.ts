@@ -131,6 +131,8 @@ export type WorktreeOffer =
   | { readonly kind: 'merged-hand-made' }
   /** The project's hand-made worktree folder, which Spotlight indexes. */
   | { readonly kind: 'spotlight'; readonly path: string }
+  /** A finished local copy whose teardown failed: run its retirement again. */
+  | { readonly kind: 'teardown'; readonly batchId: BatchId }
   /** A checkout that is off the branch of an open or failed batch: switch it to the batch's branch. */
   | { readonly kind: 'branch'; readonly batchId: BatchId }
   /** A checkout left on a finished batch's branch; `place` is where it goes back to. */
@@ -167,6 +169,13 @@ export function worktreeOffer(
         ];
       case 'abandon':
         return [abandon];
+      case 'teardown':
+        return [
+          {
+            label: WorktreeChoice.Retry,
+            description: "Run the copy's teardown command again",
+          },
+        ];
       case 'kept':
       case 'orphan':
         return [
