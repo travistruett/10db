@@ -38,7 +38,7 @@ function patternWords(hit: OutboundHit): string {
 }
 
 /** `*bold*` and `_italic_` as the preview draws them; everything else is plain text. */
-function SlackText({ text }: { readonly text: string }) {
+export function SlackText({ text }: { readonly text: string }) {
   const parts = text.split(/(\*[^*\n]+\*|_[^_\n]+_)/);
   return (
     <Text size="sm" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>

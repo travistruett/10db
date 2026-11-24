@@ -18,8 +18,8 @@ export function TakeBackModal({
   return (
     <ConfirmModal
       opened={opened}
-      title={`Take this back from ${names}?`}
-      confirmLabel="Take Back"
+      title={`Withdraw this question from ${names}?`}
+      confirmLabel="Withdraw"
       loading={takeBack.isPending}
       error={takeBack.isError ? takeBack.error.message : null}
       onCancel={onClose}

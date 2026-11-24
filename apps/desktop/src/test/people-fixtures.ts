@@ -62,7 +62,7 @@ export function sendDto(over: Record<string, unknown> = {}): StakeholderSendDto 
     teamId: 'T1',
     state: 'draft',
     people: [{ personId: mintId('Person'), userId: 'U1', name: 'Mark', recipient: true }],
-    text: "Travis's 10db build of *Demo* has a question for you.",
+    text: 'Travis has a quick question for you about *Demo*.',
     hits: [],
     permalink: null,
     sentAt: null,
