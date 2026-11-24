@@ -2559,8 +2559,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // watcher reports writes, not HEAD or ref moves, so the timer is the one contract.
   const COPY_RECHECK_MS = 60_000;
   let copyRecheck = clock.setTimeout(function recheckCopies() {
-    shipper.recheckCopies();
-    copyRecheck = clock.setTimeout(recheckCopies, COPY_RECHECK_MS);
+    try {
+      shipper.recheckCopies();
+    } catch (error) {
+      logger.warn({ err: error }, 'separate copy landings not rechecked');
+    } finally {
+      copyRecheck = clock.setTimeout(recheckCopies, COPY_RECHECK_MS);
+    }
   }, COPY_RECHECK_MS);
   // Turn pictures go 14 days after their task is done: swept now and once a day.
   const picturePruning = startPruning({

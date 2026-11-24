@@ -3,6 +3,7 @@ import {
   BatchState,
   CopyStep,
   CopyWait,
+  InvalidError,
   type BatchDto,
   type BatchId,
   type ProjectDto,
@@ -70,6 +71,14 @@ const MAX_ROUNDS = 8;
 
 type Next = 'again' | 'done';
 
+/** The landing went round MAX_ROUNDS times without ending in a wait, a failure or a landing. */
+export class LandingNotSettledError extends Error {
+  override readonly name = 'LandingNotSettledError';
+  constructor(batchId: BatchId) {
+    super(`The landing of batch ${batchId} did not settle`);
+  }
+}
+
 export function createCopyLanding(deps: CopyLandingDeps): CopyLanding {
   const { ctx } = deps;
   const db = ctx.state.db;
@@ -80,6 +89,13 @@ export function createCopyLanding(deps: CopyLandingDeps): CopyLanding {
   const patch = (batchId: BatchId, p: Parameters<typeof patchLocalCopy>[2]): void => {
     ctx.state.write((w) => patchLocalCopy(w, batchId, p));
   };
+  /** Writes the patch only while the batch is still SHIPPING: an Abandon or a joined fix task won the race otherwise. */
+  const patchWhileShipping = (batchId: BatchId, p: Parameters<typeof patchLocalCopy>[2]): boolean =>
+    ctx.state.write((w) => {
+      if (getBatch(w.tx, batchId).state !== BatchState.Shipping) return false;
+      patchLocalCopy(w, batchId, p);
+      return true;
+    });
   const hits = (project: ProjectDto, hazard: string, files: readonly string[]): string[] => {
     const globs = project.hazards.filter((h) => h.name === hazard).flatMap((h) => h.globs);
     return files.filter((f) => globs.some((g) => areaMatches(f, g)));
@@ -92,13 +108,16 @@ export function createCopyLanding(deps: CopyLandingDeps): CopyLanding {
       if (batch.state !== BatchState.Shipping) return;
       if ((await stepOnce(batch, signal)) === 'done') return;
     }
-    throw new Error('the landing did not settle');
+    throw new LandingNotSettledError(batchId);
   }
 
   async function stepOnce(batch: BatchDto, signal: AbortSignal): Promise<Next> {
     const copy = getLocalCopy(db, batch.id);
     if (copy === null) return 'done';
     const project = getProject(db, batch.projectId);
+    // A landing that may have written the folder is read by the classifier before anything else; it needs
+    // only the folder, T and C.
+    if (isLivePromoting(copy)) return promote(batch, project, copy, signal, 'classify');
     const { branch, worktreePath, baseSha } = batch;
     if (branch === null || worktreePath === null || baseSha === null) {
       deps.fail(batch, {
@@ -115,8 +134,6 @@ export function createCopyLanding(deps: CopyLandingDeps): CopyLanding {
       });
       return 'done';
     }
-    // A landing that may have written the folder is read by the classifier before anything else.
-    if (isLivePromoting(copy)) return promote(batch, project, copy, signal, 'classify');
     if (copy.wait !== null && !(await due(batch, project))) return 'done';
     const head = await ctx.git.head(worktreePath);
     const gated = copy.step === CopyStep.Gated || copy.step === CopyStep.Promoting;
@@ -149,11 +166,9 @@ export function createCopyLanding(deps: CopyLandingDeps): CopyLanding {
     const { branch, worktreePath, baseSha } = batch;
     if (branch === null || worktreePath === null || baseSha === null) return 'done';
     if (signal.aborted) return 'done';
-    patch(batch.id, {
-      step: CopyStep.Merging,
-      attempt: copy.wait === CopyWait.BaseMoving ? 0 : copy.attempt,
-      ...RELEASED,
-    });
+    const attempt = copy.wait === CopyWait.BaseMoving ? 0 : copy.attempt;
+    if (!patchWhileShipping(batch.id, { step: CopyStep.Merging, attempt, ...RELEASED }))
+      return 'done';
     withdrawWaitCards(ctx, batch.projectId, batch.id);
     const dirty = await ctx.git.changedPaths(worktreePath);
     if (dirty.length > 0) {
@@ -182,7 +197,8 @@ export function createCopyLanding(deps: CopyLandingDeps): CopyLanding {
       return 'done';
     }
     const check = shipCheck(project);
-    if (check === null) throw new Error('This project has no gate command to land a copy with');
+    if (check === null)
+      throw new InvalidError('This project has no gate command to land a copy with');
     const seen: { moved: string | null | undefined; dirty: readonly string[] } = {
       moved: undefined,
       dirty: [],
@@ -196,11 +212,15 @@ export function createCopyLanding(deps: CopyLandingDeps): CopyLanding {
       }
       seen.dirty = await ctx.git.changedPaths(worktreePath);
       if (seen.dirty.length > 0) return false;
-      patch(batch.id, { step: CopyStep.Gating, baseTip: t, candidate: head, ...RELEASED });
-      return true;
+      return patchWhileShipping(batch.id, {
+        step: CopyStep.Gating,
+        baseTip: t,
+        candidate: head,
+        ...RELEASED,
+      });
     });
     if (!passed) {
-      if (seen.moved !== undefined) return raced(batch, copy.attempt, seen.moved);
+      if (seen.moved !== undefined) return raced(batch, attempt, seen.moved);
       if (seen.dirty.length > 0)
         deps.fail(batch, shipCards.dirtyCheckout(batch, seen.dirty, worktreePath));
       return 'done';
@@ -215,7 +235,7 @@ export function createCopyLanding(deps: CopyLandingDeps): CopyLanding {
       );
       return 'done';
     }
-    patch(batch.id, { step: CopyStep.Gated });
+    if (!patchWhileShipping(batch.id, { step: CopyStep.Gated })) return 'done';
     return promote(batch, project, gating, signal, 'call');
   }
 
@@ -228,7 +248,8 @@ export function createCopyLanding(deps: CopyLandingDeps): CopyLanding {
     how: 'call' | 'classify' | 'retry',
   ): Promise<Next> {
     const { baseTip: t, candidate: c } = copy;
-    if (t === null || c === null) return 'done';
+    if (t === null || c === null)
+      throw new InvalidError('The landing journal holds no base or candidate to promote');
     const input: PromotionInput = {
       repo: project.repoPath,
       branch: batch.baseBranch,

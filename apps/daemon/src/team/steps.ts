@@ -45,6 +45,9 @@ import {
   type DbReader,
   type WorkstreamRow,
   type WriteContext,
+  getLocalCopy,
+  isLivePromoting,
+  resetLocalCopy,
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { planSteps } from '../routing';
@@ -289,11 +292,23 @@ export function retryWorkstream(
       `Retry waits for the follow-up "${followUp.title}": remove it, or let it finish.`,
     );
   const batch = row.batchId ? getBatch(state.db, row.batchId) : null;
-  if (batch && batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
+  const copy = batch ? getLocalCopy(state.db, batch.id) : null;
+  // A landing that may have written the builder's folder takes no new run until a Retry of its batch settles it.
+  if (batch && copy !== null && isLivePromoting(copy))
+    throw new ConflictError(
+      `Batch "${batch.title}": a landing is settling in your folder; press Retry on its card first`,
+    );
+  // A landing that waits wrote nothing, so a retried run takes its batch back to open.
+  const waiting = batch?.state === BatchState.Shipping && copy?.wait != null;
+  if (batch && batch.state !== BatchState.Open && batch.state !== BatchState.Failed && !waiting)
     throw new ConflictError(
       `Batch "${batch.title}" is ${batch.state.toLowerCase()}; start the task again to run it in a new batch`,
     );
   return state.write((ctx) => {
+    if (batch && waiting) {
+      transitionBatch(ctx, batch.id, { to: BatchState.Failed, reason: 'a workstream was retried' });
+      resetLocalCopy(ctx, batch.id);
+    }
     if (batch?.state === BatchState.Failed && batch.worktreePath === null)
       transitionBatch(ctx, batch.id, {
         to: BatchState.Open,

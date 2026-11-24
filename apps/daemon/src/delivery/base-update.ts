@@ -388,6 +388,9 @@ const unreadableMark = (lost: Notice): { readonly unreadable?: true } =>
 
 export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   const db = ctx.state.db;
+  /** What the base is called in words: a separate copy of a local project has no origin. */
+  const baseOf = (batch: BatchDto): string =>
+    isLocalCopy(db, batch.id) ? batch.baseBranch : `origin/${batch.baseBranch}`;
 
   function notMerged(batch: BatchDto, reason: string, note: string): NotMerged {
     ctx.logger.warn(
@@ -477,7 +480,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
 
   /** The builder's own checkout: counted, never merged into. */
   async function shared(batch: BatchDto, branch: string, from: string): Promise<Merged> {
-    const origin = `origin/${batch.baseBranch}`;
+    const origin = baseOf(batch);
     const project = getProject(db, batch.projectId);
     let behind: number;
     try {
@@ -522,7 +525,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         { batchId: batch.id, base: merged.from, files: resolved.map((r) => r.path) },
         'base conflicts settled',
       );
-    const origin = `origin/${batch.baseBranch}`;
+    const origin = baseOf(batch);
     const said = resolved
       .map((r) => {
         if (r.how !== 'regenerated') return `${r.path} (kept both sides' added lines)`;
@@ -690,7 +693,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       const { sha } = await ctx.git.commit({
         repo: path,
         paths: changed,
-        message: `Regenerate ${dirs.join(', ')} after merging origin/${batch.baseBranch}`,
+        message: `Regenerate ${dirs.join(', ')} after merging ${baseOf(batch)}`,
         opId: `regenerate-${merged.head}`,
         branch,
       });
@@ -1056,7 +1059,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     if (renumbered.length === 0) return null;
     ctx.logger.info({ batchId: batch.id, renumbered }, 'migrations renumbered after the base');
     if (keep) keepRenumbered(batch, renumbered);
-    return `10db re-created this batch's migrations after origin/${batch.baseBranch}'s. These changed number:\n${renumberedLines(renumbered)}`;
+    return `10db re-created this batch's migrations after ${baseOf(batch)}'s. These changed number:\n${renumberedLines(renumbered)}`;
   }
 
   /**
@@ -1096,7 +1099,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       tell(batch, () => {
         showNotice(ctx.state, batch.id, baseNotices.regenerate(batch, path, dirs, told));
       });
-    const said = `10db couldn't regenerate ${named(dirs)} after merging origin/${batch.baseBranch}: ${told.why}.`;
+    const said = `10db couldn't regenerate ${named(dirs)} after merging ${baseOf(batch)}: ${told.why}.`;
     return lost
       ? said
       : `${said} This gate may see generated files that don't match their sources; the builder has a notice.`;
@@ -1155,7 +1158,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       ...(fresh ? { fresh: true as const } : {}),
       note:
         joined(
-          `10db merged origin/${batch.baseBranch} into this branch and left git's conflict markers in ${named(paths)} for a session to resolve, so no gate ran on it.`,
+          `10db merged ${baseOf(batch)} into this branch and left git's conflict markers in ${named(paths)} for a session to resolve, so no gate ran on it.`,
           extra,
         ) ?? '',
     };
@@ -1190,7 +1193,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         kind: 'merged',
         base: pending.from,
         head,
-        note: `10db merged origin/${batch.baseBranch} into this branch, and a session resolved its conflicts in ${named(pending.marked)}.`,
+        note: `10db merged ${baseOf(batch)} into this branch, and a session resolved its conflicts in ${named(pending.marked)}.`,
       },
       regenerate:
         pending.regenerate.length > 0
@@ -1222,7 +1225,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const forPullRequest = options.forPullRequest === true;
     const holding = (held: BaseHeld) =>
       migrationsFor === undefined && !forPullRequest ? {} : { held };
-    const origin = isLocalCopy(db, batch.id) ? batch.baseBranch : `origin/${batch.baseBranch}`;
+    const origin = baseOf(batch);
     // An earlier gate merged the base and left markers: the merge stands, and what is left is whether
     // a session has resolved them.
     const pending = await pendingOf(batch, path);
