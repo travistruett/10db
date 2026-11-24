@@ -5,6 +5,7 @@ import { useSelectedProject } from '../../shell/selected-project';
 import { SettingsNav } from './settings-nav';
 import { useFocusTarget } from './focus-target';
 import { SectionBody } from './section-body';
+import { SettingsDrafts } from './settings-drafts';
 import { isSettingsSectionKey, SettingsSectionKey } from './sections';
 
 export function SettingsView() {
@@ -20,7 +21,10 @@ export function SettingsView() {
         <SettingsNav />
       </Panel>
       <Stack ref={ref}>
-        <SectionBody sectionKey={key} project={project} />
+        {/* A page's edits are its own: another page or project starts with none. */}
+        <SettingsDrafts key={`${key}:${project?.id ?? ''}`}>
+          <SectionBody sectionKey={key} project={project} />
+        </SettingsDrafts>
       </Stack>
     </>
   );

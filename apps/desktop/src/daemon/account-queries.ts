@@ -149,6 +149,8 @@ export function useArchiveAccount() {
 export function useCheckAccountIdentity() {
   const { client } = useDaemon();
   return useMutation({
+    // An action, not a saved setting: a settings page's bar does not say Saved for it.
+    meta: { quiet: true },
     mutationFn: async (id: AccountId) =>
       readJson(
         await client.accounts[':accountId'].identity.$get({ param: { accountId: id } }),

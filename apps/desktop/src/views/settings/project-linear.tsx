@@ -3,15 +3,22 @@ import { Button, Group, Skeleton, Switch, Text, Textarea } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useProjectIntegrations, useSetLinearReporter } from '../../daemon/sign-in-queries';
 import { SettingsSectionKey } from './sections';
+import { useDraft } from './settings-drafts';
 import { SettingRow, SettingsCard } from './setting-row';
 
 /**
  * Settings › This Project › Linear: whether a task made from a Linear issue keeps the issue updated, and the
- * note the agent that updates it follows. The same switch is the project's row on Integrations.
+ * note the agent that updates it follows, both saved with the page's bar. The same switch is the
+ * project's row on Integrations.
  */
 export function ProjectLinear({ project }: { readonly project: ProjectDto }) {
   const integrations = useProjectIntegrations(project.id);
   const save = useSetLinearReporter(project.id);
+  const saved = integrations.data?.linear;
+  const draft = useDraft({
+    saved: saved === undefined ? undefined : { on: saved.on, note: saved.note },
+    save: (value) => save.mutateAsync(value),
+  });
   if (integrations.isError)
     return (
       <Text size="sm" c="red">
@@ -19,7 +26,8 @@ export function ProjectLinear({ project }: { readonly project: ProjectDto }) {
       </Text>
     );
   const linear = integrations.data?.linear;
-  if (linear === undefined) return <Skeleton height={160} radius="md" />;
+  const value = draft.value;
+  if (linear === undefined || value === undefined) return <Skeleton height={160} radius="md" />;
   return (
     <SettingsCard
       title="Issue Updates"
@@ -48,10 +56,9 @@ export function ProjectLinear({ project }: { readonly project: ProjectDto }) {
         <Group justify="flex-end">
           <Switch
             aria-label="Keep Issues Updated"
-            checked={linear.on}
-            disabled={save.isPending}
+            checked={value.on}
             onChange={(event) => {
-              save.mutate({ on: event.currentTarget.checked, note: linear.note });
+              draft.set({ ...value, on: event.currentTarget.checked });
             }}
           />
         </Group>
@@ -63,29 +70,21 @@ export function ProjectLinear({ project }: { readonly project: ProjectDto }) {
       )}
       <SettingRow
         label="Update Note"
-        description="How the updates should read. Saved when you leave the field."
+        description="How the updates should read."
         help="Without a note the agent never sets a done status; say so here if it should."
         stacked
       >
         <Textarea
-          // Keyed by the saved note, so a save from elsewhere replaces what the field shows.
-          key={linear.note}
           aria-label="Update Note"
           autosize
           minRows={2}
           placeholder="Optional: e.g. move the issue to Done when the pull request merges"
-          defaultValue={linear.note}
-          onBlur={(event) => {
-            const note = event.currentTarget.value;
-            if (note !== linear.note) save.mutate({ on: linear.on, note });
+          value={value.note}
+          onChange={(event) => {
+            draft.set({ ...value, note: event.currentTarget.value });
           }}
         />
       </SettingRow>
-      {save.isError ? (
-        <Text size="xs" c="red">
-          {save.error.message}
-        </Text>
-      ) : null}
     </SettingsCard>
   );
 }

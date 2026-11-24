@@ -1,8 +1,8 @@
 import type { StakeholderTimersDto } from '@10db/contracts';
 import { Alert, Group, Loader, NumberInput, Stack, Switch, Text } from '@mantine/core';
-import { useState } from 'react';
 import { useSetStakeholderTimers, useStakeholderTimers } from '../../../daemon/people';
 import { SettingRow, SettingsCard } from '../setting-row';
+import { useDraft } from '../settings-drafts';
 
 const DEFAULT_REMIND_HOURS = 4;
 
@@ -14,29 +14,27 @@ function Hours() {
   );
 }
 
-/** When 10db reminds a recipient and when it returns a question to the builder; both in real hours. */
+/**
+ * When 10db reminds a recipient and when it returns a question to the builder; both in real hours, saved
+ * with the page's bar.
+ */
 export function StakeholderTimers() {
   const timers = useStakeholderTimers();
   const save = useSetStakeholderTimers();
-  // The text typed in a field, until it is saved or abandoned.
-  const [typed, setTyped] = useState<{ remind?: number; back?: number }>({});
-  if (timers.isPending) return <Loader size="sm" />;
+  const draft = useDraft({
+    saved: timers.data,
+    save: (next: StakeholderTimersDto) => save.mutateAsync(next),
+  });
+  const current = draft.value;
+  if (timers.isPending || current === undefined) return <Loader size="sm" />;
   if (timers.isError)
     return (
       <Alert color="red" title="Couldn't load the timers">
         {timers.error.message}
       </Alert>
     );
-  const current = timers.data;
-  const change = (next: StakeholderTimersDto): void => {
-    save.mutate(next, {
-      onSettled: () => {
-        setTyped({});
-      },
-    });
-  };
-  const remind = typed.remind ?? current.remindAfterHours ?? DEFAULT_REMIND_HOURS;
-  const back = typed.back ?? current.returnAfterHours;
+  const remind = current.remindAfterHours ?? DEFAULT_REMIND_HOURS;
+  const back = current.returnAfterHours;
   return (
     <Stack gap="xs">
       <SettingsCard
@@ -52,7 +50,7 @@ export function StakeholderTimers() {
               aria-label="Send a reminder"
               checked={current.remindAfterHours !== null}
               onChange={(event) => {
-                change({
+                draft.set({
                   remindAfterHours: event.currentTarget.checked
                     ? Math.max(1, Math.min(DEFAULT_REMIND_HOURS, current.returnAfterHours - 1))
                     : null,
@@ -69,14 +67,7 @@ export function StakeholderTimers() {
               disabled={current.remindAfterHours === null}
               value={remind}
               onChange={(value) => {
-                if (typeof value === 'number') setTyped((t) => ({ ...t, remind: value }));
-              }}
-              onBlur={() => {
-                if (typed.remind !== undefined && typed.remind !== current.remindAfterHours)
-                  change({
-                    remindAfterHours: typed.remind,
-                    returnAfterHours: current.returnAfterHours,
-                  });
+                if (typeof value === 'number') draft.set({ ...current, remindAfterHours: value });
               }}
             />
             <Hours />
@@ -95,25 +86,13 @@ export function StakeholderTimers() {
               max={168}
               value={back}
               onChange={(value) => {
-                if (typeof value === 'number') setTyped((t) => ({ ...t, back: value }));
-              }}
-              onBlur={() => {
-                if (typed.back !== undefined && typed.back !== current.returnAfterHours)
-                  change({
-                    remindAfterHours: current.remindAfterHours,
-                    returnAfterHours: typed.back,
-                  });
+                if (typeof value === 'number') draft.set({ ...current, returnAfterHours: value });
               }}
             />
             <Hours />
           </Group>
         </SettingRow>
       </SettingsCard>
-      {save.isError ? (
-        <Alert color="red" variant="light">
-          {save.error.message}
-        </Alert>
-      ) : null}
     </Stack>
   );
 }

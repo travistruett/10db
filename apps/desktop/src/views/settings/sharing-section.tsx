@@ -2,14 +2,13 @@ import type { ProjectDto, SlackChannelDto } from '@10db/contracts';
 import { Alert, Button, Group, Select, Skeleton, Stack, Switch, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useSlackStatus } from '../../daemon/people';
+import { usePatchProject } from '../../daemon/queries';
 import {
   useProjectIntegrations,
   useSetSlackSharing,
   useSlackChannels,
   useSlackSharing,
 } from '../../daemon/sign-in-queries';
-import { useProjectFields } from './project-fields-state';
-import { ProjectSaveBar } from './project-save-bar';
 import { SettingsSectionKey } from './sections';
 import { SettingRow, SettingsCard } from './setting-row';
 
@@ -141,10 +140,12 @@ function SlackPictures({ project }: { readonly project: ProjectDto }) {
   );
 }
 
-/** Settings › This Project › Sharing: where a pass's pictures go once its pull request is open. */
+/**
+ * Settings › This Project › Sharing: where a pass's pictures go once its pull request is open. Every
+ * control here is a switch or a pick, so each saves at once.
+ */
 export function ProjectSharing({ project }: { readonly project: ProjectDto }) {
-  const fields = useProjectFields(project, ['prPictures']);
-  const { values, set } = fields;
+  const patch = usePatchProject(project.id);
   return (
     <Stack gap="xl">
       <SettingsCard title="GitHub">
@@ -156,16 +157,21 @@ export function ProjectSharing({ project }: { readonly project: ProjectDto }) {
           <Group justify="flex-end">
             <Switch
               aria-label="Pictures in Pull Requests"
-              checked={values.prPictures}
+              checked={project.prPictures}
+              disabled={patch.isPending}
               onChange={(e) => {
-                set({ prPictures: e.currentTarget.checked });
+                patch.mutate({ prPictures: e.currentTarget.checked });
               }}
             />
           </Group>
         </SettingRow>
+        {patch.isError ? (
+          <Text size="sm" c="red" px="md" py="xs" role="alert">
+            {`Couldn't save: ${patch.error.message}`}
+          </Text>
+        ) : null}
       </SettingsCard>
       <SlackPictures project={project} />
-      <ProjectSaveBar fields={fields} />
     </Stack>
   );
 }
