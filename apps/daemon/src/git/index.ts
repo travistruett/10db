@@ -20,6 +20,7 @@ export {
   PassFolderOffBranchError,
   WorktreeNotOursError,
   type BranchMerge,
+  type FolderRead,
   type ChainCommit,
   type ChainCommitInput,
   type CheckoutPlace,
