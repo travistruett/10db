@@ -9,6 +9,7 @@ import type { Browser, BrowserContext, Dialog, Page, Request, Response } from 'p
 import type { Clock } from '../clock';
 import { BrowserStuckError, launchChromium, withDeadline } from '../pictures';
 import type { LaneDriver, LaunchLaneDriver, UploadFile } from './driver';
+import { LaneBrowserError } from './lane-browsers';
 import { laneUrlTarget } from './lane-reach';
 
 /** What is left of a navigation's budget is cut by this, so the answer still has time to build. */
@@ -413,7 +414,7 @@ class PlaywrightLaneDriver implements LaneDriver {
   }> {
     return this.guarded(signal, async () => {
       const page = this.current;
-      if (page === null) throw new Error('no page is open; call browser_open');
+      if (page === null) throw new LaneBrowserError('no page is open; call browser_open');
       const png = await page.screenshot({
         type: 'png',
         fullPage,
