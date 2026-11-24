@@ -58,8 +58,8 @@ import { conversationState, newMessages, onLoneBranch } from './conversation';
 import { draftContext } from './drafts';
 import { escapeMrkdwn } from './escape';
 import { OPTION_LETTERS } from './letters';
-import { automatedAnswerLine, reminderLine } from './lines';
-import { AUTO_ANSWER_CAP, classifyReply, type ReplyKindRead } from './reply-kind';
+import { askedAckLine, automatedAnswerLine, reminderLine } from './lines';
+import { classifyReply, type ReplyKindRead } from './reply-kind';
 import { scanOutbound } from './outbound-scan';
 import { readReply } from './read-reply';
 import type { StakeholderSends } from './sends';
@@ -367,13 +367,22 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     });
   }
 
-  /** The question goes to the builder: the send is returned (or keeps its return) with the question on it. */
-  function ask(
+  /** The binding is the send's own and Slack is on for the project. */
+  const bindingIntact = (c: Conversation): boolean =>
+    boundTeam(state.db, c.card.projectId) === c.open.teamId &&
+    projectSlack(state.db, c.card.projectId).teamId !== null;
+
+  /**
+   * The question goes to the builder: the send is returned (or keeps its return) with the question on it, and
+   * the thread is told once per question, when the binding allows a post.
+   */
+  async function ask(
+    client: SlackClient,
     c: Conversation,
     reply: Reply,
     read: ReplyKindRead,
     declined: AskedQuestion['declined'],
-  ): void {
+  ): Promise<void> {
     recordRoute(read, (ctx) => {
       markAsked(ctx, c.open.id, {
         asked: {
@@ -386,6 +395,27 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         throughTs: reply.lastTs,
       });
     });
+    const { open } = c;
+    const key = reply.firstTs;
+    if (!bindingIntact(c) || findLine(c.thread, open.id, 'asked_ack', { bot: c.bot, key })) return;
+    const text = askedAckLine(draftContext(state.db, c.card).builderName);
+    if (scanOutbound(text).some((hit) => hit.severity === 'hold')) return;
+    try {
+      await postLine(client, {
+        channel: open.channelId,
+        threadTs: open.threadTs,
+        text,
+        sendId: open.id,
+        line: 'asked_ack',
+        key,
+      });
+    } catch (error) {
+      // The question already reached the builder; a missed acknowledgement costs only a line.
+      log.warn(
+        { err: error, sendId: open.id },
+        'the thread could not be told the question was passed on',
+      );
+    }
   }
 
   /**
@@ -400,15 +430,9 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     read: ReplyKindRead,
   ): Promise<void> {
     const { open, card } = c;
-    if (open.autoAnswers >= AUTO_ANSWER_CAP) {
-      ask(c, reply, read, 'cap');
-      return;
-    }
-    const bound = (): boolean =>
-      boundTeam(state.db, card.projectId) === open.teamId &&
-      projectSlack(state.db, card.projectId).teamId !== null;
+    const bound = (): boolean => bindingIntact(c);
     if (!bound()) {
-      ask(c, reply, read, null);
+      await ask(client, c, reply, read, null);
       return;
     }
     // The reply's first message keys the line: it holds if more is written before a restart.
@@ -430,7 +454,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       )
         return;
       if (written.kind !== 'answer') {
-        ask(c, reply, read, written.reason);
+        await ask(client, c, reply, read, written.reason);
         return;
       }
       const letters = stakeholderOptions(card)
@@ -442,7 +466,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         draftContext(state.db, card).builderName,
       );
       if (scanOutbound(text).some((hit) => hit.severity === 'hold')) {
-        ask(c, reply, read, 'held');
+        await ask(client, c, reply, read, 'held');
         return;
       }
       await postLine(client, {
@@ -500,10 +524,10 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         });
         return false;
       case ReplyKind.BuilderQuestion:
-        ask(c, reply, read, null);
+        await ask(client, c, reply, read, null);
         return false;
       case ReplyKind.SimpleQuestion:
-        if (c.open.returnedAt !== null) ask(c, reply, read, null);
+        if (c.open.returnedAt !== null) await ask(client, c, reply, read, null);
         else await autoAnswer(client, c, reply, read);
         return false;
       default: {

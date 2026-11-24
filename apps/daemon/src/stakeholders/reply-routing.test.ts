@@ -222,11 +222,14 @@ const answering =
     return Promise.resolve(written);
   };
 
+const declining: AnswerWriter = () =>
+  Promise.resolve({ kind: 'declined', reason: 'not_answerable' });
+
 describe('a stakeholder reply is sorted before it answers the card', () => {
   it('a question with no judge goes to the builder, not in as the answer', async () => {
     const w = world();
     const id = w.sentCard();
-    const watch = w.makeWatch(offJudge, answering('unused'));
+    const watch = w.makeWatch(offJudge, declining);
     w.say('what is this for?');
     await watch.tick();
     await watch.tick();
@@ -236,15 +239,16 @@ describe('a stakeholder reply is sorted before it answers the card', () => {
     expect(sendForCard(w.state.db, id)).toMatchObject({
       state: 'sent',
       returnedReason: 'asked',
-      asked: { userId: MARK, text: 'what is this for?' },
+      asked: { userId: MARK, text: 'what is this for?', declined: 'not_answerable' },
     });
+    expect(w.lines('asked_ack')).toHaveLength(1);
   });
 
-  it('posts at most three automated answers, keyed, and never where Slack went Off', async () => {
+  it('answers a question once, and never where Slack went Off or a bot wrote', async () => {
     const w = world();
     const id = w.sentCard();
     const watch = w.makeWatch(judging(ReplyKind.SimpleQuestion, 0.9), answering('It is for tax.'));
-    for (const question of ['what is B?', 'and C?', 'and D?']) {
+    for (const question of ['what is B?', 'and C?']) {
       const ts = w.say(question);
       // Another app's line with 10db's metadata is not 10db's: it must not stand in for the post.
       w.botLine(sendForCard(w.state.db, id)?.id ?? '', 'auto_answer', ts, 'UOTHER');
@@ -252,18 +256,16 @@ describe('a stakeholder reply is sorted before it answers the card', () => {
       await watch.tick();
       expect(w.lines('auto_answer').at(-1)?.metadata?.event_payload['key']).toBe(ts);
     }
-    expect(w.lines('auto_answer')).toHaveLength(3);
-    expect(sendForCard(w.state.db, id)).toMatchObject({ autoAnswers: 3, asked: null });
+    expect(w.lines('auto_answer')).toHaveLength(2);
+    expect(sendForCard(w.state.db, id)).toMatchObject({ autoAnswers: 2, asked: null });
     expect(getInboxItem(w.state.db, id).state).toBe(InboxState.Open);
 
-    w.say('and E?');
+    // A message from another bot is nobody's question: no answer, nothing asked.
+    w.thread.push({ ts: '900.000001', user: 'UBOT2', text: 'what is D?', bot: true });
     await watch.tick();
     await watch.tick();
-    expect(w.lines('auto_answer')).toHaveLength(3);
-    expect(sendForCard(w.state.db, id)).toMatchObject({
-      returnedReason: 'asked',
-      asked: { declined: 'cap' },
-    });
+    expect(w.lines('auto_answer')).toHaveLength(2);
+    expect(sendForCard(w.state.db, id)).toMatchObject({ autoAnswers: 2, asked: null });
 
     // A fresh send whose project's Slack goes Off while the writer is answering.
     const other = world();

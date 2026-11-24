@@ -70,6 +70,11 @@ export function reminderLine(): string {
   return 'Bumping this: the work is still waiting on your answer.';
 }
 
+/** Told in the thread when a question goes to the builder. */
+export function askedAckLine(builderName: string): string {
+  return `🤖 *10db:* I've passed this to ${escapeMrkdwn(builderName)}; they'll reply here.`;
+}
+
 /** 10db's own answer to a simple question, marked as unreviewed by the builder. */
 export function automatedAnswerLine(
   answer: string,

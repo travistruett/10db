@@ -47,16 +47,7 @@ export const AskedQuestion = z.object({
   ts: z.string(),
   /** Why 10db didn't answer it itself; null when the sorter sent it straight to the builder. */
   declined: z
-    .enum([
-      'not_answerable',
-      'held',
-      'too_long',
-      'unparseable',
-      'failed',
-      'no_account',
-      'provider',
-      'cap',
-    ])
+    .enum(['not_answerable', 'held', 'too_long', 'unparseable', 'failed', 'no_account', 'provider'])
     .nullable(),
 });
 export type AskedQuestion = z.infer<typeof AskedQuestion>;

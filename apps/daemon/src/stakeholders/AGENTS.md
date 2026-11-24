@@ -24,7 +24,7 @@
 - A reply is one of four kinds (`reply-kind.ts`): answer, simple question, builder question, chatter. The reply
   watch routes it: `handledThroughTs` is the sorting cursor (a lone recipient's reply is the counted messages after
   it; a group's messages are sorted one by one, at most five a tick, and only when the judge can run), and
-  `lastReadTs` still moves only when the card is answered. An automated answer is `autoAnswer`: the cap, the stored
+  `lastReadTs` still moves only when the card is answered. An automated answer is `autoAnswer`: the stored
   binding, the writer, a re-check of the send, the card and the binding right before the post, the scan, then the
   `auto_answer` line keyed on the reply's first `ts`, found again with `findLine` after a crash. A returned send
   never auto-answers; any question there replaces `asked`. A `ConflictError` from a route ends that send's turn only.

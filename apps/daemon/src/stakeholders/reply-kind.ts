@@ -10,9 +10,6 @@ import type { Logger } from '../log';
 import { stakeholderOptions } from './compose';
 import { readReply } from './read-reply';
 
-/** Most automated answers 10db posts on one send. */
-export const AUTO_ANSWER_CAP = 3;
-
 /** How much of each text the judge is sent. */
 const JUDGED_TEXT = 1000;
 
@@ -68,6 +65,7 @@ const CRITERIA: Readonly<Record<ReplyKind, string>> = {
  * Sorts a stakeholder's reply: does it answer the card, ask 10db something it can explain, ask the builder, or
  * say nothing that needs acting on. A rule-picked option never asks the judge. With no judge, or below its
  * floor, a lone reply takes the rule and a group's takes "answer", which the caller treats as "do as before".
+ * Only a judge's confident "builder question" skips the answer writer.
  */
 export async function classifyReply(
   deps: { readonly judge: Judge; readonly floor: () => number; readonly log: Logger },
@@ -81,11 +79,16 @@ export async function classifyReply(
 ): Promise<ReplyKindRead> {
   const options = stakeholderOptions(input.card);
   const reply = { words: input.words, messageCount: input.messageCount };
-  const byRule = (): ReplyKindRead => ({
-    kind: input.group ? ReplyKind.Answer : ruleReplyKind(reply, options),
-    source: 'rule',
-    callId: null,
-  });
+  // A lone reply the rule reads as a question to the builder goes to the answer writer first, which passes
+  // it on when it cannot answer; a group's replies are never guessed at without a judge.
+  const byRule = (): ReplyKindRead => {
+    const ruled = input.group ? ReplyKind.Answer : ruleReplyKind(reply, options);
+    return {
+      kind: ruled === ReplyKind.BuilderQuestion ? ReplyKind.SimpleQuestion : ruled,
+      source: 'rule',
+      callId: null,
+    };
+  };
   if (readReply(reply, options).readAs === 'option')
     return { kind: ReplyKind.Answer, source: 'rule', callId: null };
   if (!(await deps.judge.ready(JudgeDecision.ReplyKind))) return byRule();
@@ -110,11 +113,12 @@ export async function classifyReply(
     if (answer.kind !== 'answered') return byRule();
     const chosen = Object.values(ReplyKind).find((k) => k === answer.choice);
     if (chosen === undefined) return byRule();
-    if (answer.confidence >= deps.floor())
+    // Any confidence that it is a simple question tries the writer, which declines what it cannot answer.
+    if (chosen === ReplyKind.SimpleQuestion || answer.confidence >= deps.floor())
       return { kind: chosen, source: 'judge', callId: answer.callId };
-    // A doubtful "10db can answer this" goes to the builder: a wrong automated answer costs more than a wait.
-    if (chosen === ReplyKind.SimpleQuestion)
-      return { kind: ReplyKind.BuilderQuestion, source: 'judge', callId: answer.callId };
+    // A doubtful "for the builder" also tries the writer first; other doubtful readings take the rule.
+    if (chosen === ReplyKind.BuilderQuestion)
+      return { kind: ReplyKind.SimpleQuestion, source: 'rule', callId: answer.callId };
     return { ...byRule(), callId: answer.callId };
   } catch (error) {
     deps.log.warn({ err: error }, 'a reply could not be sorted by the judge');
