@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useNow } from '../../shell/relative';
 import { shortAgo } from '../factory/short-ago';
 import { TakeBackModal } from './take-back-modal';
-import { WaitingDetail, WhoCell } from './waiting-row';
+import { recipientsOf, WaitingDetail } from './waiting-row';
 import { WaitingTaskLink } from './waiting-task-link';
 
 /**
@@ -16,26 +16,27 @@ export function WaitingContent({ item }: { readonly item: InboxItemDto }) {
   const now = useNow();
   const [takingBack, setTakingBack] = useState(false);
   const send = item.send;
+  const others = (send?.people ?? []).filter((p) => !p.recipient).map((p) => p.name);
   return (
     <Stack gap="sm">
       <Text fw={600}>{item.title}</Text>
-      <Group gap="lg" align="flex-start">
-        <WhoCell item={item} />
-        <Stack gap={0}>
-          {send?.sentAt == null ? null : (
-            <Text size="sm" c="dimmed">{`sent ${shortAgo(send.sentAt, now)}`}</Text>
-          )}
-          {send?.remindedAt == null ? null : (
-            <Text size="xs" c="dimmed">{`reminded ${shortAgo(send.remindedAt, now)}`}</Text>
-          )}
-        </Stack>
-      </Group>
+      <Text size="sm" c="dimmed">
+        {[
+          `Asked ${recipientsOf(item)}`,
+          others.length === 0 ? null : `with ${others.join(', ')}`,
+          send?.sentAt == null ? null : shortAgo(send.sentAt, now),
+          send?.remindedAt == null ? null : `reminded ${shortAgo(send.remindedAt, now)}`,
+        ]
+          .filter((part) => part !== null)
+          .join(' · ')}
+      </Text>
       <WaitingTaskLink item={item} />
       <WaitingDetail item={item} />
       <Group gap="sm">
         <Button
           size="xs"
-          variant="default"
+          variant="subtle"
+          color="gray"
           onClick={() => {
             setTakingBack(true);
           }}

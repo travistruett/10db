@@ -1,5 +1,5 @@
 import { isParkChoice, type InboxItemDto } from '@10db/contracts';
-import { Button, Group, Stack, Text } from '@mantine/core';
+import { Blockquote, Button, Group, Stack, Text } from '@mantine/core';
 import { useAnswerInbox } from '../../daemon/queries';
 import { cardAnswer } from './card-answer';
 import { ConversationView } from './conversation-view';
@@ -14,37 +14,24 @@ export function recipientsOf(item: InboxItemDto): string {
     .join(' + ');
 }
 
-/** Who the question is out with, and who else joined in. */
-export function WhoCell({ item }: { readonly item: InboxItemDto }) {
-  const people = item.send?.people ?? [];
-  const others = people.filter((p) => !p.recipient).map((p) => p.name);
-  return (
-    <Stack gap={0}>
-      <Text size="sm" fw={600}>
-        {recipientsOf(item)}
-      </Text>
-      {others.length === 0 ? null : (
-        <Text size="xs" c="dimmed">
-          {`with ${others.join(', ')}`}
-        </Text>
-      )}
-    </Stack>
-  );
-}
-
-/** What a Waiting row shows: the message as sent, the conversation since, and the builder's own answers. */
+/**
+ * What a Waiting row shows: the message as sent, quoted so it reads as what they got rather than as 10db
+ * talking to the builder, the conversation since, and the builder's own answers.
+ */
 export function WaitingDetail({ item }: { readonly item: InboxItemDto }) {
   const answer = useAnswerInbox();
   const send = item.send;
   if (send === null) return null;
   return (
-    <Stack gap="sm" px="md" py="xs">
-      <Text size="sm" c="dimmed" component="div">
-        <SlackText text={send.text} />
-      </Text>
+    <Stack gap="sm">
+      <Blockquote py="xs" px="md" cite={`What ${recipientsOf(item)} got in Slack`}>
+        <Text size="sm" component="div">
+          <SlackText text={send.text} />
+        </Text>
+      </Blockquote>
       <ConversationView send={send} />
-      <Text size="xs" c="dimmed">
-        Answer it yourself:
+      <Text size="sm" fw={600} mt="xs">
+        Answer it yourself
       </Text>
       <Group gap="xs">
         {/* Parking the task is not an answer: Withdraw Question brings the card back to park it. */}
