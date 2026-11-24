@@ -314,7 +314,6 @@
                         "type": "string",
                         "enum": [
                           "review",
-                          "first_send",
                           "limit",
                           "scan",
                           "slack_off"
