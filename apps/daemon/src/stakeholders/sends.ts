@@ -741,11 +741,10 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
         );
       const open = openSends(state.db, teamId).find((o) => o.id === found.id);
       if (open === undefined) throw new ConflictError("This question isn't waiting on your reply");
-      const bot = workspace?.botUserId ?? (await client.authTest()).botUserId;
       const key = `${asked.ts}${sha256(text).slice(0, 12)}`;
-      let thread: SlackMessage[];
       try {
-        thread = await client.replies(open.channelId, open.threadTs, asked.ts);
+        const bot = workspace?.botUserId ?? (await client.authTest()).botUserId;
+        const thread = await client.replies(open.channelId, open.threadTs, asked.ts);
         if (findLine(thread, found.id, 'builder_reply', { bot, key }) === undefined)
           await postLine(client, {
             channel: open.channelId,
@@ -761,9 +760,18 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
         );
       }
       // A newer question replaces this one in the same write, so a stale reply changes nothing.
-      state.write((ctx) => {
-        answerAsked(ctx, found.id, { askedTs: asked.ts, at: nowIso() });
-      });
+      try {
+        state.write((ctx) => {
+          answerAsked(ctx, found.id, { askedTs: asked.ts, at: nowIso() });
+        });
+      } catch (error) {
+        // The reply is in the thread; the send moved meanwhile (answered, taken back), so there is nothing to undo.
+        if (!(error instanceof ConflictError)) throw error;
+        log.warn(
+          { err: error, sendId: found.id },
+          'a builder reply landed after its question moved',
+        );
+      }
       return getInboxItem(state.db, cardId);
     },
 
