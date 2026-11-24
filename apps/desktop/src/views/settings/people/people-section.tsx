@@ -185,7 +185,12 @@ export function PeopleSection() {
           </Alert>
         ) : null}
         {people.isSuccess ? (
-          <Paper withBorder radius="md">
+          <Paper
+            withBorder
+            radius="md"
+            bg="var(--tendb-color-panel)"
+            style={{ overflow: 'hidden' }}
+          >
             <Table.ScrollContainer minWidth={640}>
               <Table verticalSpacing="sm" horizontalSpacing="md">
                 <Table.Thead>

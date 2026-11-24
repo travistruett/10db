@@ -177,6 +177,7 @@ export function RecentDecisions({
         columns={columns}
         idAccessor="id"
         withTableBorder
+        backgroundColor="var(--tendb-color-panel)"
         borderRadius="md"
         verticalSpacing="sm"
         horizontalSpacing="md"

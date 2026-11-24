@@ -10,6 +10,7 @@ import {
   Text,
   Title,
   Tooltip,
+  Paper,
 } from '@mantine/core';
 import { IconPencil, IconRoute, IconTrash, IconUsers } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
@@ -116,77 +117,79 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
         </EmptyState>
       ) : null}
       {rules.isSuccess && rows.length > 0 ? (
-        <Table.ScrollContainer minWidth={560}>
-          <Table verticalSpacing="xs">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th w={100}>Scope</Table.Th>
-                <Table.Th>For</Table.Th>
-                <Table.Th>Questions</Table.Th>
-                <Table.Th>Goes To</Table.Th>
-                <Table.Th w={80} />
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {rows.map((row) => (
-                <Table.Tr
-                  key={row.key}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => {
-                    setEditing(row);
-                  }}
-                >
-                  <Table.Td>{row.scope}</Table.Td>
-                  <Table.Td>{subjectWords(row.scope, row.subject)}</Table.Td>
-                  <Table.Td>{row.categories.map(categoryWord).join(', ')}</Table.Td>
-                  <Table.Td>{row.people.join(', ')}</Table.Td>
-                  <Table.Td ta="right">
-                    <Group gap={4} justify="flex-end" wrap="nowrap">
-                      <Tooltip label="Edit route">
-                        <ActionIcon
-                          variant="subtle"
-                          color="gray"
-                          aria-label={`Edit route for ${row.people.join(', ')}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setEditing(row);
-                          }}
-                        >
-                          <IconPencil size={14} />
-                        </ActionIcon>
-                      </Tooltip>
-                      <Tooltip label="Remove route">
-                        <ActionIcon
-                          variant="subtle"
-                          color="red"
-                          aria-label={`Remove route for ${row.people.join(', ')}`}
-                          loading={save.isPending}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            save.mutate({
-                              rules: ruleInputs(
-                                rules.data.filter((r) => !row.ruleIds.includes(r.id)),
-                              ),
-                            });
-                          }}
-                        >
-                          <IconTrash size={14} />
-                        </ActionIcon>
-                      </Tooltip>
-                    </Group>
-                  </Table.Td>
+        <Paper withBorder radius="md" bg="var(--tendb-color-panel)" style={{ overflow: 'hidden' }}>
+          <Table.ScrollContainer minWidth={560}>
+            <Table verticalSpacing="xs">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th w={100}>Scope</Table.Th>
+                  <Table.Th>For</Table.Th>
+                  <Table.Th>Questions</Table.Th>
+                  <Table.Th>Goes To</Table.Th>
+                  <Table.Th w={80} />
                 </Table.Tr>
-              ))}
-              <Table.Tr>
-                <Table.Td />
-                <Table.Td />
-                <Table.Td c="dimmed">Everything not routed</Table.Td>
-                <Table.Td c="dimmed">You</Table.Td>
-                <Table.Td />
-              </Table.Tr>
-            </Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>
+              </Table.Thead>
+              <Table.Tbody>
+                {rows.map((row) => (
+                  <Table.Tr
+                    key={row.key}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      setEditing(row);
+                    }}
+                  >
+                    <Table.Td>{row.scope}</Table.Td>
+                    <Table.Td>{subjectWords(row.scope, row.subject)}</Table.Td>
+                    <Table.Td>{row.categories.map(categoryWord).join(', ')}</Table.Td>
+                    <Table.Td>{row.people.join(', ')}</Table.Td>
+                    <Table.Td ta="right">
+                      <Group gap={4} justify="flex-end" wrap="nowrap">
+                        <Tooltip label="Edit route">
+                          <ActionIcon
+                            variant="subtle"
+                            color="gray"
+                            aria-label={`Edit route for ${row.people.join(', ')}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setEditing(row);
+                            }}
+                          >
+                            <IconPencil size={14} />
+                          </ActionIcon>
+                        </Tooltip>
+                        <Tooltip label="Remove route">
+                          <ActionIcon
+                            variant="subtle"
+                            color="red"
+                            aria-label={`Remove route for ${row.people.join(', ')}`}
+                            loading={save.isPending}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              save.mutate({
+                                rules: ruleInputs(
+                                  rules.data.filter((r) => !row.ruleIds.includes(r.id)),
+                                ),
+                              });
+                            }}
+                          >
+                            <IconTrash size={14} />
+                          </ActionIcon>
+                        </Tooltip>
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+                <Table.Tr>
+                  <Table.Td />
+                  <Table.Td />
+                  <Table.Td c="dimmed">Everything not routed</Table.Td>
+                  <Table.Td c="dimmed">You</Table.Td>
+                  <Table.Td />
+                </Table.Tr>
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        </Paper>
       ) : null}
       {save.isError ? (
         <Alert color="red" variant="light">

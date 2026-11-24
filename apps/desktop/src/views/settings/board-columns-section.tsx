@@ -19,6 +19,7 @@ import {
   TextInput,
   Title,
   VisuallyHidden,
+  Paper,
 } from '@mantine/core';
 import { IconArrowDown, IconArrowUp, IconPencil, IconTrash } from '@tabler/icons-react';
 import { useState } from 'react';
@@ -195,119 +196,121 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
       </Group>
       {/* Your columns first, as on the board, then the state columns: listed so the order matches the
           board, but fixed, because their order is the order work moves in. */}
-      <Table.ScrollContainer minWidth={520}>
-        <Table aria-label="Board columns" verticalSpacing="xs">
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th w={72}>
-                <VisuallyHidden>Order</VisuallyHidden>
-              </Table.Th>
-              <Table.Th>Name</Table.Th>
-              <Table.Th w={80} ta="right">
-                Tasks
-              </Table.Th>
-              <Table.Th w={160} ta="right">
-                <VisuallyHidden>Actions</VisuallyHidden>
-              </Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {list.map((column, i) => (
-              <Table.Tr key={column.id}>
-                <Table.Td>
-                  <Group gap={2} wrap="nowrap">
-                    <ActionIcon
-                      variant="subtle"
-                      aria-label={`Move ${column.name} up`}
-                      disabled={i === 0}
-                      onClick={() => {
-                        patch.mutate({ id: column.id, patch: { position: i - 1 } });
-                      }}
-                    >
-                      <IconArrowUp size={16} stroke={1.5} />
-                    </ActionIcon>
-                    <ActionIcon
-                      variant="subtle"
-                      aria-label={`Move ${column.name} down`}
-                      disabled={i === list.length - 1}
-                      onClick={() => {
-                        patch.mutate({ id: column.id, patch: { position: i + 1 } });
-                      }}
-                    >
-                      <IconArrowDown size={16} stroke={1.5} />
-                    </ActionIcon>
-                  </Group>
-                </Table.Td>
-                <Table.Td>
-                  {renaming?.id === column.id ? (
-                    <Group gap="xs">
-                      <TextInput
-                        size="sm"
-                        aria-label={`Name for ${column.name}`}
-                        value={renaming.name}
-                        error={renaming.error}
-                        onChange={(e) => {
-                          setRenaming({ ...renaming, name: e.currentTarget.value });
-                        }}
-                      />
-                      <Button
-                        size="xs"
+      <Paper withBorder radius="md" bg="var(--tendb-color-panel)" style={{ overflow: 'hidden' }}>
+        <Table.ScrollContainer minWidth={520}>
+          <Table aria-label="Board columns" verticalSpacing="xs">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th w={72}>
+                  <VisuallyHidden>Order</VisuallyHidden>
+                </Table.Th>
+                <Table.Th>Name</Table.Th>
+                <Table.Th w={80} ta="right">
+                  Tasks
+                </Table.Th>
+                <Table.Th w={160} ta="right">
+                  <VisuallyHidden>Actions</VisuallyHidden>
+                </Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {list.map((column, i) => (
+                <Table.Tr key={column.id}>
+                  <Table.Td>
+                    <Group gap={2} wrap="nowrap">
+                      <ActionIcon
+                        variant="subtle"
+                        aria-label={`Move ${column.name} up`}
+                        disabled={i === 0}
                         onClick={() => {
-                          rename(column.id, renaming.name);
+                          patch.mutate({ id: column.id, patch: { position: i - 1 } });
                         }}
                       >
-                        Save Name
-                      </Button>
+                        <IconArrowUp size={16} stroke={1.5} />
+                      </ActionIcon>
+                      <ActionIcon
+                        variant="subtle"
+                        aria-label={`Move ${column.name} down`}
+                        disabled={i === list.length - 1}
+                        onClick={() => {
+                          patch.mutate({ id: column.id, patch: { position: i + 1 } });
+                        }}
+                      >
+                        <IconArrowDown size={16} stroke={1.5} />
+                      </ActionIcon>
                     </Group>
-                  ) : (
-                    <>
-                      <Text size="sm">{column.name}</Text>
-                    </>
-                  )}
-                </Table.Td>
-                <Table.Td ta="right">{parkedIn(column.id)}</Table.Td>
-                <Table.Td>
-                  <Group gap={4} justify="flex-end" wrap="nowrap">
-                    <ActionIcon
-                      variant="subtle"
-                      aria-label={`Rename ${column.name}`}
-                      onClick={() => {
-                        setRenaming({ id: column.id, name: column.name, error: null });
-                      }}
-                    >
-                      <IconPencil size={16} stroke={1.5} />
-                    </ActionIcon>
-                    <ActionIcon
-                      variant="subtle"
-                      color="red"
-                      aria-label={`Delete ${column.name}`}
-                      disabled={!tasks.isSuccess}
-                      onClick={() => {
-                        setDeleting(column);
-                      }}
-                    >
-                      <IconTrash size={16} stroke={1.5} />
-                    </ActionIcon>
-                  </Group>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-            {SYSTEM_ORDER.map((status) => (
-              <Table.Tr key={status} c="dimmed">
-                <Table.Td />
-                <Table.Td>
-                  <Text size="sm">{SYSTEM_COLUMN_LABEL[status]}</Text>
-                  <Text size="xs" c="dimmed">
-                    {SYSTEM_HINT[status]}
-                  </Text>
-                </Table.Td>
-                <Table.Td ta="right">{inState(status)}</Table.Td>
-                <Table.Td />
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      </Table.ScrollContainer>
+                  </Table.Td>
+                  <Table.Td>
+                    {renaming?.id === column.id ? (
+                      <Group gap="xs">
+                        <TextInput
+                          size="sm"
+                          aria-label={`Name for ${column.name}`}
+                          value={renaming.name}
+                          error={renaming.error}
+                          onChange={(e) => {
+                            setRenaming({ ...renaming, name: e.currentTarget.value });
+                          }}
+                        />
+                        <Button
+                          size="xs"
+                          onClick={() => {
+                            rename(column.id, renaming.name);
+                          }}
+                        >
+                          Save Name
+                        </Button>
+                      </Group>
+                    ) : (
+                      <>
+                        <Text size="sm">{column.name}</Text>
+                      </>
+                    )}
+                  </Table.Td>
+                  <Table.Td ta="right">{parkedIn(column.id)}</Table.Td>
+                  <Table.Td>
+                    <Group gap={4} justify="flex-end" wrap="nowrap">
+                      <ActionIcon
+                        variant="subtle"
+                        aria-label={`Rename ${column.name}`}
+                        onClick={() => {
+                          setRenaming({ id: column.id, name: column.name, error: null });
+                        }}
+                      >
+                        <IconPencil size={16} stroke={1.5} />
+                      </ActionIcon>
+                      <ActionIcon
+                        variant="subtle"
+                        color="red"
+                        aria-label={`Delete ${column.name}`}
+                        disabled={!tasks.isSuccess}
+                        onClick={() => {
+                          setDeleting(column);
+                        }}
+                      >
+                        <IconTrash size={16} stroke={1.5} />
+                      </ActionIcon>
+                    </Group>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+              {SYSTEM_ORDER.map((status) => (
+                <Table.Tr key={status} c="dimmed">
+                  <Table.Td />
+                  <Table.Td>
+                    <Text size="sm">{SYSTEM_COLUMN_LABEL[status]}</Text>
+                    <Text size="xs" c="dimmed">
+                      {SYSTEM_HINT[status]}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td ta="right">{inState(status)}</Table.Td>
+                  <Table.Td />
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
+      </Paper>
       {patch.error ? (
         <Alert color="red" title="Couldn't change the column">
           {patch.error.message}

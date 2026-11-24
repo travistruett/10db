@@ -19,6 +19,7 @@ import {
   Text,
   Tooltip,
   UnstyledButton,
+  Paper,
 } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
 import { useSearch } from '@tanstack/react-router';
@@ -258,36 +259,38 @@ export function AccountsSection() {
         </Button>
       </Group>
       {/* No column wraps: the table scrolls sideways before a name or status breaks. Usage sits right like any number. */}
-      <Table.ScrollContainer minWidth={860}>
-        <Table aria-label="Accounts" verticalSpacing="sm">
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Account</Table.Th>
-              <Table.Th>Kind</Table.Th>
-              <Table.Th>Used By</Table.Th>
-              <Table.Th>Decisions</Table.Th>
-              <Table.Th>Status</Table.Th>
-              <Table.Th w={200} ta="right">
-                This Month
-              </Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {live.map((a) => (
-              <AccountRow
-                key={a.id}
-                account={a}
-                usedBy={accountUsedBy(a, projects.data ?? [], judge.data)}
-                onOpen={(account) => {
-                  returnToAdd.current = false;
-                  setSelected(account.id);
-                  setOpened(true);
-                }}
-              />
-            ))}
-          </Table.Tbody>
-        </Table>
-      </Table.ScrollContainer>
+      <Paper withBorder radius="md" bg="var(--tendb-color-panel)" style={{ overflow: 'hidden' }}>
+        <Table.ScrollContainer minWidth={860}>
+          <Table aria-label="Accounts" verticalSpacing="sm">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Account</Table.Th>
+                <Table.Th>Kind</Table.Th>
+                <Table.Th>Used By</Table.Th>
+                <Table.Th>Decisions</Table.Th>
+                <Table.Th>Status</Table.Th>
+                <Table.Th w={200} ta="right">
+                  This Month
+                </Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {live.map((a) => (
+                <AccountRow
+                  key={a.id}
+                  account={a}
+                  usedBy={accountUsedBy(a, projects.data ?? [], judge.data)}
+                  onOpen={(account) => {
+                    returnToAdd.current = false;
+                    setSelected(account.id);
+                    setOpened(true);
+                  }}
+                />
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
+      </Paper>
       {archived.length > 0 ? <ArchivedList accounts={archived} /> : null}
       <AddAccountModal
         opened={adding}
