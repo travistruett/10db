@@ -17,7 +17,7 @@ Read in order; the first row that matches wins:
 |---|---|
 | `readReply` reads it as an option (one message, a letter first or a whole label) | `answer` |
 | empty after trim | `chatter` |
-| contains `?`, or its first word is a question word (what, why, how, who, when, where, which, can, could, should, would, will, do, does, did, is, are, isn't, what's, whats) | `builder_question` |
+| contains `?`, or its first word is a question word (what, why, how, who, when, where, which, what's, whats) | `builder_question` |
 | anything else | `answer` (own words, as today) |
 
 It never returns `simple_question`: with no judge, 10db doesn't answer by itself. It never returns `chatter` for
@@ -27,8 +27,10 @@ real answer.
 ## `classifyReply` (the judge read)
 
 1. A rule pick (row 1 of the table) returns `{ kind: 'answer', source: 'rule' }` without asking the judge.
-2. Group with `judge.off`: return `answer`, source `rule`. The caller (card 5) acts on nothing but questions in
-   a group, so this means "do as today".
+2. Group while `!judge.ready(JudgeDecision.ReplyKind)` (no Decisions account, the switch off, or
+   `TENDB_JUDGE=off`): return `answer`, source `rule`, without calling `choose`. The caller (card 5) acts on
+   nothing but questions in a group, so this means "do as today". A lone reply in the same state takes
+   `ruleReplyKind` without calling `choose` either.
 3. Otherwise ask `judge.choose`:
    - `decision: JudgeDecision.ReplyKind`;
    - `options: [answer, simple_question, builder_question, chatter]`;
@@ -62,11 +64,13 @@ card is answered, and the escaped bug). Rows:
 - `"b) but quickly"` → answer;
 - `"what is this for?"` → builder_question;
 - `"Why not C"` → builder_question;
+- `"Should be B"` → answer (an auxiliary first word with no "?" is own words);
 - `"sounds fine, ship it"` → answer;
 - `"   "` → chatter.
 
-Prove it red first: the escaped-bug row fails against a stub that returns `answer`. The value card's `why_new`
-names the escaped bug: "what is this for?" answered a card.
+The table is new code, so its red is the stub's: write the rows first against a `ruleReplyKind` that returns
+`answer`, and see the question rows fail. The escaped bug's real red is card 5's test 1 on `main`. The value
+card's `why_new` names the escaped bug: "what is this for?" answered a card.
 
 ## Done when
 

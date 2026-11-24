@@ -13,8 +13,6 @@
   3. `questionsInviteLine(input.builderName)`
 
   The preview (`previewDraft`) shows it, since it composes the same text.
-- `apps/daemon/scripts/seed-waiting-question.ts`: an optional `asked` field in its zod `Seed`. When given, the
-  seeded send is returned `'asked'` with that question from Mark (write through `markAsked`).
 - `apps/desktop/e2e/stakeholder-questions.spec.ts`: extend the second test (the Board's "Waiting on Mark in
   Slack") or add one step after it, not a new flow. Seed with `asked: "what is this for?"`, then check:
   - the Inbox's Open tab shows "Mark Ellis asked" with the words;
@@ -40,8 +38,7 @@
 
 ## Interfaces
 
-Implements `questionsInviteLine`. Calls `markAsked` from the seed script (a seeding script may write to the idle
-daemon's database, `apps/desktop/e2e/AGENTS.md`).
+Implements `questionsInviteLine`. Uses card 6's `asked` seed.
 
 ## State-table rows
 

@@ -11,7 +11,8 @@
     recommendation;
   - its first target's task title, description (2,000) and acceptance criteria (at most 10, 300 each);
   - the goal's title;
-  - `inboxCardContext(db, cardId, 3)`'s messages (1,000 each);
+  - the lane agent's messages from `inboxCardContext(db, cardId, 6)`, the last three of them (1,000 each). The
+    builder's own messages to the lane are dropped: they are private to the lane and never go to the writer;
   - the project's name and the builder's name (`draftContext`).
 
   It reads nothing else: no files, no other cards, no knowledge, no code.
@@ -35,7 +36,8 @@
     2. `answerable: false` → `not_answerable`.
     3. Trim. Empty → `not_answerable`. Over `ANSWER_LIMIT` → `too_long` (never cut: a cut answer may say the
        wrong thing).
-    4. Any `hold` hit from `scanOutbound` → `held`.
+    4. Any `hold` hit from `scanOutbound`, or any `file_path` hit (the scan only warns on those, and nobody
+       previews this line) → `held`.
     5. Otherwise `{ kind: 'answer', text }`.
 - `apps/daemon/src/daemon/answer-writer-launch.ts` (new): `createAnswerWriter(deps)` returns an `AnswerWriter`.
   Its deps are `db`, `launcher`, `adapter` and `scratchRoot`, as `createAreaNamer` has. It works like
@@ -44,8 +46,10 @@
   - **Model:** the Efficient tier with `Effort.Low` and `byScore: false`, as `createReporterLaunch` picks.
   - **Declines:**
     - no account, a paused account, or one past its cap (use the `accounts` module's readiness) → `no_account`;
-    - a Codex harness while card 3's lock hasn't shipped → `provider`;
-    - a `CompletionError`, or a timeout (60 seconds) → `failed`.
+    - a Codex harness → `provider`. Card 3 replaces this branch with a call to `completeWithCodex` once its live
+      test passes; until then the writer never calls `adapter.complete` for a Codex harness;
+    - a `CompletionError` whose message is `CODEX_NO_QUESTIONS` → `provider` (as `hazards/assess.ts` maps it);
+    - any other `CompletionError`, the caller's `signal`, or a timeout (60 seconds) → `failed`.
   - **Folder:** a new empty folder under `scratchRoot` for each call, removed after.
   - It never throws.
 
@@ -72,6 +76,7 @@ Rows:
 - 701 characters → too_long;
 - an answer with `https://` → held;
 - an answer with a `sk-ant-` key → held;
+- an answer naming `apps/daemon/src/x.ts` → held;
 - prose with no JSON → unparseable.
 
 ## Done when
