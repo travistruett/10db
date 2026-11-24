@@ -7,7 +7,12 @@ import type { LaneProcessFailure, LaneProcessSetup, LedgerSweep } from '../sandb
 import { startAppProxy, type AppProxy } from './app-proxy';
 import { BROWSER_PIN } from './browser-pin';
 import { withDeadline } from './deadline';
-import { openBrowserLedger, type BrowserLedger, type CommandReader } from './browser-ledger';
+import {
+  openBrowserLedger,
+  type BrowserLaunches,
+  type BrowserLedger,
+  type CommandReader,
+} from './browser-ledger';
 import type { BrowserStatus } from './camera';
 
 /** How long the browser stays open after its last use. */
@@ -113,6 +118,8 @@ export interface BrowserHostDeps<B extends ClosableBrowser> {
   /** Where `HOME` and `TMPDIR` are read from; defaults to the daemon's own environment. */
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly commands?: CommandReader;
+  /** Shared with every other browser's launches: this one's launch and its ledger's find run in one. */
+  readonly launches?: BrowserLaunches;
 }
 
 /**
@@ -255,6 +262,7 @@ export function createBrowserHost<B extends ClosableBrowser>(
       sweep: ledgers.sweep,
       processes: deps.processes,
       ...(deps.commands === undefined ? {} : { commands: deps.commands }),
+      ...(deps.launches === undefined ? {} : { launches: deps.launches }),
       onError: (failure, error) => {
         if (reported.has(failure)) return;
         reported.add(failure);
@@ -265,7 +273,7 @@ export function createBrowserHost<B extends ClosableBrowser>(
       },
     });
     let proxy: AppProxy | null = null;
-    let browser: B | null = null;
+    const made: { browser: B | null } = { browser: null };
     try {
       proxy = await startAppProxy({
         onRefused: (target) => {
@@ -275,13 +283,21 @@ export function createBrowserHost<B extends ClosableBrowser>(
           logger.debug({ target }, 'the pictures proxy opened a tunnel to the app');
         },
       });
-      browser = await deps.launch(
-        launchOptions(exe, proxy.port, artifactsDir, browserEnv(deps.env ?? process.env)),
+      const options = launchOptions(
+        exe,
+        proxy.port,
+        artifactsDir,
+        browserEnv(deps.env ?? process.env),
       );
-      await ledger.track(exe);
+      const launched = async (): Promise<void> => {
+        await ledger.mark();
+        made.browser = await deps.launch(options);
+        await ledger.track(exe);
+      };
+      await (deps.launches === undefined ? launched() : deps.launches.one(launched));
     } catch (error) {
       try {
-        await browser?.close();
+        await made.browser?.close();
       } catch {
         // The ledger stops what is left.
       }
@@ -289,7 +305,8 @@ export function createBrowserHost<B extends ClosableBrowser>(
       await proxy?.close();
       throw error;
     }
-    running = { browser, proxy, ledger };
+    if (made.browser === null) throw new BrowserHostError('the browser did not launch');
+    running = { browser: made.browser, proxy, ledger };
     logger.info({ version: BROWSER_PIN.version }, 'launched the browser for pictures');
     return running;
   }

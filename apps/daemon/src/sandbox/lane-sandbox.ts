@@ -32,6 +32,7 @@ import {
   type LaneProcessWatch,
   type LaneProcessSetup,
   type LedgerSweep,
+  type ProcessMember,
 } from './lane-processes';
 import { cachedProcessTable, systemOpenPaths, systemProcessTable } from './process-table';
 import { isEqualOrUnder } from './protected-reads';
@@ -145,6 +146,8 @@ export interface LaneSession {
    * machine's processes.
    */
   endProcesses(): Promise<void>;
+  /** What the session's process watch remembers now (`LaneProcessWatch.members`). */
+  processMembers(): readonly ProcessMember[];
   /** Marks what the session runs now, so `endJobs` leaves it be; run it at its first command. */
   markOwn(): void;
   /** Stops the jobs its commands started since the mark and leaves the session running. */
@@ -639,6 +642,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           },
           trackProcesses: (root) => watch.track(root),
           endProcesses: () => watch.end(),
+          processMembers: () => watch.members(),
           markOwn: () => {
             watch.markOwn();
           },
