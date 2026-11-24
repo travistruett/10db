@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTempRepo, isolatedGitEnv, type TempDir } from '../../test/fixtures';
@@ -38,7 +38,9 @@ function folder(): void {
   rawGit('switch', '-q', '-c', 'copy');
   write('a.txt', 'two\n');
   write('b.txt', 'new\n');
-  rawGit('add', 'a.txt', 'b.txt');
+  // A link whose target is missing: git hashes the link text, a file read would fail.
+  symlinkSync('no-such-target', join(repo.path, 'link'));
+  rawGit('add', 'a.txt', 'b.txt', 'link');
   rawGit('commit', '-q', '-m', 'copy');
   C = rawGit('rev-parse', 'HEAD');
   rawGit('switch', '-q', 'main');
@@ -64,6 +66,18 @@ describe('promoteFastForward', () => {
     expect(state()).toEqual(before);
     expect(readFileSync(join(repo.path, 'a.txt'), 'utf8')).toBe('mine\n');
     write('a.txt', 'one\n');
+    // Staged, then the file put back to HEAD: the index differs, the file doesn't.
+    write('a.txt', 'staged\n');
+    rawGit('add', 'a.txt');
+    write('a.txt', 'one\n');
+    before = state();
+    expect(await git.promoteFastForward(input())).toEqual({
+      kind: 'in_the_way',
+      changed: ['a.txt'],
+      kept: [],
+    });
+    expect(state()).toEqual(before);
+    rawGit('add', 'a.txt');
     before = state();
 
     // A held ref lock fails only the swap: the ref is still T, so the files and index go back.
@@ -114,6 +128,14 @@ describe('classifyFolder', () => {
           const moved = rawGit('commit-tree', `${T}^{tree}`, '-p', T, '-m', 'moved');
           rawGit('update-ref', 'refs/heads/main', moved);
         },
+        { row: 'G', paths: ['a.txt', 'b.txt', 'link'], ref: '' },
+      ],
+      [
+        'G, a half-written folder with an edit',
+        () => {
+          write('a.txt', 'two\n');
+          write('b.txt', 'mine\n');
+        },
         { row: 'G', paths: ['a.txt', 'b.txt'], ref: '' },
       ],
     ];
@@ -127,5 +149,15 @@ describe('classifyFolder', () => {
       expect(await git.classifyFolder(input()), `row ${name}`).toEqual(expected);
       expect(state(), `row ${name} writes nothing`).toEqual(before);
     }
+
+    // finishPromotion swaps only while C's files are all there: discarded since the read, it refuses.
+    folder();
+    rawGit('read-tree', '-m', '-u', T, C);
+    rawGit('read-tree', '-m', '-u', C, T);
+    expect(await git.finishPromotion(input())).toBe('raced');
+    expect(rawGit('rev-parse', 'refs/heads/main')).toBe(T);
+    rawGit('read-tree', '-m', '-u', T, C);
+    expect(await git.finishPromotion(input())).toBe('promoted');
+    expect(rawGit('rev-parse', 'refs/heads/main')).toBe(C);
   });
 });
