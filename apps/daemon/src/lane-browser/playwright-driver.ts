@@ -6,7 +6,7 @@ import {
   type ScreenViewport,
 } from '@10db/contracts';
 import type { Browser, BrowserContext, Dialog, Page, Request, Response } from 'playwright-core';
-import { systemClock } from '../clock';
+import type { Clock } from '../clock';
 import { BrowserStuckError, launchChromium, withDeadline } from '../pictures';
 import type { LaneDriver, LaunchLaneDriver, UploadFile } from './driver';
 import { laneUrlTarget } from './lane-reach';
@@ -50,7 +50,7 @@ function isMainFrameNavigation(request: Request): boolean {
  * at most `BROWSER_MAX_PAGES` pages, and Playwright's routing as a first check above the proxy,
  * which is what holds.
  */
-export const launchPlaywrightDriver: LaunchLaneDriver = async (options) => {
+export const launchPlaywrightDriver: LaunchLaneDriver = async (options, clock) => {
   const browser = await launchChromium(options);
   try {
     const context = await browser.newContext({
@@ -58,7 +58,7 @@ export const launchPlaywrightDriver: LaunchLaneDriver = async (options) => {
       serviceWorkers: 'block',
       viewport: { ...VIEWPORT },
     });
-    const driver = new PlaywrightLaneDriver(browser, context);
+    const driver = new PlaywrightLaneDriver(browser, context, clock);
     await driver.guard();
     return driver;
   } catch (error) {
@@ -70,6 +70,7 @@ export const launchPlaywrightDriver: LaunchLaneDriver = async (options) => {
 class PlaywrightLaneDriver implements LaneDriver {
   private readonly browser: Browser;
   private readonly context: BrowserContext;
+  private readonly clock: Clock;
   private readonly pages: Page[] = [];
   private current: Page | null = null;
   private readonly statuses = new WeakMap<Page, number | null>();
@@ -80,7 +81,8 @@ class PlaywrightLaneDriver implements LaneDriver {
   /** Reads of the proxy's refusals still under way; an answer waits for them. */
   private readonly reading = new Set<Promise<void>>();
 
-  constructor(browser: Browser, context: BrowserContext) {
+  constructor(browser: Browser, context: BrowserContext, clock: Clock) {
+    this.clock = clock;
     this.browser = browser;
     this.context = context;
     context.on('page', (page) => {
@@ -168,7 +170,8 @@ class PlaywrightLaneDriver implements LaneDriver {
     page.on('framenavigated', (frame) => {
       if (frame !== page.mainFrame()) return;
       const url = frame.url();
-      if (url === 'about:blank' || /^https?:/i.test(url)) return;
+      // chrome-error: is the page the browser shows for a request that failed, already reported.
+      if (url === 'about:blank' || /^(https?|chrome-error):/i.test(url)) return;
       this.refused.push(refusalLine('GET', url, 'only loopback http and https are reachable'));
       void page.goto('about:blank').catch(() => undefined);
     });
@@ -193,7 +196,7 @@ class PlaywrightLaneDriver implements LaneDriver {
   private async guarded<T>(signal: AbortSignal, work: () => Promise<T>): Promise<T> {
     try {
       return await withDeadline(
-        systemClock,
+        this.clock,
         NAVIGATION_MAX_MS + NAVIGATION_RESERVE_MS,
         work,
         () => undefined,
@@ -210,7 +213,7 @@ class PlaywrightLaneDriver implements LaneDriver {
     if (page === null) return;
     try {
       await withDeadline(
-        systemClock,
+        this.clock,
         PROBE_MS,
         () => page.evaluate('1'),
         () => undefined,
@@ -432,7 +435,7 @@ class PlaywrightLaneDriver implements LaneDriver {
 
   async close(): Promise<void> {
     await withDeadline(
-      systemClock,
+      this.clock,
       CLOSE_PAGE_MS * 3,
       () => this.browser.close(),
       () => undefined,

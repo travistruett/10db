@@ -231,7 +231,7 @@ export function createLaneBrowsers(deps: {
       const options = launchOptions(exe, proxy.port, artifactsDir, env);
       await launches.one(async () => {
         await ledger.mark();
-        made.driver = await deps.launch(options);
+        made.driver = await deps.launch(options, deps.clock);
         await ledger.track(exe);
       });
     } catch (error) {

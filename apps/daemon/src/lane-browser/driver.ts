@@ -1,5 +1,6 @@
 import type { BrowserAnswer, BrowserToolInputs, ScreenViewport } from '@10db/contracts';
 import type { z } from 'zod';
+import type { Clock } from '../clock';
 import type { BrowserLaunch } from '../pictures';
 
 /** A file a lane uploads, read and checked by the handler: the driver never opens a path. */
@@ -36,4 +37,5 @@ export interface LaneDriver {
   close(): Promise<void>;
 }
 
-export type LaunchLaneDriver = (options: BrowserLaunch) => Promise<LaneDriver>;
+/** Launches a driver; its deadlines run on `clock`. */
+export type LaunchLaneDriver = (options: BrowserLaunch, clock: Clock) => Promise<LaneDriver>;
