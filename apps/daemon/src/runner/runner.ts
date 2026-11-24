@@ -214,6 +214,7 @@ import {
   MIGRATIONS_HAZARD,
   projectAtCheckout,
   rerunFlaky,
+  finalCheck,
   stepCheck,
   uncarriedSaid,
   type BaseUpdate,
@@ -4375,7 +4376,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
   }
 
-  async function verify(id: WorkstreamId, ctl: Control): Promise<void> {
+  async function verify(id: WorkstreamId, ctl: Control, final = false): Promise<void> {
     if (getWorkstreamRow(db, id).state !== S.Verifying) {
       opts.state.write((ctx) =>
         transitionWorkstream(ctx, id, {
@@ -4402,7 +4403,10 @@ export function createRunner(opts: RunnerOptions): Runner {
     // runs it in place of the gate. Otherwise a project with a changed-packages check has each step
     // checked by it, and the ship gate runs the full gate command before the push. Without a gate
     // command the builder checks, as ever.
-    const gateCommand = stepCheck(project)?.command ?? null;
+    // A Commit Directly task has no ship, so once its last step's check passed it runs the full gate
+    // (`final`) before it is Done.
+    const gateCommand =
+      (final ? finalCheck(project) : null)?.command ?? stepCheck(project)?.command ?? null;
     if (gateCommand === null) {
       await finishWithoutGate(id, ctl, row, checkout);
       return;
@@ -4645,17 +4649,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       }
       // Shutdown stopped it: record nothing, and recovery runs the gate again.
       if (stopRequested(ctl) === 'shutdown') return;
-      opts.state.write((ctx) => {
+      const needsFinalGate = opts.state.write((ctx) => {
         insertEvidence(ctx, evidence);
-        countFinished(ctx, step);
         // Planned again first, and the move chosen from those steps: a rigor changed while the gate ran
         // decides whether a Review follows or the work is done.
         const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
         const net = withSafetyNet(ctx.tx, ctl.accountId, current, forced);
-        if (!reviewFollows(net.steps, current.stepIndex))
-          fileTestValueFollowUps(ctx, row.taskId, testValue);
         const steps = net.steps;
         const after = moveAfter(steps, current.stepIndex);
+        // The last step's own check passed: the full gate runs next, and the move waits for it.
+        if (!final && batchId === null && after.kind === 'done' && finalCheck(project) !== null)
+          return true;
+        countFinished(ctx, step);
+        if (!reviewFollows(net.steps, current.stepIndex))
+          fileTestValueFollowUps(ctx, row.taskId, testValue);
         const next = after.kind === 'advance' ? steps[after.to] : undefined;
         if (after.kind === 'advance' && next) {
           transitionWorkstream(ctx, id, {
@@ -4674,14 +4681,16 @@ export function createRunner(opts: RunnerOptions): Runner {
                 : `gate passed; review added: ${net.added}; next: ${next.role}`,
           });
           clearLease(ctx, id);
-          return;
+          return false;
         }
         if (steps.length > 0)
           patchWorkstream(ctx, id, ctl.fence, {
             steps: advanceSteps(steps, current.stepIndex, -1, entryFor(ctx, id)),
           });
         markDone(ctx, id, ctl.fence, current, 'gate passed');
+        return false;
       });
+      if (needsFinalGate) await verify(id, ctl, true);
       return;
     }
     const attempt = row.attempt + 1;
