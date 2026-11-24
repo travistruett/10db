@@ -345,6 +345,7 @@ import {
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
+import { checkCoverage, coverageNote, type CheckCoverage } from './check-coverage';
 import { planOf, raisePlanApproval, waitsForPlanApproval } from './plan-approval';
 import { outstandingFixEvidence } from './fix-evidence';
 import { shipsAtRetryLimit } from './limit-ship';
@@ -4383,6 +4384,42 @@ export function createRunner(opts: RunnerOptions): Runner {
     return { head, ...(await runCommits({ db, git: opts.git }, row, checkout, base, head)) };
   }
 
+  /**
+   * What a passing check left out of the run's own changes. A worktree's own changes are those since
+   * the base it holds (the base merge brought the rest in); a shared checkout's are the files of the
+   * run's own commits, less what it held uncommitted when the task started. A command that claims no
+   * folder reads no git.
+   */
+  async function coverageOf(
+    row: WorkstreamRow,
+    checkout: string,
+    head: string,
+    command: string,
+  ): Promise<CheckCoverage | null> {
+    if (checkCoverage(command, [], checkout) === null) return null;
+    try {
+      let own: string[];
+      if (checkout !== getProject(db, row.projectId).repoPath) {
+        // Read again: the gate's base update moves the task's base.
+        const base = getWorkstreamRow(db, row.id).baseHead ?? head;
+        own = await opts.git.filesChangedBetween(checkout, base, head);
+      } else {
+        const { ranges } = await ownWork(row, checkout, row.baseHead ?? head);
+        const files = await Promise.all(
+          ranges.map((r) => opts.git.filesChangedBetween(checkout, r.base, r.head)),
+        );
+        own = withoutStartDirt(
+          [...new Set(files.flat())],
+          checkout,
+          passOfWorkstream(db, row.id) ? null : getTaskStartDirt(db, row.taskId),
+        );
+      }
+      return checkCoverage(command, own, checkout);
+    } catch {
+      return null;
+    }
+  }
+
   /** The facts the builder checks: where the task began, where it is now, and what it committed. */
   async function checkFacts(row: WorkstreamRow, checkout: string) {
     const head = await opts.git.head(checkout);
@@ -4739,6 +4776,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       const forced = await reviewForcedAfter(id, ctl, row, checkout);
       // With no Review after this step, the judge's flags on the new tests become follow-up tasks.
       const testValue = await testValueFollowUpsAfter(id, ctl, row, checkout, forced);
+      // Information only: a check that passed on less than the step changed says so in its record.
+      const note = coverageNote(await coverageOf(row, checkout, head, gateCommand));
+      if (note !== null) evidence.summary = `${note}\n\n${evidence.summary}`;
       // The read took time; a cancel that landed meanwhile must not be overwritten.
       if (stopRequested(ctl) === 'cancelled') {
         cancelNow(id, ctl.fence);
