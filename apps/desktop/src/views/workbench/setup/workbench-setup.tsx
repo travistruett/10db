@@ -14,10 +14,9 @@ import { setupKeys, useWorkbenchSetup } from '../../../daemon/pass-queries';
 import { usePatchProject } from '../../../daemon/queries';
 import { SettingsSectionKey } from '../../settings/sections';
 import { AreasSection, PageRows } from './areas-section';
-import { BranchRow } from './branch-row';
 import { settingDrafts, settingsPatch, type SettingDraft } from './setting-drafts';
 import { SettingRows, type SettingChange } from './setting-rows';
-import { areasChanged, areasSummary, newPagesOf, setupPatch } from './setup-rules';
+import { areasChanged, newPagesOf, setupPatch } from './setup-rules';
 
 function SettingsLink() {
   return (
@@ -128,7 +127,7 @@ export function WorkbenchSetup({ project, onCancel, onApplied }: WorkbenchSetupP
   const offered = areasChanged(setup.areas.proposed, project.areas);
   const areasOn = offered && rebuild;
   const changed = areasOn && areasChanged(result, project.areas);
-  if (!offered && setup.settings.length === 0 && setup.branch === null)
+  if (!offered && setup.settings.length === 0)
     return (
       <Stack gap="md" maw={720}>
         {heading}
@@ -167,7 +166,7 @@ export function WorkbenchSetup({ project, onCancel, onApplied }: WorkbenchSetupP
               }}
               label={`Rebuild areas: ${String(setup.areas.pages.length)} new ${
                 setup.areas.pages.length === 1 ? 'page' : 'pages'
-              }, ${areasSummary(project.areas, result)}`}
+              }, ${String(project.areas.length)} → ${String(result.length)} areas`}
             />
           ) : null}
           {areasOn ? (
@@ -202,12 +201,6 @@ export function WorkbenchSetup({ project, onCancel, onApplied }: WorkbenchSetupP
               setSettingEdits((edits) => ({ ...edits, [field]: { ...edits[field], ...change } }));
             }}
           />
-        </Stack>
-      )}
-      {setup.branch === null ? null : (
-        <Stack gap="sm" component="section" aria-label="Branch">
-          <Title order={3}>Branch</Title>
-          <BranchRow note={setup.branch} />
         </Stack>
       )}
       <Stack gap="xs">
