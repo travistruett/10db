@@ -29,6 +29,7 @@ import {
   type AccountId,
   type Effort,
   type ConnectableService,
+  type BatchId,
   type ProjectId,
   type ShapeId,
   type SystemCheckDto,
@@ -192,6 +193,7 @@ import {
   removeMergedBranches,
   resolvePnpm,
   resumePassSettles,
+  copyIdForBatch,
   subscribeKeptWorkLanding,
   subscribePassSettles,
   subscribePrWatch,
@@ -1505,6 +1507,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     rules: (project: ProjectDto) => listPermissionRules(state.db, project.id, null),
     checkouts: () => allCheckouts(state.db),
     timeoutMs: limits.gateTimeoutMs,
+    copyIdOf: (batchId: BatchId) => copyIdForBatch(state.db, batchId),
     resolvePnpm,
     pnpmVersion: readPnpmVersion,
     templates: createNodeModulesTemplates({

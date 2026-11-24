@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import {
   InboxKind,
   WORKSTREAM_TRANSITIONS,
+  type BatchId,
   type InboxItemDto,
   type NoticePostedData,
   type ProjectDto,
@@ -51,6 +52,7 @@ import {
   type DeliveryContext,
   type DeliveryJobs,
   type Shipper,
+  copyIdForBatch,
 } from '../src/delivery';
 import { createEventBus, createStateStore, type EventBus, type StateStore } from '../src/events';
 import { createFolderHold } from '../src/folder-hold';
@@ -352,6 +354,7 @@ export function createDeliveryHarness(
       ? {}
       : { pnpmVersion: () => Promise.resolve(opts.pnpmVersion ?? null) }),
     rules: () => [],
+    copyIdOf: (batchId: BatchId) => copyIdForBatch(state.db, batchId),
     checkouts: () => [remote.repo.path],
     timeoutMs: opts.gateTimeoutMs ?? 20_000,
     templates: createNodeModulesTemplates({
