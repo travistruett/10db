@@ -159,6 +159,8 @@ interface Outgoing {
   readonly uuid: string | undefined;
   /** The app-server call a slash command is; null for a message to the model. */
   readonly command: CodexCommandCall | null;
+  /** Goes only into a turn that is open: dropped, never a turn of its own, when none is. */
+  readonly steerOnly: boolean;
 }
 
 /** The `clientUserMessageId` a message goes under, when it has one. */
@@ -883,6 +885,10 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
           log.warn({ method: 'turn/steer' }, 'codex refused to steer the turn');
         }
       }
+      if (message.steerOnly) {
+        log.warn({}, 'pictures a tool returned were dropped: no turn is open to take them');
+        return;
+      }
       await startTurn(threadId, message);
     } catch (error) {
       if (error instanceof SessionOver) return;
@@ -1094,6 +1100,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
         text: notes.length === 0 ? spec.prompt : `${notes.join('\n')}\n\n${spec.prompt}`,
         images: spec.images ?? [],
         uuid: spec.promptUuid,
+        steerOnly: false,
         command: null,
       });
     } catch (error) {
@@ -1132,8 +1139,14 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
 
   return {
     events,
-    send: (text, images = [], uuid) => {
-      const message: Outgoing = { text, images, uuid, command: codexCommandOf(text) };
+    send: (text, images = [], uuid, options) => {
+      const message: Outgoing = {
+        text,
+        images,
+        uuid,
+        command: codexCommandOf(text),
+        steerOnly: options?.steerOnly === true,
+      };
       waiting.add(message);
       // One at a time, so messages reach Codex in the order they were sent. A command sent
       // mid-turn waits for the turn on a chain of its own, so a steer after it still reaches that turn.

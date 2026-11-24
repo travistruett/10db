@@ -78,6 +78,18 @@ export function testBudgetLines(messages: readonly string[]): string[] {
   return [...new Set(lines)];
 }
 
+/**
+ * The body of a pull request that already exists, with those of `lines` it does not carry yet
+ * added at its end; null when it carries them all. The rest of the body, which a person may have
+ * edited, is kept as it is.
+ */
+export function bodyWithTestBudget(body: string, lines: readonly string[]): string | null {
+  const have = new Set(body.split(/\r?\n/).map((line) => line.trim()));
+  const missing = lines.filter((line) => !have.has(line));
+  if (missing.length === 0) return null;
+  return `${body.trimEnd()}\n\n${missing.join('\n')}\n`;
+}
+
 /** One task of the batch, as the PR body shows it. */
 export interface PrBodyTask {
   readonly title: string;

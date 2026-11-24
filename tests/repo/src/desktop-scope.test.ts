@@ -150,7 +150,7 @@ describe('scripts/desktop-scope.mjs', () => {
     expect(result.output).toBe('desktop=false\n');
   });
 
-  it.each(['push', 'merge_group', 'workflow_dispatch', ''])(
+  it.each(['merge_group', 'workflow_dispatch', ''])(
     'always runs the desktop job on a %s event, without asking GitHub',
     (event) => {
       const result = decide({ ...pullRequest, EVENT_NAME: event }, files('docs/a.md'));
@@ -158,6 +158,57 @@ describe('scripts/desktop-scope.mjs', () => {
       expect(result.calls).toEqual([]);
     },
   );
+
+  describe('on a push', () => {
+    const before = 'a'.repeat(40);
+    const after = 'b'.repeat(40);
+    const push = { EVENT_NAME: 'push', REPOSITORY: 'owner/repo', BEFORE: before, AFTER: after };
+    const compareCall = `api --paginate repos/owner/repo/compare/${before}...${after}`;
+    const compare = (status: string, ...names: string[]): GhReply[] => [
+      {
+        args: compareCall,
+        stdout: [`status:${status}`, 'commits:1', ...names.map((n) => `file:${n}`)].join('\n'),
+      },
+    ];
+
+    it('decides by the files of the pushed commits', () => {
+      expect(decide(push, compare('ahead', 'docs/a.md', 'apps/desktop/src/x.tsx')).output).toBe(
+        'desktop=false\n',
+      );
+      expect(
+        decide(push, compare('ahead', 'docs/a.md', 'apps/desktop/src-tauri/a.rs')).output,
+      ).toBe('desktop=true\n');
+      // A file named like the status line is still a file.
+      expect(decide(push, compare('ahead', 'ahead')).output).toBe('desktop=false\n');
+    });
+
+    it.each([
+      ['a force push', compare('diverged', 'docs/a.md')],
+      ['a rewind', compare('behind', 'docs/a.md')],
+      ['a failing lookup', [{ args: compareCall, status: 1, stderr: 'HTTP 404' }]],
+      ['no files listed', compare('ahead')],
+      [
+        'more than 100 commits',
+        [{ args: compareCall, stdout: 'status:ahead\ncommits:101\nfile:docs/a.md' }],
+      ],
+      [
+        'a list as long as the compare API may cut it',
+        compare('ahead', ...Array.from({ length: 300 }, (_, i) => `docs/${String(i)}.md`)),
+      ],
+    ] satisfies [string, GhReply[]][])('runs the desktop job after %s', (_name, replies) => {
+      expect(decide(push, replies).output).toBe('desktop=true\n');
+    });
+
+    it.each([
+      ['a first push', { BEFORE: '0'.repeat(40) }],
+      ['no earlier commit', { BEFORE: '' }],
+      ['a malformed later commit', { AFTER: 'main' }],
+    ])('runs the desktop job on %s, without asking GitHub', (_name, override) => {
+      const result = decide({ ...push, ...override }, compare('ahead', 'docs/a.md'));
+      expect(result.output).toBe('desktop=true\n');
+      expect(result.calls).toEqual([]);
+    });
+  });
 
   it('decides by the files alone, so a title edit gets the decision of the last push', () => {
     // The script does not read the event action, which is what a skipped job on `edited` would

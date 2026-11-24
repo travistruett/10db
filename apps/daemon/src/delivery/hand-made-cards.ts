@@ -14,9 +14,11 @@ export interface MergedHandMade {
  * The fold keys of the hand-made folder's cards. The merged card's key names the set it lists, so
  * Keep holds for that set and a newly merged worktree is offered on its own.
  */
+export const MERGED_KEY_PREFIX = 'hand-made-merged:';
+
 export const handMadeKey = {
   merged: (worktrees: readonly MergedHandMade[]): string =>
-    `hand-made-merged:${createHash('sha256')
+    `${MERGED_KEY_PREFIX}${createHash('sha256')
       .update(
         worktrees
           .map((w) => w.path)
@@ -57,6 +59,26 @@ export const handMadeNotices = {
   }),
 } as const;
 
+/** The worktree lines of a merged card's body, for a card raised before it carried `detail.paths`. */
+const LISTED_WORKTREE = /^- (.+) \([^()]*\)$/;
+
+/**
+ * The paths a merged card names, or null when they can't all be told: its detail's list, else the
+ * body's lines, which stop at a cut ("and N more") that hides the rest.
+ */
+export function mergedCardPaths(card: {
+  readonly body: string;
+  readonly detail: Record<string, unknown> | null;
+}): string[] | null {
+  const stored = card.detail?.['paths'];
+  if (Array.isArray(stored) && stored.every((p): p is string => typeof p === 'string'))
+    return stored;
+  const lines = card.body.split('\n');
+  if (lines.some((line) => /^- and \d+ more$/.test(line))) return null;
+  const paths = lines.flatMap((line) => LISTED_WORKTREE.exec(line)?.[1] ?? []);
+  return paths.length === 0 ? null : paths;
+}
+
 export const handMadeCards = {
   merged: (folder: string, worktrees: readonly MergedHandMade[]): Card => ({
     tier: CardTier.Ask,
@@ -65,7 +87,7 @@ export const handMadeCards = {
     title: `${String(worktrees.length)} worktree${worktrees.length === 1 ? '' : 's'} in ${folder} ${worktrees.length === 1 ? 'has' : 'have'} merged`,
     body: `Each pull request below merged, the branch holds nothing the pull request lacks, and the worktree has no uncommitted changes or loose files. Every one keeps a copy of node_modules and build output that the editor, Spotlight and the file watcher keep reading, which adds to the load.\n\n${listPaths(worktrees.map((w) => `${w.path} (${w.branch})`))}\n\nRemove Merged Worktrees removes them; the branches stay.`,
     foldKey: handMadeKey.merged(worktrees),
-    ...worktreeOffer({ kind: 'merged-hand-made' }),
+    ...worktreeOffer({ kind: 'merged-hand-made' }, { paths: worktrees.map((w) => w.path) }),
   }),
   spotlight: (folder: string): Card => ({
     tier: CardTier.Ask,

@@ -66,6 +66,7 @@ function landing(): PullRequestLanding & { readonly asked: string[] } {
     asked,
     catchUp: (id) => asked.push(`catchUp ${id}`),
     restartCi: (id) => asked.push(`restartCi ${id}`) > 0,
+    catchUpToBase: (id) => asked.push(`catchUpToBase ${id}`) > 0,
     retryMerge: (id) => asked.push(`retryMerge ${id}`),
   };
 }

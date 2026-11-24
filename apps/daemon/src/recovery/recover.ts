@@ -47,6 +47,7 @@ import {
   raisePlanApproval,
   untakenMessages,
   withUndelivered,
+  yieldClaimsWhileWaiting,
 } from '../runner';
 import { recoverPage } from './pass-pages';
 import { failStep } from '../team';
@@ -206,6 +207,13 @@ export async function recoverOnStartup(opts: {
       const nextAction: NextAction = { kind: 'answer', inboxId: open.id, providerSessionId };
       opts.state.write((ctx) => {
         patchWorkstream(ctx, ws.id, null, { nextAction });
+      });
+      // A task waiting on a person does not hold its claims across the restart either.
+      await yieldClaimsWhileWaiting(opts, ws.id, open.id).catch((error: unknown) => {
+        opts.logger.warn(
+          { workstreamId: ws.id, err: String(error) },
+          'could not let go of the claims of a task waiting on an answer',
+        );
       });
       report.parked.push(ws.id);
       continue;

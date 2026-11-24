@@ -78,3 +78,5 @@
   raises no card, and `set` answers the server's open approval card through `InboxService` (so `applyMcpApproval`
   writes and the card closes) or, with none open, records the same verdict itself. A hash that is no longer current is
   a `ConflictError`.
+- A skipped-calls card (`closeFinishedSkippedCards`) closes when its task is abandoned. A Done task's card closes only once it lists no calls or its follow-up exists, since a run that succeeded still has calls the builder meant to approve. It keeps Dismiss, also when it rides on a failed run's card.
+- A stray-write card could still be owned by a Failed run whose task is open (Retry), so it stays until the task finishes or is abandoned.
