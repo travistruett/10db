@@ -40,8 +40,8 @@ export function taskLiveWord(
 const COUNT_ORDER: readonly string[] = [
   'Running',
   'Queued',
-  'Needs you',
-  'In review',
+  'Needs You',
+  'In Review',
   'Ready',
   'Waiting',
   'Done',
