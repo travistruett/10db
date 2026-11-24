@@ -272,6 +272,14 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       throw new InvalidError(
         `${project.name} does not allow separate copies; turn them on in its delivery settings`,
       );
+    if (project.gateCommand === null)
+      throw new InvalidError(
+        'A separate copy lands only after the gate runs: set a gate command first',
+      );
+    if (task.landing.kind !== 'base')
+      throw new InvalidError(
+        'A separate copy lands on the base branch, and this task lands elsewhere',
+      );
     const other = unfinishedCopyOf(db, project.id);
     if (other !== null && other.id !== ending)
       throw new ConflictError(

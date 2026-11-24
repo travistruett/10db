@@ -244,6 +244,11 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
         `${current.name} has unfinished work; finish or cancel it before changing its delivery`,
       );
   }
+  // A copy lands only after the gate runs, so the command stays while a copy is unfinished.
+  if (changes.gateCommand === null && unfinishedCopyOf(ctx.tx, id) !== null)
+    throw new ConflictError(
+      `${current.name} is in a separate copy, which lands through the gate command; let it ship or abandon it first`,
+    );
   if (changes.areas !== undefined || changes.hazards !== undefined) {
     const areas = changes.areas ?? current.areas;
     const hazards = changes.hazards ?? current.hazards;

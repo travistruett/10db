@@ -1109,7 +1109,11 @@ export function createServices(deps: {
         // A copy lands only after a review, and the playbook (resolved here, not in the store) says
         // whether the task's process runs one; the write rolls back when it doesn't.
         if (
-          patch.workspaceMode === WorkspaceMode.Worktree &&
+          patchedTask.workspaceMode === WorkspaceMode.Worktree &&
+          (patch.workspaceMode !== undefined ||
+            patch.rigor !== undefined ||
+            patch.kinds !== undefined ||
+            patch.landing !== undefined) &&
           getProject(ctx.tx, patchedTask.projectId).delivery === Delivery.Local &&
           !resolveStepPlan(ctx.tx, id).steps.some((step) => step.role === StepRole.Review)
         )
