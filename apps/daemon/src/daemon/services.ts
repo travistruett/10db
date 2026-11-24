@@ -137,6 +137,7 @@ import {
   speedProviderFor,
   type CatalogueSync,
 } from '../catalogue';
+import { linearLinkOf } from '../linear';
 import { placementAfterEdit, proposePlacement } from '../placement';
 import type { SizingService } from '../sizing';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
@@ -912,7 +913,17 @@ export function createServices(deps: {
     ...deps.planRecord,
     ...deps.knowledge,
     ...deps.thread,
-    taskLinearPosts: (taskId) => listLinearPosts(db, taskId),
+    taskLinearPosts: (taskId) => {
+      const found = linearLinkOf(db, taskId);
+      return {
+        link: found?.link ?? null,
+        followUpOf:
+          found?.followUpOf == null
+            ? null
+            : { id: found.followUpOf.id, title: found.followUpOf.title },
+        posts: listLinearPosts(db, taskId),
+      };
+    },
     taskScreens: (taskId) => deps.pictures.screens(taskId),
     screenPicture: (screenId) => deps.pictures.screenFile(screenId),
     taskDesignCheck: (taskId) => deps.pictures.designCheck(taskId),
