@@ -63,7 +63,7 @@ export function withAgentStatus(
 }
 
 /** Docker Desktop links docker into `/usr/local/bin`, or into `~/.docker/bin` for a user install. */
-function findDocker(home: string): string | null {
+export function findDocker(home: string): string | null {
   return firstExecutable([...installCandidates('docker'), join(home, '.docker', 'bin', 'docker')]);
 }
 

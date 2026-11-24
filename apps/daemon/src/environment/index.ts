@@ -36,6 +36,7 @@ export { captureLoginEnv, LOGIN_ENV_MARKER, parseEnvBlock, type LoginEnv } from 
 export { BILLING_SWITCH_VARS, NESTED_SESSION_VARS, stripBillingSwitches } from './session-env';
 export { buildNetworkEnv } from './network-env';
 export {
+  findDocker,
   markGhRequired,
   probeVersion,
   REQUIRED_TOOLS,
