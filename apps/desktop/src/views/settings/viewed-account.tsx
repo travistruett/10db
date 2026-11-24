@@ -9,7 +9,7 @@ const ACCOUNT_LABEL = (
   </Text>
 );
 
-// The account the Playbook and Agent Models read, kept here so both pages show the same one.
+// The account the Playbook and Language Models read, kept here so both pages show the same one.
 let chosen: AccountId | null = null;
 const listeners = new Set<() => void>();
 
@@ -34,7 +34,7 @@ export interface ViewedAccount {
   readonly choose: (id: AccountId) => void;
 }
 
-/** The account the Playbook and Agent Models resolve models on, shared by both pages. */
+/** The account the Playbook and Language Models resolve models on, shared by both pages. */
 export function useViewedAccount(): ViewedAccount {
   const accounts = useAccounts();
   const picked = useSyncExternalStore(subscribe, () => chosen);
@@ -44,7 +44,7 @@ export function useViewedAccount(): ViewedAccount {
   return { accounts, live, account, choose };
 }
 
-/** The Account select of the Playbook and Agent Models pages. */
+/** The Account select of the Playbook and Language Models pages. */
 export function ViewedAccountSelect({ viewed }: { readonly viewed: ViewedAccount }) {
   const { accounts, live, account } = viewed;
   return (

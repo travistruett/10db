@@ -14,7 +14,7 @@ import { SettingsSectionKey } from './sections';
 import { useViewedAccount, ViewedAccountSelect } from './viewed-account';
 
 const CLASS_OPTIONS = [
-  { value: ModelClass.Agent, label: 'Agent Models' },
+  { value: ModelClass.Agent, label: 'Language Models' },
   { value: ModelClass.Decision, label: 'Decision Models' },
 ];
 
@@ -52,7 +52,7 @@ function DecisionBilling() {
 
 /**
  * Settings › Models: what the Playbook and the decisions choose from. A title with the data sources and a
- * refresh, then Agent Models or Decision Models as the address says, each with the account that bills it.
+ * refresh, then Language Models or Decision Models as the address says, each with the account that bills it.
  * A failure of one class hides only that class.
  */
 export function ModelsSection() {
