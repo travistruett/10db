@@ -11,7 +11,8 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
-import { IconRoute, IconTrash } from '@tabler/icons-react';
+import { IconRoute, IconTrash, IconUsers } from '@tabler/icons-react';
+import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { EmptyState } from '../../shell/empty-state';
 import { useGoals } from '../../daemon/goal-queries';
@@ -22,6 +23,7 @@ import { categoryWord } from '../inbox/route-line';
 import { AddRouteModal } from './add-route-modal';
 import { HelpHint } from './help-hint';
 import { RouteScope, routeRows, ruleInputs } from './route-rows';
+import { SettingsSectionKey } from './sections';
 
 /** Settings › Question Routing: who a question goes to, by scope, most specific first. */
 export function WhoAnswersSection({ project }: { readonly project: ProjectDto }) {
@@ -68,13 +70,28 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
             Who answers each kind of question; the rest come to you.
           </Text>
         </Stack>
-        <Button
-          onClick={() => {
-            setAdding(true);
-          }}
-        >
-          Add Route
-        </Button>
+        <Group gap="xs" wrap="nowrap" style={{ flex: 'none' }}>
+          <Button
+            variant="default"
+            leftSection={<IconUsers size={16} />}
+            renderRoot={(props) => (
+              <Link
+                {...props}
+                to="/settings/$section"
+                params={{ section: SettingsSectionKey.People }}
+              />
+            )}
+          >
+            Manage People
+          </Button>
+          <Button
+            onClick={() => {
+              setAdding(true);
+            }}
+          >
+            Add Route
+          </Button>
+        </Group>
       </Group>
       {rules.isPending ? <Loader size="sm" /> : null}
       {rules.isError ? (

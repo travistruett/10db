@@ -44,6 +44,10 @@ oauth_config:
   scopes:
     bot:
       - chat:write
+      - channels:read
+      - channels:join
+      - groups:read
+      - files:write
       - im:write
       - im:history
       - mpim:write
@@ -69,6 +73,9 @@ What each part is for:
 | Part                                                   | Why                                                                                                                                                                                                                                         |
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `chat:write`                                           | post the question and the closing line                                                                                                                                                                                                      |
+| `channels:read`, `groups:read`                         | list the channels you can pick for a project's pictures: public ones, and private ones 10db was invited to                                                                                                                                  |
+| `channels:join`                                        | join the public channel you picked, so you don't have to invite 10db there                                                                                                                                                                  |
+| `files:write`                                          | post a project's pictures to that channel when a UI pass opens its pull request                                                                                                                                                             |
 | `im:write`                                             | open the DM with your stakeholder                                                                                                                                                                                                           |
 | `im:history`                                           | read their reply in that DM                                                                                                                                                                                                                 |
 | `mpim:write`, `mpim:history`                           | open a group DM when your stakeholder mentions a colleague, or when two people answer the same kind of question, and read the replies there                                                                                                 |
@@ -80,7 +87,7 @@ What each part is for:
 | `token_rotation_enabled: false`                        | a rotating token expires every 12 hours, so a Mac asleep overnight would wake with a dead one. Rotation can't be turned off once on                                                                                                         |
 | `interactivity: false`                                 | no buttons yet. A button pressed while your Mac is asleep fails with an error in Slack; a typed reply never does                                                                                                                            |
 
-Later 10db releases add `files:write` (screenshots) and buttons. Adding a scope after you installed the app,
+Later 10db releases add buttons. Adding a scope after you installed the app,
 including one this guide added since you made it (such as `reactions:write`), means reinstalling it: one click on
 the same page (**Install App › Reinstall to Workspace**).
 
