@@ -63,7 +63,7 @@ export function ProjectLinear({ project }: { readonly project: ProjectDto }) {
           />
         </Group>
       </SettingRow>
-      {linear.blockedBy === null || !linear.on ? null : (
+      {linear.blockedBy === null || !value.on ? null : (
         <Text size="xs" c="dimmed">
           {linear.blockedBy}
         </Text>

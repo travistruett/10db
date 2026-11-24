@@ -193,6 +193,8 @@ export function useConnectAccount() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
+    // An action, not a saved setting: a settings page's bar does not say Saved for it.
+    meta: { quiet: true },
     mutationFn: async (id: AccountId) => {
       queryClient.setQueryData(accountLoginKey(id), null);
       const started = await readJson(
@@ -222,6 +224,8 @@ export function useCancelConnect() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
+    // An action, not a saved setting: a settings page's bar does not say Saved for it.
+    meta: { quiet: true },
     mutationFn: async (id: AccountId) => {
       // The answer is 204 with no body; a refusal throws with the daemon's message.
       await readJson(

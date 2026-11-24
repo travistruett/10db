@@ -52,6 +52,9 @@ export function SettingsDrafts({ children }: { readonly children: ReactNode }) {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const dirty = dirtyIds.size > 0;
   useReportUnsaved(dirty);
+  // An edit ends the last save's Saved, and edits undone by hand end its refusal.
+  if (dirty && saved) setSaved(false);
+  if (!dirty && !saving && error !== null) setError(null);
 
   const [registry] = useState<DraftRegistry>(() => ({
     attach: (id, draft) => {

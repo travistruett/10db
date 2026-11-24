@@ -21,14 +21,13 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
   const accounts = useAccounts().data ?? [];
   const patch = usePatchProject(project.id);
   const limit = useProjectFields(project, ['budgetCeiling']);
-  const account = useDraft({
-    saved: project.accountId,
-    save: (accountId) => patch.mutateAsync({ accountId }),
+  // One patch for both: the daemon checks the backup against the account sent with it.
+  const pair = useDraft({
+    saved: { accountId: project.accountId, fallbackAccountId: project.fallbackAccountId },
+    save: (value) => patch.mutateAsync(value),
   });
-  const backup = useDraft({
-    saved: project.fallbackAccountId,
-    save: (fallbackAccountId) => patch.mutateAsync({ fallbackAccountId }),
-  });
+  const accountId = pair.value?.accountId ?? project.accountId;
+  const fallbackAccountId = pair.value?.fallbackAccountId ?? null;
   const handoff = useDraft<string | number>({
     saved: Math.round(project.usageHandoffAt * 100),
     save: (pct) => patch.mutateAsync({ usageHandoffAt: Number(pct) / 100 }),
@@ -53,10 +52,16 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
             aria-label="Account"
             accounts={accounts}
             isDisabled={cantRunAgents}
-            value={account.value ?? null}
+            value={accountId}
             allowDeselect={false}
             onChange={(value) => {
-              if (value !== null) account.set(AccountId.parse(value));
+              if (value === null) return;
+              const next = AccountId.parse(value);
+              // The new account can't also be its own backup.
+              pair.set({
+                accountId: next,
+                fallbackAccountId: fallbackAccountId === next ? null : fallbackAccountId,
+              });
             }}
           />
         </SettingRow>
@@ -71,13 +76,18 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
             // The project's own account is never offered, but after 10db moved the project onto its fallback
             // the recorded fallback is that account, and it still shows.
             accounts={accounts.filter(
-              (a) => a.id !== project.accountId || a.id === project.fallbackAccountId,
+              (a) =>
+                a.id !== accountId ||
+                (a.id === project.fallbackAccountId && accountId === project.accountId),
             )}
             isDisabled={cantRunAgents}
-            value={backup.value ?? null}
+            value={fallbackAccountId}
             clearable
             onChange={(value) => {
-              backup.set(value === null ? null : AccountId.parse(value));
+              pair.set({
+                accountId,
+                fallbackAccountId: value === null ? null : AccountId.parse(value),
+              });
             }}
           />
         </SettingRow>

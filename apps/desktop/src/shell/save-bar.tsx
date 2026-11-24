@@ -1,5 +1,6 @@
 import { Box, Button, Group, Text, Transition } from '@mantine/core';
 import { IconCircleCheck } from '@tabler/icons-react';
+import { useState } from 'react';
 
 /** What the bar says: edits waiting, a save under way, or a save that just landed. */
 export const SaveBarState = {
@@ -26,7 +27,11 @@ export function SaveBar({
   readonly onDiscard: () => void;
   readonly onSave: () => void;
 }) {
-  const waiting = state === SaveBarState.Unsaved || state === SaveBarState.Saving;
+  // While the bar slides away it keeps saying what it last said, never a Saved that did not happen.
+  const [last, setLast] = useState<SaveBarState>(state ?? SaveBarState.Saved);
+  if (state !== null && state !== last) setLast(state);
+  const shown = state ?? last;
+  const waiting = shown === SaveBarState.Unsaved || shown === SaveBarState.Saving;
   return (
     <Transition mounted={state !== null} transition="slide-up" duration={150}>
       {(styles) => (
@@ -74,11 +79,11 @@ export function SaveBar({
               <Button
                 variant="default"
                 onClick={onDiscard}
-                disabled={state === SaveBarState.Saving}
+                disabled={shown === SaveBarState.Saving}
               >
                 Discard
               </Button>
-              <Button onClick={onSave} loading={state === SaveBarState.Saving}>
+              <Button onClick={onSave} loading={shown === SaveBarState.Saving}>
                 Save
               </Button>
             </Group>

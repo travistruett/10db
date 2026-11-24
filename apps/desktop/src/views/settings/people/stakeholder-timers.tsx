@@ -26,13 +26,13 @@ export function StakeholderTimers() {
     save: (next: StakeholderTimersDto) => save.mutateAsync(next),
   });
   const current = draft.value;
-  if (timers.isPending || current === undefined) return <Loader size="sm" />;
   if (timers.isError)
     return (
       <Alert color="red" title="Couldn't load the timers">
         {timers.error.message}
       </Alert>
     );
+  if (current === undefined) return <Loader size="sm" />;
   const remind = current.remindAfterHours ?? DEFAULT_REMIND_HOURS;
   const back = current.returnAfterHours;
   return (
