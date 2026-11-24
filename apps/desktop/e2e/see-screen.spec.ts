@@ -18,28 +18,46 @@ const Picture = z.object({
   png: z.string(),
 });
 
-/** What the transcript's picture really holds, read back from its pixels. */
+/**
+ * What the transcript's picture really holds, read back from its pixels. WebKit may paint an image to a
+ * canvas as blank while its decoded bitmap is not yet ready to draw, though `decode()` has resolved, so
+ * each read decodes the picture afresh and the read repeats until it holds a drawn screen. The bytes the
+ * daemon served are what a failure here would be about; a picture that really is blank stays blank.
+ */
 async function pictureOf(page: Page, name: RegExp): Promise<z.infer<typeof Picture>> {
   const image = page.getByRole('img', { name });
   await expect(image).toBeVisible();
-  return Picture.parse(
-    await image.evaluate(async (node: HTMLImageElement) => {
-      await node.decode();
-      const canvas = document.createElement('canvas');
-      canvas.width = node.naturalWidth;
-      canvas.height = node.naturalHeight;
-      const context = canvas.getContext('2d');
-      if (context === null) throw new Error('no canvas');
-      context.drawImage(node, 0, 0);
-      const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
-      return {
-        naturalWidth: node.naturalWidth,
-        naturalHeight: node.naturalHeight,
-        colours: new Set(new Uint32Array(data.buffer)).size,
-        png: canvas.toDataURL('image/png'),
-      };
-    }),
-  );
+  let last: z.infer<typeof Picture> | undefined;
+  await expect
+    .poll(
+      async () => {
+        last = Picture.parse(
+          await image.evaluate(async (node: HTMLImageElement) => {
+            const copy = new Image();
+            copy.src = node.currentSrc;
+            await copy.decode();
+            const canvas = document.createElement('canvas');
+            canvas.width = copy.naturalWidth;
+            canvas.height = copy.naturalHeight;
+            const context = canvas.getContext('2d');
+            if (context === null) throw new Error('no canvas');
+            context.drawImage(copy, 0, 0);
+            const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+            return {
+              naturalWidth: copy.naturalWidth,
+              naturalHeight: copy.naturalHeight,
+              colours: new Set(new Uint32Array(data.buffer)).size,
+              png: canvas.toDataURL('image/png'),
+            };
+          }),
+        );
+        return last.colours;
+      },
+      { timeout: 15_000 },
+    )
+    .toBeGreaterThan(DRAWN_SCREEN_COLOURS);
+  if (last === undefined) throw new Error('the picture was never read');
+  return last;
 }
 
 /** Keeps the picture with the test's results, so what was drawn can be looked at. */
