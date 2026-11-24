@@ -196,9 +196,8 @@ to step 2 if it isn't.
 
    A wait's card is withdrawn when the landing goes on. Waits recheck when the folder watcher reports a change to
    HEAD, the base ref or a named path, and every minute. All waits live in the journal, so a restart keeps them.
-5. **Landed.** One write: the batch goes SHIPPED and the journal's `step: landed`. (Recovery's `landed` row
-   repeats the SHIPPED transition only for a journal written by an earlier build of this step, so a rerun is a
-   no-op.) Then:
+5. **Landed.** One write: the batch goes SHIPPED and the journal's `step: landed`, in one transaction, so
+   neither is ever found without the other. Then:
    - if T..C touches a path of the project's `migrations` hazard, one card: "This landing brought migrations into
      build: <paths>. Apply them to your dev database before you use the app." Its key is the batch, so a rerun
      raises it once;
@@ -273,7 +272,7 @@ the only one a person settles: they put the folder in a state of rows B to F, th
 | `gated` | step 4 |
 | `promoting` | the classifier |
 | any wait | restored from the journal. `retry_at` holds for `base_moving`; the others recheck at once |
-| `landed` | the SHIPPED write if missing, the migrations card by its key, then retire. Pictures catch up by themselves (§6) |
+| `landed` | the migrations card by its key, then retire. Pictures catch up by themselves (§6) |
 | `retiring` | the teardown reruns |
 
 A SHIPPING local-copy batch goes to `shipper.resume`, which routes it to the landing, starting from the journal's
