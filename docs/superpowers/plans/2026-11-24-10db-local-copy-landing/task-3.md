@@ -34,10 +34,12 @@ export function copyIdForBatch(db: DbReader, batchId: BatchId | null): CopyId | 
 ## Behavior
 
 - `withCopyId` copies `env`, deletes the name, and sets it when `copyId` isn't null.
-- `copyIdForBatch`: null for a null batch, or for a batch that isn't a worktree batch of a local project. For a
-  worktree batch of a local project it reads the journal row and returns its `copyId`; with no row, or one whose
-  `copyId` doesn't parse, it throws `CopyJournalMissingError`. The session start, gate or teardown that asked then
+- `copyIdForBatch` decides from pinned facts only, never the project's current delivery: a row's `copyId` whenever
+  the batch has a row; `CopyJournalMissingError` for a batch with a worktree, a null `repo` and a state past
+  CUTTING but no row, or a row whose `copyId` doesn't parse; null otherwise. The session start, gate or teardown that asked then
   raises one card and doesn't run, so a copy's command never runs without its id.
+- `packages/db/src/store/projects.ts` `updateProject` refuses a change of `delivery` while `unfinishedCopyOf`
+  answers a batch: "<title> is in a separate copy; let it ship or abandon it first".
 - The final check (`local-check.ts` `finalCheck`) is skipped for a copy batch (index call 6); its step checks run
   with the id.
 

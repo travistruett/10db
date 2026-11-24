@@ -64,7 +64,11 @@ Spec §5 steps 1 to 5, the reset rule ("Leaving and re-entering") and the outcom
 - A merge conflict: `sendToMerge`, the batch to OPEN, reset. There is no `conflict` wait.
 - `landed`: one transaction with the batch's SHIPPED transition and `step: landed`; then the migrations card when
   T..C touches the project's `migrations` hazard globs; then `step: retiring` and `retireCopy`.
-- `filters`, a `deps` hazard path in the diff, or a changed copy across the gate: FAILED with its `BatchFailure`,
+- Before each `promoteFastForward` call, one write clears `wait` and `retryAt`, sets `step: promoting` and checks
+  the batch is still SHIPPING (index, "Entering live"). Each outcome that wrote nothing is written to the journal
+  before any batch transition ("Leaving live").
+- `filters` (after patching the step to `gated`), a `deps` hazard path in the diff, or a changed copy across the
+  gate: FAILED with its `BatchFailure`,
   reset. Row G: FAILED (`interrupted_landing`), the journal kept.
 
 ## State-table rows

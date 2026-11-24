@@ -84,13 +84,23 @@ the classifier's row G.
   recovery's `recover.ts:219-227`) is `interrupted_landing` with the journal kept, Abandon is refused, and a new run
   of the task (a builder message, a fix) is refused with "a landing is settling in your folder". A promoting
   journal with a wait set had an outcome that wrote nothing, so none of this applies to it.
+  - **Entering live.** Before every `promoteFastForward` call, one write clears `wait` and `retryAt`, sets
+    `step: promoting`, and checks the batch is still SHIPPING; if it isn't (an Abandon or new run won the race),
+    nothing is called.
+  - **Leaving live.** An outcome that wrote nothing (`base_moved`, `off_base`, `in_the_way`, `index_locked`,
+    `filters`; classifier rows A, C, E, F) is written to the journal first, as its wait or its next step, before
+    any batch transition. `filters` patches the step to `gated` first, then the batch fails (`git_filters`) and
+    resets. Only `promoted` (→ `landed`), row B, row D, and `unclear` or row G (→ `interrupted_landing`) end live
+    otherwise.
+- **The copy id comes from pinned facts.** `copyIdForBatch` returns the row's id whenever a row exists, and
+  `updateProject` refuses a change of `delivery` while `unfinishedCopyOf` answers a batch.
 - **Your folder is written only by `promoteFastForward` and `finishPromotion`** (card 2). No other card runs
   `read-tree`, `checkout`, `reset`, `update-ref` or `mergeIntoBranch` on the project's checkout for a local copy.
   Neither function is called from inside another `withRepoLock` on the same checkout.
 - **A step's journal write comes before its act, and its outcome before the next step's intent** (spec §5).
 - **`TENDB_COPY_ID` is set only by `withCopyId`**, from the journal, last (spec §4).
 - **Nothing waits on the builder in a loop.** Every wait is a journal `wait`, one card (keyed by batch and wait
-  kind, so it is raised once), and a recheck on a minute timer or a watcher event.
+  kind, so it is raised once), and a recheck on the minute timer.
 - Tests: only those named on a card, each proven red first, each with a value card in its commit. No rendered
   component tests, no test-only exports or branches.
 - While working, run `pnpm exec vitest related <files> --maxWorkers=2` in the package, plus typecheck and lint of
@@ -225,7 +235,7 @@ export function copyIdForBatch(db: DbReader, batchId: BatchId | null): CopyId | 
 export interface CopyLanding {
   /** Runs or resumes the landing from the journal's step; the ship job calls it for a local copy. */
   land(batchId: BatchId, signal: AbortSignal): Promise<void>;
-  /** Rechecks every waiting landing whose wait a watcher event or the minute timer may have ended. */
+  /** Rechecks every waiting landing of the project; the minute timer calls it. */
   recheck(projectId: ProjectId): void;
 }
 export function createCopyLanding(deps: CopyLandingDeps): CopyLanding;
@@ -258,7 +268,7 @@ The journal's step × what happens. "Reset" is `resetLocalCopy`.
 | `promoting`                         | `off_base`                                         | `wait: folder_off_base`                                                                                                                                          | 5    |
 | `promoting`                         | `in_the_way`                                       | `wait: edits_in_the_way`                                                                                                                                         | 5    |
 | `promoting`                         | `index_locked`                                     | `wait: index_locked`, every 30 s; card after 10 min                                                                                                              | 5    |
-| `promoting`                         | `filters`                                          | FAILED (`git_filters`), reset                                                                                                                                    | 5    |
+| `promoting`                         | `filters`                                          | step → `gated`, then FAILED (`git_filters`), reset                                                                                                               | 5    |
 | `promoting`                         | `unclear`, or recovery                             | classifier row → A wait / B `landed` / C retry / D `finishPromotion` / E `merging` / F `wait: edits_in_the_way` / G FAILED (`interrupted_landing`), journal kept | 5, 6 |
 | `promoting` (FAILED, row G)         | Retry                                              | SHIPPING, resume at `promoting` → classifier                                                                                                                     | 5    |
 | `promoting`, live                   | Abandon, a new run of the task, or any failure     | Abandon and the run refused; a failure is `interrupted_landing`, journal kept                                                                                    | 5    |

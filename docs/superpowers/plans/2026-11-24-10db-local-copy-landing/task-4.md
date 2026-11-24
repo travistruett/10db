@@ -13,7 +13,7 @@ spec §2 (start routing, admission), §3 "The copy's life" (Cut).
   `insertLocalCopy` with `teardownCommand` = the project's `copyTeardownCommand`. `startBatchApart`'s refusal of
   several local tasks stays.
 - `apps/daemon/src/delivery/worktree-cut.ts`: for a local copy, start the branch at `refs/heads/<base>`, record it
-  as `base_sha`, and skip the origin, fetch and `gh` checks (`:102-162`); `repo` stays null. Create
+  as `base_sha`, and skip the origin, fetch and `gh` checks (`:102-162`); `repo` stays null. Create (or, on a recut, overwrite)
   `teardownRef(batchId)` at `base_sha` right after `addWorktree` (`:196`), and in the OPEN write (`:261-265`) set
   the journal's `teardownSha` to `base_sha` with `patchLocalCopy`. A cut refused before OPEN (`:83-97`) deletes the
   ref if it made one (card 6 exports `teardownRef`; bridge it here with a
