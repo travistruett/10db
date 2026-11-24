@@ -173,16 +173,17 @@ function world() {
     return ts;
   };
   /** A line 10db already posted for a send, as Slack keeps it. */
-  const botLine = (sendId: string, line: string, key: string): void => {
+  const botLine = (sendId: string, line: string, key: string, user: string = BOT): void => {
     thread.push({
       ts: nextTs(),
-      user: BOT,
+      user,
       text: 'an answer',
       bot: true,
       metadata: { event_type: 'tendb_send', event_payload: { sendId, line, key } },
     });
   };
-  const lines = (line: string) => thread.filter((m) => m.metadata?.event_payload['line'] === line);
+  const lines = (line: string) =>
+    thread.filter((m) => m.user === BOT && m.metadata?.event_payload['line'] === line);
   return {
     state,
     project,
@@ -245,6 +246,8 @@ describe('a stakeholder reply is sorted before it answers the card', () => {
     const watch = w.makeWatch(judging(ReplyKind.SimpleQuestion, 0.9), answering('It is for tax.'));
     for (const question of ['what is B?', 'and C?', 'and D?']) {
       const ts = w.say(question);
+      // Another app's line with 10db's metadata is not 10db's: it must not stand in for the post.
+      w.botLine(sendForCard(w.state.db, id)?.id ?? '', 'auto_answer', ts, 'UOTHER');
       await watch.tick();
       await watch.tick();
       expect(w.lines('auto_answer').at(-1)?.metadata?.event_payload['key']).toBe(ts);

@@ -298,7 +298,8 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     const { open } = c;
     const builder = draftContext(state.db, c.card).builderName;
     const lines = c.thread.flatMap((m) => {
-      const payload = m.metadata?.eventType === SEND_EVENT ? m.metadata.eventPayload : null;
+      const payload =
+        m.user === c.bot && m.metadata?.eventType === SEND_EVENT ? m.metadata.eventPayload : null;
       if (payload?.['sendId'] !== open.id || compareTs(m.ts, floorOf(open)) <= 0) return [];
       if (payload['line'] === 'auto_answer')
         return [{ ts: m.ts, name: '10db (automated)', text: m.text }];
@@ -412,7 +413,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     }
     // The reply's first message keys the line: it holds if more is written before a restart.
     const key = reply.firstTs;
-    if (findLine(c.thread, open.id, 'auto_answer', { key }) === undefined) {
+    if (findLine(c.thread, open.id, 'auto_answer', { bot: c.bot, key }) === undefined) {
       const written = await deps.answerWriter({
         cardId: card.id,
         question: reply.words,
@@ -579,6 +580,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     });
     const conversation: Conversation = {
       open,
+      bot,
       card,
       counted,
       thread: r.thread,

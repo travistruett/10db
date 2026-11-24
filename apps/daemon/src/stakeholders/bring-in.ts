@@ -66,7 +66,7 @@ export async function bringIn(
   const inCurrent = { channel: open.channelId, threadTs: open.threadTs, sendId: open.id };
 
   if (participants.length + newIds.length > GROUP_MAX) {
-    if (!findLine(input.thread, open.id, 'full', { key: mention.ts }))
+    if (!findLine(input.thread, open.id, 'full', { bot, key: mention.ts }))
       await postLine(client, { ...inCurrent, text: fullLine(), line: 'full', key: mention.ts });
     markHandled();
     return false;
@@ -79,7 +79,7 @@ export async function bringIn(
     if (!(error instanceof SlackError) || TRANSPORT.test(error.code) || error.code === 'no_token')
       throw error;
     for (const id of newIds) {
-      if (!findLine(input.thread, open.id, 'couldnt_add', { key: id }))
+      if (!findLine(input.thread, open.id, 'couldnt_add', { bot, key: id }))
         await postLine(client, {
           ...inCurrent,
           text: couldntAddLine(names.get(id) ?? id),
@@ -92,10 +92,10 @@ export async function bringIn(
   }
 
   const text = `${broughtInLine(broughtBy, newNames)}\n\n${sendSummary(state.db, open.id).text}`;
-  const already = findLine(await client.history(channel, mention.ts), open.id, 'moved');
+  const already = findLine(await client.history(channel, mention.ts), open.id, 'moved', { bot });
   const ts =
     already?.ts ?? (await postLine(client, { channel, text, sendId: open.id, line: 'moved' }));
-  if (!findLine(input.thread, open.id, 'moved_notice', { key: ts }))
+  if (!findLine(input.thread, open.id, 'moved_notice', { bot, key: ts }))
     await postLine(client, {
       ...inCurrent,
       text: movedLine(newNames),

@@ -5,17 +5,19 @@ import { blocksOf } from './slack-text';
 export const SEND_EVENT = 'tendb_send';
 
 /**
- * The line 10db already posted for a send, found by its metadata, newer than `after` when given. A crash
+ * The line 10db already posted for a send, found by its metadata, newer than `after` when given. Only a message
+ * posted by 10db's own bot (`bot`) counts: any other app can attach the same metadata. A crash
  * between a post and its write leaves the line in Slack; the next tick finds it here instead of posting again.
  */
 export function findLine(
   messages: readonly SlackMessage[],
   sendId: string,
   line: string,
-  opts: { readonly after?: string; readonly key?: string } = {},
+  opts: { readonly bot: string; readonly after?: string; readonly key?: string },
 ): SlackMessage | undefined {
   return messages.find(
     (m) =>
+      m.user === opts.bot &&
       m.metadata?.eventType === SEND_EVENT &&
       m.metadata.eventPayload['sendId'] === sendId &&
       m.metadata.eventPayload['line'] === line &&
