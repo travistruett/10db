@@ -125,11 +125,14 @@ A FAILED batch keeps its copy and database for Retry, as worktree batches do now
     (`lane-sandbox.ts`, `createLaneEnvFile`);
   - Codex lanes: `shellEnv` (`lane-sandbox.ts:571`), which `codex-lane-config.ts:65` sets as
     `shell_environment_policy.set`;
-  - gate runs and the teardown: `gate-sandbox.ts`'s `commandEnv`.
+  - gate runs and the teardown: `gate-sandbox.ts`'s `commandEnv`;
+  - the session's sandboxed MCP servers: `mcp-sandbox.ts:166`.
 - The runner passes `copyId` from the session's batch on every start and resume, and for reviewer and takeover
   sessions. A session of a copy batch whose journal row can't be read doesn't start, and raises one card. Without
   the id, Ampsio's targets would act on the folder's own databases.
-- The env allowlist doesn't change: the variable is added after filtering, like `TENDB_SANDBOX`.
+- `TENDB_COPY_ID` joins `ALLOWED_NAMES` (`sandbox/env-allowlist.ts`), as `TENDB_SANDBOX` has. A name off the list
+  becomes a `credentials.envVars` deny in the Claude profile (`lane-sandbox.ts:526`, `profile.ts:407`), while Codex
+  and the gate would still get it, so the providers would differ.
 
 ## 5. Landing
 
@@ -154,6 +157,11 @@ journal's step, never from step 0.
 | `updated_at` | |
 
 A step's row is written before it acts. Its outcome is written before the next step's intent.
+
+**Leaving and re-entering.** Any transition of the batch to FAILED or back to OPEN (a gate failure, a merge fix, a
+refusal) resets the journal to `step: open`, clears C and the wait, and keeps `attempt` at 0. Every entry at
+`gating`, `gated` or `promoting`, live or at recovery, first checks that the copy's head is still C, and goes back
+to step 2 if it isn't.
 
 **Steps.**
 
@@ -188,7 +196,9 @@ A step's row is written before it acts. Its outcome is written before the next s
 
    A wait's card is withdrawn when the landing goes on. Waits recheck when the folder watcher reports a change to
    HEAD, the base ref or a named path, and every minute. All waits live in the journal, so a restart keeps them.
-5. **Landed.** One write: the batch goes SHIPPED and the journal's `step: landed`. Then:
+5. **Landed.** One write: the batch goes SHIPPED and the journal's `step: landed`. (Recovery's `landed` row
+   repeats the SHIPPED transition only for a journal written by an earlier build of this step, so a rerun is a
+   no-op.) Then:
    - if T..C touches a path of the project's `migrations` hazard, one card: "This landing brought migrations into
      build: <paths>. Apply them to your dev database before you use the app." Its key is the batch, so a rerun
      raises it once;
@@ -244,11 +254,13 @@ file, against both T and C:
 | A | HEAD isn't `refs/heads/<base>` | you switched branch | `wait: folder_off_base` |
 | B | R is C, or descends from C | landed (later edits and commits are yours) | `step: landed`, go on |
 | C | R is T; W's index and files match T | nothing written | retry step 4 |
-| D | R is T; W's index and files match C; nothing staged in W besides C's | crashed between `read-tree` and `update-ref` | compare-and-swap T → C; a race is row F |
+| D | R is T; W's index and files match C; nothing staged in W besides C's | crashed between `read-tree` and `update-ref` | compare-and-swap T → C; a race is row G |
 | E | R descends from T, not from C; W's index and files match R | build moved; nothing of 10db's written | back to step 2 |
-| F | anything else | mixed or edited files, or build moved under files 10db wrote | one card naming the paths and refs; touch nothing; the copy keeps the work |
+| F | R is T or descends from T, not from C; W's index matches R; some W files differ from both R and C | your edits, nothing of 10db's written | `wait: edits_in_the_way`, naming those files |
+| G | anything else | mixed index or files, or build moved under files 10db wrote | the batch fails (`BatchFailure` for an interrupted landing) with one card naming the paths and refs, and a Retry that runs the classifier again. Nothing in your folder is touched; the copy keeps the work |
 
-10db never runs `read-tree`, a reset or a checkout on your folder at recovery, except for the swap in row D.
+10db never runs `read-tree`, a reset or a checkout on your folder at recovery, except for the swap in row D. Row G is
+the only one a person settles: they put the folder in a state of rows B to F, then press Retry.
 
 **At start-up** (`delivery/recover.ts`), by journal step:
 
@@ -280,8 +292,9 @@ retirement).
      passwords `.env` already uses. pgbouncer routes any database name (`* = host=db`). `DATABASE_ADMIN_URL` is
      unchanged.
 3. **Created on first use** by any copy-aware target: `CREATE DATABASE amps_lane_<id> TEMPLATE <the migrated test
-   template>`, found the way `database_template.ensure_template` finds it. "Already exists" counts as success. Grants
-   are database-local. No role is created or altered, and no password changes: `prepare_roles_and_database` touches
+   template>`, found the way `database_template.ensure_template` finds it. "Already exists" counts as success. A clone
+   doesn't carry database-level grants (`database_template.py:268-272`), so the target then runs
+   `GRANT CONNECT, TEMPORARY ON DATABASE amps_lane_<id>` to the dev roles, as the folder's database has them. No role is created or altered, and no password changes: `prepare_roles_and_database` touches
    cluster-wide roles, so it isn't used.
 4. **Copy-aware targets.** `make t`, backend `make lint`, `make migration`, `make migrate`, `verify-backend` and
    `gate.sh` run in a one-off container from the backend image when `TENDB_COPY_ID` is set. The container mounts
@@ -325,9 +338,9 @@ Following `.claude/rules/testing.md`: git and recovery are core. Each commit tha
    - an edit in a written path answers `in_the_way` and writes nothing;
    - a file touched but unchanged doesn't block (refresh before check);
    - a commit on the base between `read-tree` and `update-ref` answers `unclear` and leaves the files alone.
-2. **The classifier as one table test** in a real repository: rows A to F, each from a real folder state.
+2. **The classifier as one table test** in a real repository: rows A to G, each from a real folder state.
 3. **One wiring test:** a resumed copy session's Claude env file, its Codex `shellEnv` and its gate env all carry the
-   same `TENDB_COPY_ID`.
+   same `TENDB_COPY_ID`, and the Claude profile's `credentials.envVars` denies don't name it.
 4. **One e2e flow extended** (`apps/desktop/e2e/loop.spec.ts`, real daemon and app, local delivery already): with
    `localCopies` on, a task is put in a separate copy from its placement control, runs, and its commit reaches the
    folder's base only after its gate.
@@ -381,4 +394,7 @@ One file each under `docs/architecture/decisions/` when built:
 | Fable 16: Done before landed | `dependenciesDone` waits for the landing (§7) |
 | Fable 17: tests; reviewer and takeover sessions | four tests (§12); those sessions carry the id (§3, §4) |
 | Fable 18: scratch gate logs vanish | the gate runs in the copy; logs stay in the data dir (§5 step 3) |
+| Fable r2 B1: the copy id off the allowlist is a Claude deny | `TENDB_COPY_ID` joins `ALLOWED_NAMES`; the wiring test checks the denies (§4, §12.3) |
+| Fable r2 B2: classifier's last row stuck | row F waits on your edits; row G fails the batch with a Retry (§8) |
+| Fable r2 B3: the journal isn't reset after a fix | leaving SHIPPING resets it; re-entry checks the head is C (§5) |
 | Astra: the brief's deferred items | §1 Out |
