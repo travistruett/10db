@@ -1,314 +1,384 @@
 # 10db local copy landing: a separate copy for a Commit Directly project
 
-**Status:** designed 2026-11-24, not built. Core (git, recovery, sandbox). Size: Core.
-**From:** the lane isolation brief (`~/Agents/notes/10db/2026-11-24-lane-isolation-brief.md`, revision 5), its
-evidence notes beside it, and three rounds of adversarial review (Astra, rounds 1 to 3).
+**Status:** designed 2026-11-24, revision 2, not built. Size: Core (git, recovery, sandbox).
+**From:** the lane isolation brief (`~/Agents/notes/10db/2026-11-24-lane-isolation-brief.md`, revision 5) and the
+round-1 reviews (Fable and Astra, `~/Agents/notes/10db/2026-11-24-local-copy-spec-review-*-r1.md`).
 **Extends:** `2026-10-27-10db-worktree-mode-design.md` (worktrees), `2026-10-29-10db-task-placement-design.md`
-(placement per task). **Starts after:** lanes can run Ampsio's backend checks (10db-2b's lane-env work), #811 and
-#813 have merged.
+(placement per task). **Starts after:** lanes can run Ampsio's backend checks (10db-2b's lane-env work) and #813.
+#811 has merged.
 
 ## Brief
 
-**What changes for you.** A project that commits directly to a branch (Ampsio: local `build`, never pushed) can put
-a task in a **separate copy**: its own branch and folder, its own application database and its own test databases.
-10db merges the copy onto `build` only after review accepts the work and the full gate passes on the exact commit
-being merged. Your folder and `build` only ever receive finished work. After a landing, 10db runs your project's
-after-landing command (Ampsio: snapshot `amps_dev`, then migrate it from a clean copy of the landed commit), then
-takes the before and after pictures that the Slack posts use.
-
-This is a **pilot**: one backend task at a time, run once on a Claude lane and once on a Codex lane. Its numbers
-decide whether parallel copies, a resource broker, nightly batches and the Here/Away presets get built.
+**What changes for you.** A project that commits straight to a local branch (Ampsio: `build`, never pushed) can put
+a task in a **separate copy**: its own branch, folder and database. 10db moves `build` to the copy's work only after
+review accepts it and the full gate passes on the exact commit that lands. Your folder and `build` only ever receive
+finished work. This is a **pilot**: one copy at a time, backend tasks, run once on a Claude lane and once on a Codex
+lane. Its numbers decide what gets built next.
 
 **What it buys.**
 - Work that fails review never reaches `build`. AMP-147 left 11 commits there.
 - Edits from your other sessions can't break the task's checks (AMP-119; 79 "Write outside every claim" cards).
-- Measured numbers for the next decision.
+- Measured numbers for parallel copies, the resource broker, nightly batches and the Here/Away presets.
 
 **What could go wrong, and how we'd know.**
-- **A landing interrupted by a crash.** A journal records every step. Recovery finishes it, puts it back, or leaves
-  one card that says exactly what is half done. It never guesses.
-- **A side effect that may or may not have happened** (a migration, a Slack post). It counts as done only with a
-  receipt. Otherwise it shows "outcome uncertain" and is never repeated by itself.
-- **Your folder has edits where the landing writes.** The landing waits with one card and touches nothing.
-- **Docker reach is unchanged** (your decision): a lane can still reach `amps_dev` through Docker, as in the shared
-  folder today. The judge stays the guard.
+- **A save in your editor during the landing.** 10db lands only when your folder has no edits in the files it
+  writes. A save in the moment between git's own check and its write can be overwritten, as with `git pull`. This
+  is your decision (a), so reviewers don't reopen it.
+- **A crash mid-landing.** A journal records each step. On restart 10db reads the branch, index and files together
+  and finishes, retries, or leaves one card naming what it found. It never guesses.
+- **Your folder is off `build`, or has edits where the landing writes.** The landing waits with one card and touches
+  nothing.
+- **Docker reach is unchanged** (your decision). A lane can still reach `amps_dev` through Docker, as it can today.
 
-**Calls you might disagree with.**
-1. Copies with local delivery need a per-project switch, `localCopies`, off by default. Ampsio turns it on.
-2. Each task's copy gets one application database for its whole life, and a fresh test database for each test run.
-3. A task in a copy that changes dependency lockfiles is refused in the pilot. Its virtualenv would be the shared
-   one.
-4. Measurement is a script run during the pilot, not product code.
+**Calls you might disagree with** (each with its cost if wrong).
+1. **No secrets and no setup command.** 10db hands the copy one plain id, `TENDB_COPY_ID`. Ampsio's make targets name
+   the copy's databases from it and create them on first use. Cost: Ampsio's make targets carry the provisioning.
+2. **No `amps_dev` migration after a landing in the pilot.** You approved it. It's deferred, not refused. A landing
+   that brings migrations raises one card telling you to apply them, which is what you do today. Cost: you migrate
+   by hand during the pilot.
+3. **No new Slack path.** The landing's after picture goes through today's picture and Slack pipeline, which can
+   double-post after a crash mid-post, as it can today. Cost: an occasional double post.
+4. **The before picture is the one taken when the task starts**, not at landing. Cost: if `build` moved during the
+   task, the before shows the older `build`.
+5. **A landing waits for `build` to be still for 10 minutes** after three races with it, rather than re-gating each
+   time (Ampsio's gate takes about 18 minutes). Cost: a landing on a busy day waits longer.
 
-**What's needed from you.** Approve by replying. Ampsio's side (its AGENTS.md D-13 exception, make targets that act
-on the copy they run in, and three small scripts) is an Ampsio task, listed in §9.
+**What's needed from you.** Nothing. Ampsio's side (§9) is an Ampsio task, and the one-line D-13 exception is
+already decided.
 
 ## 1. Scope
 
 In:
-- separate copies for tasks of a `delivery: local` project with `localCopies` on;
-- per-copy setup and teardown commands;
-- landing onto the local base after review and gate;
-- an after-landing command and pictures, with receipts and a landing journal;
-- recovery after a crash at any step.
+- separate copies for single tasks of a `delivery: local` project with `localCopies` on;
+- landing onto the local base after review and a gate on the landing commit;
+- a journal and recovery for every landing step;
+- a teardown command run when the copy is retired.
 
-Out, decided by the pilot's numbers:
-- parallel copies and Docker CPU sharing;
-- the resource broker;
-- batches of several tasks;
-- the Here/Away presets;
-- reading GitHub's repo rules;
-- dependents waiting on a merge in team repos;
-- copies for tasks that change dependencies.
+Out, until the pilot's numbers say otherwise:
+- parallel copies, Docker CPU sharing and the resource broker;
+- batches of several tasks, and landing on a branch other than the base;
+- `amps_dev` migration after a landing;
+- the Here/Away presets, reading GitHub's repo rules, dependents on team repos;
+- tasks that change a lockfile.
 
-## 2. Settings
+## 2. Settings and admission
 
 New project fields (`ProjectInput`, `packages/contracts/src/entities.ts`):
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `localCopies` | boolean | false | Allows `workspaceMode: worktree` placement for a `delivery: local` project. |
-| `copySetupCommand` | string or null | null | Run once per copy, before any lane starts; prints the copy's environment (§4). |
-| `copyTeardownCommand` | string or null | null | Run when the copy is retired; receives that environment. |
-| `afterLandingCommand` | string or null | null | Run after a landing (§6), in a scratch worktree of the landed commit. |
-| `afterLandingPaths` | list of globs | `[]` | The command runs only when a landing changes a path these match; empty means after every landing. |
+| `localCopies` | boolean | false | Allows a separate copy for a task of a `delivery: local` project. |
+| `copyTeardownCommand` | string or null | null | Run when a copy is retired (§3). Required when `localCopies` is on. |
 
-Changes to existing rules:
-- The refine "A worktree per task needs pull request delivery" (`entities.ts:620`) and `placementFor`
-  (`packages/db/src/store/tasks.ts:362-374`) accept `delivery: local` when `localCopies` is on.
-- The project's default `workspaceMode` stays `shared` for Ampsio. The builder names the copy on the pilot task.
-  `isolate` proposals then work as they do for pull-request projects.
-- `localCopies` requires `copySetupCommand` to be set: a copy without its own database would fall back to the
-  project's own database.
+Both are set in Settings › Delivery, shown only for local delivery: one switch and one command field.
 
-Each run pins its placement, target branch and delivery when it starts. Changing settings later never moves running
-work.
+Rules that change:
+- The refine "A worktree per task needs pull request delivery" (`entities.ts:620`), the same check in
+  `updateProject` (`store/projects.ts:250`), `placementFor` (`store/tasks.ts:362-374`) and `placementRefusal`
+  (`store/tasks.ts:1349`) accept `delivery: local` with `localCopies` on.
+- The project's default `workspaceMode` stays `shared`. The builder puts the pilot task in a copy with the task's
+  placement control. A project default of `worktree` stays pull-request only.
+- `startBatchApart` (`delivery/start.ts:269`) still refuses several tasks at once for a local project. One task in a
+  copy starts.
+
+A task can go into a copy only when all of these hold. Otherwise placement is refused with the reason:
+- the project has a gate command (a copy lands only after one);
+- the task's rigor runs a review;
+- the task lands on the base (`TaskLanding` kind `base`);
+- no other copy of the project is unfinished (CUTTING, OPEN, SHIPPING or FAILED). A second copy task stays queued
+  until the first is shipped or abandoned, and its row says which task it waits for.
+
+Each run pins its placement, base and delivery when it starts (task placement spec). Settings changed later never
+move running work. Every path below routes on the batch's pinned delivery, never the project's current one.
 
 ## 3. The copy's life
 
-A local copy is a batch, as a worktree batch is today. The states are `BatchState`'s own; nothing new.
+A local copy is a batch with a worktree, as a pull-request worktree batch is. Its states are `BatchState`'s own. A
+journal row (§5) is written in the cut's transaction.
 
-1. **Cut** (`delivery/worktree-cut.ts`). As for a pull-request worktree, with one difference: the branch is created
-   at `refs/heads/<base>` (the local base), not `refs/remotes/origin/<base>`, and nothing is fetched. A project
-   with no origin is fine.
-   - Seed and install happen as today (`worktree-seed.ts`, `worktree-dependencies.ts`).
-   - The cut records `batches.cut_from` as the base commit.
-2. **Setup** runs right after the cut, before any lane starts:
-   - The copy's tracked files equal `cut_from`, checked with the private-index status check every other step uses,
-     so the command runs builder-committed code only.
-   - It runs through the gate runner (`createGateSandbox`, `forRun`), with the project's Docker and localhost
-     switches and `TENDB_COPY_ID` set.
-   - Its standard output is parsed as `KEY=VALUE` lines (§4).
-   - Failure or a timeout fails the cut with a card that names the command's output and log, and removes the copy
-     as a failed seed does today.
-3. **Open.** Lanes work in the copy and commit to its branch. Step checks and the final check (`local-check.ts`
-   `stepCheck`, `finalCheck`) run in the copy, with the copy's environment.
-4. **Land** (§5) once the task is Done by review (its run accepted) and nothing in the batch is unfinished.
-5. **Retire.** On SHIPPED, ABANDONED or a failed cut:
-   - The teardown command runs in a fresh scratch worktree of the base's current tip (no seed, no install), never
-     in the copy. It gets the copy's stored environment.
-   - The worktree goes as today (`worktree-cleanup.ts`).
-   - A failed teardown leaves one card naming the resources, and keeps the stored environment so it can be retried.
+1. **Cut** (`delivery/worktree-cut.ts`). As for a pull-request worktree, except:
+   - the branch starts at `refs/heads/<base>`, recorded as `batches.base_sha`;
+   - no origin, fetch or `gh` check runs (`worktree-cut.ts:102-162` are pull-request only);
+   - seed and install run as today (`worktree-seed.ts`, `worktree-dependencies.ts`).
+   The cut makes nothing outside git and the worktree, so recutting a CUTTING row after a crash is safe.
+2. **Open.** Lanes, reviewer sessions and takeovers of the task run in the copy. Every command they run carries
+   `TENDB_COPY_ID` (§4). Step and final checks run in the copy, as they do for a worktree batch.
+3. **Land** (§5) once the task's run is accepted by review and no workstream of the batch has work in hand.
+4. **Retire** on SHIPPED or ABANDONED:
+   - `copyTeardownCommand` runs through the gate runner, unslotted, in a fresh scratch worktree of the base's tip
+     (no seed, no install), never in the copy. It gets `TENDB_COPY_ID`. The tip it ran from goes in the journal.
+   - Exit 0 is done. Then the worktree and branch go as today (`worktree-cleanup.ts`).
+   - A failure leaves one card with the command's log and a Retry. The worktree stays until teardown succeeds.
+   - The command must be idempotent. Recovery reruns it.
 
-A FAILED batch keeps its copy and its database for Retry, as worktree batches do now.
+A FAILED batch keeps its copy and database for Retry, as worktree batches do now. It counts as the project's one copy.
 
-## 4. The copy's environment
+## 4. The copy id
 
-- **Shape.** The setup command prints one `KEY=VALUE` per line.
-  - Keys match `^[A-Z][A-Z0-9_]{0,63}$`; values are at most 4 KiB with no newline; at most 32 pairs.
-  - It is parsed with zod at the boundary.
-  - A key the env allowlist would never pass to a command (`sandbox/env-allowlist.ts`, for example `DOCKER_CONFIG`)
-    is refused, which fails the cut.
-  - Values can hold the copy's own database password, so every value is treated as a secret: never logged, never on
-    a card, never in an event.
-- **Stored** in one macOS Keychain item per copy (`10db copy <batch id>`), the way Slack tokens are kept
-  (`stakeholders/AGENTS.md`), never in SQLite. SQLite records only the keys, in a new table
-  `copy_environment_keys (batch_id, key)`, written in the cut's transaction, so recovery and teardown know what to
-  expect. The item is deleted once teardown succeeds.
-- **Handed** to every lane session and every gate run of the batch, on every start and resume:
-  - Claude lanes, any account (plan, API key, Bedrock): `LaneSandbox.forSession` adds the pairs to the env file
-    the sandboxed shell sources (`sandbox/env-file.ts`).
-  - Codex lanes: the same pairs go into `shellEnv`, which `codex-lane-config.ts:65` sets as
-    `shell_environment_policy.set`.
-  - Gate runs: `forRun` adds them to the run's env.
-  - One function, `copyEnvironmentOf(batchId)`, reads the Keychain item. It is the only reader, so the providers
-    can't differ. An item that can't be read fails the session's start with one card. It never starts the lane
-    without its environment, which would fall back to the project's own database.
-- **Ampsio's** setup prints, for example, `DATABASE_URL`, `DATABASE_OWNER_URL`, `AMPS_LANE_DB` and
-  `AMPS_TEST_DB_PREFIX`, all naming `amps_lane_<copy id>`. `AMPS_TEST_DB` itself is set per test run by Ampsio's
-  make targets, `<prefix>_<run>`, dropped when pytest exits (`test_utils/run_tests.py`).
+- **Value.** `copyIdOf(batchId)`: the first 12 hex digits of the SHA-256 of the batch id. It's lowercase hex, so
+  it is safe as part of a Postgres name and needs no escaping. It is not a secret.
+- **Stored** in the journal row, so recovery and teardown don't recompute it from a changed rule.
+- **Handed** by `prepareCommandEnv` (`sandbox/command-env.ts`), which builds the variables every sandboxed command
+  gets on top of the allowlisted env. It gets an optional `copyId` and sets `TENDB_COPY_ID`, as it sets
+  `TENDB_SANDBOX`. One function, so the paths can't differ:
+  - Claude lanes, on any account (plan, API key, Bedrock): the env file the sandboxed shell sources
+    (`lane-sandbox.ts`, `createLaneEnvFile`);
+  - Codex lanes: `shellEnv` (`lane-sandbox.ts:571`), which `codex-lane-config.ts:65` sets as
+    `shell_environment_policy.set`;
+  - gate runs and the teardown: `gate-sandbox.ts`'s `commandEnv`.
+- The runner passes `copyId` from the session's batch on every start and resume, and for reviewer and takeover
+  sessions. A session of a copy batch whose journal row can't be read doesn't start, and raises one card. Without
+  the id, Ampsio's targets would act on the folder's own databases.
+- The env allowlist doesn't change: the variable is added after filtering, like `TENDB_SANDBOX`.
 
 ## 5. Landing
 
-Landing runs in the project's ship queue (`delivery/jobs.ts`), one job at a time. A new table, `landings`, holds the
-journal: `(id, batch_id, step, expected_tip, candidate, attempt, detail, updated_at)`, one row per landing. Every
-step writes its row before acting and after. Steps:
+Landing replaces the push and pull request in the batch's ship steps (`delivery/ship.ts` `shipSteps`), in the
+project's ship queue (`delivery/jobs.ts`), one job at a time. The journal owns it: a resumed landing starts from the
+journal's step, never from step 0.
 
-1. **Preconditions.**
-   - The task is Done with its review accepted, and no workstream of the batch has work in hand.
-   - The copy is clean (no uncommitted files, private-index check).
-   - Your folder is on `<base>`. If not, wait with one card, "Your folder isn't on build", and recheck every
-     minute and when the watcher reports a change in the folder.
-2. **Base update in the copy.**
-   - Read `T = refs/heads/<base>`. If the copy's branch doesn't contain `T`, merge `T` into it in the copy with
-     `Git.mergeIntoBranch` (`resolve: { generated }`, as `base-update.ts` does today).
-   - A conflict goes back to the task as a fix, as base-update conflicts do now.
-   - Record `expected_tip = T` and `candidate = C`, the copy's head.
-3. **Gate on `C`.** Unless the latest passing final check already ran on `C`, run the full gate on `C`
-   (`gateInScratch` in `delivery/scratch-gate.ts`, the one slot) with the copy's environment. `gateInScratch` is
-   keyed by a pass today (`passId`, its scratch branch name); it's generalized to take a batch for this.
-   - A failure fails the batch with today's gate-failure card and fix loop.
-4. **Promote**, under your folder's repo lock (`withRepoLock`):
-   - Read the base again. If it isn't `T`, go back to step 2 (attempt + 1). Past 3 attempts, wait with one card:
-     "build keeps moving; landing waits".
-   - Capture the **before** pictures now (§7), while your folder still shows `T`.
-   - Promote with `Git.mergeIntoBranch({ repo: <your folder>, branch: <base>, from: C })`. `C` contains `T`, so
-     this is the fast-forward path: `update-index --refresh`, the check for your edits in the written paths
-     (`changes`, `untrackedInTheWay`), `read-tree -m -u T C`, then `update-ref` compare-and-swap `T → C`, putting
-     the files back if the ref raced (`git.ts:3441-3475`).
-   - `blocked` (your edits where it writes): wait with one card naming the files. The card is withdrawn when they're
-     clean or committed, and the landing retries.
-   - **The editor-save window.** `read-tree -m -u` refuses a file whose stat no longer matches the index after the
-     refresh ("not uptodate"), so a save after the check is refused, not overwritten. The plan's first card proves
-     this on Apple Git 2.50 and on CI's git. If either git overwrites, promotion instead defers whenever any written
-     path's mtime is newer than the check, and this spec is amended.
-5. **After landing** (§6), then the **after** pictures and the Slack post (§7).
-6. **Done.** The batch goes SHIPPED, the copy is retired (§3), and the journal row is closed.
+**Journal.** A new table, `local_copies`, one row per copy batch:
 
-## 6. After-landing command
+| Column | Meaning |
+|---|---|
+| `batch_id` | the batch (primary key; deleted with the batch) |
+| `copy_id` | §4 |
+| `step` | `open`, `merging`, `gating`, `gated`, `promoting`, `landed`, `retiring`, `retired` |
+| `base_tip` | T, the base the step expects |
+| `candidate` | C, the commit that lands |
+| `attempt` | races with the base so far |
+| `wait` | null, `folder_off_base`, `edits_in_the_way`, `index_locked`, `base_moving` or `conflict` |
+| `wait_detail` | the paths or branch the wait's card names |
+| `retry_at` | when a timed wait checks again |
+| `teardown_sha` | the base tip the last teardown ran from |
+| `updated_at` | |
 
-- **What runs.** It runs only when the landing changed a path that `afterLandingPaths` matches (Ampsio:
-  `amps/backend/**/migrations/**`). With no globs, it runs after every landing.
-- **Where.** It runs in a fresh scratch worktree of `C`, never your folder, through the gate runner with the
-  project's switches. `TENDB_LANDED=<C>` and `TENDB_FOLDER=<your folder>` are set.
-- **Receipt.** Exit 0 is the receipt; the project's command must exit non-zero unless its own check passed. Ampsio's
-  runs `pg_dump`, `db_prepare` (which runs `migrate`, then `check_db_security`, `db_prepare.py:61-63`), and
-  `verify-backend`.
-- **Not started:** the journal says so, and recovery may start it.
-- **Started, no receipt** (crash, timeout, or the daemon stopped mid-run): **outcome uncertain**, one card. It isn't
-  rerun on its own. The card offers Run again and Mark done.
-- **Failed:** one card with its output.
-  - The landing stays SHIPPED: `build` already holds the work.
-  - Pictures wait.
-  - The card names the snapshot path the command printed (`TENDB_SNAPSHOT=` on its output, if any), and says a
-    restore excludes uploaded files and discards everything written after the snapshot. 10db never restores
-    anything.
+A step's row is written before it acts. Its outcome is written before the next step's intent.
 
-## 7. Pictures and Slack
+**Steps.**
 
-- **Why this is needed.** A task in a copy gets pictures only from the landing: today `takesPictures` requires
-  shared placement (`pictures/picture-routes.ts:74-82`). The landing calls the camera explicitly, with the task's
-  routes (`pictureRoutes`).
-- **Before:** at step 4, before promotion.
-- **After:** after a successful after-landing command, or straight after promotion when none ran.
-- **What they show.** The project's `appUrl` (your stack), signed in by the project's dev-login command (Ampsio:
-  the `frontend-e2e` tenant). This is the same exposure as pictures today.
-- **The Slack post** counts as done only on `files.completeUploadExternal` succeeding (`slack/client.ts:266-277`),
-  not on the file id that `files.getUploadURLExternal` returns earlier.
-  - The journal records "posting" before the first call and "posted" with the reply.
-  - A crash in between is outcome uncertain, with one card (Post again, Mark done). It is never reposted by itself.
-  - Recipients and send settings apply as today.
+1. **Preconditions.** The task's run is accepted by review. No workstream of the batch has work in hand. The copy
+   is clean on its branch (the private-index status check). The diff from `base_sha` touches no path of the
+   project's `deps` hazard; if it does, the batch fails with a card saying the pilot doesn't land lockfile changes.
+2. **Merging.** Read T = `refs/heads/<base>` in your folder. If the copy's head contains T, C is the head. Otherwise
+   T is merged into the copy's branch, in the copy, with `Git.mergeIntoBranch` (`resolve: { generated }`, as
+   `base-update.ts` does). That takes the copy's lock, not your folder's.
+   - Base update for a local copy reads the local base and never fetches (`base-update.ts:1287-1297,1615`).
+   - A conflict holds the landing (`wait: conflict`) and goes to the task as a merge fix, as `sendToMerge` does for
+     a pull-request batch. The fix's run must be accepted by review again before the landing restarts. A merge
+     10db settles by itself (generated files, both sides' added lines) needs no new review: the gate covers it.
+   - Write `step: gating` with T and C.
+3. **Gating.** If the batch's last passing gate ran on C, skip to step 4. Otherwise run the full gate in the copy, as
+   step 2 of `shipSteps` does, in the gate slot. The gate is bound to C: the copy's head is C and the copy is clean
+   before the gate starts and after it ends. If either check fails, the gate counts for nothing and the batch fails
+   with "the gate changed the copy". The gate's log stays in the data dir, as today. A failure takes today's
+   gate-failure card and fix loop. A pass writes `step: gated`.
+4. **Promoting.** Write `step: promoting`. Then `Git.promoteFastForward` (below) on your folder with T and C. Its
+   outcomes:
+
+   | Outcome | What 10db does |
+   |---|---|
+   | `promoted` | `step: landed` |
+   | `base_moved` | `attempt + 1`, back to step 2. On the fourth race, `wait: base_moving` with one card, "build keeps moving; the landing waits for it to be still for 10 minutes". `retry_at` is 10 minutes after the last base change. Each base change pushes it back. |
+   | `off_base` | `wait: folder_off_base`, one card naming the branch your folder is on |
+   | `in_the_way` | `wait: edits_in_the_way`, one card naming the files |
+   | `index_locked` | `wait: index_locked`, retried every 30 s. After 10 minutes, one card saying another git holds your folder's index |
+   | `filters` | the batch fails with a card naming the paths whose git filters 10db won't run |
+   | `unclear` | read the folder (§8's classifier) and act on its row |
+
+   A wait's card is withdrawn when the landing goes on. Waits recheck when the folder watcher reports a change to
+   HEAD, the base ref or a named path, and every minute. All waits live in the journal, so a restart keeps them.
+5. **Landed.** One write: the batch goes SHIPPED and the journal's `step: landed`. Then:
+   - if T..C touches a path of the project's `migrations` hazard, one card: "This landing brought migrations into
+     build: <paths>. Apply them to your dev database before you use the app." Its key is the batch, so a rerun
+     raises it once;
+   - the after picture (§6);
+   - `step: retiring`, and retirement (§3).
+
+**`Git.promoteFastForward({ repo, branch, expected: T, candidate: C })`**, a new operation in `git/git.ts`. It
+takes your folder's repo lock once, and calls nothing else that takes it (`withRepoLock` isn't re-entrant,
+`git.ts:1474`). Inside the lock, in order:
+1. `refs/heads/<branch>` isn't symbolic and equals T; else `base_moved`.
+2. HEAD is the symbolic ref `refs/heads/<branch>`; else `off_base`.
+3. C descends from T; else `base_moved`. Only a fast-forward lands. Nothing is ever merged in your folder.
+4. No path in T..C needs a filter; else `filters`.
+5. `update-index -q --refresh`, then the check for your edits in the written paths (`changes`,
+   `untrackedInTheWay`). Any hit is `in_the_way`. The refresh comes first, so a file touched but unchanged doesn't
+   block.
+6. `read-tree -m -u T C`. A refusal naming `index.lock` is `index_locked`. Any other failure is `unclear`.
+7. `update-ref --no-deref <ref> C T`, compare-and-swap on the branch.
+8. If the swap fails, read the ref again. If it's still T, HEAD is still the branch, and the index's tree is C's,
+   put the files back with `read-tree -m -u C T` and answer `base_moved`. Otherwise touch nothing and answer
+   `unclear`. The branch moved under files 10db wrote, so only §8's classifier and a person may decide.
+
+The residual window (decision (a)): `read-tree` checks each file against the refreshed index, then writes it. A save
+between those two moments is overwritten. This is the same as `git pull`, and no test claims otherwise.
+
+## 6. Pictures and Slack
+
+- **Before.** `takesPictures` (`pictures/picture-routes.ts:74-82`) counts a task in a local copy as it counts a
+  Your-folder task. Its before is taken at first launch, as theirs is. Your folder still shows `build` then, so the
+  before shows the stack as the task found it. `before-rule.ts` doesn't change.
+- **After.** A copy task's after is asked when its batch goes SHIPPED by a landing, not when its workstream goes
+  DONE. Start-up's catch-up asks afters for copy tasks shipped in the last hour that have none, as it does for
+  Your-folder tasks done in the last hour.
+- **Slack** posts the after through today's `onAfterCapture` → `announceTask` path. Its receipts, retries and
+  start-up catch-up stay as they are, including a possible double post after a crash mid-post (call 3).
+- **Stack readiness.** The after can be taken before `make watch` has synced the landed files into the stack.
+  Today's Your-folder afters share that risk. The pilot measures it (§13). A fix waits for the numbers.
+- Sharing turned off, no routes, and a failed dev login behave as they do today.
+
+## 7. Dependents
+
+A task in a copy can reach Done before its work lands. `dependenciesDone` (`store/tasks.ts:677`) counts a Done task
+whose latest batch is a local copy that hasn't shipped as not done. Its dependents wait for the landing.
 
 ## 8. Recovery
 
-At startup, `delivery/recover.ts` reads every open `landings` row and the real state:
+**The folder classifier.** One function reads your folder for T and C, and is used both live (`unclear`) and at
+start-up. With W the paths T..C writes, it reads HEAD, R = `refs/heads/<base>`, and each W path's index entry and
+file, against both T and C:
 
-| Journal step | Real state | Recovery |
-|---|---|---|
-| base update | copy branch has or lacks the merge | redo step 2 from the copy's real head |
-| gating | gate pid gone | rerun step 3 |
-| promoting | base = `C` | promotion happened: record it, go on to step 5 |
-| promoting | base = `T`, folder's written paths match `T` | nothing written: retry step 4 |
-| promoting | base = `T`, written paths match `C` in files and index, nothing else changed in them | crashed between `read-tree` and `update-ref`: compare-and-swap `T → C`; if that races, card |
-| promoting | base is neither `T` nor `C` | card: "build moved while a landing was interrupted"; leave everything; the copy keeps the work |
-| promoting | written paths mixed between `T` and `C`, or edited | card naming the paths; touch nothing |
-| after-landing started, no receipt | | outcome uncertain card (§6) |
-| posting, no "posted" | | outcome uncertain card (§7) |
-| retire | teardown not done | run teardown (it must be idempotent; Ampsio's drops `IF EXISTS`) |
+| Row | What it reads | What it means | What 10db does |
+|---|---|---|---|
+| A | HEAD isn't `refs/heads/<base>` | you switched branch | `wait: folder_off_base` |
+| B | R is C, or descends from C | landed (later edits and commits are yours) | `step: landed`, go on |
+| C | R is T; W's index and files match T | nothing written | retry step 4 |
+| D | R is T; W's index and files match C; nothing staged in W besides C's | crashed between `read-tree` and `update-ref` | compare-and-swap T → C; a race is row F |
+| E | R descends from T, not from C; W's index and files match R | build moved; nothing of 10db's written | back to step 2 |
+| F | anything else | mixed or edited files, or build moved under files 10db wrote | one card naming the paths and refs; touch nothing; the copy keeps the work |
 
-Recovery never runs `read-tree`, a reset or a checkout on your folder for anything but finishing a compare-and-swap
-whose files already match `C`.
+10db never runs `read-tree`, a reset or a checkout on your folder at recovery, except for the swap in row D.
+
+**At start-up** (`delivery/recover.ts`), by journal step:
+
+| Step | Recovery |
+|---|---|
+| CUTTING batch | recut as today. `cuttableAgain` tests the branch against `refs/heads/<base>` for a local copy, not `refs/remotes/origin/<base>` (`recover.ts:140`) |
+| `open` | the batch is recovered as an OPEN worktree batch today |
+| `merging` | if the copy's head contains T, record C and go to `gating`; else redo step 2. A half-written copy is made whole first (`ensureWorktreeWhole`) |
+| `gating` | a surviving gate process is ended (`recover.ts` step 2), then the gate reruns on C. If the copy's head isn't C any more, back to step 2 |
+| `gated` | step 4 |
+| `promoting` | the classifier |
+| any wait | restored from the journal. `retry_at` holds for `base_moving`; the others recheck at once |
+| `landed` | the SHIPPED write if missing, the migrations card by its key, then retire. Pictures catch up by themselves (§6) |
+| `retiring` | the teardown reruns |
+
+A SHIPPING local-copy batch goes to `shipper.resume`, which routes it to the landing, starting from the journal's
+step. A SHIPPED copy's worktree is removed only after its teardown succeeds (`recover.ts` step 5 calls the copy's
+retirement).
 
 ## 9. Ampsio's side (an Ampsio task, its own process)
 
 1. **AGENTS.md D-13.** One line: 10db may create private branches and worktrees for its copies. Sessions still never
    create or switch branches.
-2. **Make targets act on the checkout they run in.** Today `gate.sh`, `make t`, `make lint`, `make migration` and
-   `make api-client` `exec` into the one `amps` stack, and `verify-backend` refuses a checkout whose files differ
-   from that container.
-   - In a copy (detected by `AMPS_LANE_DB` set), they run in a one-off container from the backend image, with the
-     copy's `amps/backend` mounted and the copy's environment, on the stack's network.
-   - In your folder, nothing changes.
-   - Whether `docker compose run -v` can add or override a bind mount on a service that defines one has to be
-     verified first; a plain `docker run` on the network is the fallback.
-3. **Setup:**
-   - `CREATE DATABASE amps_lane_<id> TEMPLATE <migrated test template>`, with the template found the way
-     `database_template.ensure_template` finds it;
-   - grants as `prepare_roles_and_database` gives;
-   - print the pairs in §4.
-4. **Teardown:** drop `amps_lane_<id>` and any `amps_lane_<id>_*` test databases, `IF EXISTS`.
-5. **After landing:**
-   - `pg_dump -Fc amps_dev` to `~/Agents/scratch/ampsio/<date>/`, keeping the newest 5;
-   - `db_prepare` from the landed scratch worktree, which has its own `amps/backend` mounted read-only;
-   - `verify-backend` once `make watch` has synced;
-   - print `TENDB_SNAPSHOT=<path>`.
-6. **Pilot tasks** change no lockfile (§2, call 3). A copy task whose diff touches `uv.lock` or `pnpm-lock.yaml`
-   fails its final check with a card saying the pilot doesn't support it.
+2. **Names**, when `TENDB_COPY_ID` is set (it must match `^[0-9a-f]{12}$`, or the target refuses):
+   - the copy's app database `amps_lane_<id>`. It has no "test" in it, so the test runner can never drop it
+     (`test_utils/run_tests.py`, `is_run_database_name`);
+   - test runs `amps_test_lane_<id>_<run>`, with the runner's worker suffixes, dropped when pytest exits as today;
+   - `DATABASE_URL`, `DATABASE_OWNER_URL` and `DATABASE_SUPPORT_URL` all name `amps_lane_<id>`, with the dev roles and
+     passwords `.env` already uses. pgbouncer routes any database name (`* = host=db`). `DATABASE_ADMIN_URL` is
+     unchanged.
+3. **Created on first use** by any copy-aware target: `CREATE DATABASE amps_lane_<id> TEMPLATE <the migrated test
+   template>`, found the way `database_template.ensure_template` finds it. "Already exists" counts as success. Grants
+   are database-local. No role is created or altered, and no password changes: `prepare_roles_and_database` touches
+   cluster-wide roles, so it isn't used.
+4. **Copy-aware targets.** `make t`, backend `make lint`, `make migration`, `make migrate`, `verify-backend` and
+   `gate.sh` run in a one-off container from the backend image when `TENDB_COPY_ID` is set. The container mounts
+   the copy's `amps/backend` read-write and the virtualenv read-only, uses the copy's names, and joins the stack's
+   network. They never `exec` into the `amps` stack. In your folder nothing changes. The gate runs every check it
+   runs in your folder, against the copy's files; its frontend checks use the copy's own seeded tree.
+5. **Refused in a copy**, with a message saying so: `make api-client`, the frontend-paired helpers, and anything
+   that changes a lockfile or the virtualenv.
+6. **`make copy-teardown`** (the project's `copyTeardownCommand`): ends connections to and drops `amps_lane_<id>`
+   and every `amps_test_lane_<id>_*`, `IF EXISTS`. It touches no other name.
+7. **Pilot tasks** are backend tasks that change no lockfile and need no API-client regeneration. Ideally they add
+   no migrations; if one does, §5's card covers it.
 
 ## 10. Provider parity
 
-- **Same everywhere.** The copy, its database, the gate, landing and recovery are 10db's, not the model's, so they
-  behave the same on every account. The copy's environment reaches Claude lanes (plan, API key, Bedrock) through
-  the env file, and Codex lanes through `shellEnv`, both from `copyEnvironmentOf`.
-- **Unattended.** A capability an account lacks is skipped and reported the same way on every account. The project
-  is never moved to another account.
+- **Same everywhere.** The copy, its id, the gate, landing and recovery are 10db's, not the model's. The id reaches
+  Claude lanes (plan, API key, Bedrock) through the env file and Codex lanes through `shellEnv`, both from
+  `prepareCommandEnv`, so no provider can differ.
+- **Unattended.** Every wait and refusal above is a card, the same on every account. The project never moves to
+  another account.
 - **The pilot** runs on a Claude plan lane and a Codex lane. API-key and Bedrock lanes are checked before any preset
   ships.
 
 ## 11. Trust and limits
 
-- **Builder-committed code only.** Setup and teardown run builder-committed code: the cut's own tree, or a scratch
-  worktree of the base. The after-landing command runs the landed commit, which passed review and the gate.
-- **Docker reach is unchanged** (the builder's decision): with `sandboxDocker` on, a lane and a gate get the engine
+- **What runs unjudged.** The gate and the teardown run through the gate runner, outside the judge, as gates do
+  today. The teardown runs from the base's tip: the builder's commits plus landed work that passed review and the
+  gate. `build` can still hold unreviewed commits from shared-folder tasks, as it does today.
+- **Docker reach is unchanged** (the builder's decision). With `sandboxDocker` on, a lane and a gate get the engine
   (`sandbox/lane-sandbox.ts:477`, `gate-sandbox.ts:281`) and can reach any database or folder. The judge is the
-  guard, as in the shared folder. This spec adds no new reach.
-- **New secrets:** none beyond the copy's own database password, kept in the Keychain and never shown.
-- **Coordination:** copy tasks take area claims scoped to the batch (W9), and hazard claims (`migrations` project-wide)
-  as today. A copy task adding a migration still waits for the `migrations` claim.
+  guard, as in the shared folder. This spec adds no reach.
+- **No new secrets.** The copy id is a name, not a credential. Postgres roles are cluster-wide and stay as they are.
+- **Coordination.** Copy tasks take area claims scoped to their batch (W9), and hazard claims (`migrations` is
+  project-wide) as today.
 
 ## 12. Tests
 
-Following `.claude/rules/testing.md`; all core (git, recovery).
+Following `.claude/rules/testing.md`: git and recovery are core. Each commit that adds a test carries its value card.
 
-1. **Promotion in a real git repository:**
-   - a dirty written path blocks and writes nothing;
-   - a save after the refresh is refused by `read-tree` (the editor window, §5 step 4);
-   - a raced compare-and-swap puts the files back.
-2. **Recovery rows** for "promoting" (§8), in a real repository and a real SQLite file: base at `C`; at `T` with
-   nothing written; at `T` with the written files matching `C`; base moved elsewhere.
-3. **One run through the real pipeline** (`createTestEngine`, the fake adapter): a copy task in a local project
-   lands only after review and gate; `build` moved during the gate means a second gate on the new candidate; the
-   after-landing command's missing receipt becomes outcome uncertain and isn't rerun.
+1. **`promoteFastForward` in a real git repository:**
+   - an edit in a written path answers `in_the_way` and writes nothing;
+   - a file touched but unchanged doesn't block (refresh before check);
+   - a commit on the base between `read-tree` and `update-ref` answers `unclear` and leaves the files alone.
+2. **The classifier as one table test** in a real repository: rows A to F, each from a real folder state.
+3. **One wiring test:** a resumed copy session's Claude env file, its Codex `shellEnv` and its gate env all carry the
+   same `TENDB_COPY_ID`.
+4. **One e2e flow extended** (`apps/desktop/e2e/loop.spec.ts`, real daemon and app, local delivery already): with
+   `localCopies` on, a task is put in a separate copy from its placement control, runs, and its commit reaches the
+   folder's base only after its gate.
 
-No e2e test is added; the cards reuse existing card kinds. Value cards go with each commit.
+No other test is added. Waits, cards and the pictures hookup are checked by the pilot itself.
 
 ## 13. Measurement (a script, not product code)
 
-`scripts/pilot-measure.mjs` in the coordinator's scratch, not the repo. Read-only SQLite plus `docker stats` sampled
-every 5 s during gates. It reports per pilot task:
-- outcome;
-- refusals (`skipped_actions`);
-- gate wait (queued to slot held);
-- wall time;
+The script lives in the coordinator's scratch, not the repo. It reads SQLite read-only, and samples `docker stats`
+every 5 s for the whole task. Per pilot task it reports:
+- outcome, and refusals (`skipped_actions`);
+- gate wait, from `waitedMs` (`verify/gate-slots.ts:172`);
+- wall time, and time from landing to SHIPPED;
 - peak Docker CPU and memory;
-- disk used by the copy and its databases.
+- disk used by the copy's worktree and databases (`du`, `pg_database_size`);
+- how long after promotion its after picture was taken;
+- cleanup readback after retirement: no worktree, no branch, no `amps_lane_<id>` or `amps_test_lane_<id>_*`
+  database.
 
 Baseline: the shared-folder profile (`2026-11-24-ampsio-lane-profile.md`).
 
 ## 14. Decisions this records
 
 One file each under `docs/architecture/decisions/` when built:
-- a Commit Directly project may use separate copies behind `localCopies`;
-- a copy lands only after review and a gate on the exact commit;
-- a side effect counts only with a receipt, otherwise "outcome uncertain";
-- Docker reach for copies is unchanged in the pilot (the builder's call).
+- a Commit Directly project may use separate copies behind `localCopies`, one at a time in the pilot;
+- a copy lands only after review and a gate on the exact commit, by fast-forward only;
+- a landing accepts git's own editor-save window, the same as `git pull` (the builder's decision (a));
+- Docker reach for copies is unchanged in the pilot (the builder's decision);
+- `amps_dev` migration after a landing is deferred from the pilot.
+
+## Appendix: round-1 findings and what revision 2 did
+
+| Finding | Resolution |
+|---|---|
+| Fable 1, Astra 1: the outer lock deadlocks; a merge could land an ungated commit | `promoteFastForward`: one lock, fast-forward only, bound to T and C, refresh before check (§5) |
+| Fable 2: promotion outcomes with no card | the outcome table (§5) |
+| Fable 3, Astra 5: recovery gaps | the journal owns the landing; the classifier; the step table (§8) |
+| Fable 4, Astra 6: Slack reposts | no new path; today's behavior, as call 3 (§6) |
+| Fable 5, Astra 7: the env allowlist refuses the keys | one non-secret id added after filtering (§4) |
+| Fable 6, Astra 9: after-landing can't run in the gate sandbox | migration deferred; a card (§5 step 5) |
+| Fable 7: editor-save claim overstated | the window stated; the builder's decision (a) |
+| Fable 8, Astra 4: test names, roles, aliases | `amps_lane_<id>`, `amps_test_lane_<id>_<run>`, every alias, no role changes (§9) |
+| Fable 9, Astra 10: no e2e | one flow extended (§12.4) |
+| Astra 2: secrets through stdout and arguments | no secrets (§4, §11) |
+| Astra 3: provisioning before any record | nothing is made at the cut; Ampsio creates on first use; teardown required and idempotent (§2, §3, §9) |
+| Astra 8, Fable 11: origin, fetch and guards; review after a conflict fix | pinned local delivery at every entry point; review again after a conflict fix (§2, §3, §5) |
+| Fable 10: rollback after a hand commit | rollback only when the ref is T and the index holds C (§5 step 8) |
+| Fable 12, 13: secrets and trust wording | no secrets; §11 rewritten |
+| Fable 14: a landing-time before is dropped | the before at task start (§6, call 4) |
+| Fable 15: gate thrash | 10 quiet minutes after three races (§5, call 5) |
+| Fable 16: Done before landed | `dependenciesDone` waits for the landing (§7) |
+| Fable 17: tests; reviewer and takeover sessions | four tests (§12); those sessions carry the id (§3, §4) |
+| Fable 18: scratch gate logs vanish | the gate runs in the copy; logs stay in the data dir (§5 step 3) |
+| Astra: the brief's deferred items | §1 Out |
