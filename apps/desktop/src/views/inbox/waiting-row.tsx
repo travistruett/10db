@@ -1,9 +1,10 @@
-import type { InboxItemDto } from '@10db/contracts';
+import { isParkChoice, type InboxItemDto } from '@10db/contracts';
 import { Button, Group, Stack, Text } from '@mantine/core';
 import { useAnswerInbox } from '../../daemon/queries';
 import { cardAnswer } from './card-answer';
 import { ConversationView } from './conversation-view';
 import { defaultRecording } from './record-decision';
+import { SlackText } from './slack-preview';
 
 /** "Mark Ellis", "Mark Ellis + Ana Ortiz": who the question is out with. */
 export function recipientsOf(item: InboxItemDto): string {
@@ -38,31 +39,34 @@ export function WaitingDetail({ item }: { readonly item: InboxItemDto }) {
   if (send === null) return null;
   return (
     <Stack gap="sm" px="md" py="xs">
-      <Text size="sm" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>
-        {send.text}
+      <Text size="sm" c="dimmed" component="div">
+        <SlackText text={send.text} />
       </Text>
       <ConversationView send={send} />
       <Text size="xs" c="dimmed">
         Answer it yourself:
       </Text>
       <Group gap="xs">
-        {item.options.map((option) => (
-          <Button
-            key={option.label}
-            size="xs"
-            variant="default"
-            aria-label={`Answer Myself: ${option.label}`}
-            loading={answer.isPending}
-            onClick={() => {
-              answer.mutate({
-                id: item.id,
-                answer: cardAnswer(item, option.label, '', defaultRecording(item)),
-              });
-            }}
-          >
-            {option.label}
-          </Button>
-        ))}
+        {/* Parking the task is not an answer: Withdraw Question brings the card back to park it. */}
+        {item.options
+          .filter((option) => !isParkChoice(option.label))
+          .map((option) => (
+            <Button
+              key={option.label}
+              size="xs"
+              variant="default"
+              aria-label={`Answer Myself: ${option.label}`}
+              loading={answer.isPending}
+              onClick={() => {
+                answer.mutate({
+                  id: item.id,
+                  answer: cardAnswer(item, option.label, '', defaultRecording(item)),
+                });
+              }}
+            >
+              {option.label}
+            </Button>
+          ))}
       </Group>
       {answer.isError ? (
         <Text size="xs" c="red">
