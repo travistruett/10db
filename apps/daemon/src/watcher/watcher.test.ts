@@ -11,6 +11,7 @@ import {
 import { dirname, join } from 'node:path';
 import {
   ConflictError,
+  TaskStatus,
   WorkstreamState,
   type BatchId,
   type InboxItemDto,
@@ -33,6 +34,7 @@ import {
   transitionBatch,
   releaseClaims,
   seedProject,
+  setTaskStatus,
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -188,22 +190,27 @@ describe('watcher', () => {
     };
 
     it('closes once its path is committed and clean or no unfinished task could own it, but not while a lane could', async () => {
-      const { workstream } = running();
+      const { task, workstream } = running();
       await raiseStray('docs/stray.md');
       expect(await watcher.resolveSettledStrays()).toBe(0);
       commit('docs/stray.md');
       expect(await watcher.resolveSettledStrays()).toBe(1);
       expect(flags()).toEqual([]);
 
-      touch('.mcp.json');
-      emit('.mcp.json');
+      touch('docs/other.md');
+      emit('docs/other.md');
       await watcher.flush();
       expect(flags()).toHaveLength(1);
       base.write((ctx) => {
         transitionWorkstream(ctx, workstream.id, { to: WorkstreamState.Failed, fence: null });
       });
+      // A failed run of an open task can be retried, so it could still own the write.
       expect(await watcher.resolveSettledStrays()).toBe(0);
       expect(flags()).toHaveLength(1);
+      base.write((ctx) => {
+        setTaskStatus(ctx, task.id, TaskStatus.Cancelled);
+      });
+      expect(await watcher.resolveSettledStrays()).toBe(1);
     });
   });
 

@@ -18,7 +18,6 @@ import {
   noOpenRouterSync,
   PROTOCOL_VERSION,
   RoutedBy,
-  TaskStatus,
   AgentSkillNotInstallable,
   harnessOf,
   requireHarness,
@@ -2197,7 +2196,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // A card for a task's skipped calls, or for a write nobody could own, has nothing left to do once the
   // task is finished or abandoned, or its run ends.
   const unsubscribeSettled = bus.subscribe((event) => {
-    if (event.type === EventType.TaskChanged && event.data['status'] !== TaskStatus.Open) {
+    if (event.type === EventType.TaskChanged) {
       closeFinishedSkippedCards(state.db, inbox);
     } else if (
       event.type === EventType.WorkstreamChanged &&

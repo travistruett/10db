@@ -11,6 +11,8 @@ import {
   LANE_STATES,
   WorkstreamId,
   WorkstreamState,
+  TaskStatus,
+  type TaskId,
   BatchId,
   type InboxItemDto,
   type ProjectDto,
@@ -26,6 +28,7 @@ import {
   getBatch,
   getInboxItem,
   getProject,
+  getTask,
   findOpenByFoldKey,
   getWorkstream,
   getWorkstreamRow,
@@ -1063,6 +1066,14 @@ export function createWatcher(deps: {
     }
   }
 
+  function taskIsOpen(taskId: TaskId): boolean {
+    try {
+      return getTask(db, taskId).status === TaskStatus.Open;
+    } catch {
+      return false;
+    }
+  }
+
   /** Whether any workstream a stray card names, or any of its project's when it names none, is unfinished. */
   function couldBeOwned(item: InboxItemDto): boolean {
     const candidates = item.detail?.['candidates'];
@@ -1081,7 +1092,12 @@ export function createWatcher(deps: {
             }
           })
         : listWorkstreams(db, { projectId: item.projectId });
-    return lanes.some((lane) => !isTerminal(lane.state));
+    // A failed run of a task still open can be retried, so it could still own the write.
+    return lanes.some(
+      (lane) =>
+        !isTerminal(lane.state) ||
+        (lane.state === WorkstreamState.Failed && taskIsOpen(lane.taskId)),
+    );
   }
 
   /**

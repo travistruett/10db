@@ -279,7 +279,7 @@ export async function sweepUnlistedRuns(deps: SkippedCardDeps): Promise<void> {
 
 /**
  * Closes every open item of a run whose task has finished or been abandoned: what it lists is
- * nothing a builder can still act on. Returns how many it closed.
+ * nothing a builder can still act on, except calls of a finished task that no follow-up has run. Returns how many it closed.
  */
 export function closeFinishedSkippedCards(
   db: DbReader,
@@ -300,6 +300,9 @@ export function closeFinishedSkippedCards(
       status = TaskStatus.Cancelled;
     }
     if (status === TaskStatus.Open) continue;
+    // A done task's run can still have calls the builder meant to approve: that card stays until
+    // it has none left to run or its follow-up exists.
+    if (status === TaskStatus.Done && stillOffersRun(db, item, run.data)) continue;
     inbox.resolve(
       item.id,
       status === TaskStatus.Done ? 'The task is done.' : 'The task was abandoned.',
@@ -307,6 +310,12 @@ export function closeFinishedSkippedCards(
     closed += 1;
   }
   return closed;
+}
+
+/** Whether a card still offers Run these now: it lists calls to run and no follow-up exists yet. */
+function stillOffersRun(db: DbReader, item: InboxItemDto, run: WorkstreamId): boolean {
+  const ids = z.array(SkippedActionId).safeParse(item.detail?.['skipIds']);
+  return ids.success && ids.data.length > 0 && skipFollowUpOf(db, run) === null;
 }
 
 const SkippedDetail = z.object({
