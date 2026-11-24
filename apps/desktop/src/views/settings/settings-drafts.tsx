@@ -117,17 +117,18 @@ export function SettingsDrafts({ children }: { readonly children: ReactNode }) {
   const save = async (): Promise<void> => {
     setSaving(true);
     setError(null);
-    const pending = [...dirtyIds].flatMap((id) => {
-      const draft = drafts.current.get(id);
-      return draft === undefined ? [] : [draft.current.save()];
-    });
+    // The drafts are read as they are now, not as of the render this handler came from, so a Save pressed
+    // as the bar appears still saves what the page holds.
+    const pending = [...drafts.current.values()].flatMap((draft) =>
+      draft.current.dirty ? [draft.current.save()] : [],
+    );
     const problems = (await Promise.all(pending)).filter((p): p is string => p !== null);
     setSaving(false);
     if (problems.length > 0) setError(problems.join(' '));
     else flashSaved();
   };
   const discard = (): void => {
-    for (const id of dirtyIds) drafts.current.get(id)?.current.discard();
+    for (const draft of drafts.current.values()) if (draft.current.dirty) draft.current.discard();
     setError(null);
   };
 
