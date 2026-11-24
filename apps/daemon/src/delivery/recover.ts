@@ -31,7 +31,14 @@ import { batchBranchName } from './branch-name';
 import { listStrayBranches, settleAbandonedBranches } from './branch-sweep';
 import { batchCheckout } from './checkout';
 import { stopCiFixing } from './ci-stop';
-import { forTasks, startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
+import {
+  forTasks,
+  startCards,
+  worktreeCards,
+  wrongBranchCard,
+  type Card,
+  type ShipFailure,
+} from './cards';
 import { copyLandingCards, raiseMigrationsForLanding } from './copy-landing-cards';
 import { retireCopy } from './copy-retire';
 import { cuttingTasks, forgetCuttingTasks } from './cutting-tasks';
@@ -71,6 +78,11 @@ export interface BatchRecoveryReport {
   readonly swept: string[];
   /** Finished shared batches whose checkout recovery switched back. */
   readonly switchedBack: BatchId[];
+}
+
+/** The failure and card of `outcome`, with `body` in place of the card's words. */
+function withKnownBody(outcome: ShipFailure, body: string): ShipFailure {
+  return { ...outcome, card: { ...outcome.card, body } };
 }
 
 const message = (error: unknown): string =>
@@ -235,8 +247,12 @@ export async function recoverBatches(deps: {
       // at promoting, whatever else is wrong with the copy.
       const copy = getLocalCopy(db, batch.id);
       const live = copy !== null && isLivePromoting(copy);
+      // Recovery has not read the folder, so the card says what it knows and nothing more.
       const interrupted = live
-        ? copyLandingCards.interruptedLanding(batch, [], batch.baseBranch)
+        ? withKnownBody(
+            copyLandingCards.interruptedLanding(batch, [], batch.baseBranch),
+            `10db restarted while it was writing ${batch.baseBranch} into your folder, and the copy's worktree is missing or off its branch (${card.title}). 10db has not read your folder and touched nothing in it; the copy still has the work. Fix the copy, then press Retry, which reads the folder before anything is written.`,
+          )
         : null;
       const reason = (interrupted?.card ?? card).title;
       deps.state.write((w) => {
@@ -297,38 +313,42 @@ export async function recoverBatches(deps: {
       if (getBatch(db, batch.id).worktreePath === null) report.retired.push(batch.id);
     }
 
-    // 5a. Finished local copies not yet retired: a copy landed (its migrations card raised by its key),
-    // closed or abandoned goes through its teardown before its worktree, branch and ref go.
-    for (const copy of listOpenLocalCopies(db)) {
-      const batch = getBatch(db, copy.batchId);
-      if (
-        batch.state !== BatchState.Shipped &&
-        batch.state !== BatchState.Closed &&
-        batch.state !== BatchState.Abandoned
-      )
-        continue;
-      try {
+    // 5a. Finished local copies not yet retired: a landed copy's migrations card is raised by its key here,
+    // and the retirement (its teardown, which may run long) is queued as other work is, so startup
+    // never waits on it and shutdown stops it.
+    try {
+      for (const copy of listOpenLocalCopies(db)) {
+        const batch = getBatch(db, copy.batchId);
         if (
-          batch.state === BatchState.Shipped &&
-          copy.step === CopyStep.Landed &&
-          copy.baseTip !== null &&
-          copy.candidate !== null
+          batch.state !== BatchState.Shipped &&
+          batch.state !== BatchState.Closed &&
+          batch.state !== BatchState.Abandoned
         )
-          await raiseMigrationsForLanding(
-            deps.worktrees.ctx,
-            batch,
-            getProject(db, batch.projectId),
-            copy.baseTip,
-            copy.candidate,
+          continue;
+        try {
+          if (
+            batch.state === BatchState.Shipped &&
+            copy.step === CopyStep.Landed &&
+            copy.baseTip !== null &&
+            copy.candidate !== null
+          )
+            await raiseMigrationsForLanding(
+              deps.worktrees.ctx,
+              batch,
+              getProject(db, batch.projectId),
+              copy.baseTip,
+              copy.candidate,
+            );
+          const ctx = deps.worktrees.ctx;
+          deps.jobs.run(jobKey(batch, JobQueue.Ship), (signal) =>
+            retireCopy(ctx, batch.id, signal).then(() => undefined),
           );
-        if (
-          (await retireCopy(deps.worktrees.ctx, batch.id, new AbortController().signal)) ===
-          'retired'
-        )
-          report.retired.push(batch.id);
-      } catch (error) {
-        deps.logger.warn({ batchId: batch.id, err: message(error) }, 'copy not retired');
+        } catch (error) {
+          deps.logger.warn({ batchId: batch.id, err: message(error) }, 'copy not retired');
+        }
       }
+    } catch (error) {
+      deps.logger.warn({ err: message(error) }, 'copies not listed for retirement');
     }
 
     // 6. The sweep, after every removal above, so it only finds what no batch names.

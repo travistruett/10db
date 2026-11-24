@@ -5,7 +5,7 @@ import {
   type InboxItemDto,
   type ProjectId,
 } from '@10db/contracts';
-import { getBatch, getBatchRow, getProject, patchBatch } from '@10db/db';
+import { getBatch, getBatchRow, getLocalCopy, getProject, patchBatch } from '@10db/db';
 import { z } from 'zod';
 import { returnCheckout } from './checkout-return';
 import { switchToBatchBranch } from './checkout-switch';
@@ -18,7 +18,7 @@ import {
   type WorktreeOffer,
 } from './cards';
 import { post, raise, withdraw, type DeliveryContext } from './context';
-import { retireCopy } from './copy-retire';
+import { finishCopyRetirement, retireCopy } from './copy-retire';
 import { handMadeCards } from './hand-made-cards';
 import { removeMergedHandMade } from './hand-made-worktrees';
 import { jobKey, JobQueue } from './jobs';
@@ -129,6 +129,9 @@ export function createWorktreeCardAnswers(
         ctx.jobs.run(jobKey(batch, JobQueue.Ship), async () => {
           try {
             await retireWorktree(ctx, offer.batchId, true);
+            // A copy's retirement ends with its ref and journal, which only `retireCopy` writes.
+            if (getLocalCopy(ctx.state.db, offer.batchId) !== null)
+              await finishCopyRetirement(ctx, offer.batchId);
           } catch (error) {
             ctx.logger.warn(
               { batchId: offer.batchId, err: message(error) },
