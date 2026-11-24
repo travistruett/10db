@@ -177,6 +177,7 @@ import {
   createNodeModulesTemplates,
   createWorktreeDependencies,
   createWorktreeGenerators,
+  createCopyTeardown,
   DEFAULT_DELIVERY_LIMITS,
   flagWorktreeMissing,
   flagWrongBranch,
@@ -1539,6 +1540,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // empty), so several such cuts at once are several downloads.
     dependencies: createWorktreeDependencies(worktreeTools),
     generators: createWorktreeGenerators(worktreeTools),
+    copyTeardown: createCopyTeardown({
+      gate: gateRunner,
+      clock,
+      dataDir: opts.dataDir,
+      logger: logger.child({ component: 'copy-teardown' }),
+      timeoutMs: limits.gateTimeoutMs,
+      sessionEnv: () => launcher.projectEnv(),
+      rules: (project) => listPermissionRules(state.db, project.id, null),
+      checkouts: () => allCheckouts(state.db),
+    }),
   };
   answerBranchCard = createBranchCardAnswers(delivery);
   answerCiStopCard = createCiStopAnswers(delivery);

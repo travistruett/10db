@@ -18,6 +18,7 @@ import {
   type WorktreeOffer,
 } from './cards';
 import { post, raise, withdraw, type DeliveryContext } from './context';
+import { retireCopy } from './copy-retire';
 import { handMadeCards } from './hand-made-cards';
 import { removeMergedHandMade } from './hand-made-worktrees';
 import { jobKey, JobQueue } from './jobs';
@@ -33,6 +34,7 @@ const Offer = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('batch'), batchId: BatchId }),
   z.object({ kind: z.literal('abandon'), batchId: BatchId }),
   z.object({ kind: z.literal('kept'), batchId: BatchId }),
+  z.object({ kind: z.literal('teardown'), batchId: BatchId }),
   z.object({ kind: z.literal('orphan'), path: z.string() }),
   z.object({ kind: z.literal('stray'), path: z.string() }),
   z.object({ kind: z.literal('merged-hand-made') }),
@@ -111,6 +113,14 @@ export function createWorktreeCardAnswers(
       case 'abandon':
         if (answer.choice === WorktreeChoice.Abandon) abandon(offer.batchId);
         return;
+      case 'teardown': {
+        if (answer.choice !== WorktreeChoice.Retry) return;
+        const batch = getBatch(ctx.state.db, offer.batchId);
+        ctx.jobs.run(jobKey(batch, JobQueue.Ship), (signal) =>
+          retireCopy(ctx, offer.batchId, signal).then(() => undefined),
+        );
+        return;
+      }
       case 'kept': {
         if (answer.choice !== WorktreeChoice.Remove) return;
         const path = getBatch(ctx.state.db, offer.batchId).worktreePath;

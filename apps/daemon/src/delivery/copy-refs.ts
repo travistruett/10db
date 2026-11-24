@@ -1,7 +1,5 @@
 import { BatchId } from '@10db/contracts';
 
-// TODO(local-copy): card 6 exports `teardownRef` from `copy-retire.ts`; use it there and drop this file.
-
 /** Where a local copy's teardown commits are kept; one ref per batch under it. */
 export const COPY_REFS_PREFIX = 'refs/10db/copies/';
 

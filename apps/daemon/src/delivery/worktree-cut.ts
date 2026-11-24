@@ -23,7 +23,7 @@ import { batchBranchName } from './branch-name';
 import { forTasks, startCards, worktreeCards, type CardText } from './cards';
 import { stopCiFixing } from './ci-stop';
 import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
-import { teardownRef } from './copy-teardown-ref';
+import { teardownRef } from './copy-refs';
 import { unmergedDependencies } from './deps';
 import { noticeUnbuilt, recordInstall } from './installed-lockfile';
 import { landingWarnings, missingLandingBranch, type SameStart } from './landing';

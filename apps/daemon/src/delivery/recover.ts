@@ -1,14 +1,24 @@
-import { BatchFailure, BatchState, CiStopped, type BatchDto, type BatchId } from '@10db/contracts';
+import {
+  BatchFailure,
+  BatchState,
+  CiStopped,
+  CopyStep,
+  type BatchDto,
+  type BatchId,
+} from '@10db/contracts';
 import {
   deleteAppSetting,
   deleteCuttingBatch,
   getBatch,
   getBatchRow,
+  getLocalCopy,
   getProject,
+  isLivePromoting,
   isLocalCopy,
   listBatches,
   listCheckoutReturns,
   listLiveWorktrees,
+  listOpenLocalCopies,
   listWorkstreams,
   patchBatch,
   transitionBatch,
@@ -22,6 +32,8 @@ import { listStrayBranches, settleAbandonedBranches } from './branch-sweep';
 import { batchCheckout } from './checkout';
 import { stopCiFixing } from './ci-stop';
 import { forTasks, startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
+import { copyLandingCards, raiseMigrationsForLanding } from './copy-landing-cards';
+import { retireCopy } from './copy-retire';
 import { cuttingTasks, forgetCuttingTasks } from './cutting-tasks';
 import { forgetStartSiblings } from './start-siblings';
 import type { FolderHold } from '../folder-hold';
@@ -219,18 +231,25 @@ export async function recoverBatches(deps: {
       if (current !== batch.branch) card = wrongBranchCard(batch, current, checkout, 'failed');
     }
     if (card !== null) {
-      const reason = card.title;
+      // A landing that may have written the builder's folder fails as interrupted, its journal kept
+      // at promoting, whatever else is wrong with the copy.
+      const copy = getLocalCopy(db, batch.id);
+      const live = copy !== null && isLivePromoting(copy);
+      const interrupted = live
+        ? copyLandingCards.interruptedLanding(batch, [], batch.baseBranch)
+        : null;
+      const reason = (interrupted?.card ?? card).title;
       deps.state.write((w) => {
         settleLeftOutCards(
           w,
           transitionBatch(w, batch.id, {
             to: BatchState.Failed,
-            patch: { failure: BatchFailure.WrongBranch },
+            patch: { failure: interrupted?.failure ?? BatchFailure.WrongBranch },
             reason,
           }),
         );
       });
-      raise(deps.inbox, batch.projectId, card);
+      raise(deps.inbox, batch.projectId, interrupted?.card ?? card);
       report.failed.push(batch.id);
       continue;
     }
@@ -260,6 +279,7 @@ export async function recoverBatches(deps: {
     // its card.
     for (const batch of listLiveWorktrees(db)) {
       try {
+        if (isLocalCopy(db, batch.id)) continue;
         if (
           batch.state === BatchState.Shipped ||
           batch.state === BatchState.Closed ||
@@ -275,6 +295,40 @@ export async function recoverBatches(deps: {
         continue;
       }
       if (getBatch(db, batch.id).worktreePath === null) report.retired.push(batch.id);
+    }
+
+    // 5a. Finished local copies not yet retired: a copy landed (its migrations card raised by its key),
+    // closed or abandoned goes through its teardown before its worktree, branch and ref go.
+    for (const copy of listOpenLocalCopies(db)) {
+      const batch = getBatch(db, copy.batchId);
+      if (
+        batch.state !== BatchState.Shipped &&
+        batch.state !== BatchState.Closed &&
+        batch.state !== BatchState.Abandoned
+      )
+        continue;
+      try {
+        if (
+          batch.state === BatchState.Shipped &&
+          copy.step === CopyStep.Landed &&
+          copy.baseTip !== null &&
+          copy.candidate !== null
+        )
+          await raiseMigrationsForLanding(
+            deps.worktrees.ctx,
+            batch,
+            getProject(db, batch.projectId),
+            copy.baseTip,
+            copy.candidate,
+          );
+        if (
+          (await retireCopy(deps.worktrees.ctx, batch.id, new AbortController().signal)) ===
+          'retired'
+        )
+          report.retired.push(batch.id);
+      } catch (error) {
+        deps.logger.warn({ batchId: batch.id, err: message(error) }, 'copy not retired');
+      }
     }
 
     // 6. The sweep, after every removal above, so it only finds what no batch names.

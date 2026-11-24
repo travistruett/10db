@@ -73,6 +73,7 @@ import { BATCH_CARD_DETAIL, type KeptRevert } from './batch-card';
 import { settleBranch } from './branch-cleanup';
 import { copyIdForBatch } from './copy-id';
 import { createCopyLanding } from './copy-landing';
+import { retireCopy } from './copy-retire';
 import { copyLandingCards, withdrawWaitCards } from './copy-landing-cards';
 import { resetCopyJournal } from './copy-reset';
 import {
@@ -2564,7 +2565,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
       for (const ws of toCancel) deps.inbox.cancelForWorkstream(ws.id);
       if (copy !== null) withdrawWaitCards(deps, batch.projectId, batchId);
       deps.jobs.run(jobKey(abandoned, JobQueue.Ship), async (signal) => {
-        await afterEnd(batchId, abandoned.worktreePath, signal);
+        if (copy !== null) await retireCopy(deps, batchId, signal);
+        else await afterEnd(batchId, abandoned.worktreePath, signal);
       });
       return abandoned;
     },

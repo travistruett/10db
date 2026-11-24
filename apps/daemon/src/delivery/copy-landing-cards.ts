@@ -4,13 +4,15 @@ import {
   Urgency,
   type BatchDto,
   type BatchId,
+  type ProjectDto,
   type ProjectId,
 } from '@10db/contracts';
-import { findOpenByFoldKey } from '@10db/db';
+import { findOpenByFoldKey, getBatch } from '@10db/db';
+import { areaMatches } from '../guard';
 import type { StateStore } from '../events';
 import { BY_ANSWER, CardTier, type InboxService } from '../inbox';
 import { shipFailureFoldKey, type Card, type ShipFailure } from './cards';
-import { raise } from './context';
+import { raise, type DeliveryContext } from './context';
 
 // The cards of a separate copy's landing, each keyed by its batch and kind: a rerun raises it once, and the
 // landing withdraws a wait's card when it goes on (spec §5).
@@ -102,6 +104,32 @@ export function raiseMigrationsCard(
     body: `Apply them to your dev database before you use the app:\n${lines(paths)}`,
     foldKey: migrationsKey(batch.id),
   });
+}
+
+/**
+ * The migrations card for a landing of T..C (the journal's `baseTip` and `candidate`) into the base,
+ * when it touched a `migrations` hazard path. Called live by the landing and again by recovery for a
+ * copy found at `landed`; the card's key is the batch, so a repeat folds into the open one.
+ */
+export async function raiseMigrationsForLanding(
+  ctx: Pick<DeliveryContext, 'git' | 'inbox' | 'logger' | 'state'>,
+  batch: BatchDto,
+  project: ProjectDto,
+  expected: string,
+  candidate: string,
+): Promise<void> {
+  try {
+    const files = await ctx.git.filesChangedBetween(project.repoPath, expected, candidate);
+    const globs = project.hazards.filter((h) => h.name === 'migrations').flatMap((h) => h.globs);
+    const migrations = files.filter((f) => globs.some((g) => areaMatches(f, g)));
+    if (migrations.length > 0)
+      raiseMigrationsCard(ctx.inbox, getBatch(ctx.state.db, batch.id), migrations);
+  } catch (error) {
+    ctx.logger.warn(
+      { batchId: batch.id, err: error instanceof Error ? error.message : String(error) },
+      'migrations card not raised',
+    );
+  }
 }
 
 function failure(

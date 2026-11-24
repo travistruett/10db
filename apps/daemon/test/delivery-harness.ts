@@ -42,6 +42,7 @@ import {
   createNodeModulesTemplates,
   createShipper,
   createWorktreeDependencies,
+  createCopyTeardown,
   createWorktreeGenerators,
   DEFAULT_DELIVERY_LIMITS,
   subscribeShipTrigger,
@@ -387,6 +388,10 @@ export function createDeliveryHarness(
     worktreeRoot,
     dependencies: createWorktreeDependencies(worktreeTools),
     generators: createWorktreeGenerators(worktreeTools),
+    copyTeardown: createCopyTeardown({
+      ...worktreeTools,
+      logger: logs.logger,
+    }),
   };
   const running = new Set<WorkstreamId>();
   const shipGate = createGateRunner({ sandbox: null, logger: silentLogger });
