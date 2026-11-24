@@ -224,10 +224,10 @@ describe('CI workflow', () => {
 
   it('keeps every pull request event out of the concurrency group of a push to main', () => {
     // An edit to a merged pull request runs with main's ref. Grouped by ref, that run cancels main's
-    // own CI, as editing #541's description did. And only a pull request's newer push cancels its older
-    // run: a push to main cancelling the one before left commits on main with no finished run.
+    // own CI, as editing #541's description did. And every commit on main finishes its run: grouped by
+    // ref, a newer push cancelled the one before, or the one waiting behind a running one.
     expect(readWorkflow(CI).concurrency).toEqual({
-      group: 'ci-${{ github.event.pull_request.number || github.ref }}',
+      group: 'ci-${{ github.event.pull_request.number || github.sha }}',
       'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
     });
   });
