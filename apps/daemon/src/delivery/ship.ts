@@ -155,8 +155,11 @@ const checksNeverStarted = (status: PullRequestStatus): boolean =>
   status.blockedOnChecks &&
   !conflicting(status);
 
-/** Why 10db merges the base into a shipped pull request: it conflicts, or its head never got its checks. */
-type CatchUpCause = 'conflict' | 'checks';
+/**
+ * Why 10db merges the base into a shipped pull request: it conflicts, its head never got its checks,
+ * or its required checks failed the way the base's did and the base passes them again.
+ */
+type CatchUpCause = 'conflict' | 'checks' | 'base';
 
 export interface ShipperDeps extends DeliveryContext {
   readonly gate: GateRunner;
@@ -221,6 +224,14 @@ export interface Shipper {
    * those raises a card, since the watch's notice says the checks never started.
    */
   restartCi(batchId: BatchId): boolean;
+  /**
+   * The open pull request failed required checks the base failed too, and the base passes them
+   * again: merges the base into it the same way and pushes it, so its checks run on a head that holds
+   * the base's fix. Pushes nothing when the branch already holds the base, and, as for a conflict, when
+   * the pull request is in the merge queue, a running CI fix holds the branch, or it does not merge by
+   * itself. Returns false when the shipper holds the ask (a drain is on) and did nothing.
+   */
+  catchUpToBase(batchId: BatchId): boolean;
   /**
    * The open pull request merges cleanly: merges it again, or turns auto-merge on again, when GitHub
    * refused that earlier, 10db just pushed to it, or the watch just withdrew the card of a catch-up
@@ -1945,7 +1956,14 @@ export function createShipper(deps: ShipperDeps): Shipper {
     }
     // The watch saw this a round ago: a check that has appeared since, running or finished, is
     // never pushed over.
-    if (cause === 'checks' ? !checksNeverStarted(status) : !conflicting(status)) return;
+    if (
+      cause === 'checks'
+        ? !checksNeverStarted(status)
+        : cause === 'base'
+          ? conflicting(status)
+          : !conflicting(status)
+    )
+      return;
     if (cause === 'conflict') {
       const startedAt = deps.clock.now().getTime();
       const last = lastCatchUp.get(batchId);
@@ -1955,8 +1973,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
     }
     /** Raises the one card; neither notice says the same thing as well. */
     const stop = (why: CatchUpStop): void => {
-      if (cause === 'checks') {
-        // Not a conflict: the watch's notice says the checks never started, and the card would not fit.
+      if (cause !== 'conflict') {
+        // Not a conflict: the watch's notice says why it is waiting, and a conflict card would not fit.
         deps.logger.warn({ batchId, prUrl, stop: why.kind }, 'checks not started again');
         return;
       }
@@ -1982,7 +2000,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         // A CI fix of this pull request that still runs lets go of the branch when it ends: asked
         // again next round. Until then the pull request says it conflicts, as no card does yet.
         if (heldByRunningFix(batch, holder)) {
-          if (cause === 'checks') return;
+          if (cause !== 'conflict') return;
           lastCatchUp.delete(batchId);
           showNotice(deps.state, batchId, updateNotices.waiting(getBatch(db, batchId)));
           return;
@@ -2173,7 +2191,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
         batchId,
         cause === 'checks'
           ? updateNotices.restarted(getBatch(db, batchId), resolved)
-          : updateNotices.merged(getBatch(db, batchId), resolved),
+          : cause === 'base'
+            ? updateNotices.baseRecovered(getBatch(db, batchId), resolved)
+            : updateNotices.merged(getBatch(db, batchId), resolved),
       );
       hideNotices(deps.state, batchId, [NOTICE_KEY.baseConflict]);
       withdraw(deps.state, deps.inbox, batch.projectId, [prCardKey.catchUp(batchId)]);
@@ -2271,6 +2291,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     queueCatchUp(batchId, 'conflict');
   };
   const restartCi = (batchId: BatchId): boolean => queueCatchUp(batchId, 'checks');
+  const catchUpToBase = (batchId: BatchId): boolean => queueCatchUp(batchId, 'base');
 
   function retryMerge(batchId: BatchId, opts: RetryMergeOptions = {}): void {
     const batch = getBatch(db, batchId);
@@ -2307,6 +2328,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
   return {
     catchUp,
     restartCi,
+    catchUpToBase,
     retryMerge,
     checkBatch,
     checkOpenBatches() {

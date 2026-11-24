@@ -1377,7 +1377,7 @@ export const prCards = {
     title: `${input.branch} fails CI, and ${String(input.waiting)} pull request${input.waiting === 1 ? '' : 's'} wait on it`,
     body: [
       `${input.repo}'s ${input.branch} fails ${input.checks.join(', ')}, and pull requests fail the same checks.`,
-      `10db starts no CI fix for those pull requests: the failure is not in their changes. Fix ${input.branch} once (or revert what broke it). Their checks run again by themselves when ${input.branch} passes.`,
+      `10db starts no CI fix for those pull requests: the failure is not in their changes. Fix ${input.branch} once (or revert what broke it). When ${input.branch} passes the checks, 10db merges it into each pull request that lands itself and pushes, so their checks run again on a new head (the others have their failed jobs run again). After an hour of waiting 10db treats the failure as the pull request's own and starts a fix.`,
     ].join('\n\n'),
     foldKey: prCardKey.baseRed(input.repo, input.branch),
     detail: { repo: input.repo, branch: input.branch },

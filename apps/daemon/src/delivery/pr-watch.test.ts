@@ -220,6 +220,7 @@ describe('the pull request watch', () => {
         intervalMs: INTERVAL,
         landing: {
           catchUp: (id) => asked.push(`catch-up ${id}`),
+          catchUpToBase: () => true,
           restartCi: (id) => {
             asked.push(`restart-ci ${id}`);
             return true;
@@ -294,6 +295,7 @@ describe('a pull request whose head never got its required checks', () => {
       landing: {
         catchUp: (id) => asked.push(`catch-up ${id}`),
         // A restart held by a drain is asked about and does nothing, as the shipper's is.
+        catchUpToBase: () => true,
         restartCi: (id) => {
           asked.push(`restart-ci ${id}${held() ? ' (held)' : ''}`);
           return !held();

@@ -65,6 +65,11 @@ export const NOTICE_KEY = {
    * the count and a new head starts from zero.
    */
   checksNoRunner: 'checks-no-runner',
+  /**
+   * The pull request's failing required checks fail on its base too, so 10db started no fix. The key
+   * ends in `:` and the head; its record says since when and which checks, so a restart keeps the wait.
+   */
+  checksWaitingOnBase: 'checks-waiting-on-base',
   /** A task started over from a failed attempt whose commits are still on the batch's branch. */
   supersededAttempt: 'superseded-attempt',
   /** The install before a gate left the copy broken, and 10db removed node_modules and installed again. */
@@ -711,6 +716,51 @@ export function noRunnerNoticeHead(key: string): string | null {
   return key.startsWith(prefix) ? key.slice(prefix.length) : null;
 }
 
+export const waitingOnBaseKey = (head: string): string =>
+  `${NOTICE_KEY.checksWaitingOnBase}:${head}`;
+
+/** The head a stored waiting-on-base notice is about; null for any other notice. */
+export function waitingOnBaseHead(key: string): string | null {
+  const prefix = `${NOTICE_KEY.checksWaitingOnBase}:`;
+  return key.startsWith(prefix) ? key.slice(prefix.length) : null;
+}
+
+/** What is stored of a pull request head that waits on a red base. */
+export interface WaitingOnBaseRecord {
+  /** Epoch milliseconds when the watch first saw the head failing like the base. */
+  readonly since: number;
+  readonly checks: readonly string[];
+  /** The base passed the checks and 10db asked for them to run again on a new head. */
+  readonly asked: boolean;
+}
+
+/** Reads a stored waiting-on-base notice's record; null when it has none or cannot be read. */
+export function waitingOnBaseRecord(notice: Notice): WaitingOnBaseRecord | null {
+  if (notice.record === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(notice.record);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const { since, checks, asked } = parsed as Record<string, unknown>;
+    if (typeof since !== 'number' || !Array.isArray(checks)) return null;
+    if (!checks.every((c): c is string => typeof c === 'string')) return null;
+    return { since, checks, asked: asked === true };
+  } catch {
+    return null;
+  }
+}
+
+export const waitingOnBaseNotice = (
+  head: string,
+  base: string,
+  record: WaitingOnBaseRecord,
+): Notice => ({
+  key: waitingOnBaseKey(head),
+  tone: 'info',
+  line: `Failing checks also fail on ${base}; 10db started no fix and waits for ${base}`,
+  body: `${record.checks.map((c) => `"${c}"`).join(', ')} fail on ${base} too, so the failure is not in this pull request and 10db started no CI fix. When ${base} passes them, 10db merges ${base} into the pull request so its checks run again. If ${base} is still failing after an hour, 10db treats the failure as this pull request's own.`,
+  record: JSON.stringify(record),
+});
+
 /** What 10db has done about cancelled-for-no-runner jobs on one pull request head. */
 export interface NoRunnerRecord {
   /** Reruns made for the head: the count the limit is checked against. */
@@ -803,6 +853,23 @@ export const updateNotices = {
       tone: 'info',
       line: `10db merged ${base} into the pull request to start its checks`,
       body: `The head of the pull request${batch.prUrl === null ? '' : ` (${batch.prUrl})`} had no run of the checks ${base} requires, minutes after it was pushed, so it would have waited for them for ever. 10db merged ${base} into the batch's branch, checked the result as it checks a batch before it ships, and pushed it, so GitHub starts its workflows on the new head.${settled}\n\nIf the checks still do not start, 10db says so on this task.`,
+    };
+  },
+  /** 10db merged the base into a pull request whose failing checks were the base's, once the base passed them. */
+  baseRecovered: (
+    batch: BatchDto,
+    resolved: readonly { readonly path: string; readonly how: 'kept_both' | 'regenerated' }[],
+  ): Notice => {
+    const base = batch.baseBranch;
+    const settled =
+      resolved.length === 0
+        ? ''
+        : `\n\nThe merge settled these conflicts itself:\n${listPaths(resolved.map((r) => r.path))}`;
+    return {
+      key: NOTICE_KEY.update,
+      tone: 'info',
+      line: `10db merged ${base} into the pull request, which failed checks ${base} failed too`,
+      body: `The pull request${batch.prUrl === null ? '' : ` (${batch.prUrl})`} failed required checks that ${base} failed as well, so 10db started no fix. ${base} passes them again, so 10db merged ${base} into the batch's branch, checked the result as it checks a batch before it ships, and pushed it: its checks now run on a head that holds the fix.${settled}`,
     };
   },
   /** `resolved` are the conflicts 10db settled in the merge, by path and how. */

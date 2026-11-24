@@ -57,9 +57,13 @@ import {
   rerunNoticeHead,
   rerunNotices,
   rerunRecord,
+  waitingOnBaseHead,
+  waitingOnBaseNotice,
+  waitingOnBaseRecord,
   type CancelledWhy,
   type NoRunnerRecord,
   type RerunRuns,
+  type WaitingOnBaseRecord,
 } from './notices';
 
 /** How often the watch reads every followed pull request. */
@@ -78,6 +82,8 @@ const RUN_STILL_RUNNING = /already running/i;
  * pull request. A shortage of macOS runners can last hours; past this the builder is told once.
  */
 const MAX_RUNNER_RERUNS = 3;
+/** How long a pull request waits on a base that fails its checks before the failure counts as its own. */
+const BASE_WAIT_MS = 60 * 60_000;
 /**
  * How long, in minutes, a shortage of runners is given before each rerun, by the reruns made so far,
  * and after the last one before the builder is told. A shortage comes in bursts of hours, so a rerun
@@ -138,6 +144,12 @@ export interface PullRequestLanding {
    * drain for an update is on) and did nothing: the watch counts it as not asked and asks again.
    */
   restartCi(batchId: BatchId): boolean;
+  /**
+   * The open pull request failed required checks the base failed too, and the base passes them
+   * again: merges the base into it and pushes it, so its checks run on a new head. Returns false
+   * when the shipper holds the ask (a drain is on): the watch asks again next round.
+   */
+  catchUpToBase(batchId: BatchId): boolean;
   /**
    * The open pull request is clean: a merge GitHub refused, or one 10db just pushed to, is asked again.
    * `catchUpCardWasOpen`: this round withdrew the card for a catch-up that stopped, so a merge is due.
@@ -302,7 +314,13 @@ export function createPrWatch(input: {
    */
   const waitingOnBase = new Map<
     BatchId,
-    { readonly repo: string; readonly branch: string; readonly checks: readonly string[] }
+    {
+      readonly projectId: ProjectId;
+      readonly repo: string;
+      readonly branch: string;
+      readonly head: string;
+      readonly checks: readonly string[];
+    }
   >();
   /** Each open pull request with a cancelled required check, by its root batch. */
   const cancelledRuns = new Map<BatchId, CancelledRun>();
@@ -1085,32 +1103,108 @@ export function createPrWatch(input: {
 
   /**
    * Sorts a pull request's failing required checks into the base's and its own. Returns the checks a
-   * fix is for, or null when every failing check fails on the base too: the pull request then waits,
-   * and starts its checks over once the base passes them.
+   * fix is for, or null while the pull request waits: every failing check fails on the base too, or
+   * the base has passed them and the pull request's checks are being run again on a new head.
+   * The wait is stored on the batch (a restart keeps it) and ends after `BASE_WAIT_MS` with the
+   * base still failing, which makes the failure the pull request's own.
    */
   async function followBase(
     root: BatchDto,
+    head: string,
     branch: string | null,
     required: RequiredChecksDto,
     reads: Map<string, Promise<ReadonlySet<string> | null>>,
     signal: AbortSignal,
   ): Promise<RequiredChecksDto | null> {
-    if (root.repo === null || branch === null) return required;
+    if (root.repo === null || branch === null || head === '') return required;
+    clearWaitingNotices(root, head);
+    const stored = getBatch(ctx.state.db, root.id).notices.find(
+      (n) => waitingOnBaseHead(n.key) === head,
+    );
+    const was = stored === undefined ? null : waitingOnBaseRecord(stored);
+    const now = clock.now().getTime();
     const base = await readBase(root.repo, branch, reads, signal);
     const sorted = classifyCiFailures(required.failing, base);
-    if (sorted.base.length === 0) {
-      const was = waitingOnBase.get(root.id);
+    const names = sorted.base.map((job) => job.name);
+    const record: WaitingOnBaseRecord = {
+      since: was?.since ?? now,
+      checks: was?.checks ?? names,
+      asked: was?.asked ?? false,
+    };
+    const store = (next: WaitingOnBaseRecord): void => {
+      ctx.state.write((write) => {
+        setBatchNotice(write, root.id, waitingOnBaseNotice(head, branch, next));
+      });
+    };
+    const track = (checks: readonly string[]): void => {
+      waitingOnBase.set(root.id, {
+        projectId: root.projectId,
+        repo: root.repo ?? '',
+        branch,
+        head,
+        checks,
+      });
+    };
+    // A wait that outlived the bound is over: whatever the base does, the failure is this pull request's.
+    if (was !== null && now - was.since >= BASE_WAIT_MS) {
       waitingOnBase.delete(root.id);
-      // The base passes what the pull request waited on: its checks start over, on the base's fix.
-      if (was !== undefined && landing !== undefined && root.autoMerge) landing.restartCi(root.id);
       return required;
     }
-    waitingOnBase.set(root.id, {
-      repo: root.repo,
-      branch,
-      checks: sorted.base.map((job) => job.name),
+    if (sorted.base.length > 0) {
+      if (was?.checks.join() !== names.join()) store({ ...record, checks: names });
+      track(names);
+      return sorted.change.length === 0 ? null : { ...required, failing: sorted.change };
+    }
+    // The base passes what this head waited on, which ran before the base's fix.
+    if (was !== null && base !== null) {
+      waitingOnBase.delete(root.id);
+      if (!was.asked) {
+        const asked = await askNewHead(root, required, signal);
+        if (asked) store({ ...record, asked: true });
+      }
+      return null;
+    }
+    waitingOnBase.delete(root.id);
+    return required;
+  }
+
+  /** Takes the waiting-on-base notices off the batch, except the one for `keepHead`. */
+  function clearWaitingNotices(root: BatchDto, keepHead: string | null): void {
+    const stale = root.notices.filter((n) => {
+      const head = waitingOnBaseHead(n.key);
+      return head !== null && head !== keepHead;
     });
-    return sorted.change.length === 0 ? null : { ...required, failing: sorted.change };
+    if (stale.length === 0) return;
+    ctx.state.write((write) => {
+      for (const n of stale) clearBatchNotice(write, root.id, n.key);
+    });
+  }
+
+  /**
+   * Asks for the checks to run on a head that holds the base: the shipper merges the base in and
+   * pushes when the batch lands itself; a batch the builder merges has its failed jobs run again.
+   * False when nothing was asked (a drain holds the shipper), so the next round asks again.
+   */
+  async function askNewHead(
+    root: BatchDto,
+    required: RequiredChecksDto,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    if (landing !== undefined && root.autoMerge) return landing.catchUpToBase(root.id);
+    const repo = root.repo;
+    if (repo === null) return false;
+    const runs = new Set(
+      required.failing.flatMap((job) => (job.runId === null ? [] : [job.runId])),
+    );
+    for (const runId of runs) {
+      try {
+        await ctx.gh.rerunFailed({ repo, runId }, ghCall(ctx, signal));
+      } catch (error) {
+        if (controller.signal.aborted || ghDown(error)) throw error;
+        logger.warn({ batchId: root.id, err: detailOf(error) }, 'could not rerun after the base');
+      }
+    }
+    return true;
   }
 
   /**
@@ -1315,7 +1409,14 @@ export function createPrWatch(input: {
         required.state === 'failing'
       ) {
         try {
-          const own = await followBase(root, read.baseRef, requiredOf(required), baseReads, signal);
+          const own = await followBase(
+            root,
+            read.headSha ?? '',
+            read.baseRef,
+            requiredOf(required),
+            baseReads,
+            signal,
+          );
           if (own !== null)
             await startCiFix({
               ctx,
@@ -1330,13 +1431,25 @@ export function createPrWatch(input: {
           logger.warn({ batchId: root.id, err: detailOf(error) }, 'could not start a CI fix');
           if (ghDown(error)) ended = { error, at: root.id };
         }
-      } else if (waitingOnBase.has(root.id)) {
+      } else {
         waitingOnBase.delete(root.id);
+        clearWaitingNotices(root, null);
       }
       if (root.repo !== null && read?.baseRef != null)
         seenBases.set(prCardKey.baseRed(root.repo, read.baseRef), root.projectId);
     }
-    if (ended === null) syncBaseCards(seenBases);
+    if (ended === null) {
+      // A pull request that left the watch (merged, closed, deleted) waits on nothing.
+      const watched = new Set(
+        groupByPullRequest(listWatchedPullRequests(ctx.state.db)).map((group) => group.root.id),
+      );
+      for (const [id, entry] of waitingOnBase) {
+        if (watched.has(id)) continue;
+        waitingOnBase.delete(id);
+        seenBases.set(prCardKey.baseRed(entry.repo, entry.branch), entry.projectId);
+      }
+      syncBaseCards(seenBases);
+    }
     resumeAfter = ended?.at ?? null;
     settle(unanswered, ended ?? (answered ? null : failed), answered, recheck);
   }
