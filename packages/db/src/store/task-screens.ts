@@ -7,6 +7,7 @@ import {
   TaskStatus,
   type GoalId,
   type PassTurnId,
+  type SessionId,
   type ScreenTheme,
   type ScreenViewport,
   type TaskId,
@@ -37,6 +38,14 @@ export interface NewTaskScreen {
   readonly height: number;
   readonly storedPath: string;
   readonly keptSha: string | null;
+  /** Set only for a `lane` picture, taken by a lane's own browser. */
+  readonly lane?: {
+    readonly url: string;
+    readonly title: string;
+    readonly note: string | null;
+    /** The session the picture went to as an image block; null when it went as a path only. */
+    readonly sentSessionId: SessionId | null;
+  };
 }
 
 const columns = {
@@ -59,6 +68,9 @@ function toDto(row: TaskScreenRow, turnSeq: number | null): TaskScreenDto {
     size: row.size,
     sha256: row.sha256,
     keptSha: row.keptSha,
+    url: row.url,
+    title: row.title,
+    note: row.note,
     createdAt: row.createdAt,
   };
 }
@@ -66,7 +78,7 @@ function toDto(row: TaskScreenRow, turnSeq: number | null): TaskScreenDto {
 /**
  * Keeps a picture's row and appends `task.screen_added`, in the caller's write. A turn picture with the
  * same hash as the newest unpruned turn picture of its task, route, viewport and theme is not kept:
- * answers null and writes nothing.
+ * answers null and writes nothing. A lane picture is always kept.
  */
 export function insertTaskScreen(ctx: WriteContext, input: NewTaskScreen): TaskScreenDto | null {
   getTask(ctx.tx, input.taskId);
@@ -91,9 +103,14 @@ export function insertTaskScreen(ctx: WriteContext, input: NewTaskScreen): TaskS
       );
     if (last?.sha256 === input.sha256) return null;
   }
+  const { lane, ...stored } = input;
   const row: TaskScreenRow = {
     id: mintId('TaskScreen'),
-    ...input,
+    ...stored,
+    url: lane?.url ?? null,
+    title: lane?.title ?? null,
+    note: lane?.note ?? null,
+    sentSessionId: lane?.sentSessionId ?? null,
     createdAt: ctx.now,
     prunedAt: null,
   };
@@ -113,6 +130,24 @@ export function insertTaskScreen(ctx: WriteContext, input: NewTaskScreen): TaskS
           .where(eq(schema.passTurns.id, row.turnId))
           .get()?.seq ?? null);
   return toDto(row, turnSeq);
+}
+
+/** The summed size of unpruned lane screens sent as image blocks to any of these sessions. */
+export function laneScreenBytesSentTo(db: DbReader, sessionIds: readonly SessionId[]): number {
+  if (sessionIds.length === 0) return 0;
+  return (
+    db
+      .select({ bytes: sql<number>`coalesce(sum(${schema.taskScreens.size}), 0)` })
+      .from(schema.taskScreens)
+      .where(
+        and(
+          eq(schema.taskScreens.kind, ScreenKind.Lane),
+          inArray(schema.taskScreens.sentSessionId, [...sessionIds]),
+          isNull(schema.taskScreens.prunedAt),
+        ),
+      )
+      .get()?.bytes ?? 0
+  );
 }
 
 /** A task's unpruned pictures, oldest first, each with its turn's number. */

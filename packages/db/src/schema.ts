@@ -866,6 +866,10 @@ export const evidence = sqliteTable('evidence', {
   summary: text('summary').notNull(),
   logPath: text('log_path'),
   commitShas: text('commit_shas', { mode: 'json' }).$type<string[]>().notNull(),
+  /** The picture a `browser` evidence row records; null for every other kind. */
+  screenId: text('screen_id')
+    .$type<TaskScreenId>()
+    .references(() => taskScreens.id),
   createdAt: createdAt(),
 });
 
@@ -2519,6 +2523,12 @@ export const taskScreens = sqliteTable(
     storedPath: text('stored_path').notNull(),
     /** The pass turn's kept commit, or the folder's HEAD, the picture was taken at. */
     keptSha: text('kept_sha'),
+    /** A lane picture's page address (origin and path), title and the lane's note; null on every other kind. */
+    url: text('url'),
+    title: text('title'),
+    note: text('note'),
+    /** The session that got a lane picture as an image block; null when it went as a path only. */
+    sentSessionId: text('sent_session_id').$type<SessionId>(),
     createdAt: createdAt(),
     prunedAt: text('pruned_at'),
   },
