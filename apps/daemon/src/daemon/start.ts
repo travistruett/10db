@@ -104,6 +104,8 @@ import {
 import {
   createDecisionModelList,
   createJudge,
+  createJudgeOutageWatch,
+  type JudgeCallHealth,
   JUDGE_LOG_RETENTION_MS,
   type JudgeService,
 } from '../judge';
@@ -236,7 +238,13 @@ import {
   type GhTools,
 } from '../github';
 import { createGithubServices } from './github-services';
-import { CardTier, createInboxService, createParkAnswers, leftWithBuilder } from '../inbox';
+import {
+  CardTier,
+  createInboxService,
+  createJudgeOutageCard,
+  createParkAnswers,
+  leftWithBuilder,
+} from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
 import { backfillAttachmentRevisions } from '../plan-record';
 import { guessPendingPageLabels, seedPendingPageLabels } from './page-label-guess';
@@ -849,9 +857,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     keychain: judgeKeychain,
     off: opts.judgeOff === true,
   });
+  // The inbox is built after the judge, so the outage watch is set once it exists.
+  let watchJudgeOutage: ((health: JudgeCallHealth) => void) | null = null;
   const judge = createJudge({
     state,
     clock,
+    onCallHealth: (health) => watchJudgeOutage?.(health),
     fetch: opts.fetch ?? fetch,
     decisionModelIds: () => decisionModels.ids(),
     readCredential: readJudgeCredential,
@@ -1096,6 +1107,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerPassCards?.(item, answer);
       answerDeadlockCard(item, answer);
     },
+  });
+  watchJudgeOutage = createJudgeOutageWatch({
+    clock,
+    logger: logger.child({ component: 'judge' }),
+    sink: createJudgeOutageCard({ state, inbox }),
   });
   // Holds that pause work and end by themselves show as a line in the app's header, not as Inbox cards.
   const status = createStatusService({
