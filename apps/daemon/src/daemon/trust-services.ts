@@ -14,6 +14,7 @@ import {
   type TrustOverrides,
   type TrustSettingsDto,
   type TrustSwitches,
+  type TrustSwitchKey,
 } from '@10db/contracts';
 import {
   deleteTrustGrant,
@@ -36,10 +37,16 @@ import {
   trustSwitchesFor,
   warnInvalidTrust,
 } from '../permissions';
-import { laneWritableRoots, SYSTEM_TEMP_ROOTS, type LaneSandbox } from '../sandbox';
+import {
+  laneWritableRoots,
+  SYSTEM_TEMP_ROOTS,
+  type LaneSandbox,
+  type SetupInput,
+} from '../sandbox';
 import type { AgentAdapter } from '../sessions';
 import {
   InstalledPluginsError,
+  isExpectedReason,
   planSessionSetup,
   planYourMcp,
   readInstalledPlugins,
@@ -84,6 +91,16 @@ function projectSkills(files: readonly { readonly relative: string }[]): string[
     }),
   );
   return [...names].sort();
+}
+
+/**
+ * The switch an item the sandbox left out came from, read off what it names: a plugin by its id, a project
+ * copy by its path under the checkout, a skill by its folder under the builder's home.
+ */
+function refusedFrom(what: string, input: SetupInput): TrustSwitchKey | null {
+  if (input.plugins.some((plugin) => plugin.id === what)) return 'yourPlugins';
+  if (input.projectFiles.some((file) => file.source === what)) return 'projectSkills';
+  return what.startsWith('~/') ? 'yourSkills' : null;
 }
 
 /**
@@ -275,10 +292,30 @@ export function createTrustServices(deps: {
         : await deps.laneSandbox.judgeSetup(project, plan.input, checkouts);
     // Codex takes a plugin's skills and nothing else of it: the preview says what the session gets.
     const codex = requireHarness(getAccountRow(db, project.accountId)) === Provider.Codex;
+    const planned = plan.leftOut.map((item) => ({
+      what: item.what,
+      why: item.why,
+      from: item.from ?? null,
+      expected: item.expected ?? false,
+    }));
+    const refused = judged.leftOut.map((item) => ({
+      ...item,
+      from: refusedFrom(item.what, plan.input),
+      expected: isExpectedReason(item.why),
+    }));
     return {
-      skills: [...judged.loaded.skills, ...projectSkills(plan.input.projectFiles)],
-      plugins: judged.loaded.plugins.map((id) => (codex ? `${id} (its skills only)` : id)),
-      leftOut: [...plan.leftOut, ...judged.leftOut],
+      skills: [
+        ...judged.loaded.skills.map((what) => ({ what, from: 'yourSkills' as const })),
+        ...projectSkills(plan.input.projectFiles).map((what) => ({
+          what,
+          from: 'projectSkills' as const,
+        })),
+      ],
+      plugins: judged.loaded.plugins.map((id) => ({
+        what: codex ? `${id} (its skills only)` : id,
+        from: 'yourPlugins' as const,
+      })),
+      leftOut: [...planned, ...refused],
     };
   };
 

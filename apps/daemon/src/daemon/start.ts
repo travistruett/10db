@@ -143,6 +143,7 @@ import {
   type SlackClients,
 } from '../stakeholders';
 import { createTrustServices } from './trust-services';
+import { createProjectTrustServices } from './project-trust-services';
 import {
   backupDatabase,
   hasPendingMigrations,
@@ -2693,7 +2694,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     openRouterOff: opts.judgeOff === true || opts.benchmarksOff === true,
     // Without a live OpenRouter account the rows are Artificial Analysis's alone.
     openRouterOn: () => openRouterSync !== null && liveOpenRouterAccounts().length > 0,
-    trust,
+    trust: { ...trust, ...createProjectTrustServices({ state, inbox, git }) },
     mcpSignIns,
     linearSignIns,
     connector,

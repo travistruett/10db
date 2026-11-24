@@ -68,6 +68,16 @@ export const LiveSystemsDto = z.strictObject({
 });
 export type LiveSystemsDto = z.infer<typeof LiveSystemsDto>;
 
+/** Where in the repo a proposed production system was read. */
+export const ProductionSource = z.strictObject({ path: z.string(), line: z.number().int().min(1) });
+export type ProductionSource = z.infer<typeof ProductionSource>;
+
+/** `GET /projects/:projectId/live-systems/proposals`: entries read from the repo, each with where, not yet listed. */
+export const LiveSystemProposalsDto = z.strictObject({
+  proposals: z.array(z.strictObject({ entry: LiveSystem, source: ProductionSource })),
+});
+export type LiveSystemProposalsDto = z.infer<typeof LiveSystemProposalsDto>;
+
 /** The longest a grant's target may be. */
 export const GRANT_TARGET_MAX = 500;
 

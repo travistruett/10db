@@ -17,3 +17,8 @@
 - The hook judge that runs them is `inbox/hook-judge.ts` (`createHookJudge`, `LimitNotes`); the card a noted limit
   raises is `inbox/limit-card.ts`, with the three answers, and Always in this project stores a grant in the
   answer's write (`inbox/service.ts`).
+- `propose-production.ts` (`proposeProduction`, behind `GET /projects/:id/live-systems/proposals`) reads a capped set of
+  files from `origin/<base>`'s commit, else HEAD, in git's object store and proposes live-system entries (vercel.json
+  aliases, `*PROD*` names and production URLs in `.env*.example`, prod compose images, production workflow urls, prod
+  AWS and GCP profiles), each with its file and line, minus those already listed. Nothing is added by it; the builder's
+  click writes through `setProjectLiveSystems`.

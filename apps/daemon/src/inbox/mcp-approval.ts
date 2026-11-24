@@ -105,7 +105,7 @@ function hostChanges(hosts: readonly string[], earlier: EarlierApproval | undefi
   return lines;
 }
 
-function approvalBody(review: McpServerReview, earlier?: EarlierApproval): string {
+export function approvalBody(review: McpServerReview, earlier?: EarlierApproval): string {
   const lines = [
     `The repo's .mcp.json declares "${visible(review.name)}" (${review.transport}). Sessions in this project run without it until you approve it.`,
   ];
@@ -164,6 +164,11 @@ function approvalOptions(review: McpServerReview): InboxOption[] {
   ];
 }
 
+/** The fold key of the approval card for one exact config of one server. */
+export function mcpApprovalFoldKey(projectId: ProjectId, review: McpServerReview): string {
+  return `project-mcp-approval:${projectId}:${review.name}:${review.configHash}`;
+}
+
 /**
  * Raises the approval card for one exact config, or returns the open one. The card is project-wide, so
  * no workstream's end cancels it; it folds per server and config hash, so retries add nothing. With the
@@ -185,7 +190,7 @@ export function requestMcpApproval(
     body: approvalBody(review, earlier),
     options: approvalOptions(review),
     detail: { [MCP_APPROVAL_DETAIL]: review },
-    foldKey: `project-mcp-approval:${projectId}:${review.name}:${review.configHash}`,
+    foldKey: mcpApprovalFoldKey(projectId, review),
   });
 }
 

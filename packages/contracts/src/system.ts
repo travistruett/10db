@@ -161,6 +161,24 @@ export const McpServerStatusDto = McpServerReview.extend({
 });
 export type McpServerStatusDto = z.infer<typeof McpServerStatusDto>;
 
+/**
+ * One repo server on Settings › Trust: its review, the verdict stored for this exact config, the open
+ * approval card when one waits, and the card's own text, which the builder confirms before turning it On.
+ */
+export const RepoMcpServerDto = McpServerStatusDto.extend({ body: z.string() });
+export type RepoMcpServerDto = z.infer<typeof RepoMcpServerDto>;
+
+/** `GET /projects/:projectId/repo-mcp-servers`: the checkout's servers, or why its `.mcp.json` can't be read. */
+export const RepoMcpServersDto = z.object({
+  servers: z.array(RepoMcpServerDto),
+  error: z.string().nullable(),
+});
+export type RepoMcpServersDto = z.infer<typeof RepoMcpServersDto>;
+
+/** `PUT /projects/:projectId/repo-mcp-servers/:name`: the verdict on the config the builder saw. */
+export const SetRepoMcpVerdict = z.object({ configHash: ConfigHash, verdict: z.enum(McpVerdict) });
+export type SetRepoMcpVerdict = z.infer<typeof SetRepoMcpVerdict>;
+
 export const KeepAwakeStatus = z.object({ mode: z.enum(KeepAwakeMode), active: z.boolean() });
 export type KeepAwakeStatus = z.infer<typeof KeepAwakeStatus>;
 

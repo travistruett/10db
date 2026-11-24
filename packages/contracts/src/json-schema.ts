@@ -306,6 +306,8 @@ import {
   LanePermissionsDto,
   McpServerReview,
   McpServerStatusDto,
+  RepoMcpServersDto,
+  SetRepoMcpVerdict,
   SystemCheckDto,
 } from './system';
 import { AgentCapabilitiesDto } from './agent-capabilities';
@@ -317,7 +319,7 @@ import {
   TrustSettingsDto,
   TrustSwitches,
 } from './trust';
-import { LiveSystemsDto, TrustGrantDto } from './trust-policy';
+import { LiveSystemProposalsDto, LiveSystemsDto, TrustGrantDto } from './trust-policy';
 import {
   ApproveYourMcpServer,
   McpSignInChangedData,
@@ -424,6 +426,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'lane-permissions-dto': LanePermissionsDto,
   'trust-switches': TrustSwitches,
   'live-systems-dto': LiveSystemsDto,
+  'live-system-proposals-dto': LiveSystemProposalsDto,
   'trust-grant-dto': TrustGrantDto,
   'tool-call-view': ToolCallView,
   'trust-overrides': TrustOverrides,
@@ -438,6 +441,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'start-mcp-sign-in': StartMcpSignIn,
   'mcp-server-review': McpServerReview,
   'mcp-server-status-dto': McpServerStatusDto,
+  'repo-mcp-servers-dto': RepoMcpServersDto,
+  'set-repo-mcp-verdict': SetRepoMcpVerdict,
   'aa-model-dto': AaModelDto,
   'benchmark-key-input': BenchmarkKeyInput,
   'benchmark-status-dto': BenchmarkStatusDto,

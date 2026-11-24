@@ -214,6 +214,7 @@ import type { StakeholderApiServices } from './stakeholder-services';
 import type { KnowledgeApiServices } from './knowledge-services';
 import type { ServiceConnector } from './connect-service';
 import type { TrustServices } from './trust-services';
+import type { ProjectTrustServices } from './project-trust-services';
 import { createPlaybookServices } from './playbook-services';
 import type { ShapeApiServices } from './shape-services';
 import type { ConversationApiServices } from './conversation-services';
@@ -386,7 +387,7 @@ export function createServices(deps: {
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
   /** Settings › Trust: the switches, the builder's plugins and each project's preview. */
-  readonly trust: TrustServices;
+  readonly trust: TrustServices & ProjectTrustServices;
   /** Settings › Trust's MCP sign-ins. */
   readonly mcpSignIns: McpSignIns;
   readonly linearSignIns: { list(): Promise<LinearSignInsDto> };
