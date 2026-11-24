@@ -259,7 +259,7 @@ import {
 } from '../inbox';
 import type { Judge } from '../judge';
 import type { Logger } from '../log';
-import { mintSessionToken, type ToolImages } from '../mcp';
+import { mintSessionToken, TOOL_PICTURES_CAPTION, type ToolImages } from '../mcp';
 import {
   closeHoldsOf,
   foldHandEdits,
@@ -401,7 +401,6 @@ const HANDOFF_BASELINE_MARGIN_PCT = 5;
 const ToolInputRecord = z.record(z.string(), z.unknown());
 
 /** Why a lane is stopped; `closed` is the runner closing a pass task's session itself. */
-
 export type StopReason = 'cancelled' | 'paused' | 'shutdown' | 'closed';
 
 export interface RunnerLimits {
@@ -3293,9 +3292,15 @@ export function createRunner(opts: RunnerOptions): Runner {
         st.handoffAskedByTool = true;
       },
       // Codex's code mode answers a script text only, so the pictures a tool returned reach its model as a
-      // message steered into the turn instead.
+      // message steered into the turn instead. The message carries 10db's own caption, never the tool's text:
+      // that text can hold what a page or file says, and it already reaches the model as the tool's result.
       ...(provider === Provider.Codex
-        ? { showImages: (shown: ToolImages) => handle?.send(shown.text, shown.images) }
+        ? {
+            showImages: (shown: ToolImages) => {
+              if (shown.images.length > 0)
+                handle?.send(TOOL_PICTURES_CAPTION, shown.images, undefined, { steerOnly: true });
+            },
+          }
         : {}),
       ...(unattended === null ? {} : { away: unattended }),
       ...(laneSession === null

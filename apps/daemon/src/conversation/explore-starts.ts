@@ -207,6 +207,7 @@ export function createStarts(core: EngineCore, turns: ExploreTurns): ExploreStar
       writeFullOutput(core.deps.dataDir, rt.id, digestItem.id, kept.full);
     made.pushed = items.map((item) => item.id);
     const handle = adapter.open({ ...launch.spec, promptUuid: uuid });
+    launch.opened?.(handle);
     state.write((ctx) => {
       out.sent(ctx);
       markFilesInline(ctx, rt.id, out.blocks, fresh);
