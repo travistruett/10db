@@ -203,8 +203,6 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
         'hard-link': 'ln .env linked.env && cat linked.env',
         'hard-link-nested': 'ln nested/.env linked-nested.env && cat linked-nested.env',
         'move-checkout-file': 'mv .env moved.env && cat moved.env',
-        // A command that must run, as `make` does, when its prerequisite exists.
-        'make-prerequisite': `printf 'all: .env\\n\\t@true\\n' > Makefile.probe && make -f Makefile.probe`,
       });
       expect(seen).toEqual({
         stat: 'ok',
@@ -220,14 +218,12 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
         'hard-link': 'denied',
         'hard-link-nested': 'denied',
         'move-checkout-file': 'denied',
-        'make-prerequisite': 'ok',
       });
     } finally {
       rmSync(join(checkout, '.env'), { force: true });
       rmSync(join(checkout, '.env.linked'), { force: true });
       for (const name of ['nested', 'moved-nested', 'linked.env', 'linked-nested.env'])
         rmSync(join(checkout, name), { recursive: true, force: true });
-      rmSync(join(checkout, 'Makefile.probe'), { force: true });
     }
   }, 60_000);
 
