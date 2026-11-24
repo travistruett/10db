@@ -107,6 +107,9 @@ function SlackPictures({ project }: { readonly project: ProjectDto }) {
           data={data}
           disabled={lack !== null || channels.data?.state === 'missing_scope'}
           value={current.channelId}
+          onDropdownOpen={() => {
+            void channels.refetch();
+          }}
           nothingFoundMessage="No channel found. A private channel shows once @10db is invited to it."
           error={
             channels.isError

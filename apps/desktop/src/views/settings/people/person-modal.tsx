@@ -319,7 +319,7 @@ function ContactBlock({
         </Group>
         <MemberSelect
           teamId={contact.teamId}
-          label={isBuilder ? 'Which one is you?' : 'Slack Member'}
+          label={isBuilder ? 'Who are you?' : 'Slack Member'}
           value={contact.member ?? current}
           onPick={(picked) => {
             onChange({ member: picked, userId: picked?.userId ?? null });

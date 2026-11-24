@@ -21,7 +21,7 @@ Decision Models (`decision-models-view.tsx`, Settings › Models › Decision Mo
   Integrations (key `integrations`, All Projects; `integrations-section.tsx`, cards in `views/settings/sign-ins/`; the old
   `sign-ins` and `project-integrations` addresses are retired and land on it) is the one page for outside services,
   one card per service: GitHub, Slack (one row per signed-in workspace from `useSlackStatus`, each with Connected, a
-  person icon that opens "Which One Is You in <Workspace>?" (`which-is-you.tsx`, a modal; a yellow dot until the
+  person icon that opens "Who Are You in <Workspace>?" (`which-is-you.tsx`, a modal; a yellow dot until the
   builder has picked), and a menu of Replace Token and Disconnect (which asks first, `shell/confirm-modal.tsx`); Add
   Workspace shows the three setup steps with the manifest in `slack-manifest.ts`, which a repo test keeps equal to
   `docs/slack-app.md`; below the rows, under a Projects heading, one Select per

@@ -3,9 +3,9 @@ import { Anchor, Badge, HoverCard, Stack, Text } from '@mantine/core';
 import { IconDownload } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { useSelfUpdate } from '../../daemon/self-update-queries';
-import { absoluteTime } from '../../shell/relative';
+import { clockTime } from '../../shell/relative';
 import { SettingsSectionKey } from '../settings/sections';
-import { updateWaitsFor } from '../settings/update-waits-for';
+import { updateDeadline, updateWaitsFor } from '../settings/update-waits-for';
 
 const SHORT = 7;
 
@@ -25,13 +25,14 @@ function noteFor(status: SelfUpdateStatusDto): Note | null {
   if (status.draining && status.drainingSince !== null)
     return {
       label: 'Lanes Paused for Update',
-      text: `Lanes are paused since ${absoluteTime(status.drainingSince)} for an update to ${build}: what is running finishes, then 10db installs and restarts, and lanes resume. ${waitsFor}`,
+      text: `Lanes paused at ${clockTime(status.drainingSince)} to install the update to ${build}. What is running finishes first, then 10db restarts with the update and lanes resume. ${waitsFor}`,
       color: 'yellow',
     };
-  if (status.waitingSince !== null)
+  const deadline = updateDeadline(status);
+  if (deadline !== null)
     return {
       label: 'Update Waiting',
-      text: `An update to ${build} is waiting since ${absoluteTime(status.waitingSince)} for a moment when nothing is mid-session. If none comes within ${String(status.waitMinutes)} minutes, lanes pause until it has installed. ${waitsFor}`.trimEnd(),
+      text: `An update to ${build} is ready. 10db installs it as soon as nothing is running. If it is still waiting at ${deadline}, lanes pause so it can install. ${waitsFor}`.trimEnd(),
       color: 'gray',
     };
   return null;
