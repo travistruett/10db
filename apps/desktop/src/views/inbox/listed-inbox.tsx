@@ -145,7 +145,7 @@ function Rows({
   return (
     <>
       {listHost === null ? null : createPortal(picker, listHost)}
-      <Stack gap="md">
+      <Stack gap="md" style={{ flex: 1 }}>
         {rows.error ? (
           <Alert color="red" title="Couldn't load the inbox">
             {rows.error.message}
