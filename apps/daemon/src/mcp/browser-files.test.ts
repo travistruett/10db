@@ -7,6 +7,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -96,7 +97,7 @@ describe('readUploads', () => {
     const big = join(copy, 'big.bin');
     writeFileSync(big, Buffer.alloc(0));
     // A sparse file: its size counts, its bytes are never written.
-    execFileSync('truncate', ['-s', String(UPLOAD_MAX_BYTES + 1), big]);
+    truncateSync(big, UPLOAD_MAX_BYTES + 1);
     expect(refusal(['big.bin'])).toContain('over 50 MB');
   });
 });
