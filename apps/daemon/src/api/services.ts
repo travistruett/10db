@@ -226,7 +226,7 @@ import type {
   LinearSignInsDto,
   ConnectableService,
   ConnectServiceDto,
-  LinearPostDto,
+  TaskLinearDto,
   LinearReporterSettings,
   StakeholderSendDto,
   StakeholderTimersDto,
@@ -616,8 +616,8 @@ export interface ApiServices extends PlanRecordServices {
    * a page with no running turn is left as it is. Refused (409) for a task no open pass holds.
    */
   stopPage(taskId: TaskId): Promise<void>;
-  /** The updates a task's Linear issue is owed or has had, newest first. */
-  taskLinearPosts(taskId: TaskId): LinearPostDto[];
+  /** A task's Linear issue (its own, or its source's for a follow-up) and its own updates, newest first. */
+  taskLinearPosts(taskId: TaskId): TaskLinearDto;
   /** A task's pictures of the builder's app (Workbench spec §10), oldest first. */
   taskScreens(taskId: TaskId): TaskScreensDto;
   /** A picture's PNG; throws NotFoundError for a pruned or missing one. */

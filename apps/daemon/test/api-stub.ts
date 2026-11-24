@@ -240,7 +240,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     addShapeFile: track('addShapeFile'),
     postTaskMessage: track('postTaskMessage'),
     stopPage: track('stopPage'),
-    taskLinearPosts: () => [],
+    taskLinearPosts: () => ({ link: null, followUpOf: null, posts: [] }),
     taskScreens: track('taskScreens'),
     screenPicture: track('screenPicture'),
     taskDesignCheck: track('taskDesignCheck'),
