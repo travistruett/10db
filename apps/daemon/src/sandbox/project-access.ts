@@ -13,7 +13,7 @@ import { toolchainAccess, type ToolchainAccess } from './toolchain-reads';
 export interface ProjectAccess {
   /** The checkout's real path. */
   readonly checkout: string;
-  /** The checkout's `.env*` files, and the real paths of its `.env*` links. */
+  /** The checkout's `.env*` files but templates, and the real paths of its `.env*` links. */
   readonly checkoutSecrets: readonly string[];
   readonly protectedReads: readonly string[];
   readonly toolchain: ToolchainAccess;
@@ -121,7 +121,7 @@ async function secretPathsOf(path: string, entry: Dirent): Promise<string[]> {
 }
 
 /**
- * Every `.env*` file under `root`, and every `.env*` link with the real path it leads to;
+ * Every `.env*` file under `root` but a template, and every such `.env*` link with the real path it leads to;
  * directories in `UNWALKED_DIRECTORIES` and links are not entered. The walk is asynchronous, as a
  * checkout can hold a large build tree. A directory that vanished mid-walk is skipped; one that
  * can't be listed for any other reason could hide a secret file, so the walk refuses, naming it.
