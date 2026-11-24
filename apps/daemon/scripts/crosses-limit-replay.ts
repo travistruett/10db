@@ -4,8 +4,7 @@ import { createTestStore, patchJudgeConfig } from '@10db/db';
 import { z } from 'zod';
 import { systemClock } from '../src/clock';
 import { createEventBus, createStateStore } from '../src/events';
-import { readComposeServices } from '../src/folders';
-import { createGit } from '../src/git';
+import type { ComposeServices } from '../src/folders';
 import {
   createJudge,
   type Judge,
@@ -18,13 +17,13 @@ import { buildTrustPolicy, crossesLimit } from '../src/trust';
 
 /**
  * Replays commands through the crosses_limit judge in a lane of a project with Docker and localhost open and the
- * compose services of a project (`--repo`, read from its origin/<base>; `--base` names a branch that has them),
- * for the hand check that routine dev commands are allowed at the floor and the controls are not. One line per command with the choice, its confidence and the verdict.
+ * compose services of a small app (backend, db, frontend), for the hand check that routine dev commands are
+ * allowed at the floor and the controls are not. One line per command with the choice, its confidence and the
+ * verdict.
  *
  *   OPENROUTER_API_KEY=<key> pnpm --filter @10db/daemon exec tsx scripts/crosses-limit-replay.ts [--model <id>]
  *   ANTHROPIC_API_KEY=<key> ... --model <claude id>
  *   AWS_PROFILE=<profile> AWS_REGION=<region> ... --model <bedrock id>
- *   ... --repo <path> [--base main]   required: the project checkout whose origin/<base> is read
  *
  * The credential is read from the environment and used for these calls only; nothing is stored. Without one no
  * model is called: the script prints the state the judge would read for the first command. It exits non-zero when
@@ -164,8 +163,6 @@ const env = Env.parse(process.env);
 const { values: args } = parseArgs({
   options: {
     model: { type: 'string' },
-    repo: { type: 'string' },
-    base: { type: 'string', default: 'main' },
   },
 });
 
@@ -189,12 +186,13 @@ if (credential !== null && credential.kind !== AccountKind.OpenRouter && args.mo
   throw new Error(`--model names the ${credential.kind} model to ask`);
 const model = args.model ?? 'typesafe/jev-1.14';
 
-if (args.repo === undefined)
-  throw new Error('--repo names the project checkout to read its compose services from');
-const compose = await readComposeServices(createGit(), {
-  repoPath: args.repo,
-  baseBranch: args.base,
-});
+// What the judge is told of the project's compose file: the services the cases' containers belong to.
+const compose: ComposeServices = {
+  files: ['app/docker-compose.yml'],
+  project: 'app',
+  services: ['backend', 'db', 'frontend'],
+  containerNames: [],
+};
 const policy = buildTrustPolicy({
   surface: TrustSurface.Lane,
   projectName: 'app',
