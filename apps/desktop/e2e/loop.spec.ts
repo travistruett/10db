@@ -161,6 +161,11 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // Each key waits for the drag to take the last one: an arrow before the pick-up lands is lost.
   await page.keyboard.press('Space');
   await expect(ready.getByRole('listitem').nth(1)).toHaveCSS('opacity', '0.3');
+  // The drop targets are measured after the pick-up renders; the card is announced over itself once
+  // they are. An arrow before that finds no target to move to and is lost.
+  await expect(
+    page.getByRole('status').filter({ hasText: `${TASK} is over ${TASK}.` }),
+  ).toHaveCount(1);
   await page.keyboard.press('ArrowUp');
   await expect(
     page.getByRole('status').filter({ hasText: `${TASK} is over ${OTHER}.` }),
