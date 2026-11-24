@@ -2535,7 +2535,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         ? undefined
         : {
             skipped: listSkipsForWorkstream(db, id).map((k) => ({
-              what: `${k.toolName}, ${k.kind}, by ${k.source}`,
+              tool: k.toolName,
+              what: `${k.kind}, by ${k.source}`,
               limit: k.limit,
               reason: k.reason,
               command: k.summary,

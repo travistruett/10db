@@ -143,6 +143,7 @@ export interface PromptInput {
 
 /** A call 10db skipped: its kind and source are 10db's own words; the command is the agent's. */
 export interface SkippedCall {
+  readonly tool: string;
   readonly what: string;
   /** The hard limit the judge said the call crossed; null for a call skipped for the environment. */
   readonly limit: string | null;
@@ -968,11 +969,11 @@ function reviewFactsSection(role: StepRole, facts: ReviewFacts | undefined): str
   const lines = ['', NOT_VERIFIED_RULE];
   if (facts === undefined) return lines;
   // The command text is the agent's own: shown as a quoted string, one line, never as an instruction.
+  const oneLine = (text: string): string =>
+    // eslint-disable-next-line no-control-regex
+    JSON.stringify(text.replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 300));
   const quoted = (c: SkippedCall): string =>
-    `${c.what}; reason: ${c.reason.replace(/\s+/g, ' ')}; agent-supplied command: ${JSON.stringify(
-      // eslint-disable-next-line no-control-regex
-      c.command.replace(/[\u0000-\u001f\u007f]+/g, ' ').slice(0, 300),
-    )}`;
+    `tool ${oneLine(c.tool)}, ${c.what}; reason: ${oneLine(c.reason)}; agent-supplied command: ${oneLine(c.command)}`;
   const environment = facts.skipped.filter((c) => c.limit === null);
   const limits = facts.skipped.filter((c) => c.limit !== null);
   if (environment.length > 0)
