@@ -47,6 +47,16 @@ const STATUS_TONE: Readonly<Record<AccountStatus, ConnectionTone>> = {
 };
 
 const NO_WRAP = { whiteSpace: 'nowrap' } as const;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/** An identity as the table shows it: "email · id" without the id, which the drawer still shows whole. */
+function shownIdentity(identity: string): string {
+  return identity
+    .split(' · ')
+    .filter((part) => !UUID.test(part.trim()))
+    .join(' · ');
+}
 /** A badge is never cut to its first letters, as the Factory's state badges aren't. */
 const WHOLE_BADGE = {
   style: { minWidth: 'max-content' },
@@ -116,8 +126,15 @@ function AccountRow({
             ) : null}
           </Group>
           {harnessOf(account) !== null && account.kind !== AccountKind.OpenRouter ? (
-            <Text size="xs" c="dimmed" style={NO_WRAP}>
-              {account.expectedIdentity ?? 'No identity yet'}
+            <Text
+              size="xs"
+              c="dimmed"
+              style={NO_WRAP}
+              title={account.expectedIdentity ?? undefined}
+            >
+              {account.expectedIdentity === null
+                ? 'No identity yet'
+                : shownIdentity(account.expectedIdentity)}
             </Text>
           ) : null}
           {account.archived || harnessOf(account) === null ? null : (
