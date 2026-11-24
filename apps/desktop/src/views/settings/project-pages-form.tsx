@@ -1,29 +1,10 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Button, Stack, Textarea, TextInput } from '@mantine/core';
-import { Link } from '@tanstack/react-router';
-import { useWorkbenchSetup } from '../../daemon/pass-queries';
-import { CountBadge } from '../../shell/count-badge';
-import { setUpCount } from '../workbench/setup/setup-rules';
+import { Stack, Textarea, TextInput } from '@mantine/core';
 import { PicturesStatus } from './pictures-status';
 import { MONO_INPUT, useProjectFields } from './project-fields-state';
 import { ScreensMatrixField } from './screens-matrix-field';
 import { ProjectSaveBar } from './project-save-bar';
 import { SettingRow, SettingsCard } from './setting-row';
-
-/** Opens the Workbench setup, badged with how many suggestions it holds. */
-function ReviewSuggestions({ project }: { readonly project: ProjectDto }) {
-  const setup = useWorkbenchSetup(project.id);
-  const count = setup.data === undefined ? 0 : setUpCount(setup.data, project.leftOutPages);
-  return (
-    <Button
-      variant="default"
-      rightSection={count === 0 ? null : <CountBadge count={count} />}
-      renderRoot={(props) => <Link {...props} to="/workbench" search={{ setup: true }} />}
-    >
-      Review Suggestions
-    </Button>
-  );
-}
 
 /** Where the app runs and how pictures of its pages are taken, saved as one patch of what changed. */
 export function ProjectPagesForm({ project }: { readonly project: ProjectDto }) {
@@ -36,7 +17,7 @@ export function ProjectPagesForm({ project }: { readonly project: ProjectDto }) 
   const { values, errors, set } = fields;
   return (
     <Stack gap="xl">
-      <SettingsCard title="Your App" action={<ReviewSuggestions project={project} />}>
+      <SettingsCard title="Your App">
         <SettingRow
           label="App Address"
           description="Where your dev server answers."

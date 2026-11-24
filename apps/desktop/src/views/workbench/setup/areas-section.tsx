@@ -3,7 +3,7 @@ import {
   pageLabel,
   type AreaDef,
   type PageRow,
-  type ProjectViewDto,
+  type ProjectDto,
   type WorkbenchSetupAreas,
 } from '@10db/contracts';
 import { Button, Checkbox, Code, Collapse, Stack, Text, Title } from '@mantine/core';
@@ -16,6 +16,15 @@ export interface PageRowsProps {
   readonly pages: readonly PageRow[];
   readonly unticked: readonly string[];
   readonly onTick: (page: string, ticked: boolean) => void;
+}
+
+const SHOWN_FOLDERS = 2;
+
+/** The first few of a page's folders and how many more, so a page with dozens of files stays one line. */
+function foldersLine(folders: readonly string[]): string {
+  const shown = folders.slice(0, SHOWN_FOLDERS).join(', ');
+  const more = folders.length - SHOWN_FOLDERS;
+  return more > 0 ? `${shown} and ${String(more)} more` : shown;
 }
 
 /**
@@ -44,7 +53,7 @@ export function PageRows({ pages, unticked, onTick }: PageRowsProps) {
               }`}
             </>
           }
-          description={page.folders.join(', ')}
+          description={foldersLine(page.folders)}
         />
       ))}
     </Stack>
@@ -52,19 +61,28 @@ export function PageRows({ pages, unticked, onTick }: PageRowsProps) {
 }
 
 export interface AreasSectionProps {
-  readonly project: ProjectViewDto;
+  readonly project: ProjectDto;
   readonly areas: WorkbenchSetupAreas;
   /** The list Apply would save, with the unticked pages folded back. */
   readonly result: readonly AreaDef[];
   readonly unticked: readonly string[];
   readonly onTick: (page: string, ticked: boolean) => void;
+  /** False when the Rebuild areas line above already says what the list comes to. */
+  readonly summarized: boolean;
 }
 
 /**
  * The setup's Areas: what the rebuild comes to in one line, each new page as a row the builder may
  * untick, the other areas behind Show, and what is kept or left out with why.
  */
-export function AreasSection({ project, areas, result, unticked, onTick }: AreasSectionProps) {
+export function AreasSection({
+  project,
+  areas,
+  result,
+  unticked,
+  onTick,
+  summarized,
+}: AreasSectionProps) {
   const [othersOpen, others] = useDisclosure(false);
   const othersId = useId();
   const rest = result.filter((a) => a.role !== AreaRole.Page);
@@ -73,7 +91,7 @@ export function AreasSection({ project, areas, result, unticked, onTick }: Areas
       <Title order={3} id={`${othersId}-title`}>
         Areas
       </Title>
-      <Text size="sm">{areasSummary(project.areas, result)}</Text>
+      {summarized ? null : <Text size="sm">{areasSummary(project.areas, result)}</Text>}
       <PageRows pages={areas.pages} unticked={unticked} onTick={onTick} />
       {areas.kept.length === 0 ? null : (
         <Stack gap={4}>
