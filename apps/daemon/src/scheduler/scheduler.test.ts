@@ -622,6 +622,9 @@ describe('scheduler', () => {
     const s = scheduler();
     await s.tick();
     expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
+    expect(getWorkstream(store.db, b.workstream.id).notice?.line).toBe(
+      'Waits for t to finish with api',
+    );
     state.write((ctx) => {
       for (const to of ['RUNNING', 'VERIFYING', 'DONE'] as const)
         transitionWorkstream(ctx, a.workstream.id, { to, fence: null });
@@ -629,6 +632,7 @@ describe('scheduler', () => {
     });
     await s.tick();
     expect(launched.map((l) => l.id)).toEqual([a.workstream.id, b.workstream.id]);
+    expect(getWorkstream(store.db, b.workstream.id).notice).toBeNull();
   });
 
   it("skips a paused account's work", async () => {
