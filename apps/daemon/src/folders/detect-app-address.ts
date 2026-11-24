@@ -88,7 +88,7 @@ const inDotFolder = (path: string): boolean =>
     .slice(0, -1)
     .some((part) => part.startsWith('.'));
 
-function composeFiles(files: readonly string[]): string[] {
+export function composeFiles(files: readonly string[]): string[] {
   return files
     .filter((f) => COMPOSE_NAMES.includes(posix.basename(f)) && !inDotFolder(f))
     .sort(

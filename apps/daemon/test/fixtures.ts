@@ -427,5 +427,6 @@ export function testPolicy(surface: TrustSurface = 'lane'): TrustPolicy {
     grants: [],
     yourMcpServers: [],
     claudeConnectors: false,
+    devAccess: { docker: false, localhost: false, compose: null },
   });
 }

@@ -138,6 +138,8 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
         grants: [],
         yourMcpServers: Object.keys(prepared.yourMcpServers),
         claudeConnectors: connector,
+        // A chat's sandbox opens neither Docker nor loopback.
+        devAccess: { docker: false, localhost: false, compose: null },
       });
       const prompt = [
         run.readOnly

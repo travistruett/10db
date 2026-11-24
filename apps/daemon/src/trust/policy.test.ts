@@ -12,6 +12,7 @@ const input = (overrides: Partial<TrustPolicyInput> = {}): TrustPolicyInput => (
   grants: [],
   yourMcpServers: [],
   claudeConnectors: false,
+  devAccess: { docker: false, localhost: false, compose: null },
   ...overrides,
 });
 
@@ -72,6 +73,63 @@ describe('buildTrustPolicy', () => {
       .toEqual([
         'Sensitive remote targets: "api.example.com", "prod admin". These are live: treat a write to any of them as writing to a live system.',
       ]);
+  });
+
+  it('tells the judge whether Docker and localhost are open, and names the compose services quoted', () => {
+    const amps = {
+      files: ['amps/docker-compose.yml'],
+      project: 'amps',
+      services: ['backend', 'db', 'frontend'],
+      containerNames: [],
+    };
+    const on = buildTrustPolicy(
+      input({ devAccess: { docker: true, localhost: true, compose: amps } }),
+    ).environment;
+    const docker = (env: readonly string[]) => env.filter((l) => l.startsWith('Docker:'));
+    expect.soft(docker(on), 'docker on').toEqual([expect.stringContaining('open to this session')]);
+    const localhost = (env: readonly string[]) => env.filter((l) => l.startsWith('Localhost:'));
+    expect
+      .soft(localhost(on), 'localhost on')
+      .toEqual([expect.stringContaining('open to this session')]);
+    const containers = on.filter((l) => l.startsWith('Local dev containers:'));
+    expect.soft(containers, 'compose services').toHaveLength(1);
+    for (const quoted of ['"backend"', '"db"', '"frontend"', '"amps"', '"amps/docker-compose.yml"'])
+      expect.soft(containers[0], quoted).toContain(quoted);
+    expect
+      .soft(on.join('\n'), 'what still destroys data')
+      .toMatch(/drop.*table.*down -v.*volume rm/is);
+
+    const off = buildTrustPolicy(input()).environment;
+    expect
+      .soft(docker(off), 'docker off')
+      .toEqual([expect.stringContaining('closed to this session')]);
+    expect
+      .soft(localhost(off), 'localhost off')
+      .toEqual([expect.stringContaining('closed to this session')]);
+    expect
+      .soft(
+        off.some((l) => l.startsWith('Local dev containers:')),
+        'no containers with Docker closed',
+      )
+      .toBe(false);
+
+    const odd = buildTrustPolicy(
+      input({
+        devAccess: {
+          docker: true,
+          localhost: false,
+          compose: { ...amps, project: 'a"b', services: ['db\nhost: prod'] },
+        },
+      }),
+    ).environment;
+    expect
+      .soft(
+        odd.every((l) => !l.includes('\n')),
+        'a newline stays on its line',
+      )
+      .toBe(true);
+    expect.soft(odd.join(' '), 'quoted').toContain('"db\\nhost: prod"');
+    expect.soft(odd.join(' '), 'quoted').toContain('"a\\"b"');
   });
 
   it('a lane and a pass say tracked files are the session’s to change; Plan and chat don’t', () => {

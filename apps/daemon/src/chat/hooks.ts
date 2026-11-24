@@ -630,6 +630,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         grants: projectGrantLines(state.db, project.id),
         yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
         claudeConnectors,
+        // A chat's sandbox opens neither Docker nor loopback.
+        devAccess: { docker: false, localhost: false, compose: null },
       });
       // The thread says once per session that 10db's judge stopped answering.
       let saidUnavailable = false;

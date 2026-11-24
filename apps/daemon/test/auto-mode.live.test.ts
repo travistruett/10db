@@ -162,6 +162,7 @@ function policyFor(surface: TrustSurface, checkout: string): TrustPolicy {
     grants: [],
     yourMcpServers: [],
     claudeConnectors: false,
+    devAccess: { docker: false, localhost: false, compose: null },
   });
 }
 

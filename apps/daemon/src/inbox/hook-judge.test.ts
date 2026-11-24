@@ -163,6 +163,7 @@ function hookJudge(
         grants: [],
         yourMcpServers: [],
         claudeConnectors: false,
+        devAccess: { docker: false, localhost: false, compose: null },
       }),
       allowLines: () => grants,
       judgeNow: () => opts.now ?? JudgeKind.Tendb,
