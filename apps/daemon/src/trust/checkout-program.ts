@@ -14,8 +14,11 @@ const inside = (root: string, path: string): boolean => {
 
 const GIT_CHECK_MS = 5_000;
 
-/** Whether git tracks `path` and neither the index nor the working tree differs from HEAD at it. */
-function isCommittedUnmodified(checkout: string, path: string): boolean {
+const COMMIT_ID = /^[0-9a-f]{40,64}$/;
+
+/** Whether git tracks `path` and neither the index nor the working tree differs from `start` at it. */
+function isCommittedUnmodified(checkout: string, path: string, start: string | null): boolean {
+  if (start === null || !COMMIT_ID.test(start)) return false;
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')),
   );
@@ -31,11 +34,11 @@ function isCommittedUnmodified(checkout: string, path: string): boolean {
       return false;
     }
   };
-  return git(['ls-files', '--error-unmatch']) && git(['diff', '--quiet', 'HEAD']);
+  return git(['ls-files', '--error-unmatch']) && git(['diff', '--quiet', start]);
 }
 
 /**
- * A regular file that git tracks and has not changed since HEAD, whose real path stays in the checkout and is
+ * A regular file that git tracks and has not changed since the commit the session started from, whose real path stays in the checkout and is
  * not a secret. A script the session wrote or edited is never one: the sandbox does not contain everything a
  * script can do (a container the project's Docker access reaches), so only code the builder committed is
  * exempt from the judge's floor.
@@ -49,7 +52,7 @@ function isCheckoutFile(word: string, cwd: string, ctx: FastPathContext): boolea
     return (
       inside(realpathSync(ctx.checkout), real) &&
       !namesSecret(path, ctx.secretFiles) &&
-      isCommittedUnmodified(realpathSync(ctx.checkout), real)
+      isCommittedUnmodified(realpathSync(ctx.checkout), real, ctx.startCommit)
     );
   } catch {
     return false;

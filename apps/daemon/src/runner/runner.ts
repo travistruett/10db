@@ -2771,6 +2771,8 @@ export function createRunner(opts: RunnerOptions): Runner {
               );
               return [];
             });
+    const startCommit =
+      laneSession === null || !tendbReady ? null : await opts.git.head(checkout).catch(() => null);
     const startFloor =
       laneSession === null
         ? null
@@ -3241,6 +3243,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 secretFiles: laneSession.fileAccess.secretFiles ?? [],
                 preExisting,
                 setupReads: laneSession.fileAccess.setupReads ?? [],
+                startCommit,
               },
               policy,
               allowLines: () => [

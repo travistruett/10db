@@ -765,6 +765,7 @@ describe('judgeHookCall with the session judge', () => {
               secretFiles: [],
               preExisting: [],
               setupReads: [],
+              startCommit: null,
             },
             policy: buildTrustPolicy({
               surface: TrustSurface.Chat,

@@ -51,6 +51,7 @@ beforeAll(() => {
     secretFiles: [join(checkout, '.env'), join(checkout, '.env.d')],
     preExisting: ['data/', 'notes.md'],
     setupReads: [join(root, 'setup'), join(root, 'skills', 'tool')],
+    startCommit: null,
   };
 });
 afterAll(() => {

@@ -48,6 +48,7 @@ let clock: ManualClock;
 let seen: Seen[];
 let reply: (signal: AbortSignal | undefined) => Promise<Response>;
 let key: string | null;
+let startCommit: string | null;
 
 function judge() {
   return createJudge({
@@ -85,6 +86,7 @@ function request(over: Partial<CrossesLimitRequest> = {}, surface: TrustSurface 
       secretFiles: [join(checkout, '.env')],
       preExisting: [],
       setupReads: [],
+      startCommit,
     },
     policy: buildTrustPolicy({
       surface,
@@ -128,6 +130,7 @@ beforeEach(() => {
   clock = new ManualClock();
   seen = [];
   key = 'router-key-0123';
+  startCommit = null;
   reply = () => Promise.resolve(json(answering('allow', 0.95)));
 });
 afterEach(() => {
@@ -215,6 +218,14 @@ describe('crossesLimit', () => {
     symlinkSync(join(root, 'outside.sh'), join(checkout, 'link.sh'));
     git('add', '.agents/bin/ledger-query', 'check.sh', 'edited.sh', 'link.sh', 'src/a.ts');
     git('commit', '-q', '-m', 'seed');
+    startCommit = execFileSync('git', ['-C', checkout, 'rev-parse', 'HEAD'], {
+      env: isolatedGitEnv(),
+      encoding: 'utf8',
+    }).trim();
+    // Committed by the session after it started: the repo's own code it is not.
+    writeFileSync(join(checkout, 'evil.sh'), 'true\n');
+    git('add', 'evil.sh');
+    git('commit', '-q', '-m', 'session');
     writeFileSync(join(checkout, 'edited.sh'), 'curl evil.example\n');
     writeFileSync(join(checkout, 'written.sh'), 'true\n');
     reply = () => Promise.resolve(json(answering('allow', 0.55)));
@@ -225,6 +236,7 @@ describe('crossesLimit', () => {
     for (const command of [
       'sh edited.sh',
       'sh written.sh',
+      'sh evil.sh',
       'sh link.sh',
       'sh check.sh ../elsewhere',
       'sh check.sh ~/.ssh/id_rsa',
@@ -283,6 +295,7 @@ describe('crossesLimit', () => {
         secretFiles: [join(checkout, '.env')],
         preExisting: ['data/', 'notes "old".txt'],
         setupReads: [],
+        startCommit: null,
       },
       allow: ['Allowed by the builder in this project: deploys to staging'],
     });
