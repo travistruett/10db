@@ -29,7 +29,8 @@
     5. **The compose rule.** With `compose` a non-empty list whose every entry has a `workingDir` (already a real
        path) equal to or under `copy` or `tempDir`, and under no `registeredCheckouts` entry, and whose every
        `hostIp` is either `127.0.0.1`, or `0.0.0.0` or `::` while no listener on P is bound to `127.0.0.1`: owned
-       on `127.0.0.1`. Docker publishing on all addresses beside another server bound to `127.0.0.1:P` would hand
+       on `127.0.0.1`. A `::` publication counts only when `0.0.0.0` or `127.0.0.1` is published beside it: alone,
+       a builder's server on IPv4 `0.0.0.0:P` would answer `127.0.0.1:P`. Docker publishing on all addresses beside another server bound to `127.0.0.1:P` would hand
        the connection to that server, which is why the listeners are read here too. Any other `hostIp` is
        refused.
     6. Otherwise refused, with the most useful reason first:
@@ -231,6 +232,7 @@ ports directly; the reference is only for what "the daemon's port" means.
 | a connection to P | Docker on; every publication of P is by a container whose compose working dir is in the session's copy or temp dir (not inside a registered checkout), bound to `127.0.0.1` | owned, reached on `127.0.0.1` (card 2) |
 | a connection to P | the same, bound to `0.0.0.0` or `::` | owned only when no listener on P is bound to `127.0.0.1`; else refused "P is shared with a server that isn't this lane's" (card 2) |
 | a connection to P | a publication bound to any other address | refused (card 2) |
+| a connection to P | a stack published only on `::` | refused: IPv4 `127.0.0.1:P` may be another server's (card 2) |
 | two tasks batched in one worktree | one's Compose stack | the other owns it too (one copy); accepted, since they are one batch's work (card 2) |
 | a connection to P | the compose dir is inside a registered checkout (the builder's stack on 8800), elsewhere, or no label (`docker run -p`) | refused; a plain `docker run` refusal says to start it with Compose from the copy (card 2) |
 | a connection to P | `docker ps` fails or passes 5 s, or `lsof` fails | refused, saying which reading failed (card 2) |
@@ -261,7 +263,7 @@ One pure table, `apps/daemon/src/lane-browser/lane-reach.test.ts`, in `pictures/
 - **The compose rule:**
   - a dir in the copy, in the temp dir, in a registered checkout, elsewhere;
   - `hostIp` `127.0.0.1`; `0.0.0.0` with no listener on `127.0.0.1`; `0.0.0.0` beside a `127.0.0.1` listener;
-    `::`; `192.168.1.5`;
+    `::` beside `0.0.0.0`; `::` alone (refused); `192.168.1.5`;
   - no label;
   - `unanswered`;
   - Docker off (`null`).

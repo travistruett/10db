@@ -22,10 +22,13 @@ smoke has run.
   - **`browser_upload`:** `readUploads(paths, session)` (`apps/daemon/src/mcp/browser-files.ts`, new), then
     `driver.upload(ref, files)`. The driver gets bytes, never a path, so nothing a lane swaps in after the check is
     ever opened. For each path, in order:
-    1. `openSync(path, O_RDONLY | O_NOFOLLOW)`. A link as the last part fails here (ELOOP) and is refused.
-    2. `fstat` the descriptor: a regular file, with its size counted against `UPLOAD_MAX_BYTES` for the whole
-       call.
-    3. A fresh `readAccess(path, session.fileAccess, false, session.copy)`. It passes when its access is
+    0. Resolve a relative path against `session.copy` (`resolve(session.copy, path)`), so the open and the check
+       below name the same file. `openSync` alone would resolve it against the daemon's cwd.
+    1. `openSync(resolved, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)`. A link as the last part fails here (ELOOP) and is
+       refused. `O_NONBLOCK` keeps a FIFO from blocking the daemon's event loop on the open.
+    2. `fstat` the descriptor: a regular file (a FIFO, socket, device or directory is refused), with its size
+       counted against `UPLOAD_MAX_BYTES` for the whole call.
+    3. A fresh `readAccess(resolved, session.fileAccess, false, session.copy)`. It passes when its access is
        `inside` or `allowed` and its real path is at or under the copy, the temp dir, or one of
        `fileAccess.setupReads`. Refused otherwise:
        - `protected` or `contains-protected` (a secret, 10db's own files);
@@ -63,8 +66,10 @@ smoke has run.
        beside `keepScreen` and `pngSize`.
     5. **The copy**, `writeScreenCopy(tempDir, screenId, png)`, after the write:
        - `mkdirSync(<tempDir>/10db-screens, 0o700)` without `recursive`, with EEXIST tolerated;
-       - then `lstatSync`: a real directory (not a link), owned by the daemon's user, whose `realpath` is directly
-         under the temp dir's real path;
+       - then `lstatSync`: a real directory (not a link) whose `realpath` is directly under the temp dir's real
+         path. The lane runs as the same user, so an owner check would prove nothing and is not made. The risk
+         left, a `<screenId>.png` written into a directory the lane swaps in between the check and the open, is
+         accepted: the name is random, the file is new (`O_EXCL`), and it holds only the lane's own screenshot;
        - then the file opened `O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW`, mode 0600, and written.
        Any failure leaves the records as they are and answers `path: null` with why. The lane can still read the
        image when one was sent.
@@ -191,10 +196,6 @@ export function readAccess(
 ): { access: ReadAccess; realPath: string }
 
 // apps/daemon/src/pictures/picture-files.ts
-export type ScreenToKeep = Omit<NewTaskScreen, 'sha256' | 'size' | 'width' | 'height' | 'storedPath'> & {
-  readonly png: Uint8Array;
-};
-export function keepScreen(state: StateStore, dataDir: string, screen: ScreenToKeep): TaskScreenDto | null
 export function pngSize(bytes: Uint8Array): { width: number; height: number } | null
 
 // apps/daemon/src/conversation/picture-budget.ts, picture-limits.ts
@@ -221,7 +222,7 @@ export function laneScreenBytesSentTo(db: DbReader, sessionIds: readonly Session
     })
 ```
 
-`writePicture`, `removeUnnamed`, `keepScreen` and `pngSize` are in `pictures/picture-files.ts`, which
+`writePicture`, `removeUnnamed` and `pngSize` are in `pictures/picture-files.ts`, which
 `pictures/index.ts` does not export. Export them from `pictures/index.ts` (the module's entry point), unchanged;
 don't import the file directly. `writePicture(dataDir, png): { sha256; storedPath }` and
 `removeUnnamed(db, dataDir, sha256, notNewerThan?): boolean` are as in that file.
@@ -260,6 +261,8 @@ don't import the file directly. `writePicture(dataDir, png): { sha256; storedPat
     - a file in the copy is read;
     - a link in the copy to a file outside is refused;
     - a path through a linked directory that leads outside is refused;
+    - a FIFO in the copy is refused at once, without blocking;
+    - a relative path is read from the copy, not the daemon's cwd;
     - a secret in the copy (`.env`, in `secretFiles`) is refused;
     - a call past 50 MB is refused.
     - The swap race itself: call the dev/inode check with a descriptor of one file and a real path of another,
@@ -279,9 +282,11 @@ don't import the file directly. `writePicture(dataDir, png): { sha256; storedPat
   - start `python3 -m http.server <port>` from its copy in the background;
   - `browser_open` it;
   - `browser_screenshot` it with a note;
+  - serve a page with a file input and `browser_upload` a fixture to it by a relative path (`fixtures/x.csv`);
+    AMP-56 depends on uploads;
   - `browser_open` the daemon's port and one other loopback server it didn't start (one you start by hand).
   Check, then report:
-  - the first two answer;
+  - the open, screenshot and upload answer (the page shows the uploaded file's name);
   - the screenshot shows on the task (`GET /tasks/:taskId/screens`) with its evidence row;
   - the last two are refused with their reasons.
   If the dev data dir has no account a lane can run on, stop and report the smoke as blocked. Don't sign one in.

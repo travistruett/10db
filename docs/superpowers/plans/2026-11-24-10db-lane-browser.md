@@ -667,6 +667,7 @@ export function programRunnable(command: string, path: string, ctx: FileAccessCo
 | a connection to P | Docker on; every publication of P is by a container whose compose working dir is in the session's copy or temp dir (not inside a registered checkout), bound to `127.0.0.1` | owned, reached on `127.0.0.1` (card 2) |
 | a connection to P | the same, bound to `0.0.0.0` or `::` | owned only when no listener on P is bound to `127.0.0.1`; else refused "P is shared with a server that isn't this lane's" (card 2) |
 | a connection to P | a publication bound to any other address | refused (card 2) |
+| a connection to P | a stack published only on `::` | refused: IPv4 `127.0.0.1:P` may be another server's (card 2) |
 | two tasks batched in one worktree | one's Compose stack | the other owns it too (one copy); accepted, since they are one batch's work (card 2) |
 | a connection to P | the compose dir is inside a registered checkout (the builder's stack on 8800), elsewhere, or no label (`docker run -p`) | refused; a plain `docker run` refusal says to start it with Compose from the copy (card 2) |
 | a connection to P | `docker ps` fails or passes 5 s, or `lsof` fails | refused, saying which reading failed (card 2) |
