@@ -468,9 +468,16 @@ export interface SessionHandle {
   readonly events: AsyncIterable<SessionEvent>;
   /**
    * Queues a user message; the agent sees it at its next opportunity. `images` go with it as content
-   * blocks, and `uuid` is the client uuid a turn that takes it lists in `consumed`.
+   * blocks, and `uuid` is the client uuid a turn that takes it lists in `consumed`. `steerOnly` is for
+   * what only means something inside the turn that is open (a tool's pictures): Codex's session drops
+   * it, and logs that it did, rather than start a turn of its own for it.
    */
-  send(text: string, images?: readonly ShapeImage[], uuid?: string): void;
+  send(
+    text: string,
+    images?: readonly ShapeImage[],
+    uuid?: string,
+    options?: { readonly steerOnly?: boolean },
+  ): void;
   /** Interrupts the turn that is running; the session stays open for the next message. */
   interrupt(): Promise<InterruptReceipt>;
   /** Ends the session cleanly; resolves once `ended` has been emitted. */

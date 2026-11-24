@@ -213,6 +213,11 @@ async function readBody(req: IncomingMessage): Promise<string> {
   return body;
 }
 
+/** A 1x1 PNG, and the path its answer names, as the lane browser's screenshot tool answers one. */
+const PIXEL_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+const SCREENSHOT_PATH = '/shots/lane-screen.png';
+
 async function startFakeMcp(token: string): Promise<FakeMcp> {
   const calls: string[] = [];
   const reply = (res: ServerResponse, status: number, body: unknown): void => {
@@ -251,9 +256,21 @@ async function startFakeMcp(token: string): Promise<FakeMcp> {
                 description: 'Commits the lane’s work.',
                 inputSchema: { type: 'object', properties: { message: { type: 'string' } } },
               },
+              {
+                name: 'browser_screenshot',
+                description: 'A picture of the page, as the lane browser answers one.',
+                inputSchema: { type: 'object', properties: {} },
+              },
             ],
           };
         case 'tools/call':
+          if (message.params?.['name'] === 'browser_screenshot')
+            return {
+              content: [
+                { type: 'image', data: PIXEL_PNG, mimeType: 'image/png' },
+                { type: 'text', text: `Screenshot kept at ${SCREENSHOT_PATH}` },
+              ],
+            };
           calls.push(JSON.stringify(message.params?.['arguments'] ?? {}));
           return { content: [{ type: 'text', text: 'committed' }] };
         default:
@@ -1498,6 +1515,20 @@ describe.skipIf(!live)(
       // A tool a later Codex adds shows here before it reaches a lane.
       expect(run.request?.tools).toEqual(OFFERED_TOOLS);
       expect(run.request?.execTools).toEqual(EXEC_TOOLS);
+    });
+
+    // Whether Codex hands the model the image of an MCP tool's result decides whether the lane prompt tells
+    // a Codex session to open a screenshot's path itself (briefing/prompts.ts).
+    it('reports whether an MCP tool result image reaches the model', async () => {
+      const session = await runSession(world, [
+        codeMode('tools.mcp__10db__browser_screenshot({})'),
+        { say: 'done' },
+      ]);
+      const outputs = expectTurn(session);
+      liveNote(
+        `codex MCP image in a tool result reaches the model: ${session.request?.outputImages === 1 ? 'yes' : `no (${String(session.request?.outputImages)})`}`,
+      );
+      expect(outputs[0]).toContain(SCREENSHOT_PATH);
     });
 
     it('runs with the real toolchain: node and git status', async () => {

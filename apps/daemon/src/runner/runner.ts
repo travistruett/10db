@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -49,6 +50,7 @@ import {
   type InboxItemId,
   type InboxTarget,
   type NextAction,
+  type ProjectDto,
   type ProjectId,
   type ReviewCardDetail,
   type SessionId,
@@ -147,7 +149,6 @@ import {
   openItemsForWorkstream,
   openPassTurn,
   passAreasOf,
-  passHoldingTask,
   passPageAreas,
   patchWorkstream,
   questionRoutesForTask,
@@ -237,6 +238,7 @@ import {
   accountAgentOf,
 } from '../environment';
 import { createPassGitSession, type Git } from '../git';
+import { claimedChanges as claimedChangesOf, yieldClaimsWhileWaiting } from './claim-yield';
 import { anotherWritersRound, readStartDirt, withoutStartDirt } from './start-dirt';
 import {
   answerUnattended,
@@ -259,7 +261,7 @@ import {
 } from '../inbox';
 import type { Judge } from '../judge';
 import type { Logger } from '../log';
-import { mintSessionToken, type ToolImages } from '../mcp';
+import { mintSessionToken, TOOL_PICTURES_CAPTION, type ToolImages } from '../mcp';
 import {
   closeHoldsOf,
   foldHandEdits,
@@ -302,7 +304,9 @@ import {
   type LaneSandbox,
   type LaneSession,
   SYSTEM_TEMP_ROOTS,
+  programRunnable,
 } from '../sandbox';
+import type { LaneBrowserSession } from '../lane-browser';
 import {
   SessionEndReason,
   skippedServersNote,
@@ -342,7 +346,6 @@ import {
   type GateRunner,
   type Hold,
 } from '../verify';
-import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
 import { checkCoverage, coverageNote, type CheckCoverage } from './check-coverage';
@@ -397,10 +400,6 @@ const HANDOFF_BASELINE_MARGIN_PCT = 5;
 
 /** A hook call's input, as the agent sent it: read as a record where a skip keys it. */
 const ToolInputRecord = z.record(z.string(), z.unknown());
-
-/** The words sent with a tool's pictures to a Codex session; 10db's own, so no tool output speaks as the builder. */
-const TOOL_PICTURES_CAPTION =
-  'The pictures your last tool call returned. Its text came back as the tool result.';
 
 /** Why a lane is stopped; `closed` is the runner closing a pass task's session itself. */
 export type StopReason = 'cancelled' | 'paused' | 'shutdown' | 'closed';
@@ -530,6 +529,11 @@ export interface RunnerOptions {
     set(id: WorkstreamId, dir: string): void;
     delete(id: WorkstreamId): void;
   };
+  /**
+   * Closes the session's lane browser and its proxy. Run as the session ends, before its processes
+   * are stopped; absent where lanes get no browser.
+   */
+  readonly endLaneBrowser?: (sessionId: SessionId) => Promise<void>;
 }
 
 /** What has to happen after the write that changed a workstream has committed. */
@@ -810,6 +814,56 @@ async function stopLaneProcesses(
       'the processes a lane session started could not be stopped',
     );
   }
+}
+
+/** The path as the kernel sees it; one that won't resolve is kept as written. */
+function realPathOr(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+/** Closes the session's lane browser; a failure is logged, never thrown, so the session still ends. */
+async function endLaneBrowser(
+  end: ((sessionId: SessionId) => Promise<void>) | undefined,
+  sessionId: SessionId,
+  logger: Logger,
+): Promise<void> {
+  if (end === undefined) return;
+  try {
+    await end(sessionId);
+  } catch (error) {
+    logger.warn(
+      { sessionId, err: error instanceof Error ? error.message : String(error) },
+      "the lane session's browser could not be closed",
+    );
+  }
+}
+
+/** What the session's sandbox lends its browser. */
+function laneBrowserSession(
+  laneSession: LaneSession,
+  sessionId: SessionId,
+  project: ProjectDto,
+  taskId: TaskId,
+  workstreamId: WorkstreamId,
+  projects: readonly ProjectDto[],
+): LaneBrowserSession {
+  return {
+    sessionId,
+    projectId: project.id,
+    taskId,
+    workstreamId,
+    copy: realPathOr(laneSession.spec.checkout),
+    tempDir: realPathOr(laneSession.tmpDir),
+    fileAccess: laneSession.fileAccess,
+    registeredCheckouts: projects.map((other) => realPathOr(other.repoPath)),
+    loopback: project.sandboxLoopback,
+    docker: project.sandboxDocker,
+    members: () => laneSession.processMembers(),
+  };
 }
 
 /** A failure as the workstream records it: its kind, which the desktop words, and the detail. */
@@ -1902,6 +1956,15 @@ export function createRunner(opts: RunnerOptions): Runner {
       else patchWorkstream(ctx, id, fence, { nextAction });
       clearLease(ctx, id);
     });
+    if (!answered)
+      void yieldClaimsWhileWaiting({ state: opts.state, git: opts.git }, id, inboxId).catch(
+        (error: unknown) => {
+          opts.logger.warn(
+            { component: 'runner', workstreamId: id, err: String(error) },
+            'could not let go of the claims of a task waiting on an answer',
+          );
+        },
+      );
   }
 
   /** Back to the queue with the next action as it was, and the lease released. */
@@ -2967,6 +3030,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       inPass: pass !== null,
       attended: policy.attended,
       pictures: project.appUrl !== null && takesPictures(project, task),
+      browser: laneSession !== null && opts.endLaneBrowser !== undefined,
       sandboxed: Boolean(opts.laneSandbox),
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
       judged,
@@ -3212,7 +3276,24 @@ export function createRunner(opts: RunnerOptions): Runner {
       ? null
       : {
           skips: createSkipRecorder(
-            { state: opts.state, log: opts.logger },
+            {
+              state: opts.state,
+              log: opts.logger,
+              ...(laneSession === null
+                ? {}
+                : {
+                    runnable: (command: string) =>
+                      programRunnable(
+                        command,
+                        laneSession.spec.shellEnv['PATH'] ??
+                          laneSession.commandEnv['PATH'] ??
+                          launch.env['PATH'] ??
+                          '',
+                        laneSession.spec.settings.filesystem.allowRead,
+                        laneSession.spec.checkout,
+                      ),
+                  }),
+            },
             { workstreamId: id, sessionId: session.id },
           ),
           approvedKeys,
@@ -3234,11 +3315,24 @@ export function createRunner(opts: RunnerOptions): Runner {
       ...(provider === Provider.Codex
         ? {
             showImages: (shown: ToolImages) => {
-              if (shown.images.length > 0) handle?.send(TOOL_PICTURES_CAPTION, shown.images);
+              if (shown.images.length > 0)
+                handle?.send(TOOL_PICTURES_CAPTION, shown.images, undefined, { steerOnly: true });
             },
           }
         : {}),
       ...(unattended === null ? {} : { away: unattended }),
+      ...(laneSession === null
+        ? {}
+        : {
+            browser: laneBrowserSession(
+              laneSession,
+              session.id,
+              project,
+              task.id,
+              id,
+              listProjects(db),
+            ),
+          }),
     });
     const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
     /** The guard's answer for a lane's call under `judge`, with the unattended answer and skip in a lane. */
@@ -4166,6 +4260,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         items.unserve();
       }
       opts.live.unregister(session.id);
+      await endLaneBrowser(opts.endLaneBrowser, session.id, opts.logger);
       // However the session ended (finished, cancelled, handed off, the daemon stopping), nothing
       // its commands started keeps running: a background loop would otherwise outlive the session
       // and hold the Mac busy.
@@ -4256,22 +4351,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     return outcome;
   }
 
-  /**
-   * The paths in the claims the workstream holds right now that git reports as changed, less those
-   * still exactly as the checkout held them when the task first launched.
-   */
-  async function claimedChanges(row: WorkstreamRow): Promise<string[]> {
-    const project = getProject(db, row.projectId);
-    const checkout = checkoutOf(db, row);
-    const changed = await opts.git.changedPaths(checkout);
-    const claims = activeClaims(db, row.id).map((c) => ({ kind: c.kind, name: c.name }));
-    // A pass lane's claims name the pass's own areas: the whole-project page for a pass of one.
-    const pass = passHoldingTask(db, getTask(db, row.taskId));
-    const areas = pass ? [...passAreasOf(db, pass.id)] : project.areas;
-    const claimed = findClaimed(changed, { areas, hazards: project.hazards }, claims);
-    const start = pass ? null : getTaskStartDirt(db, row.taskId);
-    return withoutStartDirt(claimed, checkout, start).sort();
-  }
+  const claimedChanges = (row: WorkstreamRow): Promise<string[]> =>
+    claimedChangesOf(db, opts.git, row);
 
   /**
    * A write step that ends with changes in its claims uncommitted goes back to the same step, which

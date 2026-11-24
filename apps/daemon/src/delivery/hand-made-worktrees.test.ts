@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { InboxItemDto } from '@10db/contracts';
+import { getInboxItem } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { handMadeWorktreeFolder } from '../git';
@@ -77,6 +78,24 @@ describe('the hand-made worktree folder', () => {
     expect(removed.body).toContain(merged.path);
     expect(removed.key).toBe(`hand-made-removed:${folder}`);
     expect(titles().filter((t) => t.startsWith('Removed'))).toEqual([]);
+  });
+
+  it('closes its offer by itself once none of the worktrees it names exists, but not while one does', async () => {
+    const one = handMade('one', PrState.Merged);
+    const two = handMade('two', PrState.Merged);
+    await offerHandMadeFolders(h.ctx, signal);
+    const card = cardTitled('2 worktrees in');
+
+    rmSync(one.path, { recursive: true, force: true });
+    h.git$('worktree', 'prune');
+    await offerHandMadeFolders(h.ctx, signal);
+    expect(h.cards().some((c) => c.id === card.id)).toBe(true);
+
+    rmSync(two.path, { recursive: true, force: true });
+    h.git$('worktree', 'prune');
+    await offerHandMadeFolders(h.ctx, signal);
+    expect(h.cards().some((c) => c.id === card.id)).toBe(false);
+    expect(getInboxItem(h.state.db, card.id)).toMatchObject({ state: 'RESOLVED' });
   });
 
   const stays: readonly { name: string; hold: (path: string) => void }[] = [

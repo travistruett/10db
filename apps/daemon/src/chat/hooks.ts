@@ -61,7 +61,8 @@ import type { Judge } from '../judge';
 import { principlesBrief } from '../knowledge';
 import type { Logger } from '../log';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
-import type { ExploreProfile, ShapeToolRequest } from '../sessions';
+import { TOOL_PICTURES_CAPTION, type ToolImages } from '../mcp';
+import type { ExploreProfile, SessionHandle, ShapeToolRequest } from '../sessions';
 import {
   owedPlanningRules,
   PLANNING_STUB,
@@ -567,6 +568,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       const reviewTurns = (): readonly ShapeReviewTurn[] =>
         [...liveReviews].map(([id, r]) => ({ id, kind: r.kind }));
       let noSubagents = false;
+      let opened: SessionHandle | null = null;
       deps.live.open(conv.id, {
         sessionId: start.sessionId,
         observer: start.observer,
@@ -574,6 +576,16 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         planRules,
         review: reviewTurns,
         inSession: () => noSubagents,
+        // Codex's code mode answers a script text only, so the pictures a tool returned reach its model as a
+        // message steered into the turn, under 10db's own caption and never the tool's text.
+        ...(launch.account.harness === Provider.Codex
+          ? {
+              showImages: (shown: ToolImages) => {
+                if (shown.images.length > 0)
+                  opened?.send(TOOL_PICTURES_CAPTION, shown.images, undefined, { steerOnly: true });
+              },
+            }
+          : {}),
       });
       holdingSession.set(chat.id, start.sessionId);
       const endJobs = ready === null ? undefined : () => ready.endJobs();
@@ -833,6 +845,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         release,
         track: (pid) => {
           ready?.trackProcesses(pid);
+        },
+        opened: (handle) => {
+          opened = handle;
         },
       };
     },

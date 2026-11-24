@@ -8,7 +8,12 @@ import type {
 } from '@10db/contracts';
 import type { ConversationItemRow, ConversationRow, WriteContext } from '@10db/db';
 import type { WaitObserver } from '../inbox';
-import type { ConversationReadSpec, ExploreSessionSpec, ShapeImage } from '../sessions';
+import type {
+  ConversationReadSpec,
+  ExploreSessionSpec,
+  SessionHandle,
+  ShapeImage,
+} from '../sessions';
 import type { PictureLimits } from './picture-limits';
 
 // Sessions spec §6.1: what an explore conversation's owner (Plan, and a chat once chats run) gives the
@@ -55,6 +60,8 @@ export interface ExploreLaunch {
   release(): Promise<void>;
   /** Watches what runs under the agent's process, whose pid its start reports. */
   track(pid: number): void;
+  /** Hands the owner the session's handle once it is open, for what the owner sends it on its own. */
+  opened?(handle: SessionHandle): void;
 }
 
 /** How a turn ended, and the turn starters it was begun with. */
