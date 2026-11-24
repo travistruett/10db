@@ -81,6 +81,13 @@ export function laneProxyTarget(request: {
   return refused('the proxy takes an absolute http:// address or a tunnel only');
 }
 
+/** One listening socket as `netstat` shows it. */
+export interface PortSocket {
+  readonly family: 'tcp4' | 'tcp6' | 'tcp46';
+  readonly address: string;
+  readonly pid: number;
+}
+
 export interface PortReadings {
   /** `lsof`'s listeners on the port: each one's address and its process chain, itself first, up to launchd. */
   readonly listeners:
@@ -89,6 +96,13 @@ export interface PortReadings {
         readonly chain: readonly { readonly pid: number; readonly startedAt: string }[];
       }[]
     | 'unread';
+  /**
+   * Every listener on the port from `netstat`, whoever's: its family and bound address (`*` for all
+   * addresses) and the pid that holds it. `lsof` run as the builder cannot see another user's socket,
+   * so this is the view that shows a root-owned `127.0.0.1:P` beside a lane's wildcard one. 'unread'
+   * when `netstat` failed or passed its deadline.
+   */
+  readonly sockets: readonly PortSocket[] | 'unread';
   /**
    * Each publication of the port by a running container: its compose working dir (null without the label)
    * and the host address Docker bound (`127.0.0.1`, `0.0.0.0`, `::`, or another); null when Docker is off for
@@ -154,9 +168,12 @@ export function portVerdict(input: {
   const { port, session, readings } = input;
   const fixed = fixedPortRefusal(port, input.daemonPort, input.proxyPorts);
   if (fixed !== null) return { kind: 'refused', why: fixed };
-  const { listeners, compose } = readings;
+  const { listeners, compose, sockets } = readings;
   if (listeners === 'unread') {
     return { kind: 'refused', why: `the listeners on ${String(port)} could not be read` };
+  }
+  if (sockets === 'unread') {
+    return { kind: 'refused', why: `the sockets on ${String(port)} could not be read` };
   }
   if (listeners.length === 0) return { kind: 'refused', why: `nothing listens on ${String(port)}` };
 
@@ -165,13 +182,21 @@ export function portVerdict(input: {
     !chain.some((p) => session.browserPids.has(p.pid));
   const ledgerOwners = session.loopback ? listeners.filter((l) => ownedByLedger(l.chain)) : [];
   if (session.loopback && ledgerOwners.length === listeners.length) {
-    const onIpv6Only = listeners.every((l) => bare(l.address) === '::1');
-    return { kind: 'owned', connectTo: onIpv6Only ? '::1' : '127.0.0.1' };
+    // Every socket on the port must be one of the lane's own, whoever lsof could see.
+    const lanePids = new Set(listeners.map((l) => l.chain[0]?.pid));
+    if (sockets.some((socket) => !lanePids.has(socket.pid))) {
+      return { kind: 'refused', why: `another process listens on port ${String(port)}` };
+    }
+    const connectTo = addressCovered(sockets);
+    if (connectTo === null) {
+      return { kind: 'refused', why: `${String(port)} is not bound to loopback` };
+    }
+    return { kind: 'owned', connectTo };
   }
 
   const pubs: NonNullable<Exclude<PortReadings['compose'], 'unanswered'>> =
     compose === null || compose === 'unanswered' ? [] : compose;
-  const ipv4Loopback = listeners.some((l) => bare(l.address) === '127.0.0.1');
+  const ipv4Loopback = sockets.some((socket) => bare(socket.address) === '127.0.0.1');
   if (pubs.length > 0) {
     const ips = pubs.map((c) => bare(c.hostIp));
     const known = ips.every((ip) => ip === '127.0.0.1' || ip === '0.0.0.0' || ip === '::');
@@ -213,6 +238,18 @@ export function portVerdict(input: {
     }
   }
   return { kind: 'refused', why: `${String(port)} is not a server this lane started` };
+}
+
+/** The loopback address one of the lane's own sockets answers on, IPv4 first; null when none does. */
+function addressCovered(sockets: readonly PortSocket[]): '127.0.0.1' | '::1' | null {
+  const v4 = sockets.some(
+    (s) => s.family !== 'tcp6' && ['127.0.0.1', '*', '0.0.0.0'].includes(bare(s.address)),
+  );
+  if (v4) return '127.0.0.1';
+  const v6 = sockets.some(
+    (s) => s.family !== 'tcp4' && ['::1', '*', '::'].includes(bare(s.address)),
+  );
+  return v6 ? '::1' : null;
 }
 
 function isInsideCopy(dir: string | null, session: PortSession): boolean {

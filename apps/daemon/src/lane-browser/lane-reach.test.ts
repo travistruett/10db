@@ -74,14 +74,35 @@ const session = (over: Partial<PortSession> = {}): PortSession => ({
 const chain = (...pids: [number, string][]) => pids.map(([pid, startedAt]) => ({ pid, startedAt }));
 const mine = chain([200, 't1'], [100, 't0'], [1, 'x']);
 const others = chain([300, 't2'], [250, 't9'], [1, 'x']);
-const judge = (readings: PortReadings, s: PortSession = session(), p = 3000): PortVerdict =>
-  portVerdict({ port: p, daemonPort: 7433, proxyPorts: new Set([4444]), session: s, readings });
+type Readings = Omit<PortReadings, 'sockets'> & { sockets?: PortReadings['sockets'] };
+// Unless a row says otherwise, netstat shows exactly what lsof attributed.
+const judge = (given: Readings, s: PortSession = session(), p = 3000): PortVerdict => {
+  const readings: PortReadings = {
+    ...given,
+    sockets:
+      given.sockets ??
+      (given.listeners === 'unread'
+        ? []
+        : given.listeners.map((l) => ({
+            family: l.address.includes(':') ? ('tcp6' as const) : ('tcp4' as const),
+            address: l.address.replace(/^\[|\]$/g, ''),
+            pid: l.chain[0]?.pid ?? 0,
+          }))),
+  };
+  return portVerdict({
+    port: p,
+    daemonPort: 7433,
+    proxyPorts: new Set([4444]),
+    session: s,
+    readings,
+  });
+};
 const owned = (connectTo: string) => ({ kind: 'owned', connectTo });
 const dir = (workingDir: string | null, hostIp: string) => ({ workingDir, hostIp });
 
 describe('portVerdict: fixed refusals', () => {
   it('refuses the daemon and a proxy before reading', () => {
-    expect(judge('unread' as never, session(), 7433)).toMatchObject(refused);
+    expect(judge({ listeners: 'unread', compose: null }, session(), 7433)).toMatchObject(refused);
     expect(judge({ listeners: 'unread', compose: null }, session(), 4444)).toMatchObject({
       kind: 'refused',
       why: "4444 is a lane browser's proxy",
@@ -99,7 +120,7 @@ describe('portVerdict: fixed refusals', () => {
 
 describe('portVerdict: the ledger rule', () => {
   const listener = (address: string, c = mine) => ({ address, chain: c });
-  it.each<[string, PortReadings, Partial<PortSession>, object]>([
+  it.each<[string, Readings, Partial<PortSession>, object]>([
     [
       'a chain reaching a member',
       { listeners: [listener('127.0.0.1')], compose: null },
@@ -136,6 +157,51 @@ describe('portVerdict: the ledger rule', () => {
       {},
       { kind: 'refused', why: "3000 is shared with a server that isn't this lane's" },
     ],
+    [
+      'a wildcard lane listener beside an unattributed 127.0.0.1',
+      {
+        listeners: [listener('*')],
+        sockets: [
+          { family: 'tcp4', address: '*', pid: 200 },
+          { family: 'tcp4', address: '127.0.0.1', pid: 5 },
+        ],
+        compose: null,
+      },
+      {},
+      { kind: 'refused', why: 'another process listens on port 3000' },
+    ],
+    [
+      'a lone wildcard lane listener',
+      {
+        listeners: [listener('*')],
+        sockets: [{ family: 'tcp4', address: '*', pid: 200 }],
+        compose: null,
+      },
+      {},
+      owned('127.0.0.1'),
+    ],
+    [
+      'a netstat failure',
+      { listeners: [listener('127.0.0.1')], sockets: 'unread', compose: null },
+      {},
+      { kind: 'refused', why: 'the sockets on 3000 could not be read' },
+    ],
+    [
+      'an IPv6-only wildcard reached on ::1',
+      {
+        listeners: [listener('*')],
+        sockets: [{ family: 'tcp6', address: '*', pid: 200 }],
+        compose: null,
+      },
+      {},
+      owned('::1'),
+    ],
+    [
+      'a socket bound to another address',
+      { listeners: [listener('192.168.1.5')], compose: null },
+      {},
+      refused,
+    ],
     ['only ::1', { listeners: [listener('[::1]')], compose: null }, {}, owned('::1')],
     [
       'ipv4 and ::1',
@@ -152,7 +218,7 @@ describe('portVerdict: the ledger rule', () => {
 describe('portVerdict: the compose rule', () => {
   const foreign = [{ address: '*', chain: others }];
   const loopbackForeign = [{ address: '127.0.0.1', chain: others }];
-  it.each<[string, PortReadings, object]>([
+  it.each<[string, Readings, object]>([
     [
       'a dir in the copy',
       { listeners: foreign, compose: [dir('/work/copy/app', '127.0.0.1')] },
@@ -219,6 +285,8 @@ describe('createPortOwner', () => {
     let owner = 200;
     let reads = 0;
     const readers: PortReaders = {
+      sockets: () =>
+        Promise.resolve([{ family: 'tcp4' as const, address: '127.0.0.1', pid: owner }]),
       listeners: () => {
         reads += 1;
         return Promise.resolve([{ pid: owner, address: '127.0.0.1' }]);

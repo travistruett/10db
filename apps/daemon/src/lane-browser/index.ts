@@ -8,6 +8,7 @@ export {
   type LaneTarget,
   type PortReadings,
   type PortSession,
+  type PortSocket,
   type PortVerdict,
 } from './lane-reach';
 export { createPortOwner, systemPortReaders, type PortOwner, type PortReaders } from './port-owner';

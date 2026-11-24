@@ -11,6 +11,7 @@ import {
   PORT_CHECKS_PER_MINUTE,
   portVerdict,
   type PortReadings,
+  type PortSocket,
   type PortSession,
   type PortVerdict,
 } from './lane-reach';
@@ -19,10 +20,13 @@ import type { LaneBrowserSession } from './session';
 const run = promisify(execFile);
 const READ_DEADLINE_MS = 5_000;
 const LSOF = '/usr/sbin/lsof';
+const NETSTAT = '/usr/sbin/netstat';
 
 export interface PortReaders {
   /** `lsof -nP -a -iTCP:<port> -sTCP:LISTEN`, each listener's pid and address; rejects on failure. */
   listeners(port: number): Promise<readonly { readonly pid: number; readonly address: string }[]>;
+  /** `netstat -anv -p tcp` for the port: every user's listeners, with family, address and pid; rejects on failure. */
+  sockets(port: number): Promise<readonly PortSocket[]>;
   /** The process table, for each listener's chain and start times. */
   readonly table: ProcessTable;
   /** `docker ps` for the port's publications: compose working dir and host address; null when no docker is found. */
@@ -44,6 +48,33 @@ function parseListeners(output: string): { pid: number; address: string }[] {
       const colon = name.lastIndexOf(':');
       if (colon > 0) found.push({ pid, address: name.slice(0, colon) });
     }
+  }
+  return found;
+}
+
+/**
+ * Parses `netstat -anv -p tcp` for the listeners on `port`. A listening line of the port that does not
+ * parse throws, so a view that may be incomplete is never taken for a whole one.
+ */
+function parseSockets(output: string, port: number): PortSocket[] {
+  if (!output.includes('Proto')) throw new Error('netstat printed no table');
+  const found: PortSocket[] = [];
+  for (const line of output.split('\n')) {
+    if (!line.includes('LISTEN')) continue;
+    const cols = line.trim().split(/\s+/);
+    const local = cols[3];
+    if (local === undefined) throw new Error('netstat line without an address');
+    const dot = local.lastIndexOf('.');
+    if (local.slice(dot + 1) !== String(port)) continue;
+    const family = cols[0];
+    // The pid is the end of the `process:pid` column, whose name may hold spaces; an older netstat
+    // printed the pid alone after the two window sizes.
+    const named = /LISTEN\s+\d+\s+\d+\s+\d+\s+\d+\s+.*:(\d+)\s+\S+\s+\S+\s/.exec(line)?.[1];
+    const pid = Number(named ?? cols[8]);
+    if ((family !== 'tcp4' && family !== 'tcp6' && family !== 'tcp46') || !Number.isInteger(pid)) {
+      throw new Error('netstat line not understood');
+    }
+    found.push({ family, address: local.slice(0, dot), pid });
   }
   return found;
 }
@@ -107,6 +138,15 @@ export function systemPortReaders(
         }
         throw error;
       }
+    },
+    async sockets(port) {
+      const { stdout } = await run(NETSTAT, ['-anv', '-p', 'tcp'], {
+        env: { LC_ALL: 'C' },
+        timeout: READ_DEADLINE_MS,
+        killSignal: 'SIGKILL',
+        maxBuffer: 64 * 1024 * 1024,
+      });
+      return parseSockets(stdout, port);
     },
     table,
     compose:
@@ -190,9 +230,9 @@ export function createPortOwner(
 
     let listeners: PortReadings['listeners'];
     try {
-      const sockets = await deps.readers.listeners(port);
+      const found = await deps.readers.listeners(port);
       const rows = new Map((await deps.readers.table()).map((row) => [row.pid, row]));
-      listeners = sockets.map(({ pid, address }) => {
+      listeners = found.map(({ pid, address }) => {
         const chain: { pid: number; startedAt: string }[] = [];
         const seen = new Set<number>();
         for (
@@ -209,13 +249,20 @@ export function createPortOwner(
     } catch {
       listeners = 'unread';
     }
-    const first = judge({ listeners, compose: null });
+    let sockets: PortReadings['sockets'];
+    try {
+      sockets = await deps.readers.sockets(port);
+    } catch {
+      sockets = 'unread';
+    }
+    const first = judge({ listeners, sockets, compose: null });
     const compose = deps.readers.compose;
     if (
       first.kind === 'owned' ||
       !session.docker ||
       compose === null ||
       listeners === 'unread' ||
+      sockets === 'unread' ||
       listeners.length === 0
     ) {
       return first;
@@ -226,7 +273,7 @@ export function createPortOwner(
     } catch {
       publications = 'unanswered';
     }
-    return judge({ listeners, compose: publications });
+    return judge({ listeners, sockets, compose: publications });
   };
 
   return {
