@@ -1,5 +1,10 @@
-import { RoutedBy, type WorkstreamId } from '@10db/contracts';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { ClaimKind, RoutedBy, type WorkstreamId } from '@10db/contracts';
 import {
+  activeClaims,
+  claimConflict,
+  getTaskStartDirt,
   getWorkstream,
   insertPerson,
   listInbox,
@@ -376,5 +381,58 @@ describe('a task cancelled while its question waits for triage', () => {
     });
     const after = listInbox(engine.store.db, {}).find((c) => c.id === card.id);
     expect(after).toMatchObject({ state: 'CANCELLED', routedBy: 'builder', assignees: ['me'] });
+  });
+});
+
+describe('a task waiting on a person', () => {
+  it('lets go of clean claims for another task, keeps claims over its own edits, and asks again on the answer', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [{ do: 'await_signal', name: 'alpha-asks' }, askHuman('product', 'op-yield-ask-1'), turn],
+        [turn],
+      ],
+      Gamma: [
+        [{ do: 'await_signal', name: 'edited' }, askHuman('product', 'op-yield-ask-2'), turn],
+        [turn],
+      ],
+    });
+    routeTo('product', ['mark'], false);
+    const alpha = engine.addTask('Alpha');
+    const gamma = engine.addTask('Gamma', ['ui']);
+    engine.launch(alpha.workstream.id);
+    engine.launch(gamma.workstream.id);
+    // Once the run has recorded the checkout as it was, Gamma writes a file under its claim and asks.
+    await waitFor(() => getTaskStartDirt(engine.store.db, gamma.task.id) !== null);
+    mkdirSync(join(engine.repoPath, 'src/ui'), { recursive: true });
+    writeFileSync(join(engine.repoPath, 'src/ui/draft.ts'), 'wip');
+    engine.adapter.signal('edited');
+    await waitFor(() => ws(gamma.workstream.id).state === 'WAITING_HUMAN');
+    // Alpha asks the same question, which is the one card, after Gamma's claims were weighed.
+    engine.adapter.signal('alpha-asks');
+    const card = await waitFor(openCard);
+    await engine.runner.idle();
+
+    await waitFor(() => activeClaims(engine.store.db, alpha.workstream.id).length === 0);
+    // Gamma's uncommitted file sits in its claim: it stays held, so nothing can touch or commit it.
+    expect(activeClaims(engine.store.db, gamma.workstream.id)).toHaveLength(1);
+    const beta = engine.addTask('Beta');
+    const ask = (name: string, workstreamId: WorkstreamId) => ({
+      projectId: engine.project.id,
+      workstreamId,
+      requests: [{ kind: ClaimKind.Area, name }],
+    });
+    expect(claimConflict(engine.store.db, ask('ui', beta.workstream.id))).toMatchObject({
+      heldBy: gamma.workstream.id,
+    });
+    expect(claimConflict(engine.store.db, ask('api', beta.workstream.id))).toBeNull();
+
+    // Beta takes the area; the answer queues Alpha, which then waits for it like any queued task.
+    engine.launch(beta.workstream.id);
+    engine.inbox.answer(card.id, { choice: 'Yes' });
+    expect(ws(alpha.workstream.id).state).toBe('QUEUED');
+    expect(claimConflict(engine.store.db, ask('api', alpha.workstream.id))).toMatchObject({
+      name: 'api',
+      heldBy: beta.workstream.id,
+    });
   });
 });
