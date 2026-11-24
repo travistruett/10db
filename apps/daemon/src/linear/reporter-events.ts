@@ -2,7 +2,6 @@ import {
   BatchId,
   BatchState,
   EventType,
-  ExternalKind,
   InboxItemId,
   LinearEventKind,
   PullRequestState,
@@ -28,6 +27,7 @@ import {
 import type { Clock } from '../clock';
 import type { EventBus, StateStore } from '../events';
 import type { Logger } from '../log';
+import { linearLinkOf } from './task-link';
 import { trustSwitchesFor } from '../permissions';
 import { reporterSettings } from './reporter-settings';
 
@@ -266,7 +266,7 @@ export function subscribeLinearEvents(
         const made = new Set<TaskId>();
         for (const draft of drafts) {
           const task = getTask(ctx.tx, draft.taskId);
-          if (task.external?.kind !== ExternalKind.Linear) continue;
+          if (linearLinkOf(ctx.tx, draft.taskId) === null) continue;
           if (!blocked.has(task.projectId))
             blocked.set(task.projectId, reporterBlockedBy(ctx.tx, task.projectId));
           if (blocked.get(task.projectId) !== null) continue;

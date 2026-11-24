@@ -304,9 +304,14 @@ export function applySkippedChoice(
     description: [
       `The builder approved these calls, which an earlier run of "${sourceTask.title}" skipped. Run them, then finish what that run left undone because of them.`,
       ...approved.map(followUpLine),
+      // The source's scope comes along, so the follow-up is checked against what the source promised.
+      ...(sourceTask.description.trim() === ''
+        ? []
+        : ['', `What "${quoted}" set out to do:`, sourceTask.description]),
     ].join('\n'),
     acceptanceCriteria: [
       'Each approved call has run, and what it held up in the earlier run is done.',
+      ...sourceTask.acceptanceCriteria,
     ],
     areas: sourceTask.areas,
   });
