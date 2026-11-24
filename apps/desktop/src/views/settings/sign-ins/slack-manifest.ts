@@ -16,6 +16,10 @@ oauth_config:
   scopes:
     bot:
       - chat:write
+      - channels:read
+      - channels:join
+      - groups:read
+      - files:write
       - im:write
       - im:history
       - mpim:write
