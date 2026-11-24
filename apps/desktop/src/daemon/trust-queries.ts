@@ -93,6 +93,8 @@ export function useStartMcpSignIn() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
+    // An action, not a saved setting: a settings page's bar does not say Saved for it.
+    meta: { quiet: true },
     mutationFn: async (input: StartMcpSignIn) =>
       readJson(await client.settings.trust['mcp-sign-ins'].$post({ json: input }), McpSignInsDto),
     onSuccess: (signIns) => {

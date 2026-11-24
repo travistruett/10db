@@ -167,11 +167,14 @@ const clientIdOf = (message: Outgoing): { clientUserMessageId?: string } =>
 
 /**
  * The pictures as Codex's user input, after the text, in order: each a local image of its stored
- * file, which Codex reads itself. Every lane picture is a stored file.
+ * file, which Codex reads itself, or, for a picture with no file (what a tool answered), an image
+ * by its data URL.
  */
 const pictureInputs = (images: readonly ShapeImage[]): readonly Record<string, string>[] =>
-  images.flatMap((image) =>
-    image.path === undefined ? [] : [{ type: 'localImage', path: image.path }],
+  images.map((image) =>
+    image.path === undefined
+      ? { type: 'image', url: `data:${image.mediaType};base64,${image.data}` }
+      : { type: 'localImage', path: image.path },
   );
 
 /** The text of a message a session that has started sends; nothing was prompted before then. */

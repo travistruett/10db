@@ -56,6 +56,7 @@ import {
   type SessionEvent,
   type ExploreSessionSpec,
   type LaneSessionSpec,
+  type SessionHandle,
   type ShapeImage,
 } from '../src/sessions';
 import {
@@ -748,6 +749,7 @@ async function runSession(
     readonly setup?: SetupInput;
     readonly instructions?: string;
     readonly yours?: LaneSessionInput['yourMcpServers'];
+    readonly toolImages?: readonly ShapeImage[];
   } = {},
 ): Promise<SessionRun> {
   const launch = launcher.session(world.account, MODEL, []);
@@ -768,11 +770,14 @@ async function runOnLane(
     readonly promptUuid?: string;
     readonly images?: readonly ShapeImage[];
     readonly instructions?: string;
+    /** Pictures a tool answered, handed to the session while the first call of an MCP tool runs. */
+    readonly toolImages?: readonly ShapeImage[];
   },
   launch: ReturnType<Launcher['session']>,
   laneSession: Awaited<ReturnType<LaneSandbox['forSession']>>,
 ): Promise<SessionRun> {
   const prompt = world.model.script(steps);
+  const opened: { handle?: SessionHandle } = {};
   const spec: LaneSessionSpec = {
     sessionId: opts.sessionId ?? mintId('Session'),
     conversationId: null,
@@ -801,6 +806,9 @@ async function runOnLane(
       };
       world.calls.push(call);
       world.onCall(call, spec);
+      // What the daemon's MCP endpoint does for a tool whose result is pictures, as the call is made.
+      if (req.toolName.startsWith('mcp__') && opts.toolImages !== undefined)
+        opened.handle?.send('A tool returned this picture.', opts.toolImages);
       return call.input.includes(DENIED)
         ? { decision: 'deny', reason: DENIAL_REASON }
         : { decision: 'allow' };
@@ -815,6 +823,7 @@ async function runOnLane(
       Promise.resolve({ behavior: 'deny', message: 'Nothing asks in this test.', by: '10db' }),
   };
   const handle = world.adapter.open(spec);
+  opened.handle = handle;
   const events: SessionEvent[] = [];
   try {
     for await (const event of handle.events) {
@@ -1661,6 +1670,17 @@ describe.skipIf(!live)(
         since: new Date(0).toISOString(),
       });
       expect([...held].sort()).toEqual([first, second].sort());
+    });
+
+    it("gets a tool's pictures in its model's input, with no file to open", async () => {
+      const png = noisePng(4, 4);
+      const page = await runSession(world, [commit('shot'), { say: 'Saw the picture.' }], {
+        // What a tool answered, which has no file: it goes to Codex as an image by its data URL.
+        toolImages: [{ mediaType: 'image/png', data: png.toString('base64') }],
+      });
+      expectTurn(page);
+      // Codex's code mode answered the script text only, so the picture came as a message steered in.
+      expect(page.request?.images).toBe(1);
     });
 
     it("cannot open its task's stored picture by its path: the guard refuses view_image, the sandbox the shell", async () => {

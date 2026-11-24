@@ -3138,6 +3138,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       sessionSignal: (id) => live.get(id)?.signal,
       dataDir: opts.dataDir,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
+      showImages: (id, images) => live.get(id)?.showImages?.(images),
       awayFor: (id) => live.get(id)?.away,
       claimWaits,
       deliverMessage: (taskId, messageId) =>

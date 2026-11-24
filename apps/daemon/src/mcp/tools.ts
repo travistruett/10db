@@ -128,6 +128,7 @@ import type { LinearReporter } from '../linear';
 import type { ChatToolsFor } from './chat-tools';
 import type { LaneBrowsers, LaneBrowserSession } from '../lane-browser';
 import type { ShapeToolsFor } from './shape-tools';
+import type { ToolImages } from './tool-images';
 import { answerAway, routedToPerson, type AwayLane } from '../trust';
 
 export interface McpDeps {
@@ -140,6 +141,11 @@ export interface McpDeps {
   sessionSignal(sessionId: SessionId): AbortSignal | undefined;
   /** Tells the runner a tool's answer asked the session to hand off. */
   askedToHandOff(sessionId: SessionId): void;
+  /**
+   * Hands a tool's pictures to the session as a message, for an agent that drops the image blocks of a
+   * tool result (Codex's code mode answers a script text only); absent, none does.
+   */
+  showImages?(sessionId: SessionId, images: ToolImages): void;
   /** The lane nobody watches a session runs in, whose questions are answered at once; absent, it asks. */
   awayFor?(sessionId: SessionId): AwayLane | undefined;
   /** Every session's claim waits; the daemon shares them with the scheduler. */

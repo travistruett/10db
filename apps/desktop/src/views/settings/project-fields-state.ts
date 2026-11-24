@@ -1,8 +1,9 @@
 import type { ProjectDto } from '@10db/contracts';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { FIELD_HOMES } from './general-field-homes';
 import { useDaemon } from '../../daemon/provider';
 import { usePatchProject } from '../../daemon/queries';
+import { saveError, useJoinSaveBar } from './settings-drafts';
 import {
   checkGeneral,
   generalValues,
@@ -92,9 +93,10 @@ export const MONO_INPUT = { input: { fontFamily: 'var(--mantine-font-family-mono
 const isGeneralField = (name: string): name is keyof GeneralValues => name in FIELD_HOMES;
 
 /**
- * A page's typed settings, held as one set of values and saved as one patch of what changed. Every page
- * holds the full set but shows only its own fields; a field it does not show stays at the project's value
- * and adds nothing to the patch.
+ * A page's typed settings, held as one set of values and saved by the page's bar as one patch of what
+ * changed. Every page holds the full set but shows only its own fields; a field it does not show stays at
+ * the project's value and adds nothing to the patch. The page counts as changed only while Save would
+ * send something, so text that differs from the project by a trailing space is not an edit.
  */
 export function useProjectFields(project: ProjectDto, shown: readonly (keyof GeneralValues)[]) {
   const patch = usePatchProject(project.id);
@@ -110,65 +112,42 @@ export function useProjectFields(project: ProjectDto, shown: readonly (keyof Gen
     setValues((v) => reseed(v, seed, next));
   }
   const [errors, setErrors] = useState<GeneralErrors>({});
-  const [note, setNote] = useState<string | null>(null);
-  const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  // The confirmation's timer belongs to the latest save and ends with the form.
-  useEffect(
-    () => () => {
-      clearTimeout(savedTimer.current);
-    },
-    [],
-  );
   const set = (change: Partial<GeneralValues>) => {
     setValues((v) => ({ ...v, ...change }));
-    setNote(null);
   };
 
-  function save() {
-    const checked = checkGeneral(project, values, daemonPortOf(connection.url));
-    if (!checked.ok) {
-      setErrors(checked.errors);
-      return;
-    }
-    setErrors({});
-    if (checked.patch === null) {
-      setNote('Nothing to change');
-      return;
-    }
-    patch.mutate(checked.patch, {
-      onSuccess: () => {
-        setNote('Saved');
-        // The confirmation fades after a moment; a later edit clears it at once.
-        clearTimeout(savedTimer.current);
-        savedTimer.current = setTimeout(() => {
-          setNote((current) => (current === 'Saved' ? null : current));
-        }, 4000);
-      },
-    });
-  }
+  const checked = checkGeneral(project, values, daemonPortOf(connection.url));
+  // A value the checks refuse is an edit still waiting: Save then marks it.
+  const dirty = checked.ok
+    ? checked.patch !== null
+    : JSON.stringify(values) !== JSON.stringify(generalValues(project));
 
-  function reset() {
-    setValues(generalValues(project));
-    setErrors({});
-    setNote(null);
-  }
+  useJoinSaveBar({
+    dirty,
+    save: async () => {
+      if (!checked.ok) {
+        setErrors(checked.errors);
+        return 'Fix the fields marked in red.';
+      }
+      setErrors({});
+      if (checked.patch === null) return null;
+      try {
+        await patch.mutateAsync(checked.patch);
+        return null;
+      } catch (error) {
+        return saveError(error);
+      }
+    },
+    discard: () => {
+      setValues(generalValues(project));
+      setErrors({});
+    },
+  });
 
   // A field the page does not show can still fail a check; Save then needs to say where it is.
   const hiddenField = Object.keys(errors).find(
     (name): name is keyof GeneralValues => isGeneralField(name) && !shown.includes(name),
   );
-  const dirty = JSON.stringify(values) !== JSON.stringify(generalValues(project));
 
-  return {
-    values,
-    errors,
-    dirty,
-    hiddenField: hiddenField ?? null,
-    note,
-    set,
-    save,
-    reset,
-    saving: patch.isPending,
-    saveError: patch.error ? patch.error.message : null,
-  };
+  return { values, errors, hiddenField: hiddenField ?? null, set };
 }

@@ -166,7 +166,7 @@ write a module's notes there, not here. This file keeps what crosses modules.
   is. The start sweep settles a card a crash left pending.
 - A routed question is drafted in the transaction that routes it (`drafts.ts`, `draftOnOpen`; a recipient with no
   Slack contact makes the card the builder's), and `sends.ts` sends it: `afterDraft` sends at once only when
-  `holdFor` finds no reason (scan, first send, limit, review, in that order), `send` rescans and refuses a hold,
+  `holdFor` finds no reason (scan, limit, review, in that order; a person's send mode alone decides review, the first message included), `send` rescans and refuses a hold,
   and the post carries `tendb_send` metadata so `recoverSending` finds a post a crash left in flight instead of
   posting twice. `onCardChanged`, subscribed to `inbox.changed`, closes the send and says why in every thread it
   used (`closing-lines.ts`). With Slack off (`TENDB_SLACK=off`, no token) every draft stays as it is.

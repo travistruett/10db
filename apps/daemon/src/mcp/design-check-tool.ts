@@ -27,6 +27,7 @@ import { imagesWithinBudget } from '../conversation';
 import type { StateStore } from '../events';
 import { checkShotsOf, missingLines, type Pictures } from '../pictures';
 import { approvedMockupsOf } from '../plan-record';
+import type { ShapeImage } from '../sessions';
 import { lanePicturesSpent, sessionPictureLimits } from './picture-spend';
 import { ToolImages } from './tool-images';
 
@@ -177,7 +178,7 @@ export function checkDesignTool(
         spent,
         limits,
       );
-      const images: { mediaType: string; data: string }[] = [];
+      const images: ShapeImage[] = [];
       for (const index of fits) {
         const c = candidates[index];
         if (c === undefined) continue;

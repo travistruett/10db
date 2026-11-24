@@ -5,6 +5,7 @@ import { useJudgeStatus } from '../../daemon/judge-queries';
 import { useSetShapeJev, useShapeJev } from '../../daemon/shape-measures-queries';
 import { SettingsSectionKey } from './sections';
 import { SettingRow } from './setting-row';
+import { useDraft } from './settings-drafts';
 
 export const SHAPE_JEV_LABEL = 'Send Brainstorm Messages to Fast Models';
 
@@ -15,6 +16,10 @@ export const SHAPE_JEV_LABEL = 'Send Brainstorm Messages to Fast Models';
 export function ShapeJevSetting({ project }: { readonly project: ProjectDto }) {
   const setting = useShapeJev(project.id);
   const set = useSetShapeJev(project.id);
+  const enabled = useDraft({
+    saved: setting.data?.enabled,
+    save: (on: boolean) => set.mutateAsync(on),
+  });
   const judge = useJudgeStatus();
   const account = judge.data?.account ?? null;
   return (
@@ -30,15 +35,11 @@ export function ShapeJevSetting({ project }: { readonly project: ProjectDto }) {
       <Stack gap={4} align="flex-end">
         <Switch
           aria-label={SHAPE_JEV_LABEL}
-          checked={setting.data?.enabled ?? false}
+          checked={enabled.value ?? false}
           // A switch that is on can always be turned off; only turning it on needs an account.
-          disabled={
-            setting.data === undefined ||
-            set.isPending ||
-            (account === null && !setting.data.enabled)
-          }
+          disabled={setting.data === undefined || (account === null && enabled.value !== true)}
           onChange={(event) => {
-            set.mutate(event.currentTarget.checked);
+            enabled.set(event.currentTarget.checked);
           }}
         />
       </Stack>

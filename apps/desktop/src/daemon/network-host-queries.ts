@@ -47,6 +47,8 @@ export function useAllowNetworkHost(projectId: ProjectId) {
 export function useScanNetworkHosts(projectId: ProjectId) {
   const { client } = useDaemon();
   return useMutation({
+    // An action, not a saved setting: a settings page's bar does not say Saved for it.
+    meta: { quiet: true },
     mutationFn: async () =>
       readJson(
         await client.projects[':projectId']['network-hosts'].scan.$post({ param: { projectId } }),

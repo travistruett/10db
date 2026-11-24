@@ -125,6 +125,7 @@ function world() {
     handle: string,
     teams: readonly string[],
     limits: Readonly<Record<string, number>> = {},
+    sendMode: 'auto' | 'review' = 'auto',
   ) =>
     state.write((ctx) =>
       insertPerson(ctx, {
@@ -133,7 +134,7 @@ function world() {
         slack: teams.map((teamId) => ({
           teamId,
           userId: `U${teamId.slice(1)}-${handle}`,
-          sendMode: 'auto' as const,
+          sendMode,
           dailyLimit: limits[teamId] ?? 10,
         })),
       }),
@@ -244,7 +245,7 @@ const sendState = (w: World, id: InboxItemId) => sendForCard(w.state.db, id);
 describe('a question reaches only its project workspace', () => {
   it('posts with the project workspace token and the contact in it, in each workspace', async () => {
     const w = world();
-    w.person('mark', [A, B]);
+    w.person('mark', [A, B], {}, 'review');
     const p1 = w.project(A);
     const p2 = w.project(B);
     const c1 = await w.ask(p1, ['mark']);
@@ -284,6 +285,15 @@ describe('a question reaches only its project workspace', () => {
     expect(w.calls()).toEqual([]);
   });
 
+  it('sends the first question to a person on Send on Its Own at once', async () => {
+    const w = world();
+    w.person('mark', [A]);
+
+    const card = await w.ask(w.project(A), ['mark']);
+
+    expect(sendState(w, card)).toMatchObject({ state: 'sent', heldBy: null });
+  });
+
   it("counts a person's limit per workspace", async () => {
     const w = world();
     const mark = w.person('mark', [A, B], { [A]: 1, [B]: 1 });
@@ -300,10 +310,10 @@ describe('a question reaches only its project workspace', () => {
 
   it("keeps an Off project's held draft through the start sweep", async () => {
     const w = world();
-    w.person('ana', [A]);
+    w.person('ana', [A], {}, 'review');
     const p1 = w.project(A);
     const card = await w.ask(p1, ['ana']);
-    expect(sendState(w, card)).toMatchObject({ state: 'draft', heldBy: 'first_send' });
+    expect(sendState(w, card)).toMatchObject({ state: 'draft', heldBy: 'review' });
     w.state.write((ctx) => {
       setProjectSlack(ctx, p1, null);
     });
@@ -317,10 +327,10 @@ describe('a question reaches only its project workspace', () => {
   it('takes back what is sent in the old workspace in the binding write, and posts a draft in the new one', async () => {
     const w = world();
     const mark = w.person('mark', [A, B]);
-    w.person('ana', [A, B]);
+    w.person('ana', [A, B], {}, 'review');
     const p1 = w.project(A);
     const sent = w.sentTo(p1, mark.id, A, w.clock.now().toISOString());
-    // Ana has never been sent to, so her question waits as a draft for review.
+    // Ana is on review, so her question waits as a draft.
     const draft = await w.ask(p1, ['ana']);
     expect(sendState(w, draft)).toMatchObject({ teamId: A });
 
@@ -346,7 +356,7 @@ describe('a question reaches only its project workspace', () => {
 
   it('keeps a post that lands after the move failed, and tells its thread in the old workspace', async () => {
     const w = world();
-    w.person('mark', [A, B]);
+    w.person('mark', [A, B], {}, 'review');
     const p1 = w.project(A);
     const card = await w.ask(p1, ['mark']);
     const reached = new Promise<void>((resolve) => {
