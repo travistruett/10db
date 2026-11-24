@@ -32,11 +32,13 @@ export function LanePermissionsSection() {
               : "Off: 10db's fixed rules decide, and anything they can't settle comes to you."
           }
           help={
-            <HelpText>
-              Who approves: Claude Code's auto mode on a Claude plan, an API key, and Bedrock on a
-              model it supports. For Codex, and models auto mode doesn't run on, 10db's judge does
-              (Settings › Decisions). The calls listed under Still Asks You come to you either way.
-            </HelpText>
+            <Stack gap={6}>
+              <HelpText>Claude models: Claude Code's auto mode approves.</HelpText>
+              <HelpText>
+                Codex and older models: 10db's judge approves (Settings › Decisions).
+              </HelpText>
+              <HelpText>Still Asks You always comes to you.</HelpText>
+            </Stack>
           }
         >
           <Group justify="flex-end">
