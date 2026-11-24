@@ -4,7 +4,7 @@ import type { InboxItemDto } from '@10db/contracts';
 import { getInboxItem } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
-import { handMadeWorktreeFolder } from '../git';
+import { handMadeWorktreeFolders } from '../git';
 import { PrState } from '../github';
 import { createInboxService, type InboxService } from '../inbox';
 import { WorktreeChoice } from './cards';
@@ -26,7 +26,7 @@ beforeEach(() => {
       abandon: (id) => h.shipper.abandon(id),
     }),
   });
-  folder = handMadeWorktreeFolder(h.repo);
+  folder = handMadeWorktreeFolders(h.repo)[1] ?? '';
   mkdirSync(folder, { recursive: true });
 });
 afterEach(() => {
@@ -78,6 +78,23 @@ describe('the hand-made worktree folder', () => {
     expect(removed.body).toContain(merged.path);
     expect(removed.key).toBe(`hand-made-removed:${folder}`);
     expect(titles().filter((t) => t.startsWith('Removed'))).toEqual([]);
+  });
+
+  it('offers merged worktrees in the .noindex folder, and offers no Spotlight card for it', async () => {
+    rmSync(folder, { recursive: true, force: true });
+    const noindex = handMadeWorktreeFolders(h.repo)[0] ?? '';
+    mkdirSync(noindex, { recursive: true });
+    const branch = 'hand/done';
+    const path = join(noindex, 'done');
+    h.git$('worktree', 'add', '-b', branch, path, 'main');
+    h.gh.setHead(h.gh.openPr(branch, PrState.Merged), h.git$('rev-parse', branch));
+    try {
+      await offerHandMadeFolders(h.ctx, signal);
+      expect(cardTitled('1 worktree in').body).toContain(path);
+      expect(titles().filter((t) => t.startsWith('Spotlight indexes'))).toEqual([]);
+    } finally {
+      rmSync(noindex, { recursive: true, force: true });
+    }
   });
 
   it('closes its offer by itself once none of the worktrees it names exists, but not while one does', async () => {
