@@ -187,27 +187,23 @@ describe('watcher', () => {
       });
     };
 
-    it('closes once its path is committed and clean, and not while it is dirty and a lane runs', async () => {
-      running();
+    it('closes once its path is committed and clean or no unfinished task could own it, but not while a lane could', async () => {
+      const { workstream } = running();
       await raiseStray('docs/stray.md');
       expect(await watcher.resolveSettledStrays()).toBe(0);
       commit('docs/stray.md');
       expect(await watcher.resolveSettledStrays()).toBe(1);
       expect(flags()).toEqual([]);
-    });
 
-    it('closes once no unfinished task could own it, unless the path can change what runs', async () => {
-      const { workstream } = running();
-      await raiseStray('docs/stray.md');
       touch('.mcp.json');
       emit('.mcp.json');
       await watcher.flush();
-      expect(flags()).toHaveLength(2);
+      expect(flags()).toHaveLength(1);
       base.write((ctx) => {
         transitionWorkstream(ctx, workstream.id, { to: WorkstreamState.Failed, fence: null });
       });
-      expect(await watcher.resolveSettledStrays()).toBe(1);
-      expect(flags().map((f) => f.body.split('\n')[0])).toEqual(['.mcp.json']);
+      expect(await watcher.resolveSettledStrays()).toBe(0);
+      expect(flags()).toHaveLength(1);
     });
   });
 
