@@ -2,7 +2,7 @@ import { Delivery, ProjectLanding, WorkspaceMode, type ProjectDto } from '@10db/
 import { NumberInput, SegmentedControl, Select, Stack, TagsInput, TextInput } from '@mantine/core';
 import { asNumber, MONO_INPUT, useProjectFields } from './project-fields-state';
 import { ProjectArchiveCard } from './project-archive-card';
-import { ProjectSaveBar } from './project-save-bar';
+import { HiddenFieldAlert } from './hidden-field-alert';
 import { SettingRow, SettingsCard } from './setting-row';
 
 /** Said under the default, whichever it is: the default moves no task and needs no idle project. */
@@ -357,7 +357,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
 
       <ProjectArchiveCard project={project} />
 
-      <ProjectSaveBar fields={fields} />
+      <HiddenFieldAlert fields={fields} />
     </Stack>
   );
 }

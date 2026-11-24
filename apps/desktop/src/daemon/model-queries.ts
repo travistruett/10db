@@ -137,6 +137,8 @@ export function useRefreshModels() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
+    // An action, not a saved setting: a settings page's bar does not say Saved for it.
+    meta: { quiet: true },
     mutationFn: async () => readJson(await client.models.refresh.$post(), CatalogueStatusDto),
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: modelKeys.all });

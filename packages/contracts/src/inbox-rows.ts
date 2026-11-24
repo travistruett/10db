@@ -80,12 +80,20 @@ export function inboxRowSort(state: InboxListState, card: SortCard): InboxRowSor
 const byCodeUnit = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
- * Negative when `a` shows first. Open and Waiting run ascending; Resolved runs newest first, and a tie on the
- * timestamp falls to the greater id. Strings compare by code unit, as SQLite's BINARY collation does.
+ * Negative when `a` shows first. Open runs by urgency, then newest first; Waiting runs ascending, the longest
+ * waiting first; Resolved runs newest first. A tie on the timestamp falls to the greater id where newest
+ * leads. Strings compare by code unit, as SQLite's BINARY collation does.
  */
 export function compareRowSort(state: InboxListState, a: InboxRowSort, b: InboxRowSort): number {
-  const ascending = a[0] - b[0] || byCodeUnit(a[1], b[1]) || byCodeUnit(a[2], b[2]);
-  return state === 'resolved' ? -ascending : ascending;
+  const later = byCodeUnit(a[1], b[1]) || byCodeUnit(a[2], b[2]);
+  switch (state) {
+    case 'open':
+      return a[0] - b[0] || -later;
+    case 'waiting':
+      return a[0] - b[0] || later;
+    case 'resolved':
+      return -(a[0] - b[0] || later);
+  }
 }
 
 /** One row of a page: its key, where it sorts, the pass it holds and its cards' ids in list order. */

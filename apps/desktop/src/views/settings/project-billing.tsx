@@ -1,12 +1,12 @@
 import { AccountId, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN, type ProjectDto } from '@10db/contracts';
-import { NumberInput, Stack, Text } from '@mantine/core';
-import { useState } from 'react';
+import { NumberInput, Stack } from '@mantine/core';
 import { useAccounts } from '../../daemon/account-queries';
 import { usePatchProject } from '../../daemon/queries';
 import { AccountSelect } from './account-select';
 import { cantRunAgents } from './accounts/used-by';
+import { HiddenFieldAlert } from './hidden-field-alert';
 import { asNumber, useProjectFields } from './project-fields-state';
-import { ProjectSaveBar } from './project-save-bar';
+import { useDraft } from './settings-drafts';
 import { SettingRow, SettingsCard } from './setting-row';
 
 const MIN_PCT = Math.round(USAGE_HANDOFF_MIN * 100);
@@ -14,22 +14,39 @@ const MAX_PCT = Math.round(USAGE_HANDOFF_MAX * 100);
 
 /**
  * Which account pays for the project, and the fallback 10db moves it to near a usage limit
- * (accounts spec §6, §7). Work in flight follows a move at each lane's next session. The spending limit
- * is a typed field and saves with the bar below.
+ * (accounts spec §6, §7). Work in flight follows a move at each lane's next session. Every field here
+ * waits for the page's Save.
  */
 export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
   const accounts = useAccounts().data ?? [];
   const patch = usePatchProject(project.id);
   const limit = useProjectFields(project, ['budgetCeiling']);
-  const [handoffPct, setHandoffPct] = useState<string | number>(
-    Math.round(project.usageHandoffAt * 100),
-  );
-  const pct = Number(handoffPct);
-  // The API's range, in whole percent: the field never sends what PATCH would refuse.
-  const handoffError =
-    Number.isInteger(pct) && pct >= MIN_PCT && pct <= MAX_PCT
-      ? null
-      : `Between ${String(MIN_PCT)}% and ${String(MAX_PCT)}%`;
+  // One patch for both: the daemon checks the backup against the account sent with it.
+  const pair = useDraft({
+    saved: { accountId: project.accountId, fallbackAccountId: project.fallbackAccountId },
+    // Only what the builder changed: a move 10db made since the edit began is not undone.
+    save: (value) =>
+      patch.mutateAsync({
+        ...(value.accountId === project.accountId ? {} : { accountId: value.accountId }),
+        ...(value.fallbackAccountId === project.fallbackAccountId
+          ? {}
+          : { fallbackAccountId: value.fallbackAccountId }),
+      }),
+  });
+  const accountId = pair.value?.accountId ?? project.accountId;
+  const fallbackAccountId = pair.value?.fallbackAccountId ?? null;
+  const handoff = useDraft<string | number>({
+    saved: Math.round(project.usageHandoffAt * 100),
+    save: (pct) => patch.mutateAsync({ usageHandoffAt: Number(pct) / 100 }),
+    // The API's range, in whole percent: Save never sends what PATCH would refuse.
+    problem: (value) => {
+      const pct = Number(value);
+      return value !== '' && Number.isInteger(pct) && pct >= MIN_PCT && pct <= MAX_PCT
+        ? null
+        : `Between ${String(MIN_PCT)}% and ${String(MAX_PCT)}%`;
+    },
+    same: (a, b) => Number(a) === Number(b) && a !== '',
+  });
   return (
     <Stack gap="md">
       <SettingsCard>
@@ -42,12 +59,16 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
             aria-label="Account"
             accounts={accounts}
             isDisabled={cantRunAgents}
-            value={project.accountId}
+            value={accountId}
             allowDeselect={false}
-            disabled={patch.isPending}
             onChange={(value) => {
-              if (value !== null && value !== project.accountId)
-                patch.mutate({ accountId: AccountId.parse(value) });
+              if (value === null) return;
+              const next = AccountId.parse(value);
+              // The new account can't also be its own backup.
+              pair.set({
+                accountId: next,
+                fallbackAccountId: fallbackAccountId === next ? null : fallbackAccountId,
+              });
             }}
           />
         </SettingRow>
@@ -62,15 +83,18 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
             // The project's own account is never offered, but after 10db moved the project onto its fallback
             // the recorded fallback is that account, and it still shows.
             accounts={accounts.filter(
-              (a) => a.id !== project.accountId || a.id === project.fallbackAccountId,
+              (a) =>
+                a.id !== accountId ||
+                (a.id === project.fallbackAccountId && accountId === project.accountId),
             )}
             isDisabled={cantRunAgents}
-            value={project.fallbackAccountId}
+            value={fallbackAccountId}
             clearable
-            disabled={patch.isPending}
             onChange={(value) => {
-              if (value !== project.fallbackAccountId)
-                patch.mutate({ fallbackAccountId: value === null ? null : AccountId.parse(value) });
+              pair.set({
+                accountId,
+                fallbackAccountId: value === null ? null : AccountId.parse(value),
+              });
             }}
           />
         </SettingRow>
@@ -86,14 +110,9 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
             max={MAX_PCT}
             allowDecimal={false}
             clampBehavior="none"
-            value={handoffPct}
-            error={handoffError}
-            disabled={patch.isPending}
-            onChange={setHandoffPct}
-            onBlur={() => {
-              if (handoffError === null && pct / 100 !== project.usageHandoffAt)
-                patch.mutate({ usageHandoffAt: pct / 100 });
-            }}
+            value={handoff.value ?? ''}
+            error={handoff.problem}
+            onChange={handoff.set}
           />
         </SettingRow>
         <SettingRow
@@ -114,12 +133,7 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
           />
         </SettingRow>
       </SettingsCard>
-      {patch.error ? (
-        <Text size="sm" c="red" role="alert">
-          {`Couldn't change the project's accounts: ${patch.error.message}`}
-        </Text>
-      ) : null}
-      <ProjectSaveBar fields={limit} />
+      <HiddenFieldAlert fields={limit} />
     </Stack>
   );
 }
