@@ -4,6 +4,7 @@ import {
   type AreaDef,
   type PageRow,
   type ProjectDto,
+  type SplitRow,
   type WorkbenchSetupAreas,
 } from '@10db/contracts';
 import { Button, Checkbox, Code, Collapse, Group, Stack, Text } from '@mantine/core';
@@ -60,6 +61,56 @@ export function PageRows({ pages, unticked, onTick }: PageRowsProps) {
   );
 }
 
+const SHOWN_PARTS = 3;
+
+/**
+ * A row per area open tasks name that splits along its packages: ticked, it becomes its core and one
+ * area per package, and every open task naming it names all of them, so none loses a file.
+ */
+export function SplitRows({
+  splits,
+  unticked,
+  onTick,
+}: {
+  readonly splits: readonly SplitRow[];
+  readonly unticked: readonly string[];
+  readonly onTick: (from: string, ticked: boolean) => void;
+}) {
+  if (splits.length === 0) return null;
+  return (
+    <Stack gap="xs">
+      {splits.map((row) => {
+        const [core, ...parts] = row.into;
+        const shown = parts.slice(0, SHOWN_PARTS).map((p) => p.name);
+        const more = parts.length - shown.length;
+        return (
+          <Checkbox
+            key={row.from}
+            checked={!unticked.includes(row.from)}
+            onChange={(event) => {
+              onTick(row.from, event.currentTarget.checked);
+            }}
+            label={
+              <>
+                {'Split '}
+                <Code>{row.from}</Code>
+                {` into ${String(row.into.length)} areas, one per package`}
+              </>
+            }
+            description={`${core?.name ?? row.from} (core), ${shown.join(', ')}${
+              more > 0 ? ` and ${String(more)} more` : ''
+            }${
+              row.tasks === 0
+                ? ''
+                : ` · ${String(row.tasks)} open ${row.tasks === 1 ? 'task gets' : 'tasks get'} all of them`
+            }`}
+          />
+        );
+      })}
+    </Stack>
+  );
+}
+
 export interface AreasSectionProps {
   readonly project: ProjectDto;
   readonly areas: WorkbenchSetupAreas;
@@ -106,6 +157,7 @@ export function AreasSection({
     <Stack gap="sm" component="section" aria-label="Areas">
       {summarized ? null : <Text size="sm">{areasSummary(project.areas, result)}</Text>}
       <PageRows pages={areas.pages} unticked={unticked} onTick={onTick} />
+      <SplitRows splits={areas.splits} unticked={unticked} onTick={onTick} />
       {folds.length === 0 ? null : (
         <Group gap="xs">
           {folds.map((fold) => (

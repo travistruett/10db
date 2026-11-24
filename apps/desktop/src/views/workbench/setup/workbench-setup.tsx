@@ -1,10 +1,4 @@
-import {
-  AreaRole,
-  setupAreasProblem,
-  withoutPages,
-  type ProjectDto,
-  type SettingField,
-} from '@10db/contracts';
+import { AreaRole, setupAreasProblem, type ProjectDto, type SettingField } from '@10db/contracts';
 import { TitleRow } from '../../../shell/title-row';
 import { Anchor, Button, Checkbox, Group, Loader, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
@@ -13,10 +7,10 @@ import { useState } from 'react';
 import { setupKeys, useWorkbenchSetup } from '../../../daemon/pass-queries';
 import { usePatchProject } from '../../../daemon/queries';
 import { SettingsSectionKey } from '../../settings/sections';
-import { AreasSection, PageRows } from './areas-section';
+import { AreasSection, PageRows, SplitRows } from './areas-section';
 import { settingDrafts, settingsPatch, type SettingDraft } from './setting-drafts';
 import { SettingRows, type SettingChange } from './setting-rows';
-import { areasChanged, newPagesOf, setupPatch } from './setup-rules';
+import { areasAfter, areasChanged, newPagesOf, setupPatch } from './setup-rules';
 
 function SettingsLink() {
   return (
@@ -114,19 +108,26 @@ export function WorkbenchSetup({ project, onCancel, onApplied }: WorkbenchSetupP
     );
 
   const setup = read.data;
-  const unticked = setup.areas.pages
-    .filter((page) => !(tickEdits[page.name] ?? !project.leftOutPages.includes(page.name)))
-    .map((page) => page.name);
+  const ticked = (name: string) => tickEdits[name] ?? !project.leftOutPages.includes(name);
+  const unticked = [
+    ...setup.areas.pages.map((page) => page.name),
+    ...setup.areas.splits.map((row) => row.from),
+  ].filter((name) => !ticked(name));
   const rebuild = rebuildEdit ?? (!hasPages || newPagesOf(setup, project.leftOutPages).length > 0);
   const drafts: SettingDraft[] = settingDrafts(setup.settings).map((d) => ({
     ...d,
     ...settingEdits[d.field],
   }));
-  const result = withoutPages(setup.areas.proposed, unticked, setup.areas.pages);
-  // A rebuild that changes nothing is not offered: no Areas section, Apply for settings alone.
-  const offered = areasChanged(setup.areas.proposed, project.areas);
-  const areasOn = offered && rebuild;
-  const changed = areasOn && areasChanged(result, project.areas);
+  // A rebuild that changes nothing is not offered: no rebuild line, Apply for splits and settings alone.
+  const rebuildOffered = areasChanged(setup.areas.proposed, project.areas);
+  const splits = setup.areas.splits;
+  const offered = rebuildOffered || splits.length > 0;
+  const areasOn = rebuildOffered && rebuild;
+  const result = areasAfter(setup, project.areas, unticked, areasOn);
+  const changed = areasChanged(result, project.areas);
+  const onTick = (name: string, on: boolean) => {
+    setTickEdits((edits) => ({ ...edits, [name]: on }));
+  };
   if (!offered && setup.settings.length === 0)
     return (
       <Stack gap="md" maw={720}>
@@ -158,7 +159,7 @@ export function WorkbenchSetup({ project, onCancel, onApplied }: WorkbenchSetupP
       {heading}
       {!offered ? null : (
         <Stack gap="sm">
-          {hasPages ? (
+          {hasPages && rebuildOffered ? (
             <Checkbox
               checked={rebuild}
               onChange={(event) => {
@@ -175,20 +176,15 @@ export function WorkbenchSetup({ project, onCancel, onApplied }: WorkbenchSetupP
               areas={setup.areas}
               result={result}
               unticked={unticked}
-              onTick={(page, ticked) => {
-                setTickEdits((edits) => ({ ...edits, [page]: ticked }));
-              }}
+              onTick={onTick}
               summarized={hasPages}
             />
           ) : (
-            // Leaving a page out needs no rebuild: the rows stand on their own and Apply remembers them.
-            <PageRows
-              pages={setup.areas.pages}
-              unticked={unticked}
-              onTick={(page, ticked) => {
-                setTickEdits((edits) => ({ ...edits, [page]: ticked }));
-              }}
-            />
+            // Leaving a page out, or splitting an area, needs no rebuild: Apply remembers the rows.
+            <>
+              <PageRows pages={setup.areas.pages} unticked={unticked} onTick={onTick} />
+              <SplitRows splits={splits} unticked={unticked} onTick={onTick} />
+            </>
           )}
         </Stack>
       )}

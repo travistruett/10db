@@ -17,6 +17,7 @@ import {
   type AreaCandidate,
 } from './area-candidates';
 import { areasFromStructure } from './area-naming';
+import { broadAreaSplit } from './broad-areas';
 import { areaNameOf, codeRoutes, navFiles, routerFiles, type CodePage } from './code-routes';
 import { isSourceFile, readPathAliases } from './import-graph';
 import { literalGlob } from './literal-glob';
@@ -67,13 +68,18 @@ const packageUnits = (files: readonly string[]): string[] =>
 const unitOf = (folder: string, units: readonly string[]): string =>
   units.filter((u) => under(folder, u)).sort((a, b) => b.length - a.length)[0] ?? '';
 
-/** Why each existing area is kept: the open tasks that name it. */
-function keepReasons(
+/** How many open tasks name each area. */
+function taskCounts(
   openTasks: readonly { readonly areas: readonly string[] }[],
-): Map<string, string> {
+): Map<string, number> {
   const counts = new Map<string, number>();
   for (const task of openTasks)
     for (const name of new Set(task.areas)) counts.set(name, (counts.get(name) ?? 0) + 1);
+  return counts;
+}
+
+/** Why each existing area is kept: the open tasks that name it. */
+function keepReasons(counts: ReadonlyMap<string, number>): Map<string, string> {
   return new Map(
     [...counts].map(([name, n]) => [
       name,
@@ -423,15 +429,40 @@ export async function proposeSetupAreas(
   }
 
   for (const reason of refusals) skipped.push({ name: 'page code', reason });
+  const counts = taskCounts(openTasks);
+  const taken = new Set([
+    ...project.areas.map((a) => a.name),
+    ...project.hazards.map((h) => h.name),
+    ...others.map((a) => a.name),
+    ...planned.map((p) => p.name),
+  ]);
+  // A kept area open tasks name splits only by the builder's tick, with its tasks retagged; an area
+  // no task names is split in the rebuilt list itself.
+  const splits = new Map<string, { core: AreaDef; parts: readonly AreaDef[]; tasks: number }>();
+  for (const area of project.areas) {
+    const tasks = counts.get(area.name) ?? 0;
+    if (tasks === 0) continue;
+    const split = broadAreaSplit(area, files, taken);
+    if (split === null) continue;
+    for (const part of split.parts) taken.add(part.name);
+    splits.set(area.name, { ...split, tasks });
+  }
+  const splitOthers = others.flatMap((area): AreaDef[] => {
+    const split = broadAreaSplit(area, files, taken);
+    if (split === null) return [area];
+    for (const part of split.parts) taken.add(part.name);
+    return [split.core, ...split.parts];
+  });
   return rebuildAreas({
     files,
     existing: project.areas,
     hazards: project.hazards.map((h) => h.name),
     keep: new Map(
-      [...keepReasons(openTasks)].filter(([name]) => project.areas.some((a) => a.name === name)),
+      [...keepReasons(counts)].filter(([name]) => project.areas.some((a) => a.name === name)),
     ),
-    others,
+    others: splitOthers,
     pages: planned,
     skipped,
+    splits,
   });
 }

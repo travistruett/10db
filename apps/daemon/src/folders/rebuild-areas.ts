@@ -5,6 +5,7 @@ import {
   withoutPages,
   type AreaDef,
   type PageRow,
+  type SplitRow,
   type WorkbenchSetupAreas,
 } from '@10db/contracts';
 import { globReaches } from './area-candidates';
@@ -35,6 +36,11 @@ export interface RebuildInput {
   readonly pages: readonly PlannedPage[];
   /** What the page finders left out, with why. */
   readonly skipped: readonly { name: string; reason: string }[];
+  /** Kept areas that split along their packages (`broadAreaSplit`), by name, with how many open tasks name each. */
+  readonly splits?: ReadonlyMap<
+    string,
+    { readonly core: AreaDef; readonly parts: readonly AreaDef[]; readonly tasks: number }
+  >;
 }
 
 const overlaps = (one: readonly string[], other: readonly string[]): boolean =>
@@ -96,7 +102,20 @@ const filesOf = (area: AreaDef, files: readonly string[]): string[] =>
  * until it is valid. A list that is the project's own is answered with no page. Pure.
  */
 export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
-  const used = new Set(input.hazards);
+  // A kept area's split stays a row the builder ticks: its parts' names are reserved, and it is
+  // offered on every path, so a project with nothing else to rebuild still sees it.
+  const splits: SplitRow[] = [];
+  for (const [name, split] of input.splits ?? []) {
+    const was = input.existing.find((a) => a.name === name);
+    if (was === undefined || !input.keep.has(name)) continue;
+    splits.push({
+      from: name,
+      into: [split.core, ...split.parts].map((a) => ({ ...a, globs: [...a.globs] })),
+      was: { ...was, globs: [...was.globs] },
+      tasks: split.tasks,
+    });
+  }
+  const used = new Set([...input.hazards, ...splits.flatMap((row) => row.into.map((a) => a.name))]);
   const skipped = [...input.skipped];
   /** The page the setup found for a kept page area, by name or route: its guessed label. */
   const guessFor = (area: AreaDef): { readonly label?: string } =>
@@ -118,6 +137,9 @@ export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
       continue;
     }
     pending.splice(pending.indexOf(page), 1);
+    // A kept area that becomes a page is never split.
+    const row = splits.findIndex((r) => r.from === area.name);
+    if (row >= 0) splits.splice(row, 1);
     const grown: AreaDef = {
       ...area,
       globs: [...new Set([...area.globs, ...page.takenGlobs])],
@@ -200,6 +222,7 @@ export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
       kept: keptReasons,
       pages: [],
       skipped: problem === null ? skipped : [...skipped, { name: 'areas', reason: problem }],
+      splits,
     };
 
   // A page is new only when no page of the project has its name: a changed label, route or glob is
@@ -228,5 +251,6 @@ export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
       return row;
     }),
     skipped,
+    splits,
   };
 }

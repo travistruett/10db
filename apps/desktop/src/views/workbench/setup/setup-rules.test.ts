@@ -30,11 +30,11 @@ const SETUP: WorkbenchSetupDto = {
       { name: 'inbox', route: '/inbox', folders: ['app/inbox/'] },
     ],
     skipped: [],
+    splits: [],
   },
   settings: [
     { field: SettingField.AppUrl, value: 'http://localhost:1420', source: 'from tauri.conf.json' },
   ],
-  branch: null,
 };
 
 describe('setupPatch', () => {
@@ -80,11 +80,38 @@ describe('setupPatch', () => {
     );
   });
 
-  it('leaves the areas out when the rebuild is not ticked', () => {
+  it('leaves the areas out when the rebuild is not ticked, unless a split is', () => {
     expect(setupPatch(SETUP, CURRENT, [], { appUrl: 'http://localhost:1420' }, false)).toEqual({
       appUrl: 'http://localhost:1420',
     });
     expect(setupPatch(SETUP, CURRENT, [], {}, false)).toBeNull();
+    // A split always travels with the open tasks' retag, so none is left on the narrowed name.
+    const split = {
+      ...SETUP,
+      areas: {
+        ...SETUP.areas,
+        splits: [
+          {
+            from: 'repo',
+            into: [
+              { name: 'repo', globs: ['*'] },
+              { name: 'billing', globs: ['billing/**'] },
+            ],
+            was: { name: 'repo', globs: ['**'] },
+            tasks: 2,
+          },
+        ],
+      },
+    };
+    expect(setupPatch(split, CURRENT, [], {}, false)).toMatchObject({
+      areas: [
+        { name: 'repo', globs: ['*'] },
+        { name: 'billing', globs: ['billing/**'] },
+        ...CURRENT.slice(1),
+      ],
+      areaSplits: [{ from: 'repo', into: ['repo', 'billing'] }],
+    });
+    expect(setupPatch(split, CURRENT, ['repo'], {}, false)).toEqual({ leftOutPages: ['repo'] });
   });
 
   it('leaves the areas out when the result is the list the project has', () => {
@@ -105,7 +132,15 @@ describe('areasChanged and suggestionCount', () => {
 });
 
 describe('setUpCount and newPagesOf', () => {
-  const BRANCH = { branch: 'build', ahead: 3, command: 'git push origin build' };
+  const SPLIT = {
+    from: 'backend',
+    into: [
+      { name: 'backend', globs: ['api/*'] },
+      { name: 'billing', globs: ['api/billing/**'] },
+    ],
+    was: { name: 'backend', globs: ['api/**'] },
+    tasks: 2,
+  };
   it.each<{ name: string; setup: WorkbenchSetupDto; leftOut: string[]; count: number }>([
     { name: 'two new pages and a setting', setup: SETUP, leftOut: [], count: 3 },
     { name: 'a page left out is not counted', setup: SETUP, leftOut: ['inbox'], count: 2 },
@@ -122,9 +157,9 @@ describe('setUpCount and newPagesOf', () => {
       count: 3,
     },
     {
-      name: 'the branch note is never counted',
-      setup: { ...SETUP, branch: BRANCH },
-      leftOut: [],
+      name: 'a split is counted until it is left out',
+      setup: { ...SETUP, areas: { ...SETUP.areas, splits: [SPLIT] } },
+      leftOut: ['backend'],
       count: 3,
     },
     {

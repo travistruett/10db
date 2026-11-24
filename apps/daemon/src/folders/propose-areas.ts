@@ -10,6 +10,7 @@ import {
 import { equalOrUnder, type Git } from '../git';
 import { deriveAreaCandidates, mergeCoupledCandidates } from './area-candidates';
 import { areasFromModel, areasFromStructure, namingPrompt } from './area-naming';
+import { broadAreaSplit } from './broad-areas';
 
 /** How many of the latest commits are read for files that change together. */
 const HISTORY_COMMITS = 400;
@@ -101,6 +102,26 @@ async function named(
 }
 
 /**
+ * Each area that is a folder of sibling packages (`broadAreaSplit`) as its core and one area per
+ * package, so a new project never starts with one area every task of that folder waits on.
+ */
+function splitBroad(areas: readonly ProposedArea[], files: readonly string[]): ProposedArea[] {
+  const taken = new Set(areas.map((a) => a.name));
+  return areas.flatMap((area): ProposedArea[] => {
+    const split = broadAreaSplit(area, files, taken);
+    if (split === null) return [area];
+    for (const part of split.parts) taken.add(part.name);
+    return [
+      { ...split.core, reason: area.reason },
+      ...split.parts.map((part) => ({
+        ...part,
+        reason: `One package of ${area.name}, so its tasks run beside the others'.`,
+      })),
+    ];
+  });
+}
+
+/**
  * Areas for the repository at `path`, each with its globs and a one-line reason. The signals are the
  * tracked files at HEAD and the files that changed together in recent commits, both read through git's
  * plumbing; no file in the checkout is opened and no program the repository names is run. A model then
@@ -131,5 +152,5 @@ export async function proposeAreas(
   if (candidates.length === 0)
     return { ok: true, proposal: { areas: [EVERYTHING], namedBy: AreaProposalSource.Structure } };
   const { areas, source } = await named(deps.namer, candidates, deps.namingMs ?? NAMING_MS, signal);
-  return { ok: true, proposal: { areas, namedBy: source } };
+  return { ok: true, proposal: { areas: splitBroad(areas, survey.files), namedBy: source } };
 }
