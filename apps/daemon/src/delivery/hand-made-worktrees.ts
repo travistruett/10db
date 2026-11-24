@@ -1,5 +1,4 @@
 import { existsSync, statSync } from 'node:fs';
-import { join } from 'node:path';
 import { Delivery, type ProjectDto } from '@10db/contracts';
 import {
   getInboxItem,
@@ -17,7 +16,6 @@ import {
 } from '../git';
 import { githubRepoOf, PrState } from '../github';
 import type { InboxService } from '../inbox';
-import { keepSpotlightOut, SPOTLIGHT_MARKER } from '../sandbox';
 import { looseWork } from './build-output';
 import { detailOf } from './cards';
 import { haveCommit } from './branch-sweep';
@@ -37,9 +35,6 @@ const LOOK_EVERY_MS = 6 * 60 * 60_000;
 
 /** Whether the daemon stopped; a function, so a check after an await is not read as the one before. */
 const stopped = (signal: AbortSignal): boolean => signal.aborted;
-
-/** Whether `folder`'s Spotlight marker is there. */
-const marked = (folder: string): boolean => existsSync(join(folder, SPOTLIGHT_MARKER));
 
 /**
  * The folders of the project's hand-made worktrees that exist, the `.noindex` one first and the
@@ -105,7 +100,7 @@ export async function mergedHandMadeWorktrees(
 /**
  * Raises the cards about each pull request project's hand-made worktree folder, and withdraws one
  * whose cause is gone: one offering to remove the worktrees whose pull request merged, and one
- * offering to keep Spotlight out of the folder. The builder's own answer is never taken for them.
+ * telling the builder Spotlight indexes an older folder that holds worktrees. The builder's own answer is never taken for them.
  * A project with no folder gets nothing, and a card the builder answered Keep is not raised again
  * for the same worktrees. A gh that is down ends the look, and nothing else rejects.
  */
@@ -119,9 +114,13 @@ export async function offerHandMadeFolders(
     const folders = foldersOf(project);
     if (folders.length === 0) continue;
     try {
+      const listed = await ctx.git.listWorktrees(project.repoPath);
       for (const folder of folders.filter((f) => !skippedBySpotlightByName(f))) {
         const spotlight = handMadeKey.spotlight(folder);
-        if (marked(folder)) withdraw(ctx.state, ctx.inbox, project.id, [spotlight]);
+        const holdsWorktrees = listed.some(
+          (e) => surelyInside(e.path, folder) && !samePath(e.path, folder),
+        );
+        if (!holdsWorktrees) withdraw(ctx.state, ctx.inbox, project.id, [spotlight]);
         else if (!hasAnsweredByFoldKey(ctx.state.db, project.id, spotlight))
           raise(ctx.inbox, project.id, handMadeCards.spotlight(folder));
       }
@@ -204,21 +203,4 @@ export async function removeMergedHandMade(
   ctx.logger.info({ projectId: project.id, folder, removed }, 'merged hand-made worktrees removed');
   post(ctx.inbox, project.id, handMadeNotices.removed(folder, removed));
   return removed;
-}
-
-/**
- * The builder's Keep Spotlight Out answer: creates the marker in the project's older hand-made folder (a `.noindex` one needs none), and
- * only there, whatever `path` the card carried. Posts a notice saying what changed.
- */
-export function keepHandMadeFolderOutOfSpotlight(ctx: DeliveryContext, project: ProjectDto): void {
-  for (const folder of foldersOf(project).filter((f) => !skippedBySpotlightByName(f))) {
-    const before = marked(folder);
-    keepSpotlightOut(folder);
-    const created = !before && marked(folder);
-    ctx.logger.info(
-      { projectId: project.id, folder, created },
-      'hand-made folder kept out of Spotlight',
-    );
-    post(ctx.inbox, project.id, handMadeNotices.spotlightKept(folder, created));
-  }
 }

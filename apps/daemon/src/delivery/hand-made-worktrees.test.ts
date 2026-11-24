@@ -59,6 +59,7 @@ describe('the hand-made worktree folder', () => {
     const open = handMade('going', PrState.Open);
     await offerHandMadeFolders(h.ctx, signal);
 
+    expect(cardTitled('Spotlight indexes').body).toContain('-worktrees.noindex');
     const card = cardTitled('1 worktree in');
     expect(card.options.map((o) => o.label)).toEqual([
       WorktreeChoice.RemoveMerged,

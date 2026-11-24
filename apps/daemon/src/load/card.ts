@@ -36,7 +36,7 @@ function advice(culprits: readonly Culprit[]): string {
   const parts: string[] = [];
   if (culprits.some((c) => FILE_WATCHERS.test(c.command)))
     parts.push(
-      'Spotlight and the file-change watcher follow every file that worktrees’ installs and test runs touch. Two Inbox cards cut that: Keep Spotlight Out, for the folder of worktrees you made by hand, and Remove Merged Worktrees, for the ones whose pull request merged. 10db’s own worktrees are already kept out of Spotlight and removed when their batch ships.',
+      'Spotlight and the file-change watcher follow every file that worktrees’ installs and test runs touch. Two Inbox cards cut that: one for an older folder of hand-made worktrees Spotlight indexes (make them in a folder named *-worktrees.noindex, which it skips), and Remove Merged Worktrees, for the ones whose pull request merged. 10db’s own worktrees are already kept out of Spotlight and removed when their batch ships.',
     );
   if (left.length > 0)
     parts.push(
