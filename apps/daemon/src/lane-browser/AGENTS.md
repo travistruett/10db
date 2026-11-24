@@ -13,8 +13,10 @@ The browser a lane drives against its own servers. This part holds its reach: wh
   socket, so `netstat -anv -p tcp` supplies every listener on the port (family, address, pid): one whose pid
   is not a lane listener's refuses "another process listens on port P", and a `netstat` failure or
   timeout refuses. The proxy connects to an address a lane socket covers: `127.0.0.1` for tcp4, `*` or
-  tcp46, else `::1`; a socket bound to anything else is refused. `netstat` needs the real node: it printed
-  nothing under `pnpm exec` in the sandbox of an agent session, which reads as a refusal here.
+  tcp46, else `::1`; a socket bound to anything else is refused. macOS answers
+  netstat's socket table with nothing when a process's ancestors include an ad-hoc-signed program (pnpm, so
+  `make dev`; a one-line C program reproduces it), which reads as a refusal. `TENDB_LANE_NETSTAT=off`, set by
+  `scripts/dev.sh`, reads sockets from `lsof` alone: other users' sockets go unseen. The installed app leaves it unset.
 - **The compose rule**: with Docker on, a port is owned when every publication of it is a Compose stack whose
   working dir (a real path) is in the session's copy or temp dir and in no registered checkout, bound to
   `127.0.0.1`; or `0.0.0.0` or `::` while no `netstat` socket on the port is bound to `127.0.0.1` (a `::`
@@ -53,5 +55,12 @@ The browser a lane drives against its own servers. This part holds its reach: wh
   `ariaSnapshot({ mode: 'ai' })` cut at `SNAPSHOT_MAX_CHARS`. A call stopped by its signal probes the current
   page; one that will not answer throws `BrowserStuckError`, so the browser closes.
 - **Live test**: `pictures/browser.live.test.ts` (`TENDB_LIVE_BROWSER=1`) runs a lane browser against two
-  loopback servers, one in the session's ledger. Run vitest as `node ../../node_modules/vitest/vitest.mjs`:
-  under `pnpm exec`, and at times under load, `netstat -p tcp` printed nothing, which reads as a refusal.
+  loopback servers, one in the session's ledger. Run it with `TENDB_LANE_NETSTAT=off`
+  when vitest runs under pnpm: netstat's socket table is empty there, which reads as a refusal.
+- **The tools** (`mcp/browser-tools.ts`, offered by `mcp/server.ts` `laneTools` when `McpDeps.laneBrowser` and
+  `dataDir` are given): `browser_upload` reads each file itself in `mcp/browser-files.ts` (`O_NOFOLLOW`,
+  a regular file, a fresh `readAccess` that must land in the copy, temp dir or setup reads, the same dev and
+  inode, 50 MB a call) and hands the driver bytes. `browser_screenshot` writes the picture, then one write with
+  its `lane` screen (URL without query, title, note, whether it was sent) and its `browser` evidence, then a
+  copy under `<tempDir>/10db-screens`; it shares the model's picture budget with `check_design`
+  (`mcp/picture-spend.ts`). Lane screens are pruned like turn pictures.

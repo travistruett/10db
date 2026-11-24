@@ -259,7 +259,7 @@ export function listTaskToolCalls(
 }
 
 /**
- * The unpruned turn pictures of tasks done or cancelled, each with when its task finished (its last
+ * The unpruned turn and lane pictures of tasks done or cancelled, each with when its task finished (its last
  * update, read as the moment it was done), for the pruning sweep.
  */
 export function listFinishedTurnScreens(db: DbReader): {
@@ -281,7 +281,7 @@ export function listFinishedTurnScreens(db: DbReader): {
     .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskScreens.taskId))
     .where(
       and(
-        eq(schema.taskScreens.kind, ScreenKind.Turn),
+        inArray(schema.taskScreens.kind, [ScreenKind.Turn, ScreenKind.Lane]),
         isNull(schema.taskScreens.prunedAt),
         inArray(schema.tasks.status, [TaskStatus.Done, TaskStatus.Cancelled]),
       ),

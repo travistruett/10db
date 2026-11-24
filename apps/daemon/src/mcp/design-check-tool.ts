@@ -10,30 +10,24 @@ import {
   WorkspaceMode,
   type ApprovedMockup,
   type DesignCheckShot,
+  type SessionId,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
-  getAccount,
   getProject,
-  getSession,
   getTask,
   getWorkstream,
   insertDesignChecks,
   latestTaskDesignChecks,
-  listTaskDesignChecks,
   passHoldingTask,
   setDesignCheckVerdict,
   type DbReader,
 } from '@10db/db';
-import {
-  imagesWithinBudget,
-  pictureLimitsFor,
-  STRICTEST_LIMITS,
-  type PictureLimits,
-} from '../conversation';
+import { imagesWithinBudget } from '../conversation';
 import type { StateStore } from '../events';
 import { checkShotsOf, missingLines, type Pictures } from '../pictures';
 import { approvedMockupsOf } from '../plan-record';
+import { lanePicturesSpent, sessionPictureLimits } from './picture-spend';
 import { ToolImages } from './tool-images';
 
 // Plan-in-sessions spec §4, "Design review": a lane whose task has an approved mock-up is offered
@@ -46,7 +40,7 @@ export interface DesignCheckDeps {
   readonly state: StateStore;
   readonly pictures: Pick<Pictures, 'shootNow' | 'drawMockup' | 'bytesOf'>;
   /** The lane's session, whose account's picture limits apply. */
-  readonly sessionId: Parameters<typeof getSession>[1];
+  readonly sessionId: SessionId;
 }
 
 /** Whether the lane's task has an approved mock-up, so `check_design` is offered to it. */
@@ -59,18 +53,6 @@ const WORKTREE_TASK =
   "This task runs in a worktree, where 10db serves no app, so there is nothing to shoot. Compare by reading the approved mock-up's HTML in your brief against the code you wrote, and say in your handoff what still differs.";
 const NO_PAGE =
   'This task names no page area with a route, so there is no page to shoot. Compare by reading the mock-up in your brief.';
-
-function limitsOf(db: DbReader, sessionId: DesignCheckDeps['sessionId']): PictureLimits {
-  try {
-    const session = getSession(db, sessionId);
-    return pictureLimitsFor(getAccount(db, session.accountId).kind, {
-      accountId: session.accountId,
-      launchId: session.model,
-    });
-  } catch {
-    return STRICTEST_LIMITS;
-  }
-}
 
 /** The tool as the lane endpoint registers it. */
 export function checkDesignTool(
@@ -153,20 +135,9 @@ export function checkDesignTool(
         return unshot(WORKTREE_TASK);
       if (routes.length === 0) return unshot(NO_PAGE);
 
-      const limits = limitsOf(db, deps.sessionId);
-      // What earlier calls sent: each call's mock-ups, and its shots once (its checks share a time).
-      const calls = new Map<string, { mockups: number; shots: number }>();
-      for (const check of listTaskDesignChecks(db, taskId)) {
-        if (check.purpose !== DesignCheckPurpose.LaneCheck) continue;
-        const call = calls.get(check.createdAt) ?? { mockups: 0, shots: 0 };
-        call.mockups += check.mockupSha256 === null ? 0 : deps.pictures.bytesOf(check.mockupSha256);
-        call.shots = check.shots.reduce(
-          (n, s) => n + (s.sha256 === null ? 0 : deps.pictures.bytesOf(s.sha256)),
-          0,
-        );
-        calls.set(check.createdAt, call);
-      }
-      const spent = [...calls.values()].reduce((n, c) => n + c.mockups + c.shots, 0);
+      const limits = sessionPictureLimits(db, deps.sessionId);
+      // What earlier calls sent: the task's checks, and the lane screens its conversation carries.
+      const spent = lanePicturesSpent(db, deps.pictures.bytesOf, taskId, deps.sessionId);
 
       const taken = await deps.pictures.shootNow({
         projectId: project.id,

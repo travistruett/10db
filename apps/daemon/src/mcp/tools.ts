@@ -162,6 +162,8 @@ export interface McpDeps {
   readonly reporter?: Pick<LinearReporter, 'reportPost'>;
   /** Draws a mock-up and shoots the app for `check_design`; absent, a lane is not offered it. */
   readonly pictures?: Pick<Pictures, 'shootNow' | 'drawMockup' | 'bytesOf'>;
+  /** The data directory, where the lane browser keeps its screenshots; absent, no browser tools are offered. */
+  readonly dataDir?: string;
   /** Each lane session's browser; absent, a lane is not offered the browser tools. */
   readonly laneBrowser?: {
     readonly browsers: LaneBrowsers;
