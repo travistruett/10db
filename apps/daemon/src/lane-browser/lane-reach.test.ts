@@ -164,14 +164,14 @@ describe('portVerdict: the ledger rule', () => {
       { kind: 'refused', why: 'another process answers on port 3000' },
     ],
     [
-      'an acceptor that is a ledger member but not a listener',
+      "a cluster child that accepts for its listening parent is the lane's own server",
       {
         listeners: [listener('*')],
         acceptors: [{ chain: chain([201, 't1'], [100, 't0']) }],
         compose: null,
       },
       {},
-      { kind: 'refused', why: 'another process answers on port 3000' },
+      owned('127.0.0.1'),
     ],
     [
       "a listener and a second holder that is not the lane's",

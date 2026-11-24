@@ -192,9 +192,13 @@ export function portVerdict(input: {
     if (acceptors === 'unaccepted') {
       return { kind: 'refused', why: `${String(port)} did not accept in time` };
     }
-    const listenerPids = new Set(listeners.map((l) => l.chain[0]?.pid));
-    const answers = acceptors.every(
-      (a) => listenerPids.has(a.chain[0]?.pid) && (!byLane || ownedByLedger(a.chain)),
+    // A lane's own server may accept through a child of its listener (a node cluster, pm2): the ledger's
+    // chain says it is the lane's. A compose stack's acceptor must itself be an lsof listener.
+    const listenerPids = new Set(
+      listeners.flatMap((l) => (l.chain[0]?.pid === undefined ? [] : [l.chain[0].pid])),
+    );
+    const answers = acceptors.every((a) =>
+      byLane ? ownedByLedger(a.chain) : listenerPids.has(a.chain[0]?.pid ?? -1),
     );
     if (acceptors.length === 0 || !answers) {
       return { kind: 'refused', why: `another process answers on port ${String(port)}` };

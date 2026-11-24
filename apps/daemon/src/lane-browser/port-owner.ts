@@ -25,6 +25,7 @@ const READ_DEADLINE_MS = 5_000;
 const LSOF = '/usr/sbin/lsof';
 const ACCEPT_WAIT_MS = 1_000;
 const ACCEPT_POLL_MS = 50;
+const CONNECT_DEADLINE_MS = 1_000;
 
 export interface PortReaders {
   /** `lsof -nP -a -iTCP:<port> -sTCP:LISTEN`, each listener's pid and address; rejects on failure. */
@@ -82,11 +83,16 @@ async function realOrNull(path: string): Promise<string | null> {
   }
 }
 
-/** A connection to `address:port` that sends nothing; rejects when it cannot connect. */
-function connect(address: string, port: number): Promise<Socket> {
+/** A connection to `address:port` that sends nothing; rejects when it cannot connect, null when it takes too long. */
+function connect(address: string, port: number): Promise<Socket | null> {
   return new Promise((resolve, reject) => {
     const socket = createConnection({ host: address, port });
+    socket.setTimeout(CONNECT_DEADLINE_MS, () => {
+      socket.destroy();
+      resolve(null);
+    });
     socket.once('connect', () => {
+      socket.setTimeout(0);
       socket.removeAllListeners('error');
       // A server that resets the held connection must not crash the daemon.
       socket.on('error', () => undefined);
@@ -172,6 +178,7 @@ export function systemPortReaders(
     },
     async acceptors(address, port) {
       const probe = await connect(address, port);
+      if (probe === null) return 'unaccepted';
       try {
         const local = probe.localPort;
         const localAddress = probe.localAddress;
@@ -358,19 +365,21 @@ export function createPortOwner(
       // A port this lane owned in the last minute is its own server read again: it costs nothing.
       const lastOwned = ownedAt.get(port);
       const free = lastOwned !== undefined && now - lastOwned < MINUTE_MS;
-      if (!free && fresh.length >= PORT_CHECKS_PER_MINUTE) {
+      // The budget counts distinct ports: one a page keeps polling is one check, not a hundred.
+      const counted = fresh.some((e) => e.port === port);
+      if (!free && !counted && fresh.length >= PORT_CHECKS_PER_MINUTE) {
         return {
           kind: 'refused',
           why: `this lane checked ${String(PORT_CHECKS_PER_MINUTE)} ports in a minute; wait before trying another`,
         };
       }
       const entry = { port, at: now };
-      if (!free) fresh.push(entry);
+      if (!free && !counted) fresh.push(entry);
       const reading = read(port).then((verdict) => {
         const done = deps.clock.now().getTime();
         if (verdict.kind === 'owned') {
           ownedAt.set(port, done);
-          fresh = fresh.filter((e) => e !== entry);
+          fresh = fresh.filter((e) => e.port !== port);
         }
         cache.set(port, {
           verdict,
