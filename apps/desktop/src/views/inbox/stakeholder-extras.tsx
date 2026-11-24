@@ -157,7 +157,7 @@ const OUTAGE_NOTICES: Readonly<Record<string, string>> = {
   refused:
     "Slack refused 10db's token, so replies can't be read. Reconnect it in Settings › Integrations, or answer this yourself.",
   none: "Slack's token was removed, so replies can't be read. Add it again in Settings › Integrations, or answer this yourself.",
-  off: 'Slack is off on this daemon, so replies can’t be read here. Answer this yourself or take it back.',
+  off: 'Slack is off on this daemon, so replies can’t be read here. Answer this yourself or withdraw the question.',
   unreachable:
     "Slack can't be reached right now. Replies are read again when it is; you can answer this yourself meanwhile.",
 };
@@ -229,6 +229,9 @@ function AskedQuestionBox({
           </Button>
           {actions}
         </Group>
+        <Text size="xs" c="dimmed">
+          {`Or answer it yourself below; ${first} sees that you answered.`}
+        </Text>
         {reply.isError ? (
           <Text size="xs" c="red">
             {reply.error.message}
@@ -265,27 +268,33 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
   const state =
     status.data === undefined ? undefined : status.data.off ? 'off' : (workspace?.state ?? 'none');
   const notice = state === undefined ? undefined : OUTAGE_NOTICES[state];
+  const first = (names[0] ?? 'them').split(' ')[0] ?? 'them';
+  const withdraw = (
+    <Button
+      size="xs"
+      variant={send.asked === null ? 'default' : 'subtle'}
+      onClick={() => {
+        setTakingBack(true);
+      }}
+    >
+      Withdraw Question
+    </Button>
+  );
   const actions = (
     <>
-      <Button
-        size="xs"
-        variant="default"
-        loading={keepWaiting.isPending}
-        onClick={() => {
-          keepWaiting.mutate(item.id);
-        }}
-      >
-        Keep Waiting
-      </Button>
-      <Button
-        size="xs"
-        variant="default"
-        onClick={() => {
-          setTakingBack(true);
-        }}
-      >
-        Take Back
-      </Button>
+      {send.asked === null ? (
+        <Button
+          size="xs"
+          variant="default"
+          loading={keepWaiting.isPending}
+          onClick={() => {
+            keepWaiting.mutate(item.id);
+          }}
+        >
+          {`Give ${first} More Time`}
+        </Button>
+      ) : null}
+      {withdraw}
     </>
   );
   if (send.returnedAt !== null) {
@@ -303,11 +312,6 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
               {notice}
             </Alert>
           )}
-          {keepWaiting.isError ? (
-            <Text size="xs" c="red">
-              {keepWaiting.error.message}
-            </Text>
-          ) : null}
           <TakeBackModal
             item={item}
             opened={takingBack}
@@ -346,17 +350,7 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
     <Alert color="yellow" variant="light">
       <Stack gap="xs">
         {notice}
-        <Group>
-          <Button
-            size="xs"
-            variant="default"
-            onClick={() => {
-              setTakingBack(true);
-            }}
-          >
-            Take Back
-          </Button>
-        </Group>
+        <Group>{withdraw}</Group>
       </Stack>
       <TakeBackModal
         item={item}
