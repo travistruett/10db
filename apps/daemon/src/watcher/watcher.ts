@@ -7,13 +7,14 @@ import {
   InboxKind,
   InboxState,
   type InboxItemId,
+  isTerminal,
   LANE_STATES,
   WorkstreamId,
   WorkstreamState,
-  type BatchId,
+  BatchId,
   type InboxItemDto,
   type ProjectDto,
-  type ProjectId,
+  ProjectId,
   Urgency,
 } from '@10db/contracts';
 import {
@@ -29,6 +30,7 @@ import {
   getWorkstream,
   getWorkstreamRow,
   listInbox,
+  listOpenFlagRows,
   latestPassTurn,
   listPassDirt,
   listSharedChanges,
@@ -178,6 +180,11 @@ export interface Watcher {
   /** Processes pending changes now instead of at the next batch. */
   flush(): Promise<void>;
   /**
+   * Closes the open "Write outside every claim" cards with nothing left to do: their paths are committed
+   * and clean, or no unfinished workstream could own them. Resolves with how many it closed.
+   */
+  resolveSettledStrays(): Promise<number>;
+  /**
    * Notes the files 10db itself just wrote in the checkout `root` (a take-out putting a page back), as
    * they are now: a batch or a step end that finds one unchanged since raises no card for it.
    */
@@ -239,6 +246,8 @@ export function createWatcher(deps: {
   // Checkouts with a batch run queued that has not started yet; it takes the checkout's `pending` when it does.
   const waiting = new Set<string>();
   let stopped = false;
+  // A function, so a check after an await is not narrowed to the value `stopped` had before it.
+  const isStopped = (): boolean => stopped;
 
   /** The batch a workstream works in when that batch has its own worktree. */
   function worktreeBatchOf(ws: { readonly batchId: BatchId | null }): BatchId | null {
@@ -1035,6 +1044,100 @@ export function createWatcher(deps: {
     }
   }
 
+  /** The checkout a stray card's fold key scopes it to: null when the batch's worktree is gone. */
+  function checkoutOfScope(scope: string): string | null {
+    const batch = BatchId.safeParse(scope);
+    if (batch.success) {
+      try {
+        return getBatch(db, batch.data).worktreePath;
+      } catch {
+        return null;
+      }
+    }
+    const project = ProjectId.safeParse(scope);
+    if (!project.success) return null;
+    try {
+      return getProject(db, project.data).repoPath;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Whether any workstream a stray card names, or any of its project's when it names none, is unfinished. */
+  function couldBeOwned(item: InboxItemDto): boolean {
+    const candidates = item.detail?.['candidates'];
+    const named = new Set<WorkstreamId>(item.targets.map((t) => t.workstreamId));
+    for (const c of Array.isArray(candidates) ? candidates : []) {
+      const id = WorkstreamId.safeParse(c);
+      if (id.success) named.add(id.data);
+    }
+    const lanes =
+      named.size > 0
+        ? [...named].flatMap((id) => {
+            try {
+              return [getWorkstreamRow(db, id)];
+            } catch {
+              return [];
+            }
+          })
+        : listWorkstreams(db, { projectId: item.projectId });
+    return lanes.some((lane) => !isTerminal(lane.state));
+  }
+
+  /**
+   * Closes each open "Write outside every claim" card there is nothing left to do about: its checkout is
+   * gone; or its paths (every change in the checkout, for a bulk card that lists fewer than it counts) are
+   * committed and clean; or no unfinished workstream could own the write. A write that can change what runs
+   * stays carded until the builder answers it, whatever its workstreams did, unless its checkout is gone.
+   * Returns how many it closed.
+   */
+  async function resolveSettledStrays(): Promise<number> {
+    let closed = 0;
+    for (const row of listOpenFlagRows(db)) {
+      if (stopped) break;
+      const scope = /^stray-write:([^:]+):/.exec(row.foldKey ?? '')?.[1];
+      if (scope === undefined || !isStrayTitle(row.title)) continue;
+      try {
+        const item = getInboxItem(db, row.id);
+        if (item.state !== InboxState.Open) continue;
+        const single = item.title === STRAY_TITLE;
+        const detailPath = item.detail?.['path'];
+        const listed = item.detail?.['paths'];
+        const count = item.detail?.['count'];
+        const paths: string[] | null = single
+          ? typeof detailPath === 'string'
+            ? [detailPath]
+            : null
+          : Array.isArray(listed) && listed.every((p): p is string => typeof p === 'string')
+            ? listed
+            : null;
+        // A bulk card that lists fewer than it counts hides paths: only the whole checkout can vouch for them.
+        const partial =
+          !single && (paths === null || typeof count !== 'number' || count > paths.length);
+        if (paths === null && !partial) continue;
+        const root = checkoutOfScope(scope);
+        let reason: string | null = null;
+        if (root === null || !existsSync(root)) reason = 'Its checkout no longer exists.';
+        else if (!(paths ?? []).some(isSensitivePath)) {
+          if (!couldBeOwned(item)) reason = 'No unfinished task could own the write.';
+          else if (
+            (await deps.git.changedPaths(root, partial ? undefined : (paths ?? []))).length === 0
+          )
+            reason = 'Its paths are committed and clean.';
+        }
+        if (reason === null || isStopped()) continue;
+        deps.inbox.resolve(item.id, reason);
+        closed += 1;
+      } catch (error) {
+        deps.logger.warn(
+          { cardId: row.id, err: String(error) },
+          'could not check whether a stray card is settled',
+        );
+      }
+    }
+    return closed;
+  }
+
   /** Logs a path dropped because it is Claude Code's bookkeeping, so the log shows what the list hides. */
   function logBookkeeping(
     projectId: ProjectId,
@@ -1397,6 +1500,8 @@ export function createWatcher(deps: {
     },
 
     flush,
+
+    resolveSettledStrays,
 
     async daemonWrote(root, paths) {
       for (const rel of paths) {

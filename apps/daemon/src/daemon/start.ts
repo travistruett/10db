@@ -18,6 +18,7 @@ import {
   noOpenRouterSync,
   PROTOCOL_VERSION,
   RoutedBy,
+  TaskStatus,
   AgentSkillNotInstallable,
   harnessOf,
   requireHarness,
@@ -182,6 +183,8 @@ import {
   openPass,
   readPnpmVersion,
   recoverBatches,
+  closeFinishedSkippedCards,
+  closeGoneMergedWorktreeCards,
   createHandMadeFolderLook,
   removeMergedBranches,
   resolvePnpm,
@@ -2172,6 +2175,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const skippedDeps = { state, git, log: logger.child({ component: 'skipped' }) };
   // The raises still reading a run's changed paths, which stop() waits for before the store closes.
   const skippedRaises = new Set<Promise<void>>();
+  // A card for a task's skipped calls, or for a write nobody could own, has nothing left to do once the
+  // task is finished or abandoned, or its run ends.
+  const unsubscribeSettled = bus.subscribe((event) => {
+    if (event.type === EventType.TaskChanged && event.data['status'] !== TaskStatus.Open) {
+      closeFinishedSkippedCards(state.db, inbox);
+    } else if (
+      event.type === EventType.WorkstreamChanged &&
+      [WorkstreamState.Done, WorkstreamState.Failed, WorkstreamState.Cancelled].some(
+        (ended) => ended === event.data['to'],
+      )
+    ) {
+      watcher?.resolveSettledStrays().catch((error: unknown) => {
+        logger.warn({ err: error }, 'could not close the stray-write cards of an ended run');
+      });
+    }
+  });
   const unsubscribeSkipped = bus.subscribe((event) => {
     if (event.type !== EventType.WorkstreamChanged) return;
     const to = event.data['to'];
@@ -2191,6 +2210,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     skippedRaises.add(raised);
   });
   await sweepUnlistedRuns(skippedDeps);
+  // Cards an earlier daemon left open that have nothing left to do close now, so a backlog clears
+  // without the builder. The stray-write cards close once the watcher has been synced, below.
+  const closedAtStart =
+    closeFinishedSkippedCards(state.db, inbox) + closeGoneMergedWorktreeCards(state.db, inbox);
+  if (closedAtStart > 0)
+    logger.info({ closed: closedAtStart }, 'closed open cards with nothing left');
   // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets
   // one. A send that was mid-post is looked for by its workspace's reply watch.
   for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
@@ -2455,6 +2480,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const unsubscribeYields = forgetEndedYields(bus, claimWaits);
   keepAwake.refresh();
   watcher?.sync();
+  watcher
+    ?.resolveSettledStrays()
+    .then((closed) => {
+      if (closed > 0) logger.info({ closed }, 'closed stray-write cards with nothing left');
+    })
+    .catch((error: unknown) => {
+      logger.warn({ err: error }, 'could not close the settled stray-write cards');
+    });
 
   const token = opts.uiToken ?? randomBytes(32).toString('base64url');
   const areaNamer = createAreaNamer({ adapter, launcher, db: state.db, scratchRoot: tmpdir() });
@@ -3272,6 +3305,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A tick asked for before the stop may still be reading the branches; it launches nothing now,
       // but it reads and writes the database until it ends.
       await createdScheduler.idle();
+      unsubscribeSettled();
       unsubscribeSkipped();
       await Promise.all(skippedRaises);
       state.write((ctx) => {

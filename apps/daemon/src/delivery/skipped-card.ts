@@ -2,8 +2,12 @@ import {
   Approval,
   ConflictError,
   InboxKind,
+  InboxState,
+  NotFoundError,
   SkipKind,
   SkippedActionId,
+  TaskStatus,
+  WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamId,
   WorkstreamState,
   type InboxAnswer,
@@ -18,6 +22,8 @@ import {
   getWorkstreamRow,
   insertSkipFollowUp,
   insertTask,
+  listInbox,
+  openItemsForWorkstream,
   skipFollowUpOf,
   lastConfigHead,
   lastListed,
@@ -25,12 +31,13 @@ import {
   listSkipsForWorkstream,
   markListed,
   unlistedEndedRuns,
+  type DbReader,
   type WriteContext,
 } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
-import { flagCard, BY_ANSWER, CardTier } from '../inbox';
+import { flagCard, rewordCard, BY_ANSWER, CardTier, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { LIMITS, writtenConfig } from '../trust';
 import { checkoutOf } from './checkout';
@@ -208,6 +215,30 @@ export async function raiseSkippedCard(
     const skipIds = skips
       .filter((s) => s.kind !== SkipKind.Question && s.approval !== Approval.None)
       .map((s) => s.id);
+    // A failed run already shows its builder a card: the skipped calls go on that one.
+    const failed =
+      row.state === WorkstreamState.Failed
+        ? openItemsForWorkstream(ctx.tx, workstreamId).find(
+            (i) =>
+              i.kind === InboxKind.Flag &&
+              i.state === InboxState.Open &&
+              i.title.startsWith(WORKSTREAM_FAILED_TITLE_PREFIX),
+          )
+        : undefined;
+    if (failed !== undefined) {
+      rewordCard(ctx, failed.id, `${failed.body}\n\n${bodyOf(skips, written)}`, {
+        options:
+          skipIds.length === 0
+            ? failed.options
+            : [
+                ...failed.options,
+                runOption(followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait'),
+              ],
+        detail: { ...failed.detail, [SKIPPED_DETAIL]: workstreamId, skipIds },
+      });
+      markListed(ctx, workstreamId, through, failed.id, configHead);
+      return;
+    }
     const item = flagCard(ctx, {
       projectId: row.projectId,
       workstreamId: null,
@@ -243,6 +274,38 @@ export async function sweepUnlistedRuns(deps: SkippedCardDeps): Promise<void> {
       );
     }
   }
+}
+
+/**
+ * Closes every open item of a run whose task has finished or been abandoned: what it lists is
+ * nothing a builder can still act on. Returns how many it closed.
+ */
+export function closeFinishedSkippedCards(
+  db: DbReader,
+  inbox: Pick<InboxService, 'resolve'>,
+): number {
+  let closed = 0;
+  for (const item of listInbox(db, { states: [InboxState.Open] })) {
+    if (item.kind !== InboxKind.Flag) continue;
+    // The detail is JSON read back from the database: a boundary, so parse it.
+    const run = WorkstreamId.safeParse(item.detail?.[SKIPPED_DETAIL]);
+    if (!run.success) continue;
+    let status: TaskStatus;
+    try {
+      status = getTask(db, getWorkstreamRow(db, run.data).taskId).status;
+    } catch (error) {
+      // A run or task no longer stored leaves nothing to act on.
+      if (!(error instanceof NotFoundError)) throw error;
+      status = TaskStatus.Cancelled;
+    }
+    if (status === TaskStatus.Open) continue;
+    inbox.resolve(
+      item.id,
+      status === TaskStatus.Done ? 'The task is done.' : 'The task was abandoned.',
+    );
+    closed += 1;
+  }
+  return closed;
 }
 
 const SkippedDetail = z.object({

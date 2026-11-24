@@ -1,5 +1,5 @@
 import type { ProjectId, ShapeId } from '@10db/contracts';
-import { createTestStore, getAppSetting, listInbox, seedProject } from '@10db/db';
+import { createTestStore, getAppSetting, listInbox, seedProject, setAppSetting } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -260,6 +260,16 @@ describe('a build that fails', () => {
     expect(card?.body).toContain(RUNNING.slice(0, 12));
     expect(card?.body).toContain('make rollback-app');
     expect(world.calls).toEqual(['stage']);
+  });
+
+  it('closes its card once a later update installs, whichever build the card was for', async () => {
+    expect(await make().tick()).toBe('failed');
+    expect(cards()).toHaveLength(1);
+    state.write((ctx) => {
+      setAppSetting(ctx, SELF_UPDATE_APPLYING_KEY, { commit: RUNNING, head: 'c'.repeat(40) });
+    });
+    make().settle();
+    expect(cards().map((c) => c.state)).toEqual(['RESOLVED']);
   });
 
   it('raises no second card for the same commit however often it checks', async () => {

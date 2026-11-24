@@ -171,6 +171,46 @@ describe('watcher', () => {
     expect(open[0]?.detail).toMatchObject({ path: 'docs/stray.md', candidates: [workstream.id] });
   });
 
+  describe('a stray card with nothing left to do', () => {
+    const raiseStray = async (rel: string) => {
+      watcher.sync();
+      touch(rel);
+      emit(rel);
+      await watcher.flush();
+      expect(flags()).toHaveLength(1);
+    };
+    const commit = (rel: string) => {
+      execFileSync('git', ['add', rel], { cwd: repo.path, env: isolatedGitEnv() });
+      execFileSync('git', ['commit', '-q', '-m', `Add ${rel}`], {
+        cwd: repo.path,
+        env: isolatedGitEnv(),
+      });
+    };
+
+    it('closes once its path is committed and clean, and not while it is dirty and a lane runs', async () => {
+      running();
+      await raiseStray('docs/stray.md');
+      expect(await watcher.resolveSettledStrays()).toBe(0);
+      commit('docs/stray.md');
+      expect(await watcher.resolveSettledStrays()).toBe(1);
+      expect(flags()).toEqual([]);
+    });
+
+    it('closes once no unfinished task could own it, unless the path can change what runs', async () => {
+      const { workstream } = running();
+      await raiseStray('docs/stray.md');
+      touch('.mcp.json');
+      emit('.mcp.json');
+      await watcher.flush();
+      expect(flags()).toHaveLength(2);
+      base.write((ctx) => {
+        transitionWorkstream(ctx, workstream.id, { to: WorkstreamState.Failed, fence: null });
+      });
+      expect(await watcher.resolveSettledStrays()).toBe(1);
+      expect(flags().map((f) => f.body.split('\n')[0])).toEqual(['.mcp.json']);
+    });
+  });
+
   it('flags a write under a nested node_modules that git reports', async () => {
     running();
     watcher.sync();
