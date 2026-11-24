@@ -209,7 +209,12 @@ export async function recoverOnStartup(opts: {
         patchWorkstream(ctx, ws.id, null, { nextAction });
       });
       // A task waiting on a person does not hold its claims across the restart either.
-      await yieldClaimsWhileWaiting(opts, ws.id, open.id).catch(() => false);
+      await yieldClaimsWhileWaiting(opts, ws.id, open.id).catch((error: unknown) => {
+        opts.logger.warn(
+          { workstreamId: ws.id, err: String(error) },
+          'could not let go of the claims of a task waiting on an answer',
+        );
+      });
       report.parked.push(ws.id);
       continue;
     }

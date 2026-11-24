@@ -5,16 +5,22 @@
 ## Decision
 
 When a task parks on an `answer` card (a question to the builder or to a routed person), 10db
-reads its checkout once (`yieldClaimsWhileWaiting`, `runner/claim-yield.ts`) and releases each claim,
-area or hazard, that covers no uncommitted change of the task's (`claimedChanges`). The answer
-queues the task, and the scheduler asks for the same claims as for any queued task: a free claim is
-granted before the session resumes, a held one shows the usual claim-wait notice and the task waits
-in the queue. It never fails for it. A daemon restart does the same for a waiting task it finds.
+reads its checkout once (`yieldClaimsWhileWaiting`, `runner/claim-yield.ts`). If no change under any of
+its claims is uncommitted (`claimedChanges`) it releases all of them, areas and hazards, and forgets the
+`request_claim` grants it recorded, so a repeat of such a call asks again. Otherwise it keeps all of
+them, never some: a task holding one claim while another task holds its other and waits on it would
+deadlock where no check looks. The answer queues the task, and the scheduler asks for the same claims
+as for any queued task: a free claim is granted before the session resumes, a held one shows the usual
+claim-wait notice and the task waits in the queue. It never fails for it. A daemon restart does the same
+for a waiting task it finds.
 
-A claim covering edits the task left uncommitted stays held, so those edits stay its own and no other
-task can touch or commit them, while the rest of a wide area is free. A task that depends on the
-waiting one stays queued. Claims are by area, not by file; a checkpoint commit of the waiting task's
-work was turned down, since it would commit ungated work to the builder's branch. A pass's page, a plan approval and a builder check keep their claims.
+A task that depends on the waiting one stays queued. A pass's page, a plan approval and a builder check
+keep their claims. Claims are by area, not by file, and a checkpoint commit of the waiting task's work
+was turned down, since it would commit ungated work to the builder's branch.
+
+Limits: ignored files the task created (build output, `.env.local`) are not seen as its edits, so they
+do not keep its claims. Work the task committed but no gate has verified sits in a released area, and
+another task can build on it before the waiting task resumes.
 
 ## Why
 

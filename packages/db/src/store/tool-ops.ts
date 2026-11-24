@@ -189,3 +189,23 @@ export function latestToolOp(
     .limit(1)
     .get();
 }
+
+/**
+ * Forgets the `request_claim` calls of a workstream that were granted, so a repeat of one with the same
+ * opId asks again instead of replaying a grant for a claim the workstream no longer holds.
+ */
+export function forgetGrantedClaimOps(ctx: WriteContext, workstreamId: WorkstreamId): void {
+  const ops = ctx.tx
+    .select({ id: schema.toolOps.id, result: schema.toolOps.result })
+    .from(schema.toolOps)
+    .where(
+      and(eq(schema.toolOps.workstreamId, workstreamId), eq(schema.toolOps.tool, 'request_claim')),
+    )
+    .all();
+  for (const op of ops) {
+    const result = op.result;
+    if (typeof result !== 'object' || result === null || Array.isArray(result)) continue;
+    if (result['granted'] === true)
+      ctx.tx.delete(schema.toolOps).where(eq(schema.toolOps.id, op.id)).run();
+  }
+}
