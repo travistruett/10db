@@ -36,7 +36,7 @@ function byline(model: DecisionModelDto): string {
 /** The models by maker; a saved model the account no longer lists stays pickable on its own. */
 function optionGroups(
   models: readonly DecisionModelDto[],
-  saved: string,
+  saved: string | null,
 ): ComboboxItemGroup<ComboboxItem>[] {
   const groups = new Map<string, { group: string; items: ComboboxItem[] }>();
   for (const m of models) {
@@ -44,35 +44,41 @@ function optionGroups(
     group.items.push({ value: m.id, label: m.name, disabled: m.cantCall !== null });
     groups.set(m.maker, group);
   }
-  const listed = models.some((m) => m.id === saved);
+  const listed = saved === null || models.some((m) => m.id === saved);
   return listed
     ? [...groups.values()]
     : [{ group: 'Saved', items: [{ value: saved, label: saved }] }, ...groups.values()];
 }
 
 /**
- * A decision's model, picked from the Decisions account's models with each one's price. The daemon saves a pick only
- * once the model has answered a test decision, so the field shows the pick while it is asked and the saved model
- * again when it is refused.
+ * The model of one decision, or of several at once, picked from the Decisions account's models with each one's price.
+ * The daemon saves a pick only once the model has answered a test decision, and saves it to every decision given or
+ * to none, so the field shows the pick while it is asked and the saved model again when it is refused. Decisions on
+ * different models show "Mixed" until one is picked for all.
  */
 export function DecisionModelPicker({
-  decision,
+  decisions,
   status,
   disabled,
+  label = 'Model',
 }: {
-  readonly decision: AskedDecision;
+  readonly decisions: readonly AskedDecision[];
   readonly status: JudgeStatusDto;
   readonly disabled: boolean;
+  readonly label?: string;
 }) {
-  const saved = status.config.decisions[decision].model;
+  const picked = new Set(decisions.map((d) => status.config.decisions[d].model));
+  const saved = picked.size === 1 ? ([...picked][0] ?? null) : null;
+  const first = decisions[0];
   const keyed = !status.off && status.account?.secretSet === true;
-  const models = useDecisionModels(keyed);
+  const offered = useDecisionModels(keyed);
   const patch = usePatchJudge();
-  const asking = patch.isPending ? patch.variables.decisions?.[decision]?.model : undefined;
+  const asking =
+    patch.isPending && first !== undefined ? patch.variables.decisions?.[first]?.model : undefined;
 
   const savedText = (
     <Text size="sm" ff="monospace">
-      {saved}
+      {saved ?? 'Mixed'}
     </Text>
   );
   if (!keyed)
@@ -88,21 +94,21 @@ export function DecisionModelPicker({
         )}
       </Stack>
     );
-  if (models.isPending) return <Loader size="sm" aria-label="Loading models" />;
-  if (models.isError)
+  if (offered.isPending) return <Loader size="sm" aria-label="Loading models" />;
+  if (offered.isError)
     return (
       <Stack gap={2} align="flex-start">
         {savedText}
         <Text size="xs" c="red" role="alert">
           The account&apos;s models could not be read.{' '}
-          {models.error instanceof DaemonRequestError ? models.error.message : ''}
+          {offered.error instanceof DaemonRequestError ? offered.error.message : ''}
         </Text>
         <Button
           size="xs"
           variant="default"
-          loading={models.isFetching}
+          loading={offered.isFetching}
           onClick={() => {
-            void models.refetch();
+            void offered.refetch();
           }}
         >
           Try Again
@@ -110,13 +116,14 @@ export function DecisionModelPicker({
       </Stack>
     );
 
-  const list = models.data.models;
+  const list = offered.data.models;
   const byId = new Map<string, DecisionModelDto>(list.map((m) => [m.id, m]));
-  const savedModel = byId.get(saved);
+  const savedModel = saved === null ? undefined : byId.get(saved);
   return (
     <Stack gap={4}>
       <Select
-        aria-label="Model"
+        aria-label={label}
+        placeholder="Mixed"
         searchable
         allowDeselect={false}
         nothingFoundMessage="No decision model matches"
@@ -125,7 +132,9 @@ export function DecisionModelPicker({
         disabled={disabled || patch.isPending}
         onChange={(value) => {
           if (value !== null && value !== saved)
-            patch.mutate({ decisions: { [decision]: { model: value } } });
+            patch.mutate({
+              decisions: Object.fromEntries(decisions.map((d) => [d, { model: value }])),
+            });
         }}
         renderOption={({ option, checked }) => {
           const model = byId.get(option.value);

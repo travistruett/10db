@@ -1,4 +1,4 @@
-import type { AskedDecision } from '@10db/contracts';
+import { JudgeDecision, isAskedDecision, type AskedDecision } from '@10db/contracts';
 import {
   Alert,
   Anchor,
@@ -22,6 +22,7 @@ import {
 } from '../../daemon/judge-queries';
 import { useShapeMeasures } from '../../daemon/shape-measures-queries';
 import { DecisionDrawer } from './decision-drawer';
+import { DecisionModelPicker } from './decision-model-picker';
 import { statsFor } from './decision-numbers';
 import { DecisionsTable } from './decisions-table';
 import { PlanMeasures } from './plan-measures';
@@ -32,6 +33,10 @@ import { SettingsSectionKey } from './sections';
 import { SettingRow } from './setting-row';
 
 const ASK_A_MODEL = 'Let a Model Make These Calls';
+
+/** Every decision 10db still asks a model, in the order the contract lists them. */
+const EVERY_DECISION: readonly AskedDecision[] =
+  Object.values(JudgeDecision).filter(isAskedDecision);
 
 const DecisionsTab = { Decisions: 'decisions', Recent: 'recent' } as const;
 type DecisionsTab = (typeof DecisionsTab)[keyof typeof DecisionsTab];
@@ -104,6 +109,18 @@ export function DecisionsSection() {
               </SettingRow>
               <Divider />
               <PaidBy status={status.data} disabled={disabled} />
+              <Divider />
+              <SettingRow
+                label="Model for Every Decision"
+                description="Tests the model once, then sets every decision below to it. Open one to change only that one."
+              >
+                <DecisionModelPicker
+                  decisions={EVERY_DECISION}
+                  status={status.data}
+                  disabled={disabled || !config.enabled}
+                  label="Model for Every Decision"
+                />
+              </SettingRow>
             </Paper>
           </Stack>
           {off ? (
