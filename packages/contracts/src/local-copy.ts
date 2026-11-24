@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { BatchId } from './ids';
 
+/** A git object id: 40 hex digits (SHA-1) or 64 (SHA-256); it reaches git's argv. */
+const ObjectId = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+
 const Timestamp = z.iso.datetime();
 
 /** Where a separate copy's landing stands; the journal row writes each step before it acts. */
@@ -38,9 +41,9 @@ export const LocalCopyDto = z.object({
   copyId: CopyId,
   step: z.enum(CopyStep),
   /** T, the base tip the step expects. */
-  baseTip: z.string().nullable(),
+  baseTip: ObjectId.nullable(),
   /** C, the commit that lands. */
-  candidate: z.string().nullable(),
+  candidate: ObjectId.nullable(),
   /** Races with the base so far. */
   attempt: z.number().int(),
   wait: z.enum(CopyWait).nullable(),
@@ -51,7 +54,7 @@ export const LocalCopyDto = z.object({
   /** The teardown command, pinned at the cut. */
   teardownCommand: z.string(),
   /** The commit the teardown runs from, set when the batch opens. */
-  teardownSha: z.string().nullable(),
+  teardownSha: ObjectId.nullable(),
   updatedAt: Timestamp,
 });
 export type LocalCopyDto = z.infer<typeof LocalCopyDto>;

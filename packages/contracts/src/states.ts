@@ -401,7 +401,7 @@ export const BatchFailure = {
   InterruptedLanding: 'interrupted_landing',
   /** The copy's work changed a lockfile, which a copy never lands. */
   LockfileInCopy: 'lockfile_in_copy',
-  /** The copy's work changed the gate command's own files, so the gate that passed is not the gate that lands. */
+  /** The gate changed the copy's head or tree while it ran (a formatter writing files, say), so its pass counts for nothing. */
   GateChangedCopy: 'gate_changed_copy',
   /** The project's git filters would rewrite files the landing writes. */
   GitFilters: 'git_filters',
