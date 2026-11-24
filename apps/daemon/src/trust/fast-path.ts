@@ -31,7 +31,7 @@ export interface FastPathContext {
   readonly checkout: string;
   /** The session's own temp directory. */
   readonly tmpDir: string;
-  /** The session's secret files: every `.env*` file and link, and each link's real path. */
+  /** The session's secret files: every `.env*` file and link but a template, and each link's real path. */
   readonly secretFiles: readonly string[];
   /**
    * The untracked and ignored entries the checkout held when the session started, relative to it, as git lists

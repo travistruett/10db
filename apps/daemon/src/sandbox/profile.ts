@@ -166,7 +166,7 @@ export interface LaneProfileInput {
   tmpDir: string;
   home: string;
   protectedReads: readonly string[];
-  /** The checkout's `.env*` files, and the real paths of its `.env*` links. */
+  /** The checkout's `.env*` files but templates, and the real paths of its `.env*` links. */
   secretFiles: readonly string[];
   /** Toolchain files that can hold a registry token or a key, from `toolchainAccess`. */
   toolchainSecrets: readonly string[];
