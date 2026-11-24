@@ -30,7 +30,16 @@
       "Bash(make check-changed)",
       "Bash(make precheck)",
       "Bash(pnpm exec prettier --check *)",
-      "Bash(pnpm exec vitest run *)"
+      "Bash(pnpm exec vitest run *)",
+      "Bash(pnpm exec vitest related *)",
+      "Bash(pnpm exec tsc --noEmit)",
+      "Bash(pnpm exec tsc --noEmit *)",
+      "Bash(node ~/.10db/skills/10db-task/tendb.mjs context)",
+      "Bash(node ~/.10db/skills/10db-task/tendb.mjs inbox)",
+      "Bash(node ~/.10db/skills/10db-task/tendb.mjs project *)",
+      "Bash(node ~/.10db/skills/10db-task/tendb.mjs areas *)",
+      "Bash(node ~/.10db/skills/10db-task/tendb.mjs knowledge *)",
+      "Bash(defaults read *)"
     ]
   }
 }
