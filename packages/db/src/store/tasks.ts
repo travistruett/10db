@@ -1321,10 +1321,12 @@ export function resetTaskLanding(ctx: WriteContext, id: TaskId, landing: TaskLan
 }
 
 /**
- * A task's areas change while it is open and none of its runs holds a claim: each launch claims the
- * task's areas as they are then, so a run between lanes (queued, failed, waiting with its claims let
- * go) takes the new ones at its next launch, while a held claim keeps the areas it was granted. A
- * finished task's areas are history. Every area must be one the project has.
+ * A task's areas change while it is open, none of its runs holds a claim, it has no saved work and no
+ * pass holds it: each launch claims the task's areas as they are then, so a run between lanes (queued,
+ * failed, waiting with its claims let go) takes the new ones at its next launch. A held claim keeps the
+ * areas it was granted; saved work goes back into the folder under the areas it was made in; a pass
+ * reads its pages' areas for its life. A finished task's areas are history. Every area must be one the
+ * project has.
  */
 function checkAreasCanChange(db: DbReader, task: TaskDto, areas: readonly string[]): void {
   if (task.status !== TaskStatus.Open)
@@ -1332,6 +1334,14 @@ function checkAreasCanChange(db: DbReader, task: TaskDto, areas: readonly string
   if (holdsClaims(db, task.id))
     throw new ConflictError(
       `${task.title} holds its areas now, so they can't change until its run lets them go`,
+    );
+  if (getTaskKeptWork(db, task.id) !== null)
+    throw new ConflictError(
+      `${task.title} has saved work from an earlier run, which goes back under the areas it was made in, so they can't change`,
+    );
+  if (passHolds(db, task.passId ?? null))
+    throw new ConflictError(
+      `${task.title} is a page of a pass, which keeps its areas until the pass ends`,
     );
   refuseUnknownAreas(getProject(db, task.projectId), areas);
 }

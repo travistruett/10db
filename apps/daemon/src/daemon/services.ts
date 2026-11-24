@@ -1040,7 +1040,7 @@ export function createServices(deps: {
     reopenTask: (id) => deps.state.write((ctx) => reopenTask(ctx, id)),
     async patchTask(id, patch, rigorSource) {
       await refuseMissingLandingBranch(getProject(db, getTask(db, id).projectId), patch.landing);
-      // The store refuses a task that has started; a join still pending has not written yet.
+      // The store refuses a task whose run holds its claims; a join still pending has not written yet.
       if (patch.workspaceMode !== undefined || patch.areas !== undefined)
         deps.starter.refuseIfJoining(id);
       // The areas or kinds can now match the placement rule. The store moves the task to a separate
