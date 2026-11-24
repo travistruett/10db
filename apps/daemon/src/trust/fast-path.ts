@@ -44,11 +44,6 @@ export interface FastPathContext {
    * skill's instructions and references, is read with no model; anything else in them goes to the judge.
    */
   readonly setupReads: readonly string[];
-  /**
-   * The commit the workstream first started from; null when it has none or it could not be read. Only a program
-   * that matches it is the repo's own code rather than the session's.
-   */
-  readonly startCommit: string | null;
 }
 
 /** Key and credential files, by their last segment, case-folded, beside the sandbox's own `.env*`. */

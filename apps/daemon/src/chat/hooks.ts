@@ -770,7 +770,6 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                       secretFiles: access.secretFiles ?? [],
                       preExisting: [],
                       setupReads: access.setupReads ?? [],
-                      startCommit: null,
                     },
                     policy,
                     allowLines: () => projectGrantLines(state.db, project.id),

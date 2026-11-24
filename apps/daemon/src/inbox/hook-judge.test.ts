@@ -152,7 +152,6 @@ function hookJudge(
         secretFiles: [join(checkout, '.env')],
         preExisting: [],
         setupReads: [],
-        startCommit: null,
       },
       policy: buildTrustPolicy({
         surface,
