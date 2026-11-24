@@ -1,6 +1,7 @@
 # A .env template is not a secret
 
 - **Date:** 2026-11-24
+- **Amends:** decisions 91 and 132
 
 ## Decision
 
@@ -9,7 +10,8 @@ A `.env*` file name that ends in `.example`, `.sample` or `.template` (`.env.exa
 (`apps/daemon/src/guard/paths.ts`) answers false for it, so lanes on every provider (Claude Code's profile and
 Codex's `deny`), the gate, the file-access judge's fast path and chat's commits treat it as an ordinary file.
 Every other `.env*` name stays closed, including one that only holds a template ending in the middle
-(`.env.example.local`).
+(`.env.example.local`). This covers the checkout: an opened setup read (`sandbox/setup-dir.ts`) and copied
+project definitions (`session-setup/project-definitions.ts`) keep every `.env*` name closed, templates included.
 
 ## Why
 

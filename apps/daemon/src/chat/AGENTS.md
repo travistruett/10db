@@ -36,7 +36,7 @@
   session first.
 - `git-tools.ts` holds the chat's tools that change git in Your folder (`make_branch`, `switch_branch`, `pull`, `commit_changes`;
   Git's side is `git/chat-git.ts`; a call's `beforeWrite` repeats the hold check under the repo lock, `commit_changes` refuses a
-  `.env*` file or one of the checkout's `secretFilesIn` files (a listed folder holds all under it) and stages only the paths it
+  `.env*` file (a template excepted) or one of the checkout's `secretFilesIn` files (a listed folder holds all under it) and stages only the paths it
   checked). Each runs only from the chat's open session while its turn holds the folder, refuses while a closed
   pass waits for its pull request and while HEAD or the named branch is under `10db/` (`git-names.ts`), and answers a warning naming
   the other chat when it commits everything in a shared folder. The shell's own git writes are refused with `CHAT_GIT_REFUSAL`

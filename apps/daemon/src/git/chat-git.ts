@@ -93,7 +93,7 @@ export interface ChatGit {
     input: {
       readonly message: string;
       readonly paths?: readonly string[];
-      /** The session's secret files, absolute; with every `.env*` file, a commit holding one is refused. */
+      /** The session's secret files, absolute; with every `.env*` file but a template, a commit holding one is refused. */
       readonly secretFiles?: readonly string[];
       readonly beforeWrite?: BeforeWrite;
     },
@@ -121,7 +121,7 @@ export interface ChatGit {
 }
 
 /**
- * The paths among `paths` (relative to the checkout, which `roots` name as given and as resolved) that a sandboxed session may not read: a `.env*` file, or
+ * The paths among `paths` (relative to the checkout, which `roots` name as given and as resolved) that a sandboxed session may not read: a `.env*` file that is no template, or
  * one of `secretFiles`. A commit would put them in git's objects, which the session can read.
  */
 function secretsAmong(
