@@ -19,7 +19,8 @@ routes only the rest. So, overriding the text below where they differ:
 - The writer leans toward answering: it may explain the question, the options and their trade-offs, the
   recommendation and why the lane asks; it declines only for a call only the builder can make or facts it lacks.
   Its context adds the goal's description and the lane agent's last six messages.
-- At most five automated answers per card.
+- No cap on automated answers. The runaway guard is direct instead: only a human participant's message is sorted
+  or answered (never a bot's, 10db's included), and each question message gets at most one answer.
 - When a question does go to the builder, 10db says so in the thread ("I've passed this to Travis; they'll reply
   here"), once per question.
 
