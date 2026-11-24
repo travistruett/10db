@@ -38,3 +38,20 @@ The browser a lane drives against its own servers. This part holds its reach: wh
   answer's `notes`. `end` runs as the session does (`RunnerOptions.endLaneBrowser`), after any launch under
   way, and later calls for that id are refused. A browser a crash leaves is reaped by the ledger sweep at the
   next start. With no sandbox roots (`ledgers` null) every call is refused.
+
+- **The driver** (`playwright-driver.ts`, `launchPlaywrightDriver`): one context per launched browser (its
+  cookie jar), downloads refused, service workers blocked. Playwright's routing is the first check and the
+  proxy is what holds: an http(s) request passes when `laneUrlTarget` names a port; `data:` and `blob:`
+  pass unless they are a main-frame navigation; every other scheme is aborted. WebSockets connect only to a
+  loopback target. A main-frame navigation the route cannot see (to a scheme other than http(s)) is sent to
+  `about:blank`. Each refusal goes in the next answer's `refused` as `<method> <origin><path>: <why>`; the
+  proxy's own 403 (no body, no content type) and a bare `ERR_FAILED` or tunnel failure are read as proxy
+  refusals.
+- **Pages, dialogs, snapshot**: a popup or new tab becomes current; past `BROWSER_MAX_PAGES` the oldest closes
+  with a note. `alert` and `beforeunload` are accepted; `confirm` and `prompt` are dismissed unless the
+  `browser_act` in flight said `dialog: "accept"`; each is reported in `dialogs`. A snapshot is
+  `ariaSnapshot({ mode: 'ai' })` cut at `SNAPSHOT_MAX_CHARS`. A call stopped by its signal probes the current
+  page; one that will not answer throws `BrowserStuckError`, so the browser closes.
+- **Live test**: `pictures/browser.live.test.ts` (`TENDB_LIVE_BROWSER=1`) runs a lane browser against two
+  loopback servers, one in the session's ledger. Run vitest as `node ../../node_modules/vitest/vitest.mjs`:
+  under `pnpm exec`, and at times under load, `netstat -p tcp` printed nothing, which reads as a refusal.

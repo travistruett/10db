@@ -1,7 +1,7 @@
 # apps/daemon/src/pictures
 
 - `pictures/`'s browser (`decisions/2026-11-10-task-pictures-come-from-a-pinned-chromium-and-stay-on-the-mac.md`): only
-  `pictures/playwright.ts` and `pictures/playwright-camera.ts` touch `playwright-core`, and only `playwright.ts`
+  `pictures/playwright.ts`, `pictures/playwright-camera.ts` and `lane-browser/playwright-driver.ts` touch `playwright-core`, and only `playwright.ts`
   loads it at runtime (a dynamic import). The browser is Chrome for Testing's headless shell at `BROWSER_PIN`
   (`browser-pin.ts`), which must be the build the pinned `playwright-core`'s `browsers.json` names (a test fails
   when they part); it is fetched, checked and locked down by `environment/pinned-install.ts` (`PinnedRelease`,

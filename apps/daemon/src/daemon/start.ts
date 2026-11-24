@@ -326,11 +326,11 @@ import {
 } from '../pictures';
 import {
   createLaneBrowsers,
-  LaneBrowserError,
   systemPortReaders,
   type LaneBrowsers,
   type LaunchLaneDriver,
   type PortReaders,
+  launchPlaywrightDriver,
 } from '../lane-browser';
 import { startPreview, type Preview } from '../preview';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
@@ -1350,10 +1350,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           launches: browserLaunches,
           build: pinnedBuild,
           launch:
-            opts.laneBrowser.kind === 'given'
-              ? opts.laneBrowser.launch
-              : // TODO(lane-browser): the Playwright driver replaces this shim.
-                () => Promise.reject(new LaneBrowserError('the lane browser is not built yet')),
+            opts.laneBrowser.kind === 'given' ? opts.laneBrowser.launch : launchPlaywrightDriver,
           readers:
             opts.laneBrowser.kind === 'given'
               ? opts.laneBrowser.readers
