@@ -68,7 +68,10 @@ describe('the skipped-calls item of a run', () => {
     expect(open.map((i) => i.id)).toEqual([failed.id]);
     expect(open[0]?.body).toContain('The gate failed 4 times');
     expect(open[0]?.body).toContain('fetch https://example.com');
-    expect(open[0]?.options.map((o) => o.label)).toEqual([SkippedChoice.RunTheseNow]);
+    expect(open[0]?.options.map((o) => o.label)).toEqual([
+      SkippedChoice.RunTheseNow,
+      SkippedChoice.Dismiss,
+    ]);
 
     expect(closeFinishedSkippedCards(world.store.db, inbox)).toBe(0);
     world.store.write((ctx) => {
