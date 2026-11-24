@@ -1,6 +1,8 @@
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { z } from 'zod';
-import { E2E_REPO, E2E_TOKEN } from './paths';
+import { E2E_DATA, E2E_REPO, E2E_TOKEN } from './paths';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
 
@@ -314,6 +316,39 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   });
   expect(changes.ok()).toBe(true);
   expect(Changes.parse(await changes.json()).commits).toHaveLength(1);
+
+  // A lane's browser_screenshot would leave one picture and its evidence on the task; the e2e daemon runs
+  // no browser, so they are seeded. The drawer shows the picture under its note, and a reload keeps it.
+  const LANE_NOTE = 'The greeting page after saving';
+  execFileSync(
+    'pnpm',
+    [
+      'exec',
+      'tsx',
+      'scripts/seed-lane-screen.ts',
+      E2E_DATA,
+      JSON.stringify({
+        workstreamId: run?.id,
+        url: 'http://127.0.0.1:4455/greeting',
+        title: 'Greeting',
+        note: LANE_NOTE,
+      }),
+    ],
+    { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
+  );
+  await page.goto('/board');
+  await expectView(page, 'Board');
+  await page
+    .getByRole('list', { name: 'Done tasks' })
+    .getByRole('listitem', { name: TASK })
+    .click();
+  const laneGroup = page.getByRole('dialog', { name: 'Task' }).getByRole('group', {
+    name: 'Lane Screenshots',
+  });
+  await expect(laneGroup.getByText(LANE_NOTE)).toBeVisible();
+  await expect(laneGroup.getByText('http://127.0.0.1:4455/greeting')).toBeVisible();
+  await expect(laneGroup.getByRole('img')).toBeVisible();
+  await page.keyboard.press('Escape');
 
   await open(page, 'Board');
   await expect(

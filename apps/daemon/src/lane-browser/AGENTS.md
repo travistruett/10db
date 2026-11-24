@@ -1,6 +1,6 @@
 # apps/daemon/src/lane-browser
 
-The browser a lane drives against its own servers. This part holds its reach: what a page may load.
+The browser a lane drives against its own servers: its reach (what a page may load), its lifecycle, its driver and its tools.
 
 - **Targets** (`lane-reach.ts`, pure): http or https to exactly `localhost`, `127.0.0.1` or `[::1]`, any
   other spelling (`0.0.0.0`, `127.0.0.2`, `[::ffff:127.0.0.1]`, `*.localhost`, a decimal or hex address)
@@ -31,7 +31,6 @@ The browser a lane drives against its own servers. This part holds its reach: wh
 - **The proxy holds** (`lane-proxy.ts`): Playwright's routing is a first check; the proxy answers every
   connection by asking `PortOwner.check` and connects only to the address it returns, never a name.
   `lsof` and `docker ps` run through `execFile` with an argument list, a 5 s deadline and a fixed env.
-
 - **Lifecycle** (`lane-browsers.ts`, `createLaneBrowsers`): one entry per session, and everything on the
   entry's queue (calls, launches, the idle close, `end`, `close`), so a close never races a launch. A call
   runs under `CALL_DEADLINE_MS` counted from its arrival; the driver it gets stops when the deadline or the
@@ -44,7 +43,6 @@ The browser a lane drives against its own servers. This part holds its reach: wh
   answer's `notes`. `end` runs as the session does (`RunnerOptions.endLaneBrowser`), after any launch under
   way, and later calls for that id are refused. A browser a crash leaves is reaped by the ledger sweep at the
   next start. With no sandbox roots (`ledgers` null) every call is refused.
-
 - **The driver** (`playwright-driver.ts`, `launchPlaywrightDriver`): one context per launched browser (its
   cookie jar), downloads refused, service workers blocked. Playwright's routing is the first check and the
   proxy is what holds: an http(s) request passes when `laneUrlTarget` names a port; `data:` and `blob:`

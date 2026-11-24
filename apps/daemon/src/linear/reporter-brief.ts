@@ -5,6 +5,7 @@ import {
   LinearPostState,
   parseFindings,
   reviewRounds,
+  ScreenKind,
   Verdict,
   type ExternalLink,
   type LinearPostDto,
@@ -185,7 +186,10 @@ export function readReporterFacts(
     prUrl: taskPrUrl(db, taskId),
     screens: listTaskScreens(db, taskId).map((s) => ({
       id: s.id,
-      shows: `${s.kind}, ${s.route}, ${String(s.viewport.width)}x${String(s.viewport.height)}, ${s.theme} theme`,
+      shows:
+        s.kind === ScreenKind.Lane
+          ? [s.kind, s.url, ...(s.note === null ? [] : [JSON.stringify(s.note)])].join(', ')
+          : `${s.kind}, ${s.route}, ${String(s.viewport.width)}x${String(s.viewport.height)}, ${s.theme} theme`,
     })),
   };
 }
