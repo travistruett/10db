@@ -269,6 +269,20 @@
         "pattern": "^[a-z][a-z0-9-]*$"
       }
     },
+    "localCopies": {
+      "type": "boolean"
+    },
+    "copyTeardownCommand": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "appUrl": {
       "type": [
         "string",

@@ -9,6 +9,7 @@ import {
   InvalidError,
   isMetered,
   mintId,
+  NAME_COPY_TEARDOWN,
   NAME_LANDING_BRANCH,
   NotFoundError,
   PRECHECK_NEEDS_GATE,
@@ -265,6 +266,12 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
   const precheckCommand =
     changes.precheckCommand === undefined ? current.precheckCommand : changes.precheckCommand;
   if (precheckCommand !== null && gateCommand === null) throw new InvalidError(PRECHECK_NEEDS_GATE);
+  const localCopies = changes.localCopies ?? current.localCopies;
+  const copyTeardownCommand =
+    changes.copyTeardownCommand === undefined
+      ? current.copyTeardownCommand
+      : changes.copyTeardownCommand;
+  if (localCopies && copyTeardownCommand === null) throw new InvalidError(NAME_COPY_TEARDOWN);
   const moving = changes.accountId !== undefined && changes.accountId !== current.accountId;
   if (changes.accountId !== undefined && moving) {
     // Work in flight moves too: each lane's next session runs on the new account.

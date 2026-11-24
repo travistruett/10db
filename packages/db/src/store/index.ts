@@ -34,6 +34,7 @@ export * from './knowledge-list';
 export * from './knowledge-search';
 export * from './principles';
 export * from './landing-groups';
+export * from './local-copies';
 export * from './lane-times';
 export * from './plan-record';
 export * from './shape-review';

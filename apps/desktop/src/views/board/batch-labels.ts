@@ -11,4 +11,9 @@ export const FAILURE_LABELS: Readonly<Record<BatchFailure, string>> = {
   [BatchFailure.PushRejected]: 'git push was rejected',
   [BatchFailure.GhUnavailable]: 'gh is missing or signed out',
   [BatchFailure.Network]: 'A network step failed',
+  [BatchFailure.InterruptedLanding]:
+    'A landing in your folder was interrupted; check the folder before retrying',
+  [BatchFailure.LockfileInCopy]: "The copy's work changed a lockfile, which a copy does not land",
+  [BatchFailure.GateChangedCopy]: "The copy's work changed the gate itself, so it can't land",
+  [BatchFailure.GitFilters]: "Your folder's git filters would rewrite what the landing writes",
 };

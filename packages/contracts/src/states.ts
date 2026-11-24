@@ -397,6 +397,14 @@ export const BatchFailure = {
   PushRejected: 'push_rejected',
   GhUnavailable: 'gh_unavailable',
   Network: 'network',
+  /** A landing that may have written the builder's folder ended without an answer: look before retrying. */
+  InterruptedLanding: 'interrupted_landing',
+  /** The copy's work changed a lockfile, which a copy never lands. */
+  LockfileInCopy: 'lockfile_in_copy',
+  /** The copy's work changed the gate command's own files, so the gate that passed is not the gate that lands. */
+  GateChangedCopy: 'gate_changed_copy',
+  /** The project's git filters would rewrite files the landing writes. */
+  GitFilters: 'git_filters',
 } as const;
 export type BatchFailure = ValueOf<typeof BatchFailure>;
 
