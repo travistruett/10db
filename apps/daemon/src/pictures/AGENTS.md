@@ -25,10 +25,12 @@
   turn that ended not Ready (abort), `pass.page_ready` (a turn picture when `turnChangedSomething`: a new kept
   commit, or a shared change of the task's own held in the turn), `pass.page_signed_off` (the after),
   `task.changed` with `leftPassId` (a take-out), `workstream.changed` to DONE (the after of a Your-folder task
-  naming a routed page) and `project.changed` (an app address set starts `BrowserHost.prepare`; a changed one
+  naming a routed page; a local copy's task is skipped there) and `batch.updated` to SHIPPED (the afters of a local
+  copy's tasks that name a routed page, once the change is in the copy) and `project.changed` (an app address set starts `BrowserHost.prepare`; a changed one
   aborts). Start-up removes half-written picture files, asks befores for open pages with none and afters for
-  Your-folder tasks done in the last hour with none. Which tasks and routes: `picture-routes.ts` (a pass page,
-  or a Your-folder task naming a page area whose route loads, no `[`/`:` segment; every route × the project's
+  Your-folder tasks done in the last hour with none, and for the tasks of a local copy whose batch shipped in the
+  last hour (`taskInLocalCopy`, `copy-task.ts`). Which tasks and routes: `picture-routes.ts` (a pass page,
+  or a Your-folder task or a task of a local copy naming a page area whose route loads, no `[`/`:` segment; every route × the project's
   matrix). The before rule (`before-rule.ts`): a before is asked only while the task has no pass turn (a pass
   page) or no session (any other task) and no kept work, and dropped when a session of the task reported a
   Write, Edit, MultiEdit, NotebookEdit or any Bash call (Codex's `command` and `apply_patch`) at or before the shot's end, or when a Codex session of the task started by then (Codex reports a call only once it ran); the write check runs when the before is asked too, so none that could never be kept is asked or waited on. A task's first launch

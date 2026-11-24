@@ -8,8 +8,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
-import { prepareCommandEnv } from './command-env';
+import type { CopyId, PermissionRuleDto, ProjectDto } from '@10db/contracts';
+import { prepareCommandEnv, withCopyId } from './command-env';
 import { dockerAccess, dockerEnvNames } from './docker-access';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
@@ -74,6 +74,8 @@ export interface GateRunInput {
    * install scripts, no pnpmfile) should ask: nothing else in the sandbox may write there.
    */
   readonly packageInstall?: boolean;
+  /** The copy the gate's batch runs in (`copyIdForBatch`); absent or null for any other gate. */
+  readonly copyId?: CopyId | null;
   /**
    * A pass's commit or merge the builder allowed, which runs here so the hooks it starts are
    * contained: the checkout's own git dir opens for writing, but for what git reads to run a
@@ -281,15 +283,18 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         const docker = input.project.sandboxDocker ? dockerAccess(deps.home, input.env) : null;
         if (docker === null) writeDockerShim(binDir, marker);
         else mkdirSync(binDir, { mode: 0o700 });
-        const commandEnv: Record<string, string> = {
-          ...allowlisted(
-            input.env,
-            docker === null ? undefined : new Set(dockerEnvNames(input.env)),
-          ),
-          TMPDIR: tmpDir,
-          ...prepareCommandEnv(tmpDir, deps.home, input.env),
-          PATH: [binDir, ...(input.env['PATH'] ? [input.env['PATH']] : [])].join(':'),
-        };
+        const commandEnv: Record<string, string> = withCopyId(
+          {
+            ...allowlisted(
+              input.env,
+              docker === null ? undefined : new Set(dockerEnvNames(input.env)),
+            ),
+            TMPDIR: tmpDir,
+            ...prepareCommandEnv(tmpDir, deps.home, input.env),
+            PATH: [binDir, ...(input.env['PATH'] ? [input.env['PATH']] : [])].join(':'),
+          },
+          input.copyId ?? null,
+        );
         const secrets = splitSecrets(
           checkout,
           access.checkoutSecrets,

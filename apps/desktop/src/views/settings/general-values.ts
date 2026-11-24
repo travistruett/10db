@@ -6,6 +6,7 @@ import {
   AppUrl,
   BranchName,
   Delivery,
+  NAME_COPY_TEARDOWN,
   NAME_LANDING_BRANCH,
   PRECHECK_NEEDS_GATE,
   PrTitlePrefix,
@@ -81,6 +82,10 @@ export interface GeneralValues {
   readonly worktreeSeed: readonly string[];
   /** Area and hazard names whose new tasks are proposed a separate copy; blanks are dropped on save. */
   readonly isolate: readonly string[];
+  /** Whether a task of a Commit Directly project may run in a separate copy. */
+  readonly localCopies: boolean;
+  /** Run when a copy is retired; '' means none, which a project with copies on can't save. */
+  readonly copyTeardownCommand: string;
   /** Where the dev server answers; '' means none. */
   readonly appUrl: string;
   /** Prints the address that signs the browser for pictures in; '' means none. */
@@ -130,6 +135,8 @@ export function generalValues(project: ProjectDto): GeneralValues {
     workspaceMode: project.workspaceMode,
     worktreeSeed: project.worktreeSeed,
     isolate: project.isolate,
+    localCopies: project.localCopies,
+    copyTeardownCommand: project.copyTeardownCommand ?? '',
     appUrl: project.appUrl ?? '',
     devLoginCommand: project.devLoginCommand ?? '',
     previewCommand: project.previewCommand ?? '',
@@ -217,6 +224,8 @@ export function checkGeneral(
     errors.prTitlePrefix = 'Enter a PR title prefix such as feat(app)';
   if (values.workspaceMode === WorkspaceMode.Worktree && values.delivery !== Delivery.PullRequest)
     errors.workspaceMode = 'A worktree per task needs pull request delivery';
+  const teardown = values.copyTeardownCommand.trim();
+  if (values.localCopies && teardown === '') errors.copyTeardownCommand = NAME_COPY_TEARDOWN;
   const checkedSeed = checkSeedNames(values.worktreeSeed);
   if (checkedSeed.error !== null) errors.worktreeSeed = checkedSeed.error;
   const seed = checkedSeed.names;
@@ -273,6 +282,10 @@ export function checkGeneral(
   if (values.workspaceMode !== project.workspaceMode) patch.workspaceMode = values.workspaceMode;
   if (!sameCommands(seed, project.worktreeSeed)) patch.worktreeSeed = seed;
   if (!sameCommands(checkedIsolate.names, project.isolate)) patch.isolate = checkedIsolate.names;
+  if (values.localCopies !== project.localCopies) patch.localCopies = values.localCopies;
+  const copyTeardownCommand = teardown === '' ? null : teardown;
+  if (copyTeardownCommand !== project.copyTeardownCommand)
+    patch.copyTeardownCommand = copyTeardownCommand;
   const address = appUrl?.success ? appUrl.data : null;
   if (address !== project.appUrl) patch.appUrl = address;
   const devLogin = values.devLoginCommand.trim();

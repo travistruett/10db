@@ -104,6 +104,7 @@ function dependencies(
     rules: () => [{ toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org' }],
     checkouts: () => [join(tmp.path, 'main')],
     timeoutMs,
+    copyIdOf: () => null,
   });
 }
 
@@ -471,6 +472,7 @@ describe('refreshing a worktree’s dependencies', () => {
       rules: () => [],
       checkouts: () => [],
       timeoutMs: 20_000,
+      copyIdOf: () => null,
     });
     expect(await refresh(deps)).toMatchObject({
       kind: 'failed',
@@ -507,6 +509,7 @@ describe('refreshing a worktree’s dependencies', () => {
       rules: () => [],
       checkouts: () => [],
       timeoutMs: 20_000,
+      copyIdOf: () => null,
       // The only pnpm on PATH lies in a checkout.
       resolvePnpm: (env, checkouts) => resolvePnpm(env, [...checkouts, bin]),
     });
@@ -555,6 +558,7 @@ describe('refreshing a worktree’s dependencies', () => {
         rules: () => [],
         checkouts: () => [worktree],
         timeoutMs: 60_000,
+        copyIdOf: () => null,
         resolvePnpm,
       });
       const result = await refresh(deps);
@@ -616,6 +620,7 @@ describe('refreshing a worktree’s dependencies', () => {
         rules: () => [],
         checkouts: () => [worktree, other],
         timeoutMs: 60_000,
+        copyIdOf: () => null,
         resolvePnpm,
         pnpmVersion: readPnpmVersion,
         templates: createNodeModulesTemplates({
@@ -663,6 +668,7 @@ describe('a copy’s node_modules from a template', () => {
       rules: () => [],
       checkouts: () => [worktree],
       timeoutMs: 20_000,
+      copyIdOf: () => null,
       templates: createNodeModulesTemplates({ root: root(), logger: silentLogger }),
     });
   }

@@ -184,7 +184,11 @@ async function strayBranchesOf(ctx: DeliveryContext, project: ProjectDto): Promi
  */
 export async function listStrayBranches(ctx: DeliveryContext): Promise<void> {
   for (const project of listActiveProjects(ctx.state.db)) {
-    if (project.delivery !== Delivery.PullRequest || !existsSync(project.repoPath)) continue;
+    if (
+      (project.delivery !== Delivery.PullRequest && !project.localCopies) ||
+      !existsSync(project.repoPath)
+    )
+      continue;
     try {
       const stray = await strayBranchesOf(ctx, project);
       if (stray.length > 0) raise(ctx.inbox, project.id, branchCards.withoutBatch(stray));

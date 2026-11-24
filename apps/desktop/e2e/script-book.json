@@ -191,15 +191,27 @@
       {
         "do": "plan",
         "steps": [
-          { "text": "Read the login code", "status": "completed" },
-          { "text": "Find why the retry is skipped", "status": "in_progress" },
-          { "text": "Write the fix", "status": "pending" }
+          {
+            "text": "Read the login code",
+            "status": "completed"
+          },
+          {
+            "text": "Find why the retry is skipped",
+            "status": "in_progress"
+          },
+          {
+            "text": "Write the fix",
+            "status": "pending"
+          }
         ]
       },
       {
         "do": "background",
         "tasks": [
-          { "description": "pnpm exec vitest run login.test.ts", "kind": "local_bash" },
+          {
+            "description": "pnpm exec vitest run login.test.ts",
+            "kind": "local_bash"
+          },
           {
             "description": "Find where the token expires",
             "kind": "local_agent",
@@ -269,21 +281,32 @@
           "verdict": null
         }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ],
     [
       {
         "do": "mcp",
         "tool": "complete_step",
-        "args": { "opId": "op-prr-pr1", "summary": "Looks right.", "verdict": "approve" }
+        "args": {
+          "opId": "op-prr-pr1",
+          "summary": "Looks right.",
+          "verdict": "approve"
+        }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ],
     [
       {
         "do": "tool",
         "toolName": "Write",
-        "input": { "file_path": "notes/pair.txt", "content": "pair\n" }
+        "input": {
+          "file_path": "notes/pair.txt",
+          "content": "pair\n"
+        }
       },
       {
         "do": "mcp",
@@ -294,23 +317,37 @@
           "message": "Add notes/pair.txt"
         }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ],
     [
       {
         "do": "mcp",
         "tool": "complete_step",
-        "args": { "opId": "op-prr-rev1", "summary": "Looks right.", "verdict": "approve" }
+        "args": {
+          "opId": "op-prr-rev1",
+          "summary": "Looks right.",
+          "verdict": "approve"
+        }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ],
     [
       {
         "do": "mcp",
         "tool": "complete_step",
-        "args": { "opId": "op-prr-qa1", "summary": "Looks right.", "verdict": "approve" }
+        "args": {
+          "opId": "op-prr-qa1",
+          "summary": "Looks right.",
+          "verdict": "approve"
+        }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ]
   ],
   "Pair the second device": [
@@ -324,15 +361,23 @@
           "verdict": null
         }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ],
     [
       {
         "do": "mcp",
         "tool": "complete_step",
-        "args": { "opId": "op-prr-pr2", "summary": "Looks right.", "verdict": "approve" }
+        "args": {
+          "opId": "op-prr-pr2",
+          "summary": "Looks right.",
+          "verdict": "approve"
+        }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ],
     [
       {
@@ -344,21 +389,32 @@
           "verdict": null
         }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ],
     [
       {
         "do": "mcp",
         "tool": "complete_step",
-        "args": { "opId": "op-prr-pr3", "summary": "Looks right.", "verdict": "approve" }
+        "args": {
+          "opId": "op-prr-pr3",
+          "summary": "Looks right.",
+          "verdict": "approve"
+        }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ],
     [
       {
         "do": "tool",
         "toolName": "Write",
-        "input": { "file_path": "notes/second.txt", "content": "pair\n" }
+        "input": {
+          "file_path": "notes/second.txt",
+          "content": "pair\n"
+        }
       },
       {
         "do": "mcp",
@@ -369,26 +425,39 @@
           "message": "Add notes/second.txt"
         }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ],
     [
       {
         "do": "mcp",
         "tool": "complete_step",
-        "args": { "opId": "op-prr-rev2", "summary": "Looks right.", "verdict": "approve" }
+        "args": {
+          "opId": "op-prr-rev2",
+          "summary": "Looks right.",
+          "verdict": "approve"
+        }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ],
     [
       {
         "do": "mcp",
         "tool": "complete_step",
-        "args": { "opId": "op-prr-qa2", "summary": "Looks right.", "verdict": "approve" }
+        "args": {
+          "opId": "op-prr-qa2",
+          "summary": "Looks right.",
+          "verdict": "approve"
+        }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ]
   ],
-
   "Measure the light task": [
     [
       {
@@ -453,73 +522,183 @@
   ],
   "Chat: Edit on a branch": [
     [
-      { "do": "consume" },
-      { "do": "say", "text": "Reading the notes first." },
-      { "do": "edit", "path": "notes.md", "text": "# Notes\n\nWritten on a branch.\n" },
-      { "do": "turn_complete" }
+      {
+        "do": "consume"
+      },
+      {
+        "do": "say",
+        "text": "Reading the notes first."
+      },
+      {
+        "do": "edit",
+        "path": "notes.md",
+        "text": "# Notes\n\nWritten on a branch.\n"
+      },
+      {
+        "do": "turn_complete"
+      }
     ],
     [
-      { "do": "consume" },
-      { "do": "edit", "path": "notes.md", "text": "# Notes\n\nWritten on a branch.\n" },
-      { "do": "say", "text": "Wrote the notes." },
-      { "do": "turn_complete" }
+      {
+        "do": "consume"
+      },
+      {
+        "do": "edit",
+        "path": "notes.md",
+        "text": "# Notes\n\nWritten on a branch.\n"
+      },
+      {
+        "do": "say",
+        "text": "Wrote the notes."
+      },
+      {
+        "do": "turn_complete"
+      }
     ]
   ],
   "Chat: Choose after a reload": [
     [
-      { "do": "consume" },
-      { "do": "say", "text": "Looking at the notes first." },
-      { "do": "edit", "path": "notes.md", "text": "# Notes\n\nChosen later.\n" },
-      { "do": "turn_complete" }
+      {
+        "do": "consume"
+      },
+      {
+        "do": "say",
+        "text": "Looking at the notes first."
+      },
+      {
+        "do": "edit",
+        "path": "notes.md",
+        "text": "# Notes\n\nChosen later.\n"
+      },
+      {
+        "do": "turn_complete"
+      }
     ],
     [
-      { "do": "consume" },
-      { "do": "edit", "path": "notes.md", "text": "# Notes\n\nChosen later.\n" },
-      { "do": "say", "text": "Wrote the later notes." },
-      { "do": "turn_complete" }
+      {
+        "do": "consume"
+      },
+      {
+        "do": "edit",
+        "path": "notes.md",
+        "text": "# Notes\n\nChosen later.\n"
+      },
+      {
+        "do": "say",
+        "text": "Wrote the later notes."
+      },
+      {
+        "do": "turn_complete"
+      }
     ]
   ],
   "Chat: Edit then archive": [
     [
-      { "do": "consume" },
-      { "do": "say", "text": "Reading the notes before editing." },
-      { "do": "edit", "path": "notes.md", "text": "# Notes\n\nDirty.\n" },
-      { "do": "turn_complete" }
+      {
+        "do": "consume"
+      },
+      {
+        "do": "say",
+        "text": "Reading the notes before editing."
+      },
+      {
+        "do": "edit",
+        "path": "notes.md",
+        "text": "# Notes\n\nDirty.\n"
+      },
+      {
+        "do": "turn_complete"
+      }
     ],
     [
-      { "do": "consume" },
-      { "do": "edit", "path": "notes.md", "text": "# Notes\n\nDirty.\n" },
-      { "do": "say", "text": "Wrote the dirty notes." },
-      { "do": "turn_complete" }
+      {
+        "do": "consume"
+      },
+      {
+        "do": "edit",
+        "path": "notes.md",
+        "text": "# Notes\n\nDirty.\n"
+      },
+      {
+        "do": "say",
+        "text": "Wrote the dirty notes."
+      },
+      {
+        "do": "turn_complete"
+      }
     ]
   ],
   "Chat: Edit here": [
     [
-      { "do": "consume" },
-      { "do": "say", "text": "Reading the todo list first." },
-      { "do": "edit", "path": "todo.md", "text": "# Todo\n\n- done\n" },
-      { "do": "turn_complete" }
+      {
+        "do": "consume"
+      },
+      {
+        "do": "say",
+        "text": "Reading the todo list first."
+      },
+      {
+        "do": "edit",
+        "path": "todo.md",
+        "text": "# Todo\n\n- done\n"
+      },
+      {
+        "do": "turn_complete"
+      }
     ],
     [
-      { "do": "consume" },
-      { "do": "edit", "path": "todo.md", "text": "# Todo\n\n- done\n" },
-      { "do": "say", "text": "Wrote the todo list." },
-      { "do": "turn_complete" }
+      {
+        "do": "consume"
+      },
+      {
+        "do": "edit",
+        "path": "todo.md",
+        "text": "# Todo\n\n- done\n"
+      },
+      {
+        "do": "say",
+        "text": "Wrote the todo list."
+      },
+      {
+        "do": "turn_complete"
+      }
     ]
   ],
   "Hold the folder": [
-    [{ "do": "await_message", "contains": "release" }, { "do": "turn_complete" }]
+    [
+      {
+        "do": "await_message",
+        "contains": "release"
+      },
+      {
+        "do": "turn_complete"
+      }
+    ]
   ],
   "Chat: Move to the terminal": [
     [
-      { "do": "consume" },
-      { "do": "say", "text": "Ready for the terminal." },
-      { "do": "turn_complete" }
+      {
+        "do": "consume"
+      },
+      {
+        "do": "say",
+        "text": "Ready for the terminal."
+      },
+      {
+        "do": "turn_complete"
+      }
     ],
     [
-      { "do": "consume" },
-      { "do": "say", "text": "Back from the terminal." },
-      { "do": "turn_complete" }
+      {
+        "do": "consume"
+      },
+      {
+        "do": "say",
+        "text": "Back from the terminal."
+      },
+      {
+        "do": "turn_complete"
+      }
     ]
   ],
   "Chat: Report the pending Linear updates.": [
@@ -527,7 +706,10 @@
       {
         "do": "tool",
         "toolName": "mcp__linear__save_comment",
-        "input": { "issueId": "e2e-linear-issue-1", "body": "Update from 10db." },
+        "input": {
+          "issueId": "e2e-linear-issue-1",
+          "body": "Update from 10db."
+        },
         "result": "{\"id\":\"e2e-comment-1\"}"
       },
       {
@@ -543,13 +725,18 @@
           }
         }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ],
     [
       {
         "do": "tool",
         "toolName": "mcp__linear__save_comment",
-        "input": { "issueId": "e2e-linear-issue-1", "body": "Update from 10db." },
+        "input": {
+          "issueId": "e2e-linear-issue-1",
+          "body": "Update from 10db."
+        },
         "result": "{\"id\":\"e2e-comment-1\"}"
       },
       {
@@ -565,13 +752,18 @@
           }
         }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
     ],
     [
       {
         "do": "tool",
         "toolName": "mcp__linear__save_comment",
-        "input": { "issueId": "e2e-linear-issue-1", "body": "Update from 10db." },
+        "input": {
+          "issueId": "e2e-linear-issue-1",
+          "body": "Update from 10db."
+        },
         "result": "{\"id\":\"e2e-comment-1\"}"
       },
       {
@@ -587,7 +779,48 @@
           }
         }
       },
-      { "do": "turn_complete" }
+      {
+        "do": "turn_complete"
+      }
+    ]
+  ],
+  "Add the farewell": [
+    [
+      {
+        "do": "tool",
+        "toolName": "Write",
+        "input": {
+          "file_path": "src/greeting/farewell.txt",
+          "content": "goodbye\n"
+        }
+      },
+      {
+        "do": "mcp",
+        "tool": "commit",
+        "args": {
+          "opId": "op-e2e-commit-farewell",
+          "paths": ["src/greeting/farewell.txt"],
+          "message": "Add the farewell"
+        }
+      },
+      {
+        "do": "turn_complete",
+        "text": "Wrote src/greeting/farewell.txt and committed it."
+      }
+    ],
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": {
+          "opId": "op-e2e-review-farewell",
+          "summary": "The farewell is written and committed.",
+          "verdict": "approve"
+        }
+      },
+      {
+        "do": "turn_complete"
+      }
     ]
   ]
 }

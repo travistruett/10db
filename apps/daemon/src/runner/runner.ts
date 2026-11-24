@@ -67,6 +67,7 @@ import {
   JudgeKind,
   Provider,
   TakeOutStep,
+  type CopyId,
   type PassId,
   type TaskId,
   type TaskDto,
@@ -217,6 +218,8 @@ import {
   MIGRATIONS_HAZARD,
   projectAtCheckout,
   rerunFlaky,
+  copyIdForBatch,
+  CopyJournalMissingError,
   finalCheck,
   stepCheck,
   uncarriedSaid,
@@ -300,6 +303,7 @@ import {
   laneWritableRoots,
   SandboxProfileError,
   SandboxTempDirError,
+  withCopyId,
   type GateSandbox,
   type LaneSandbox,
   type LaneSession,
@@ -376,7 +380,7 @@ import {
   withUndelivered,
 } from './next-action';
 import { readBackThread, type ReadBack } from './read-back';
-import { takesPictures } from '../pictures';
+import { takesPictures, taskInLocalCopy } from '../pictures';
 import { checkTaskAnchors } from '../plan-record';
 import {
   buildThreadDigest,
@@ -2764,9 +2768,18 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Where Claude Code keeps this account's sessions, and with them each one's saved tool results.
     const configDir = sessionConfigDir(agent.harness, launch.env, homedir());
     let laneSession: LaneSession | null = null;
+    let sessionCopyId: CopyId | null;
+    try {
+      sessionCopyId = copyIdForBatch(db, row.batchId);
+    } catch (error) {
+      releaseStart();
+      if (!(error instanceof CopyJournalMissingError)) throw error;
+      return { kind: 'refused', message: error.message, providerSessionId: savedResumeId };
+    }
     if (opts.laneSandbox) {
       try {
         laneSession = await opts.laneSandbox.forSession({
+          copyId: sessionCopyId,
           setup: setupPlan.input,
           project: projectAtCheckout(project, checkout),
           env: launch.env,
@@ -3029,7 +3042,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       brief: opts.laneBrief ?? LaneBrief.Full,
       inPass: pass !== null,
       attended: policy.attended,
-      pictures: project.appUrl !== null && takesPictures(project, task),
+      pictures:
+        project.appUrl !== null && takesPictures(project, task, [], taskInLocalCopy(db, task.id)),
       browser: laneSession !== null && opts.endLaneBrowser !== undefined,
       sandboxed: Boolean(opts.laneSandbox),
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
@@ -3457,7 +3471,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         model: launch.model,
         effort: launchStep.effort,
         resumeProviderSessionId: resumeId,
-        env: launch.env,
+        // An ambient copy id never reaches a session, and a copy's own is never missing from it.
+        env: withCopyId(launch.env, sessionCopyId),
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
         yourMcpServers: yourServers,
@@ -4609,7 +4624,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     // command the builder checks, as ever.
     // `final`: the full gate a Commit Directly task runs after its last implement step's check.
     const gateCommand =
-      (final ? finalCheck(project) : null)?.command ?? stepCheck(project)?.command ?? null;
+      (final && row.batchId === null ? finalCheck(project) : null)?.command ??
+      stepCheck(project)?.command ??
+      null;
     if (gateCommand === null) {
       await finishWithoutGate(id, ctl, row, checkout);
       return;
@@ -4623,6 +4640,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     // merge changes the tree under a running gate. Work outside a batch has no base to take.
     const before: { update: BaseUpdate | null } = { update: null };
     const batchId = row.batchId;
+    let copyId: CopyId | null;
+    try {
+      copyId = copyIdForBatch(db, batchId);
+    } catch (error) {
+      if (!(error instanceof CopyJournalMissingError)) throw error;
+      fail(id, ctl.fence, { kind: WorkstreamFailure.SessionFailed, reason: error.message });
+      return;
+    }
     let recording: Promise<void> = Promise.resolve();
     // Set once the gate holds its slot and starts; only a started gate records gate.finished.
     let gateStarted = false;
@@ -4659,6 +4684,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       },
       project: projectAtCheckout(project, checkout),
       command: gateCommand,
+      copyId,
       logPath,
       timeoutMs: opts.limits.gateTimeoutMs,
       // The project env: the login shell without billing switches, and never the account's credentials.

@@ -1,6 +1,12 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { PermissionRuleDto, ProjectDto, ProjectId } from '@10db/contracts';
+import {
+  BatchId,
+  type CopyId,
+  type PermissionRuleDto,
+  type ProjectDto,
+  type ProjectId,
+} from '@10db/contracts';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { Git, WorktreeOwner } from '../git';
@@ -160,6 +166,8 @@ export interface WorktreeDependenciesDeps {
   /** Every registered checkout and live worktree, which the install can't write. */
   checkouts(): readonly string[];
   readonly timeoutMs: number;
+  /** The copy id of a batch (`copyIdForBatch`), which a copy's install and generators run with. */
+  copyIdOf(batchId: BatchId): CopyId | null;
   /** Where a removed `node_modules` and its reason are recorded, besides the install's own log. */
   readonly logger?: Logger;
   /** The absolute path of a real pnpm program to run, found outside every checkout; null when none is trustworthy. */
@@ -327,6 +335,7 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         const result = await deps.gate.run({
           project: { repoPath: path, sandboxLoopback: project.sandboxLoopback },
           command: installCommand(pnpm, mode),
+          copyId: owner.kind === 'batch' ? deps.copyIdOf(BatchId.parse(owner.id)) : null,
           logPath: attemptLog,
           timeoutMs: deps.timeoutMs,
           env,

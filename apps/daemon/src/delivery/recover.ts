@@ -1,13 +1,24 @@
-import { BatchFailure, BatchState, CiStopped, type BatchDto, type BatchId } from '@10db/contracts';
+import {
+  BatchFailure,
+  BatchState,
+  CiStopped,
+  CopyStep,
+  type BatchDto,
+  type BatchId,
+} from '@10db/contracts';
 import {
   deleteAppSetting,
   deleteCuttingBatch,
   getBatch,
   getBatchRow,
+  getLocalCopy,
   getProject,
+  isLivePromoting,
+  isLocalCopy,
   listBatches,
   listCheckoutReturns,
   listLiveWorktrees,
+  listOpenLocalCopies,
   listWorkstreams,
   patchBatch,
   transitionBatch,
@@ -20,7 +31,16 @@ import { batchBranchName } from './branch-name';
 import { listStrayBranches, settleAbandonedBranches } from './branch-sweep';
 import { batchCheckout } from './checkout';
 import { stopCiFixing } from './ci-stop';
-import { forTasks, startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
+import {
+  forTasks,
+  startCards,
+  worktreeCards,
+  wrongBranchCard,
+  type Card,
+  type ShipFailure,
+} from './cards';
+import { copyLandingCards, raiseMigrationsForLanding } from './copy-landing-cards';
+import { retireCopy } from './copy-retire';
 import { cuttingTasks, forgetCuttingTasks } from './cutting-tasks';
 import { forgetStartSiblings } from './start-siblings';
 import type { FolderHold } from '../folder-hold';
@@ -58,6 +78,11 @@ export interface BatchRecoveryReport {
   readonly swept: string[];
   /** Finished shared batches whose checkout recovery switched back. */
   readonly switchedBack: BatchId[];
+}
+
+/** The failure and card of `outcome`, with `body` in place of the card's words. */
+function withKnownBody(outcome: ShipFailure, body: string): ShipFailure {
+  return { ...outcome, card: { ...outcome.card, body } };
 }
 
 const message = (error: unknown): string =>
@@ -137,8 +162,11 @@ export async function recoverBatches(deps: {
       if (tip === null) return true;
       if ((await deps.git.branchInUse(repo, branch)) !== null) return false;
       // Only a branch with nothing of its own on it goes: the cut made it and never opened the batch.
-      if (!(await deps.git.isAncestor(repo, tip, `refs/remotes/origin/${batch.baseBranch}`)))
-        return false;
+      // A local copy is cut from the local base branch; a pull request's from origin's.
+      const base = isLocalCopy(db, batch.id)
+        ? `refs/heads/${batch.baseBranch}`
+        : `refs/remotes/origin/${batch.baseBranch}`;
+      if (!(await deps.git.isAncestor(repo, tip, base))) return false;
       return await deps.git.deleteBranchIfAt(repo, branch, tip);
     } catch (error) {
       deps.logger.warn({ batchId: batch.id, err: message(error) }, 'cut left in git not cleared');
@@ -215,18 +243,29 @@ export async function recoverBatches(deps: {
       if (current !== batch.branch) card = wrongBranchCard(batch, current, checkout, 'failed');
     }
     if (card !== null) {
-      const reason = card.title;
+      // A landing that may have written the builder's folder fails as interrupted, its journal kept
+      // at promoting, whatever else is wrong with the copy.
+      const copy = getLocalCopy(db, batch.id);
+      const live = copy !== null && isLivePromoting(copy);
+      // Recovery has not read the folder, so the card says what it knows and nothing more.
+      const interrupted = live
+        ? withKnownBody(
+            copyLandingCards.interruptedLanding(batch, [], batch.baseBranch),
+            `10db restarted while it was writing ${batch.baseBranch} into your folder, and the copy's worktree is missing or off its branch (${card.title}). 10db has not read your folder and touched nothing in it; the copy still has the work. Fix the copy, then press Retry, which reads the folder before anything is written.`,
+          )
+        : null;
+      const reason = (interrupted?.card ?? card).title;
       deps.state.write((w) => {
         settleLeftOutCards(
           w,
           transitionBatch(w, batch.id, {
             to: BatchState.Failed,
-            patch: { failure: BatchFailure.WrongBranch },
+            patch: { failure: interrupted?.failure ?? BatchFailure.WrongBranch },
             reason,
           }),
         );
       });
-      raise(deps.inbox, batch.projectId, card);
+      raise(deps.inbox, batch.projectId, interrupted?.card ?? card);
       report.failed.push(batch.id);
       continue;
     }
@@ -250,12 +289,14 @@ export async function recoverBatches(deps: {
       );
   }
 
+  const copiesToRetire: BatchDto[] = [];
   if (deps.worktrees) {
     // 5. Finished batches whose path is still set: the removal and clear a crash cut short. A dirty
     // ABANDONED worktree, or a finished one holding git-ignored files 10db didn't seed, is kept, with
     // its card.
     for (const batch of listLiveWorktrees(db)) {
       try {
+        if (isLocalCopy(db, batch.id)) continue;
         if (
           batch.state === BatchState.Shipped ||
           batch.state === BatchState.Closed ||
@@ -271,6 +312,41 @@ export async function recoverBatches(deps: {
         continue;
       }
       if (getBatch(db, batch.id).worktreePath === null) report.retired.push(batch.id);
+    }
+
+    // 5a. Finished local copies not yet retired: a landed copy's migrations card is raised by its key here,
+    // and the retirement (its teardown, which may run long) is queued after the sweeps below, so startup
+    // never waits on it, shutdown stops it, and no sweep takes its scratch worktree for an orphan.
+    try {
+      for (const copy of listOpenLocalCopies(db)) {
+        const batch = getBatch(db, copy.batchId);
+        if (
+          batch.state !== BatchState.Shipped &&
+          batch.state !== BatchState.Closed &&
+          batch.state !== BatchState.Abandoned
+        )
+          continue;
+        try {
+          if (
+            batch.state === BatchState.Shipped &&
+            copy.step === CopyStep.Landed &&
+            copy.baseTip !== null &&
+            copy.candidate !== null
+          )
+            await raiseMigrationsForLanding(
+              deps.worktrees.ctx,
+              batch,
+              getProject(db, batch.projectId),
+              copy.baseTip,
+              copy.candidate,
+            );
+          copiesToRetire.push(batch);
+        } catch (error) {
+          deps.logger.warn({ batchId: batch.id, err: message(error) }, 'copy not retired');
+        }
+      }
+    } catch (error) {
+      deps.logger.warn({ err: message(error) }, 'copies not listed for retirement');
     }
 
     // 6. The sweep, after every removal above, so it only finds what no batch names.
@@ -296,6 +372,11 @@ export async function recoverBatches(deps: {
   if (deps.worktrees) {
     await settleAbandonedBranches(deps.worktrees.ctx);
     await listStrayBranches(deps.worktrees.ctx);
+    const ctx = deps.worktrees.ctx;
+    for (const batch of copiesToRetire)
+      deps.jobs.run(jobKey(batch, JobQueue.Ship), (signal) =>
+        retireCopy(ctx, batch.id, signal).then(() => undefined),
+      );
   }
 
   // 7. OPEN batches whose work all settled ship.

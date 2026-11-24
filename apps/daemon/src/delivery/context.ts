@@ -8,6 +8,7 @@ import type { Gh, GhCall } from '../github';
 import { flagCard, postNotice, rewordCard, withdrawCard, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { Card, DeliveryNotice } from './cards';
+import type { CopyTeardown } from './copy-teardown-run';
 import type { DeliveryJobs } from './jobs';
 import type { PutBackKeptWork } from './pass-open';
 import type { WorktreeDependencies } from './worktree-dependencies';
@@ -53,6 +54,8 @@ export interface DeliveryContext {
   readonly dependencies: WorktreeDependencies;
   /** Regenerates the generated files of a worktree after a merge with its base took the base's. */
   readonly generators: WorktreeGenerators;
+  /** Runs a retiring local copy's pinned teardown command. */
+  readonly copyTeardown: CopyTeardown;
   /** The login environment network calls run in (environment/buildNetworkEnv). */
   networkEnv(): Readonly<Record<string, string>>;
   /** Asks the scheduler to look for work: a batch opened, grew or reopened. */
