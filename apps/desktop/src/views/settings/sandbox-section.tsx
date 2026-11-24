@@ -17,8 +17,8 @@ export function SandboxSection({ project }: { readonly project: ProjectDto }) {
       <SettingsCard title="Permissions">
         <SettingRow
           label="Allow localhost"
-          description="For tests that start a local server."
-          help="Opens every local port to tasks, not just this project's."
+          description="For dev servers and tests that start a local server."
+          help="Tasks can then reach every port on this Mac, not just this project's: other projects' databases and dev servers, and local apps. A server a task starts on 0.0.0.0 can be reached from your network. With Docker on, a container can already reach these ports."
         >
           <Group justify="flex-end">
             <Switch
@@ -33,7 +33,7 @@ export function SandboxSection({ project }: { readonly project: ProjectDto }) {
         <SettingRow
           label="Allow Docker"
           description="For gates and tasks that run docker compose."
-          help="Docker can mount any host folder into a container, so a gate or task with Docker can reach outside the sandbox."
+          help="A container can mount any folder on this Mac and reach every local port, so a gate or task with Docker can reach outside the sandbox, past Allow localhost too."
         >
           <Group justify="flex-end">
             <Switch
