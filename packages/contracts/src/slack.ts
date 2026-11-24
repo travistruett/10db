@@ -46,7 +46,7 @@ export const StakeholderSendDto = z.object({
   returnedAt: z.iso.datetime().nullable(),
   returnedReason: z.enum(['timer', 'disagreed']).nullable(),
   /** Why a draft waits for the builder. */
-  heldBy: z.enum(['review', 'first_send', 'limit', 'scan', 'slack_off']).nullable(),
+  heldBy: z.enum(['review', 'limit', 'scan', 'slack_off']).nullable(),
   /** The option a settled conversation landed on, waiting for a recipient to approve it. */
   proposal: z.object({ choice: z.string(), confidence: z.number() }).nullable(),
   askedWhichWay: z.boolean(),

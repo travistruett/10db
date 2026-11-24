@@ -22,7 +22,7 @@ import type { DbReader, WriteContext } from './store';
 const BUILDER_EDITED = 'builder-edited';
 
 type SendRow = typeof schema.stakeholderSends.$inferSelect;
-type HeldBy = NonNullable<SendRow['heldBy']>;
+type HeldBy = Exclude<NonNullable<SendRow['heldBy']>, 'first_send'>;
 
 /** A person in a send's conversation. A recipient can answer; anyone else only talks. */
 export interface SendPersonInput {
@@ -91,7 +91,8 @@ function toDto(db: DbReader, row: SendRow): StakeholderSendDto {
     answeredAt: row.answeredAt,
     returnedAt: row.returnedAt,
     returnedReason: row.returnedReason,
-    heldBy: row.heldBy,
+    // A draft held for a first send, before that hold was removed, reads as one held for review.
+    heldBy: row.heldBy === 'first_send' ? 'review' : row.heldBy,
     proposal: row.proposal && { choice: row.proposal.choice, confidence: row.proposal.confidence },
     askedWhichWay: row.askedWhichWayAt !== null,
     conversation: [],
@@ -792,25 +793,4 @@ export function newThreadsSince(
     )
     .get();
   return row?.n ?? 0;
-}
-
-/** Whether anything was ever sent to this person in a workspace; the first send there is always reviewed. */
-export function everSent(db: DbReader, personId: PersonId, teamId: string): boolean {
-  const row = db
-    .select({ id: schema.stakeholderSends.id })
-    .from(schema.stakeholderSends)
-    .innerJoin(
-      schema.stakeholderSendPeople,
-      eq(schema.stakeholderSendPeople.sendId, schema.stakeholderSends.id),
-    )
-    .where(
-      and(
-        eq(schema.stakeholderSendPeople.personId, personId),
-        eq(schema.stakeholderSendPeople.recipient, true),
-        isNotNull(schema.stakeholderSends.sentAt),
-        eq(schema.stakeholderSends.teamId, teamId),
-      ),
-    )
-    .get();
-  return row !== undefined;
 }
