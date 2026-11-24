@@ -5,11 +5,13 @@ import {
   BatchStartInput,
   BatchState,
   ConflictError,
+  COPY_NEEDS_REVIEW,
   Delivery,
   InvalidError,
   mintId,
   NotFoundError,
   TaskStatus,
+  StepRole,
   UNFINISHED_BATCH_STATES,
   WorkspaceMode,
   WorkstreamState,
@@ -36,6 +38,7 @@ import {
   getWorkstream,
   getWorkstreamRow,
   insertBatch,
+  insertLocalCopy,
   listBatches,
   listWorkstreams,
   patchBatch,
@@ -45,6 +48,7 @@ import {
   placeTaskByRule,
   setBatchNotice,
   transitionBatch,
+  unfinishedCopyOf,
   type WriteContext,
 } from '@10db/db';
 import { githubRepoOf } from '../github';
@@ -90,7 +94,8 @@ export interface BatchStarter {
    */
   startBatch(projectId: ProjectId, input: BatchStartInput): BatchDto[];
   /**
-   * One task in a pull-request project: in Your folder, a member of the open shared batch or a new
+   * One task in a local project that works in a separate copy: always a new batch of its own, refused
+   * while the project's other copy is unfinished. Otherwise one task in a pull-request project: in Your folder, a member of the open shared batch or a new
    * one titled after it; in a separate copy, always a new batch of its own.
    */
   startTask(taskId: TaskId): BatchDto;
@@ -246,6 +251,67 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const batch = getBatch(db, batchId);
     if (batch.state === BatchState.Failed && batch.worktreePath !== null)
       reopenWorktreeBatch(ctx, batchId, 'a workstream was retried');
+  }
+
+  /** A task placed in a separate copy of a local project. */
+  function isCopyTask(project: ProjectDto, task: TaskDto): boolean {
+    return project.delivery === Delivery.Local && task.workspaceMode === WorkspaceMode.Worktree;
+  }
+
+  /**
+   * What a local copy's start checks, as if the batch `ending` had already ended: copies still on,
+   * one copy at a time, a review in the task's process. Settings and rigor can change after the
+   * placement was admitted, so the start asks again.
+   */
+  function refuseLocalCopy(
+    project: ProjectDto,
+    task: TaskDto,
+    ending: BatchId | undefined,
+  ): StepPlanDto {
+    if (!project.localCopies || project.copyTeardownCommand === null)
+      throw new InvalidError(
+        `${project.name} does not allow separate copies; turn them on in its delivery settings`,
+      );
+    const other = unfinishedCopyOf(db, project.id);
+    if (other !== null && other.id !== ending)
+      throw new ConflictError(
+        `Another task is in a separate copy (${other.title}); start this one when that one ships or is abandoned`,
+      );
+    const plan = planForStart(db, task.id);
+    if (!plan.steps.some((step) => step.role === StepRole.Review))
+      throw new InvalidError(COPY_NEEDS_REVIEW);
+    return plan;
+  }
+
+  /** One task of a local project in a new copy: the CUTTING row, its journal and its run in one write, then the cut. */
+  function startLocalCopy(project: ProjectDto, task: TaskDto): BatchDto {
+    checkStartable(project, task);
+    const plan = refuseLocalCopy(project, task, undefined);
+    const teardownCommand = project.copyTeardownCommand;
+    if (teardownCommand === null) throw new InvalidError(`${project.name} has no teardown command`);
+    refuseUnfinished(
+      project.id,
+      { title: task.title },
+      unfinishedDependencies(db, [task], new Set([task.id])),
+    );
+    const target = sharedLanding(project, [task], 'worktree');
+    const root = madeWorktreeRoot(ctx.worktreeRoot);
+    const plans: Plans = new Map([[task.id, plan]]);
+    const batch = ctx.state.write((w) => {
+      const id = mintId('Batch');
+      const inserted = insertBatch(w, {
+        id,
+        projectId: project.id,
+        title: task.title,
+        ...target,
+        worktreePath: worktreePathFor(root, project, batchBranchName(task.title, id)),
+      });
+      insertPlannedWorkstream(w, task.id, plan, id);
+      insertLocalCopy(w, { batchId: id, teardownCommand });
+      return inserted;
+    });
+    runCut(batch, (signal) => cutWorktree(ctx, batch.id, plans, signal));
+    return batch;
   }
 
   /** One part of a start: what it writes, in the start's one transaction, and the job it queues after. */
@@ -922,6 +988,8 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     startBatch,
     startTask(taskId) {
       const task = getTask(db, taskId);
+      const project = getProject(db, task.projectId);
+      if (isCopyTask(project, task)) return startLocalCopy(project, task);
       const [batch] = startBatch(task.projectId, { title: task.title, taskIds: [taskId] });
       if (!batch) throw new InvalidError(`Task ${task.title} did not start`);
       return batch;
@@ -932,6 +1000,10 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       const task = getTask(db, taskId);
       const project = getProject(db, task.projectId);
       checkStartable(project, task);
+      if (isCopyTask(project, task)) {
+        refuseLocalCopy(project, task, ending);
+        return;
+      }
       if (project.delivery !== Delivery.PullRequest) return;
       // The steps are only built, never written or launched.
       prepare(

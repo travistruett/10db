@@ -549,8 +549,12 @@ export function createServices(deps: {
       const superseded: WorkstreamId | null =
         held?.state === WorkstreamState.Failed ? held.id : null;
       const project = getProject(db, getTask(db, taskId).projectId);
+      // A task placed in a separate copy of a local project is cut a batch, as a pull-request task is.
+      const inCopy =
+        project.delivery === Delivery.Local &&
+        getTask(db, taskId).workspaceMode === WorkspaceMode.Worktree;
       const started: TaskStarted =
-        project.delivery === Delivery.PullRequest
+        project.delivery === Delivery.PullRequest || inCopy
           ? { kind: 'batch', batch: deps.starter.startTask(taskId) }
           : { kind: 'workstream', workstream: startTaskWithPlan(deps.state, taskId) };
       // The batch it left no longer waits on the attempt it started over from.

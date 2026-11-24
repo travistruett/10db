@@ -531,7 +531,12 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         needsRoom = true;
       }
       // A pass's folder was read for its branch above; its off-branch card is the pass's own.
-      if (inPass === null && project.delivery === Delivery.PullRequest) {
+      // A batch with a worktree is checked on any delivery, so a local project's separate copy never
+      // launches in Your folder; a batch without one is checked for pull-request projects only.
+      if (
+        inPass === null &&
+        (project.delivery === Delivery.PullRequest || batch?.worktreePath != null)
+      ) {
         const checkout = batch?.worktreePath ?? project.repoPath;
         // A worktree that isn't on disk holds the batch's work with one card; it never launches.
         if (batch && snapshot.missing.has(checkout)) {
@@ -637,8 +642,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         checkouts.add(project.repoPath);
         continue;
       }
-      if (project.delivery !== Delivery.PullRequest) continue;
       const batch = ws.batchId ? getBatch(db, ws.batchId) : null;
+      if (project.delivery !== Delivery.PullRequest && batch?.worktreePath == null) continue;
       if (batch?.worktreePath == null) {
         checkouts.add(project.repoPath);
         continue;
