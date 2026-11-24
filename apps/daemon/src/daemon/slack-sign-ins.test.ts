@@ -16,7 +16,7 @@ import {
   type Store,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
-import { offJudge } from '../../test/engine';
+import { decliningWriter, offJudge } from '../../test/engine';
 import { createMemoryKeychain } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { slackBotAccount, LEGACY_SLACK_BOT_ACCOUNT } from '../environment';
@@ -106,6 +106,7 @@ function services(w: ReturnType<typeof world>, fetchSlack: typeof fetch) {
     clock: w.clock,
     log: silentLogger,
     connections,
+    answerWriter: decliningWriter,
   });
   return createStakeholderApiServices({
     state: w.state,
@@ -311,6 +312,7 @@ describe('Reply watches by workspace', () => {
       clock: w.clock,
       log: silentLogger,
       connections,
+      answerWriter: decliningWriter,
     });
     expect(connections.list().workspaces.map((x) => x.state)).toEqual(['checking', 'checking']);
 

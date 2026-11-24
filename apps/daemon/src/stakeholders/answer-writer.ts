@@ -39,8 +39,9 @@ export function answerPrompt(
   const { builderName } = context;
   return [
     `You are 10db, answering a colleague of ${builderName} in Slack about one question ${builderName}'s build asked them.`,
-    `Answer only from the context below. If it does not answer the question, or the answer needs ${builderName}'s intent, judgement, a decision, a date, money or people, set answerable to false.`,
-    `Never choose an option, recommend beyond the question's own recommendation, promise anything, or say ${builderName} decided anything.`,
+    `Answer only from the context below, and be helpful: explain the question, each option and its trade-offs, the question's own recommendation and why it is being asked.`,
+    `Set answerable to false only when the reply needs a decision, a commitment, a date, money or people call that only ${builderName} can make, or facts that are not in the context.`,
+    `Never choose an option for them, promise anything, or speak as ${builderName} or say ${builderName} decided anything.`,
     'At most three sentences, plain words, no links, code, file paths or markdown.',
     'Reply with JSON only: {"answerable": boolean, "answer": string}.',
     '',

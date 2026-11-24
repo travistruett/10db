@@ -1,5 +1,12 @@
 import type { InboxItemId } from '@10db/contracts';
-import { getInboxItem, getTask, inboxCardContext, targetTaskIds, type DbReader } from '@10db/db';
+import {
+  getGoal,
+  getInboxItem,
+  getTask,
+  inboxCardContext,
+  targetTaskIds,
+  type DbReader,
+} from '@10db/db';
 import { stakeholderOptions } from './compose';
 import { draftContext } from './drafts';
 
@@ -9,8 +16,9 @@ const DESCRIPTION_LIMIT = 2000;
 const CRITERIA_COUNT = 10;
 const CRITERION_LIMIT = 300;
 /** Conversation items read, from which the lane agent's last few messages are kept. */
-const MESSAGES_READ = 6;
-const LANE_MESSAGES = 3;
+const MESSAGES_READ = 12;
+const LANE_MESSAGES = 6;
+const GOAL_DESCRIPTION_LIMIT = 1000;
 const LANE_MESSAGE_LIMIT = 1000;
 
 /** Everything the answer writer may know, and nothing else: no files, other cards, knowledge or code. */
@@ -23,6 +31,7 @@ export interface QuestionContext {
   };
   readonly task: { title: string; description: string; acceptanceCriteria: string[] } | null;
   readonly goalTitle: string | null;
+  readonly goalDescription: string | null;
   /** The lane agent's own messages only; the builder's messages to the lane never reach the writer. */
   readonly laneMessages: readonly { text: string }[];
   readonly projectName: string;
@@ -53,6 +62,9 @@ export function questionContext(db: DbReader, cardId: InboxItemId): QuestionCont
               .map((criterion) => criterion.slice(0, CRITERION_LIMIT)),
           },
     goalTitle,
+    goalDescription: task?.goalId
+      ? getGoal(db, task.goalId).description.slice(0, GOAL_DESCRIPTION_LIMIT)
+      : null,
     laneMessages: inboxCardContext(db, cardId, MESSAGES_READ)
       .messages.filter((message) => message.author === 'agent')
       .slice(-LANE_MESSAGES)
