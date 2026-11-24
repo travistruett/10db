@@ -25,11 +25,14 @@ function orList(letters: readonly string[]): string {
   return letters.length === 1 ? last : `${letters.slice(0, -1).join(', ')} or ${last}`;
 }
 
-/** The last line of every question message. */
+/**
+ * The last line of every question message. It asks for the thread because a person may have several
+ * questions open in one conversation, and a reply in a question's thread can only be about that question.
+ */
 export function replyWithLine(letters: readonly string[]): string {
   return letters.length === 0
-    ? 'Reply with your own words.'
-    : `Reply with ${letters.join(', ')}, or your own words.`;
+    ? 'Reply in this thread in your own words.'
+    : `Reply in this thread with ${letters.join(', ')}, or your own words.`;
 }
 
 /** The invitation to ask questions in the thread, last in every question message. */

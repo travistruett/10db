@@ -361,12 +361,13 @@ The spec says "retry and notify" but not how long the account stays active meanw
 *C.* Keep access for the whole billing period
 
 The work on this waits for your answer.
-Reply with A, B, C, or your own words.
+Reply in this thread with A, B, C, or your own words.
 ```
 
-- **The last line.** Every question message, in a DM, a group DM or a tie's group DM, ends with "Reply with A,
-  B, C, or your own words." It doesn't ask for the thread: a reply in the thread and one at the top of the DM
-  count the same (§8.2).
+- **The last line.** Every question message, in a DM, a group DM or a tie's group DM, ends with "Reply in this
+  thread with A, B, C, or your own words." Questions post as they come in, so a person can have several open in
+  one conversation; a reply in a question's thread can only be about that question. A reply at the top of the
+  DM still counts, matched to its question as §8.2 says.
 
 - **Escaping.** Every field from the card is escaped for `mrkdwn` (`&`, `<`, `>`), every text object is sent
   `verbatim: true` and the post sets `unfurl_links: false` and `unfurl_media: false`. Agent text cannot ping
