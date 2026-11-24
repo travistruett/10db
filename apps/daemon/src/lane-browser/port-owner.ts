@@ -17,6 +17,7 @@ import {
   type PortSession,
   type PortVerdict,
 } from './lane-reach';
+import { parseAcceptors } from './probe-holders';
 import type { LaneBrowserSession } from './session';
 
 const run = promisify(execFile);
@@ -58,17 +59,6 @@ function parseListeners(output: string): { pid: number; address: string }[] {
     }
   }
   return found;
-}
-
-/** The pids of an `lsof -F p` listing. */
-function parsePids(output: string): number[] {
-  const pids: number[] = [];
-  for (const line of output.split('\n')) {
-    if (!line.startsWith('p')) continue;
-    const pid = Number(line.slice(1));
-    if (Number.isInteger(pid)) pids.push(pid);
-  }
-  return pids;
 }
 
 /** The mappings of a `docker ps` `.Ports` column that publish exactly `port`: each one's host address. */
@@ -184,10 +174,18 @@ export function systemPortReaders(
       const probe = await connect(address, port);
       try {
         const local = probe.localPort;
-        if (local === undefined) throw new Error('the probe has no local port');
+        const localAddress = probe.localAddress;
+        if (local === undefined || localAddress === undefined) {
+          throw new Error('the probe has no local address');
+        }
         const until = clock.now().getTime() + ACCEPT_WAIT_MS;
         for (;;) {
-          const holders = parsePids(await lsofHolders(local)).filter((pid) => pid !== process.pid);
+          const holders = parseAcceptors(await lsofHolders(local), {
+            server: address,
+            port,
+            client: localAddress,
+            clientPort: local,
+          }).filter((pid) => pid !== process.pid);
           if (holders.length > 0) return holders;
           if (clock.now().getTime() >= until) return 'unaccepted';
           await sleep(clock, ACCEPT_POLL_MS);

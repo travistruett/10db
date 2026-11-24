@@ -13,7 +13,9 @@ The browser a lane drives against its own servers. This part holds its reach: wh
   one (`127.0.0.1`, `*` or `0.0.0.0` connects to `127.0.0.1`, else `[::1]`, `::` to `::1`).
 - **The probe** (`PortReaders.acceptors`), only after a rule passes: the daemon makes a byteless connection to
   exactly the address the proxy would use and holds it. The acceptor exists only once the server calls accept,
-  so `lsof -nP -iTCP:<the probe's local port>` is polled up to about a second; every holder but the daemon must
+  so `lsof -nP -iTCP:<the probe's local port> -F pn` is polled up to about a second, and only a socket named
+  exactly `<address>:P-><probe address>:<probe port>` counts (`probe-holders.ts`: an unrelated socket that merely
+  mentions the port, or the daemon's client end, does not); every holder but the daemon must
   be a ledger member or descendant (ledger rule) and one of the pids `lsof` showed listening (both rules). No
   holder in time refuses "did not accept in time"; an acceptor `lsof` cannot see (a root-owned `127.0.0.1:P`
   beside a lane's wildcard socket) refuses the same way, as does a failed probe. A one-shot listener
