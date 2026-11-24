@@ -33,10 +33,9 @@ export function LanePermissionsSection() {
           }
           help={
             <HelpText>
-              Who approves: Claude Code's auto mode on a Claude plan, an API key, and Bedrock with a
-              recent Opus, Sonnet or Fable. For Codex, and models auto mode doesn't run on, 10db's
-              judge does (Settings › Decisions). The calls listed under Still Asks You come to you
-              either way.
+              Who approves: Claude Code's auto mode on a Claude plan, an API key, and Bedrock on a
+              model it supports. For Codex, and models auto mode doesn't run on, 10db's judge does
+              (Settings › Decisions). The calls listed under Still Asks You come to you either way.
             </HelpText>
           }
         >
