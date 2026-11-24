@@ -16,8 +16,10 @@ import { appendFileSync } from 'node:fs';
 
 // The pull request files API returns at most 3000 files; a list that long may be cut short.
 const FILES_API_LIMIT = 3000;
-// The compare API's file list may stop at 300 however it is paged; a list that long may be cut short.
+// The compare API lists files on its first page only (later pages fail the lookup) and stops at 300, so a
+// list that long may be cut short. Its commit list is paged too: a push of more than 100 commits is unknown.
 const COMPARE_FILES_LIMIT = 300;
+const COMPARE_COMMITS_LIMIT = 100;
 const MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
 
 // Everything under these is what the job builds or tests on macOS.
@@ -111,7 +113,7 @@ function pushedFiles(repository, before, after) {
   // `status` is `ahead` only when `after` descends from `before`; a force push is anything else.
   // Each page repeats it, and the prefixes keep a file named `ahead` apart from it.
   const query =
-    '"status:" + .status, (.files[] | "file:" + .filename, ("file:" + .previous_filename // empty))';
+    '"status:" + .status, "commits:" + (.total_commits | tostring), (.files[] | "file:" + .filename, (.previous_filename // empty | "file:" + .))';
   const result = spawnSync(
     'gh',
     [
@@ -129,7 +131,11 @@ function pushedFiles(repository, before, after) {
   }
   const lines = result.stdout.split('\n').filter((line) => line !== '');
   if (lines.some((line) => line.startsWith('status:') && line !== 'status:ahead')) return undefined;
-  const files = lines.filter((line) => line.startsWith('file:')).map((line) => line.slice(5));
+  const commits = lines.find((line) => line.startsWith('commits:'));
+  if (commits === undefined || Number(commits.slice(8)) > COMPARE_COMMITS_LIMIT) return undefined;
+  const files = lines
+    .filter((line) => line.startsWith('file:') && line.length > 5)
+    .map((line) => line.slice(5));
   return files.length === 0 || files.length >= COMPARE_FILES_LIMIT ? undefined : files;
 }
 

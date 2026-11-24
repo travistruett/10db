@@ -22,7 +22,10 @@ depth is needed) and applies the same file lists, so a push to `main` of a docs 
 (amended 2026-11-24: 161 pushes a week each took a macOS runner, and a failed runner acquisition was 8 of 23
 failures on `main`). A `desktop` check stays required on pull requests. A push whose files cannot be known runs
 the job: a missing, malformed or all-zero `before` (a first push), a compare that is not `ahead` (a force
-push), a failing lookup, or an empty or 3000-entry list.
+push), a failing lookup, an empty list, a list of 300 or more files (the compare API's cap), or a push of
+more than 100 commits. This relies on main's runs never cancelling each other (`ci.yml` groups a non-pull-request
+run by its own commit), so every push is compared against its own `before`; if runs could be cancelled, a later
+push would hide an earlier push's desktop change.
 
 The job still runs whenever the files cannot be known: a `merge_group` or `workflow_dispatch` event, a missing or malformed repository or number, a failing `gh`, an empty list, or one of 3000 or more
 entries. A failed `desktop-scope` leaves an empty output, which is not `'false'`, so `desktop` runs.

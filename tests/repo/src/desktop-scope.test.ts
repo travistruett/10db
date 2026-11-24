@@ -167,7 +167,7 @@ describe('scripts/desktop-scope.mjs', () => {
     const compare = (status: string, ...names: string[]): GhReply[] => [
       {
         args: compareCall,
-        stdout: [`status:${status}`, ...names.map((n) => `file:${n}`)].join('\n'),
+        stdout: [`status:${status}`, 'commits:1', ...names.map((n) => `file:${n}`)].join('\n'),
       },
     ];
 
@@ -187,6 +187,10 @@ describe('scripts/desktop-scope.mjs', () => {
       ['a rewind', compare('behind', 'docs/a.md')],
       ['a failing lookup', [{ args: compareCall, status: 1, stderr: 'HTTP 404' }]],
       ['no files listed', compare('ahead')],
+      [
+        'more than 100 commits',
+        [{ args: compareCall, stdout: 'status:ahead\ncommits:101\nfile:docs/a.md' }],
+      ],
       [
         'a list as long as the compare API may cut it',
         compare('ahead', ...Array.from({ length: 300 }, (_, i) => `docs/${String(i)}.md`)),
