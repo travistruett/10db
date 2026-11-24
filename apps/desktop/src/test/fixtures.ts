@@ -38,6 +38,8 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     moveBackAutomatic: false,
     fallbackAccountId: null,
     usageHandoffAt: 0.95,
+    localCopies: false,
+    copyTeardownCommand: null,
     handoffPct: 40,
     nudgePct: 50,
     humanWaitMinutes: 10,
