@@ -8,7 +8,7 @@
   `extractZipWithTar`). `browser-host.ts` launches it on first use with the renderer sandbox on, `HOME` and
   `TMPDIR` only, artifacts under `<data dir>/browser/artifacts`, and every request, loopback included, through
   `app-proxy.ts`'s proxy as Chromium's own switches (`launchOptions`); it runs one shot or sign-in at a time,
-  holds the browser's processes in a lane process ledger (`browser-ledger.ts`: the browser is the daemon's child
+  holds the browser's processes in a lane process ledger (`browser-ledger.ts`, one lock for every browser, pictures' and each lane's, `createBrowserLaunches`: a launch marks the daemon's children first and a ledger never takes a marked or held root: the browser is the daemon's child
   whose executable, by its real path, is the pinned one; `ps`'s `comm` on macOS, `/proc/<pid>/exe` on Linux, whose
   `comm` is a cut name), refuses to launch with no ledger sweep, and closes after five idle minutes. The proxy
   forwards only the app's origin and a `CONNECT` to its host and port (`origin-guard.ts`, `proxyAllows`), and,

@@ -25,3 +25,16 @@ The browser a lane drives against its own servers. This part holds its reach: wh
 - **The proxy holds** (`lane-proxy.ts`): Playwright's routing is a first check; the proxy answers every
   connection by asking `PortOwner.check` and connects only to the address it returns, never a name.
   `lsof` and `docker ps` run through `execFile` with an argument list, a 5 s deadline and a fixed env.
+
+- **Lifecycle** (`lane-browsers.ts`, `createLaneBrowsers`): one entry per session, and everything on the
+  entry's queue (calls, launches, the idle close, `end`, `close`), so a close never races a launch. A call
+  runs under `CALL_DEADLINE_MS` counted from its arrival; the driver it gets stops when the deadline or the
+  session ends, and a call that will not stop has its browser closed out from under it
+  (`BROWSER_CLOSE_MS` later). The first call with no browser (or a crashed one) fetches nothing itself: it
+  asks the build shared with pictures, answers "fetching" at once while it downloads, then makes the
+  session's artifacts dir, a ledger of its own, a port owner and proxy, and launches inside the launch lock
+  (`pictures/browser-ledger.ts`: `mark`, launch, `track`), so ending one session never stops another's
+  browser. A `BrowserStuckError` closes the browser; idle five minutes closes it; each says so in the next
+  answer's `notes`. `end` runs as the session does (`RunnerOptions.endLaneBrowser`), after any launch under
+  way, and later calls for that id are refused. A browser a crash leaves is reaped by the ledger sweep at the
+  next start. With no sandbox roots (`ledgers` null) every call is refused.

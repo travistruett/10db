@@ -126,6 +126,7 @@ import { createPlanToolHandlers, PLAN_TOOL_DESCRIPTIONS } from './plan-tools';
 import { judgeReportedRoutes } from './report-pages';
 import type { LinearReporter } from '../linear';
 import type { ChatToolsFor } from './chat-tools';
+import type { LaneBrowsers, LaneBrowserSession } from '../lane-browser';
 import type { ShapeToolsFor } from './shape-tools';
 import { answerAway, routedToPerson, type AwayLane } from '../trust';
 
@@ -161,6 +162,11 @@ export interface McpDeps {
   readonly reporter?: Pick<LinearReporter, 'reportPost'>;
   /** Draws a mock-up and shoots the app for `check_design`; absent, a lane is not offered it. */
   readonly pictures?: Pick<Pictures, 'shootNow' | 'drawMockup' | 'bytesOf'>;
+  /** Each lane session's browser; absent, a lane is not offered the browser tools. */
+  readonly laneBrowser?: {
+    readonly browsers: LaneBrowsers;
+    sessionOf(sessionId: SessionId): LaneBrowserSession | undefined;
+  };
 }
 
 /** What a build step that plans first is told once its plan is recorded. */

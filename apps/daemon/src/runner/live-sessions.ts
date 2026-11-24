@@ -1,5 +1,6 @@
 import type { SessionId } from '@10db/contracts';
 import type { WaitObserver } from '../inbox';
+import type { LaneBrowserSession } from '../lane-browser';
 import type { AwayLane } from '../trust';
 
 export interface LiveSession {
@@ -9,6 +10,8 @@ export interface LiveSession {
   askedToHandOff(): void;
   /** Present for a lane nobody watches: its questions are answered at once and kept. */
   readonly away?: AwayLane;
+  /** A lane session's sandbox as its browser reads it; absent for a session with no lane sandbox. */
+  readonly browser?: LaneBrowserSession;
 }
 
 /**
