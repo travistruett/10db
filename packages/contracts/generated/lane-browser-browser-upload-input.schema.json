@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "ref": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]{1,32}$"
+    },
+    "paths": {
+      "minItems": 1,
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      }
+    }
+  },
+  "required": [
+    "ref",
+    "paths"
+  ],
+  "additionalProperties": false
+}

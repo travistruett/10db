@@ -306,6 +306,8 @@ import {
   LanePermissionsDto,
   McpServerReview,
   McpServerStatusDto,
+  RepoMcpServersDto,
+  SetRepoMcpVerdict,
   SystemCheckDto,
 } from './system';
 import { AgentCapabilitiesDto } from './agent-capabilities';
@@ -317,7 +319,7 @@ import {
   TrustSettingsDto,
   TrustSwitches,
 } from './trust';
-import { LiveSystemsDto, TrustGrantDto } from './trust-policy';
+import { LiveSystemProposalsDto, LiveSystemsDto, TrustGrantDto } from './trust-policy';
 import {
   ApproveYourMcpServer,
   McpSignInChangedData,
@@ -327,6 +329,7 @@ import {
 } from './your-mcp';
 import { SkippedActionDto } from './skipped-actions';
 import { ToolCallView } from './tool-call-view';
+import { BrowserAnswer, BrowserToolInputs, BrowserToolName } from './lane-browser';
 
 const shapeMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
   Object.values(ShapeToolName).map((tool): [string, z.ZodType] => [
@@ -348,6 +351,16 @@ const builderMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
     AdvertisedBuilderToolInputs[tool],
   ]),
 );
+
+const laneBrowserSchemas: Record<string, z.ZodType> = {
+  'lane-browser-answer': BrowserAnswer,
+  ...Object.fromEntries(
+    Object.values(BrowserToolName).map((tool): [string, z.ZodType] => [
+      `lane-browser-${tool.replaceAll('_', '-')}-input`,
+      BrowserToolInputs[tool],
+    ]),
+  ),
+};
 
 /** Every schema visible outside the daemon, keyed by the file stem of its generated JSON Schema. */
 export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
@@ -424,6 +437,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'lane-permissions-dto': LanePermissionsDto,
   'trust-switches': TrustSwitches,
   'live-systems-dto': LiveSystemsDto,
+  'live-system-proposals-dto': LiveSystemProposalsDto,
   'trust-grant-dto': TrustGrantDto,
   'tool-call-view': ToolCallView,
   'trust-overrides': TrustOverrides,
@@ -438,6 +452,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'start-mcp-sign-in': StartMcpSignIn,
   'mcp-server-review': McpServerReview,
   'mcp-server-status-dto': McpServerStatusDto,
+  'repo-mcp-servers-dto': RepoMcpServersDto,
+  'set-repo-mcp-verdict': SetRepoMcpVerdict,
   'aa-model-dto': AaModelDto,
   'benchmark-key-input': BenchmarkKeyInput,
   'benchmark-status-dto': BenchmarkStatusDto,
@@ -648,6 +664,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-preview-mended-data': PassPreviewMendedData,
   ...mcpSchemas,
   ...builderMcpSchemas,
+  ...laneBrowserSchemas,
   ...shapeMcpSchemas,
 };
 

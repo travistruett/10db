@@ -132,6 +132,9 @@ import type {
   McpSignInsDto,
   StartMcpSignIn,
   McpServerStatusDto,
+  RepoMcpServersDto,
+  SetRepoMcpVerdict,
+  LiveSystemProposalsDto,
   ModelProfileDto,
   ModelMeasuresDto,
   ModelRowDto,
@@ -846,6 +849,19 @@ export interface ApiServices extends PlanRecordServices {
   liveSystems(projectId: ProjectId): LiveSystemsDto;
   /** Replaces them, trimmed and without duplicates; read when each session starts. */
   setLiveSystems(projectId: ProjectId, input: LiveSystemsDto): LiveSystemsDto;
+  /** What 10db found in the repo that reads like a production system and isn't listed yet; throws NotFoundError. */
+  liveSystemProposals(projectId: ProjectId): Promise<LiveSystemProposalsDto>;
+  /** The checkout's `.mcp.json` servers and their verdicts, raising no card; throws NotFoundError. */
+  repoMcpServers(projectId: ProjectId): RepoMcpServersDto;
+  /**
+   * Approves or denies one repo server for the exact config the page showed, answering its open card when
+   * there is one; throws ConflictError when the config changed since, NotFoundError for an unknown server.
+   */
+  setRepoMcpVerdict(
+    projectId: ProjectId,
+    name: string,
+    input: SetRepoMcpVerdict,
+  ): RepoMcpServersDto;
   /** What the builder allowed in a project from now on (Always in this project), oldest first; throws NotFoundError. */
   trustGrants(projectId: ProjectId): TrustGrantDto[];
   /** Removes one of the project's grants; throws NotFoundError when the project has none by that id. */

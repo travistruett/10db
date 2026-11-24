@@ -312,6 +312,7 @@ function unattendedReason(kind: SkipKind, path: string | null): string {
       return 'A commit, push or merge waits for the builder in a pass; nobody is here to allow it.';
     case SkipKind.DefaultModeCard:
     case SkipKind.Classifier:
+    case SkipKind.CantRunInLane:
     case SkipKind.ConfigWrite:
     case SkipKind.Deploy:
     case SkipKind.DockerOff:

@@ -2,8 +2,12 @@ import {
   Approval,
   ConflictError,
   InboxKind,
+  InboxState,
+  NotFoundError,
   SkipKind,
   SkippedActionId,
+  TaskStatus,
+  WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamId,
   WorkstreamState,
   type InboxAnswer,
@@ -18,6 +22,8 @@ import {
   getWorkstreamRow,
   insertSkipFollowUp,
   insertTask,
+  listInbox,
+  openItemsForWorkstream,
   skipFollowUpOf,
   lastConfigHead,
   lastListed,
@@ -25,12 +31,13 @@ import {
   listSkipsForWorkstream,
   markListed,
   unlistedEndedRuns,
+  type DbReader,
   type WriteContext,
 } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
-import { flagCard, BY_ANSWER, CardTier } from '../inbox';
+import { flagCard, rewordCard, BY_ANSWER, CardTier, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { LIMITS, writtenConfig } from '../trust';
 import { checkoutOf } from './checkout';
@@ -72,6 +79,8 @@ function clearedBy(kind: SkipKind): string {
       return 'make the change yourself';
     case SkipKind.SafetyCheck:
       return 'only you can run it';
+    case SkipKind.CantRunInLane:
+      return "can't run in a lane: its program is outside what lanes may read. Use 10db's browser, or run it yourself";
     case SkipKind.MonitorNoCommand:
     case SkipKind.UnreadEditPath:
       return 'the agent can write it another way';
@@ -208,6 +217,31 @@ export async function raiseSkippedCard(
     const skipIds = skips
       .filter((s) => s.kind !== SkipKind.Question && s.approval !== Approval.None)
       .map((s) => s.id);
+    // A failed run already shows its builder a card: the skipped calls go on that one.
+    const failed =
+      row.state === WorkstreamState.Failed
+        ? openItemsForWorkstream(ctx.tx, workstreamId).find(
+            (i) =>
+              i.kind === InboxKind.Flag &&
+              i.state === InboxState.Open &&
+              i.title.startsWith(WORKSTREAM_FAILED_TITLE_PREFIX),
+          )
+        : undefined;
+    if (failed !== undefined) {
+      rewordCard(ctx, failed.id, `${failed.body}\n\n${bodyOf(skips, written)}`, {
+        // Closing itself adds to the card; the builder can still dismiss a notice they have read.
+        options: [
+          ...failed.options.filter((o) => o.label !== DISMISS.label),
+          ...(skipIds.length === 0
+            ? []
+            : [runOption(followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait')]),
+          DISMISS,
+        ],
+        detail: { ...failed.detail, [SKIPPED_DETAIL]: workstreamId, skipIds },
+      });
+      markListed(ctx, workstreamId, through, failed.id, configHead);
+      return;
+    }
     const item = flagCard(ctx, {
       projectId: row.projectId,
       workstreamId: null,
@@ -243,6 +277,47 @@ export async function sweepUnlistedRuns(deps: SkippedCardDeps): Promise<void> {
       );
     }
   }
+}
+
+/**
+ * Closes every open item of a run whose task has finished or been abandoned: what it lists is
+ * nothing a builder can still act on, except calls of a finished task that no follow-up has run. Returns how many it closed.
+ */
+export function closeFinishedSkippedCards(
+  db: DbReader,
+  inbox: Pick<InboxService, 'resolve'>,
+): number {
+  let closed = 0;
+  for (const item of listInbox(db, { states: [InboxState.Open] })) {
+    if (item.kind !== InboxKind.Flag) continue;
+    // The detail is JSON read back from the database: a boundary, so parse it.
+    const run = WorkstreamId.safeParse(item.detail?.[SKIPPED_DETAIL]);
+    if (!run.success) continue;
+    let status: TaskStatus;
+    try {
+      status = getTask(db, getWorkstreamRow(db, run.data).taskId).status;
+    } catch (error) {
+      // A run or task no longer stored leaves nothing to act on.
+      if (!(error instanceof NotFoundError)) throw error;
+      status = TaskStatus.Cancelled;
+    }
+    if (status === TaskStatus.Open) continue;
+    // A done task's run can still have calls the builder meant to approve: that card stays until
+    // it has none left to run or its follow-up exists.
+    if (status === TaskStatus.Done && stillOffersRun(db, item, run.data)) continue;
+    inbox.resolve(
+      item.id,
+      status === TaskStatus.Done ? 'The task is done.' : 'The task was abandoned.',
+    );
+    closed += 1;
+  }
+  return closed;
+}
+
+/** Whether a card still offers Run these now: it lists calls to run and no follow-up exists yet. */
+function stillOffersRun(db: DbReader, item: InboxItemDto, run: WorkstreamId): boolean {
+  const ids = z.array(SkippedActionId).safeParse(item.detail?.['skipIds']);
+  return ids.success && ids.data.length > 0 && skipFollowUpOf(db, run) === null;
 }
 
 const SkippedDetail = z.object({

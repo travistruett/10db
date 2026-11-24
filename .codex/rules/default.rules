@@ -95,7 +95,7 @@ prefix_rule(
 
 # Codex asks about every `git restore` and every `git checkout --` or `git checkout -q --`, in any
 # directory: a prefix rule can't see which worktree it runs in, so the Claude guard's exception for
-# named files in a 10db-worktrees/ worktree doesn't apply here. A commit before the `--`
+# named files in a 10db-worktrees.noindex/ worktree doesn't apply here. A commit before the `--`
 # (`git checkout HEAD -- <file>`) is a word a prefix rule can't match, so Codex doesn't ask about it.
 prefix_rule(
     pattern = ["git", "restore"],

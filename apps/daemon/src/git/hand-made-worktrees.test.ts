@@ -6,7 +6,7 @@ import { createTempRepoWithOrigin, isolatedGitEnv, tempDir } from '../../test/fi
 import type { TempDir } from '../../test/fixtures';
 import {
   createGit,
-  handMadeWorktreeFolder,
+  handMadeWorktreeFolders,
   memoryPinStore,
   WorktreeNotOursError,
   type Git,
@@ -17,6 +17,7 @@ let ownRoot: TempDir;
 let elsewhere: TempDir;
 let git: Git;
 let folder: string;
+let noindexFolder: string;
 
 const raw = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-C', cwd, ...args], { env: isolatedGitEnv(), stdio: 'pipe' })
@@ -36,7 +37,8 @@ beforeEach(() => {
   fixture = createTempRepoWithOrigin();
   ownRoot = tempDir('own-root');
   elsewhere = tempDir('elsewhere');
-  folder = handMadeWorktreeFolder(main());
+  folder = handMadeWorktreeFolders(main())[1] ?? '';
+  noindexFolder = handMadeWorktreeFolders(main())[0] ?? '';
   git = createGit({
     worktreeRoot: ownRoot.path,
     pins: memoryPinStore(),
@@ -45,16 +47,18 @@ beforeEach(() => {
 });
 afterEach(() => {
   rmSync(folder, { recursive: true, force: true });
+  rmSync(noindexFolder, { recursive: true, force: true });
   fixture.cleanup();
   ownRoot.cleanup();
   elsewhere.cleanup();
 });
 
-describe('handMadeWorktreeFolder', () => {
-  it('is the folder beside the checkout named for it', () => {
-    expect(handMadeWorktreeFolder('/Users/me/Projects/10db')).toBe(
+describe('handMadeWorktreeFolders', () => {
+  it('names the .noindex folder beside the checkout first, then the older one', () => {
+    expect(handMadeWorktreeFolders('/Users/me/Projects/10db')).toEqual([
+      '/Users/me/Projects/10db-worktrees.noindex',
       '/Users/me/Projects/10db-worktrees',
-    );
+    ]);
   });
 });
 
@@ -76,6 +80,13 @@ describe('a worktree the builder made by hand', () => {
     expect(existsSync(path)).toBe(false);
     expect(raw(main(), 'branch', '--list', 'hand/feature')).toContain('hand/feature');
     await expect(git.removeHandMadeWorktree(main(), path)).resolves.toBe('absent');
+  });
+
+  it('is read and removed from the .noindex folder as from the older one', async () => {
+    const path = handMade('feature', noindexFolder);
+    await expect(git.handMadeWorktreeChanges(main(), path)).resolves.toEqual([]);
+    await expect(git.removeHandMadeWorktree(main(), path)).resolves.toBe('removed');
+    expect(existsSync(path)).toBe(false);
   });
 
   const refusals: readonly {

@@ -224,10 +224,11 @@ describe('CI workflow', () => {
 
   it('keeps every pull request event out of the concurrency group of a push to main', () => {
     // An edit to a merged pull request runs with main's ref. Grouped by ref, that run cancels main's
-    // own CI, as editing #541's description did.
+    // own CI, as editing #541's description did. And every commit on main finishes its run: grouped by
+    // ref, a newer push cancelled the one before, or the one waiting behind a running one.
     expect(readWorkflow(CI).concurrency).toEqual({
-      group: 'ci-${{ github.event.pull_request.number || github.ref }}',
-      'cancel-in-progress': true,
+      group: 'ci-${{ github.event.pull_request.number || github.sha }}',
+      'cancel-in-progress': "${{ github.event_name == 'pull_request' }}",
     });
   });
 
@@ -247,7 +248,7 @@ describe('CI workflow', () => {
     expect(limited).toEqual(['desktop', 'dependency-review']);
   });
 
-  it('skips desktop by the files of the pull request alone, never by the event', () => {
+  it('skips desktop by the files of the change alone, never by the event kind', () => {
     // A skipped required check counts as passing, so skipping on an `edited` event would replace an
     // earlier red desktop result for the same commit. desktop-scope decides from the pull request's
     // files, so a title edit decides as the last push did (see the note at the top of ci.yml).
@@ -270,6 +271,8 @@ describe('CI workflow', () => {
       EVENT_NAME: '${{ github.event_name }}',
       REPOSITORY: '${{ github.repository }}',
       PR_NUMBER: '${{ github.event.pull_request.number }}',
+      BEFORE: '${{ github.event.before }}',
+      AFTER: '${{ github.event.after }}',
       GH_TOKEN: '${{ github.token }}',
     });
     expect(scope?.permissions).toEqual({ contents: 'read', 'pull-requests': 'read' });

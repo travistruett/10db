@@ -85,7 +85,7 @@ Read the ones for what you touch, and write a view's notes there, not here. This
 - Factory and preview: the installed release app is the factory; it manages the 10db repo and runs its tasks.
   `pnpm dev` (its own `.dev/data`) with `dev:shell` or http://localhost:1420 is the preview: it renders the
   checkout with live reload and never runs tasks. While a task holds the checkout (Your folder / shared mode),
-  don't hand-edit it; work in a worktree under `../10db-worktrees/`.
+  don't hand-edit it; work in a worktree under `../10db-worktrees.noindex/`.
 - `pnpm dev:factory` (`scripts/factory-ui.ts`) runs Vite over the installed app's daemon instead: it reads that
   daemon's `daemon.json` and `ui-token` from `~/Library/Application Support/10db`, checks over `/health` that it
   answers the Vite origin over CORS and takes the token (`GET /projects`), and runs Vite with `--no-cors` and

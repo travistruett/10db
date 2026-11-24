@@ -1,5 +1,5 @@
 export { projectInstructionsLoaded } from './instructions';
-export { leftOutNote } from './left-out';
+export { isExpectedReason, leftOutNote } from './left-out';
 export { loadedLine } from './loaded-line';
 export {
   InstalledPluginsError,

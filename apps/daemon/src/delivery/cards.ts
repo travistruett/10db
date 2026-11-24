@@ -27,7 +27,6 @@ import {
   type PassDirtRecord,
 } from '../git';
 import { GhError, SIGN_IN_IN_SETTINGS } from '../github';
-import { SPOTLIGHT_MARKER } from '../sandbox';
 import type { GateResult } from '../verify';
 import { batchCardFields } from './batch-card';
 import { maxCiFixes } from './ci-failure-action';
@@ -102,8 +101,6 @@ export const WorktreeChoice = {
   Delete: 'Delete directory',
   /** Remove the worktrees in the builder's hand-made folder whose pull request merged. */
   RemoveMerged: 'Remove Merged Worktrees',
-  /** Mark the builder's hand-made worktree folder so Spotlight skips it. */
-  KeepSpotlightOut: 'Keep Spotlight Out',
   Keep: 'Keep',
 } as const;
 export type WorktreeChoice = (typeof WorktreeChoice)[keyof typeof WorktreeChoice];
@@ -197,13 +194,7 @@ export function worktreeOffer(
           keep('the worktrees'),
         ];
       case 'spotlight':
-        return [
-          {
-            label: WorktreeChoice.KeepSpotlightOut,
-            description: `Create an empty ${SPOTLIGHT_MARKER} file in ${offer.path}`,
-          },
-          keep('Spotlight indexing the folder'),
-        ];
+        return [keep('Spotlight indexing the folder')];
       case 'branch':
         return [
           {
@@ -1179,6 +1170,10 @@ export const prCardKey = {
   catchUp: (batchId: BatchId): string => `pr-catch-up:${batchId}`,
   /** A required job never got a runner, and 10db's reruns for the head ran out: the root batch's id. */
   noRunner: (batchId: BatchId): string => `pr-no-runner:${batchId}`,
+  /** A check that failed and then passed on the same commit: one per check name. */
+  flakyCheck: (name: string): string => `flaky-check:${name}`,
+  /** A branch's own failing checks block pull requests: one per repository and branch. */
+  baseRed: (repo: string, branch: string): string => `base-red:${repo}:${branch}`,
   /** One per daemon: gh being unavailable is the same problem for every pull request. */
   ghUnavailable: 'pr-watch-gh',
 } as const;
@@ -1350,6 +1345,34 @@ export const prCards = {
       detail: prDetail(root, prUrl),
     };
   },
+  /** A check passed on a rerun of the commit it failed on: nothing to fix in a pull request, but a test to fix. */
+  flakyCheck: (name: string, occurrences: number): Card => ({
+    tier: CardTier.Ask,
+    urgency: Urgency.Normal,
+    closesWhen: BY_ANSWER,
+    title: `Flaky check: ${name} (${String(occurrences)} time${occurrences === 1 ? '' : 's'})`,
+    body: `The required check ${name} failed and then passed on a rerun of the same commit, ${String(occurrences)} time${occurrences === 1 ? '' : 's'} so far. A check that passes on a rerun hides a test that needs a code fix (never a retry in the test); find which test it is in the failed run's log.`,
+    foldKey: prCardKey.flakyCheck(name),
+    detail: { check: name, occurrences },
+  }),
+  /** The base branch fails checks that pull requests fail too: one card however many wait on it. */
+  baseRed: (input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly checks: readonly string[];
+    readonly waiting: number;
+  }): Card => ({
+    tier: CardTier.Ask,
+    urgency: Urgency.High,
+    closesWhen: { by: 'withdrawn', when: 'the base passes these checks again (pr-watch)' },
+    title: `${input.branch} fails CI, and ${String(input.waiting)} pull request${input.waiting === 1 ? '' : 's'} wait on it`,
+    body: [
+      `${input.repo}'s ${input.branch} fails ${input.checks.join(', ')}, and pull requests fail the same checks.`,
+      `10db starts no CI fix for those pull requests: the failure is not in their changes. Fix ${input.branch} once (or revert what broke it). When ${input.branch} passes the checks, 10db merges it into each pull request that lands itself and pushes, so their checks run again on a new head (the others have their failed jobs run again). After an hour of waiting 10db treats the failure as the pull request's own and starts a fix.`,
+    ].join('\n\n'),
+    foldKey: prCardKey.baseRed(input.repo, input.branch),
+    detail: { repo: input.repo, branch: input.branch },
+  }),
   /** GitHub refused the rerun the stop card's Retry asked for. */
   rerunFailed: (root: BatchDto, error: unknown): Card => ({
     tier: CardTier.Ask,

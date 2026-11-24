@@ -931,9 +931,12 @@ function currentBranch(cwd) {
   return attempt(() => gitOutput(cwd, ['symbolic-ref', '--short', '-q', 'HEAD']).trim()) ?? '';
 }
 
+/** The folders beside the checkout where agents' hand-made worktrees live: the current one, then the older one. */
+const OWN_WORKTREE_FOLDERS = ['10db-worktrees.noindex', '10db-worktrees'];
+
 /**
- * True when `cwd` is inside a linked worktree that sits directly in `10db-worktrees/` beside its
- * main checkout, where AGENTS.md puts the worktrees agents make by hand. A directory there whose
+ * True when `cwd` is inside a linked worktree that sits directly in `10db-worktrees.noindex/` (or the older
+ * `10db-worktrees/`, still accepted while it drains) beside its main checkout, where AGENTS.md puts the worktrees agents make by hand. A directory there whose
  * `.git` file points at the main repository or at another worktree's git directory is not one: the
  * worktree's own git directory must differ from the common one and name this `.git` file back in
  * its `gitdir`. False when git can't say.
@@ -959,7 +962,8 @@ function inAgentWorktree(cwd) {
   );
   if (linked !== true) return false;
   const checkout = posix.dirname(common);
-  return posix.dirname(top) === posix.join(posix.dirname(checkout), '10db-worktrees');
+  const beside = posix.dirname(checkout);
+  return OWN_WORKTREE_FOLDERS.some((folder) => posix.dirname(top) === posix.join(beside, folder));
 }
 
 // Words that make a command act on a directory other than the cwd the guard judged: a change of
@@ -1479,7 +1483,7 @@ function judge(command, cwd, whole = command, startDir = cwd) {
  * can approve it. Undefined when there is none to suggest.
  * @param {string} verb
  * @param {boolean} rewritesRefs a push that forces or deletes a remote ref
- * @param {() => boolean} inOwnWorktree whether git runs in an agent worktree in `10db-worktrees/`
+ * @param {() => boolean} inOwnWorktree whether git runs in an agent worktree in `10db-worktrees.noindex/`
  * @returns {string | undefined}
  */
 function insteadOf(verb, rewritesRefs, inOwnWorktree) {
@@ -1488,7 +1492,7 @@ function insteadOf(verb, rewritesRefs, inOwnWorktree) {
     // Files outside the agent's own worktree may hold another session's uncommitted work.
     const discard = inOwnWorktree()
       ? 'To discard one file, write its committed copy over it: git show <ref>:./<path> > <path>.'
-      : 'Discard files only in your own worktree in 10db-worktrees/, never in a checkout another session may be using.';
+      : 'Discard files only in your own worktree in 10db-worktrees.noindex/, never in a checkout another session may be using.';
     return verb === 'reset' ? `${discard} To undo a commit, use git revert.` : discard;
   }
   if (verb === 'stash') {

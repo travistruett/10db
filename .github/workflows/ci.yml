@@ -23,10 +23,11 @@ on:
 permissions: {}
 
 concurrency:
-  # By pull request number, not ref alone: an edit to a merged pull request runs with main's ref, and
-  # would otherwise cancel main's own run.
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A pull request groups by its number, so its newer push cancels its older run. Every other run groups by
+  # its own commit, so no run on main waits behind or cancels another (a group keeps one pending run, and a
+  # third push would cancel the second's), and an edit to a merged pull request can't touch main's run.
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # The gate is split so that a pull request gets its first failure in minutes and each job can be
@@ -147,7 +148,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Decides whether desktop needs a macOS runner, from the pull request's files alone
+  # Decides whether desktop needs a macOS runner, from the files of the change alone: a pull request's
+  # files, or on a push the files of the pushed commits (via GitHub's compare API, so no fetch depth).
   # (scripts/desktop-scope.mjs; decisions/2026-11-18-desktop-runs-on-macos-only-for-what-it-tests.md).
   # It reads no event action, so every event of a head decides alike.
   desktop-scope:
@@ -167,12 +169,14 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
           GH_TOKEN: ${{ github.token }}
         run: node scripts/desktop-scope.mjs
 
   desktop:
     needs: desktop-scope
-    # The required check. Skipped when no file of the pull request is one the job tests, which GitHub counts
+    # The required check. Skipped when no file of the change is one the job tests, which GitHub counts
     # as passing, and without taking a macOS runner. Runs when desktop-scope failed or was skipped
     # (its output is then empty), so a broken decision never hides a build. !cancelled() lets it
     # evaluate after a failed need, which a plain `if` would not.

@@ -35,7 +35,7 @@ const NEW_FILE_KEPT_MS = 10 * 60_000;
 /** How often the sweep runs after the one at start-up. */
 const PRUNE_EVERY_MS = 24 * 60 * 60_000;
 
-/** The turn pictures among `rows` whose task was done (by `doneAt`) at least 14 days before `now`. */
+/** The turn and lane pictures among `rows` whose task was done (by `doneAt`) at least 14 days before `now`. */
 export function prunableTurnScreens(
   rows: readonly {
     readonly id: TaskScreenId;
@@ -46,7 +46,7 @@ export function prunableTurnScreens(
   now: number,
 ): TaskScreenId[] {
   return rows.flatMap((row) => {
-    if (row.kind !== ScreenKind.Turn) return [];
+    if (row.kind !== ScreenKind.Turn && row.kind !== ScreenKind.Lane) return [];
     const done = doneAt.get(row.taskId);
     return done !== undefined && now - Date.parse(done) >= TURN_PICTURES_KEPT_MS ? [row.id] : [];
   });

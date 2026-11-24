@@ -22,6 +22,11 @@ export interface FakeRequest {
   readonly developerTexts: readonly string[];
   /** How many pictures the user messages of the input carry, the whole thread's. */
   readonly images: number;
+  /**
+   * How many pictures the tool call outputs after the script's prompt carry (`input_image` parts of a
+   * `function_call_output` or `custom_tool_call_output` whose `output` is a content list), in order.
+   */
+  readonly outputImages: number;
   /** The text each `exec` call returned since the script's prompt, in order. */
   readonly outputs: readonly string[];
   /**
@@ -251,6 +256,10 @@ export async function startFakeResponses(): Promise<FakeResponses> {
           ...items.filter(isDeveloperMessage).map((item) => textOf(item.content)),
         ],
         images: items.filter(isUserMessage).reduce((sum, item) => sum + imagesOf(item.content), 0),
+        outputImages: items
+          .slice(at + 1)
+          .filter(isCallOutput)
+          .reduce((sum, item) => sum + imagesOf(item.output), 0),
         outputs,
         tools: offered.map(({ name }) => name).sort(),
         execTools: execToolsOf(offered.map(({ tool }) => tool)).sort(),

@@ -38,7 +38,7 @@ const ROWS: Readonly<Record<TrustSwitchKey, Omit<TrustRow, 'key'>>> = {
     label: 'Your Skills',
     description: 'Skills from ~/.claude/skills and ~/.agents/skills.',
     providers:
-      'Sessions read these skills but never change them. A skill kept directly in your home (~/x), under a hidden folder (~/.something) or in a project folder is left out; Comes along says why.',
+      'Sessions read these skills but never change them. A skill kept directly in your home (~/x), under a hidden folder (~/.something) or in a project folder is left out; the list under the switch says why.',
     whileOn: null,
   },
   yourPlugins: {
@@ -88,9 +88,9 @@ export const JUDGE_LIST_NOTE = "Accounts without auto mode, and Codex, use 10db'
 export const NATIVE_JUDGE_NOTE =
   "On a model auto mode doesn't run, a session falls back to 10db's rules and says so in its thread.";
 
-/** The project's Live systems input: what an entry is, and when a change applies. */
-export const LIVE_SYSTEMS_DESCRIPTION =
-  'Hosts, cloud profiles and namespaces the judge treats as live, such as api.example.com or the prod AWS profile. Names with prod or production count already. Applies from the next session.';
+/** The project's Production card: what the list is, and what the judge does with it. */
+export const PRODUCTION_DESCRIPTION =
+  "Lanes may read these places, and 10db's judge refuses any write to them. Hosts, cloud profiles and namespaces, such as api.example.com or the prod AWS profile. Names with prod or production count already. Applies from the next session.";
 
 /** A grant's limit as the project's Allowed in this project list names it; null is any limit. */
 export const GRANT_LIMIT_LABELS: Readonly<Record<LimitName, string>> = {

@@ -26,8 +26,8 @@
 - **The builder's reply from the Open card is held only for a secret.**
 - **Provider parity:** the same on every account; where a provider cannot write, the question comes to the
   builder and Settings says so.
-- **Protocol 15.** `StakeholderSendDto.returnedReason` gained `'asked'`, a narrowing for older desktops, so the
-  protocol version moves (the number is settled at the merge of main).
+- **Protocol 15.** `StakeholderSendDto.returnedReason` gained `'asked'`, a value an older
+  desktop cannot read, so `PROTOCOL_VERSION` goes from 14 to 15.
 
 ## Why
 

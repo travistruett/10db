@@ -166,6 +166,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/settings/trust/mcp-sign-ins': 'No screen draws a setting.',
   '/projects/:projectId/trust': 'No screen draws a setting.',
   '/projects/:projectId/live-systems': 'No screen draws a setting.',
+  '/projects/:projectId/live-systems/proposals': 'No screen draws a setting.',
+  '/projects/:projectId/repo-mcp-servers': 'No screen draws a setting.',
   '/projects/:projectId/trust-grants': 'No screen draws a setting.',
   '/settings/self-update': 'No screen draws a setting.',
   '/projects/:projectId/knowledge': 'Only the Knowledge view draws it, and it is not a screen.',

@@ -16,9 +16,18 @@ request is one the job builds or tests, and a pull request whose files are all u
 top-level path, desktop UI code under `apps/desktop/src`, `apps/desktop/e2e`, daemon code outside the listed
 modules and the workspace packages under `packages/` all skip it.
 
-The job still runs whenever the files cannot be known: a non-`pull_request` event (so every push to `main`
-runs it), a missing or malformed repository or number, a failing `gh`, an empty list, or one of 3000 or more
-entries. A failed `desktop-scope` leaves an empty output, which is not `'false'`, so `desktop` runs.
+A push is decided the same way, from the files of the pushed commits: `desktop-scope` asks the compare API for
+`github.event.before...github.event.after` (a squash merge makes that the pull request's diff, and no checkout
+depth is needed) and applies the same file lists, so a push to `main` of a docs or UI change skips the job
+(amended 2026-11-24: 161 pushes a week each took a macOS runner, and a failed runner acquisition was 8 of 23
+failures on `main`). A `desktop` check stays required on pull requests. A push whose files cannot be known runs
+the job: a missing, malformed or all-zero `before` (a first push), a compare that is not `ahead` (a force
+push), a failing lookup, an empty list, a list of 300 or more files (the compare API's cap), or a push of
+more than 100 commits. This relies on main's runs never cancelling each other (`ci.yml` groups a non-pull-request
+run by its own commit), so every push is compared against its own `before`; if runs could be cancelled, a later
+push would hide an earlier push's desktop change.
+
+The job still runs whenever the files cannot be known: a `merge_group` or `workflow_dispatch` event, a missing or malformed repository or number, a failing `gh`, an empty list, or a list at its API's cap (3000 paths for a pull request's files, 300 for a push's compare). A failed `desktop-scope` leaves an empty output, which is not `'false'`, so `desktop` runs.
 
 **What counts**, grouped as `scripts/desktop-scope.mjs` lists it:
 
@@ -61,6 +70,6 @@ would run the job on nearly every pull request again. That code runs alike on Li
 it. The list follows the first hop of what is macOS-relevant instead.
 
 Keeping the default to run was turned down because it is what ran the job on 80% of pull requests. The cost of
-the allowlist is that a file it misses can break only on macOS and merge; the next push to `main` runs the job
-and shows it. A dependency change cannot slip past, since a frozen-lockfile install means `pnpm-lock.yaml`
+the allowlist is that a file it misses can break only on macOS and merge; a red `desktop` on a push stays visible
+on that commit's run, and a later push that touches only docs skips the job. A dependency change cannot slip past, since a frozen-lockfile install means `pnpm-lock.yaml`
 changes with it.

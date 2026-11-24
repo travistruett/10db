@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4897c667-53b7-44c6-a086-cb58554e7754",
+  "id": "d1c577d3-0019-41a0-85cd-7f2fc14d128d",
   "prevId": "1e9254bf-789a-49e0-b414-e4380b4281cb",
   "tables": {
     "aa_models": {
@@ -2080,6 +2080,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "screen_id": {
+          "name": "screen_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -2096,6 +2103,19 @@
           "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "evidence_screen_id_task_screens_id_fk": {
+          "name": "evidence_screen_id_task_screens_id_fk",
+          "tableFrom": "evidence",
+          "tableTo": "task_screens",
+          "columnsFrom": [
+            "screen_id"
           ],
           "columnsTo": [
             "id"
@@ -8889,28 +8909,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "handled_through_ts": {
-          "name": "handled_through_ts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "auto_answers": {
-          "name": "auto_answers",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "asked": {
-          "name": "asked",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "settled_through_ts": {
           "name": "settled_through_ts",
           "type": "text",
@@ -9673,6 +9671,34 @@
         },
         "kept_sha": {
           "name": "kept_sha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sent_session_id": {
+          "name": "sent_session_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

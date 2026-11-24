@@ -42,6 +42,7 @@
         "classifier",
         "safety_check",
         "host",
+        "cant_run_in_lane",
         "question"
       ]
     },

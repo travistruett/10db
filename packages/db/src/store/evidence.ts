@@ -1,10 +1,11 @@
 import {
   EventType,
+  EvidenceKind,
   mintId,
   NotFoundError,
   EvidenceDto,
   type EvidenceId,
-  type EvidenceKind,
+  type TaskScreenId,
   type WorkstreamId,
 } from '@10db/contracts';
 import { asc, eq } from 'drizzle-orm';
@@ -18,7 +19,7 @@ interface NewEvidenceBase {
   readonly commitShas: readonly string[];
 }
 
-/** A gate or agent check records its command and exit code; a note or `no_revert` record has neither. */
+/** A gate or agent check records its command and exit code; a note or `no_revert` record has neither; a browser record names its picture. */
 export type NewEvidence =
   | (NewEvidenceBase & {
       readonly kind: typeof EvidenceKind.Gate | typeof EvidenceKind.Agent;
@@ -29,6 +30,12 @@ export type NewEvidence =
       readonly kind: typeof EvidenceKind.Builder | typeof EvidenceKind.NoRevert;
       readonly command: null;
       readonly exitCode: null;
+    })
+  | (NewEvidenceBase & {
+      readonly kind: typeof EvidenceKind.Browser;
+      readonly command: null;
+      readonly exitCode: null;
+      readonly screenId: TaskScreenId;
     });
 
 /** A stored evidence row does not satisfy the evidence contract. */
@@ -55,7 +62,10 @@ export function insertEvidence(ctx: WriteContext, input: NewEvidence): EvidenceD
     commitShas: [...input.commitShas],
     createdAt: ctx.now,
   };
-  ctx.tx.insert(schema.evidence).values(row).run();
+  ctx.tx
+    .insert(schema.evidence)
+    .values({ ...row, screenId: input.kind === EvidenceKind.Browser ? input.screenId : null })
+    .run();
   ctx.emit({
     type: EventType.EvidenceRecorded,
     entityType: 'evidence',

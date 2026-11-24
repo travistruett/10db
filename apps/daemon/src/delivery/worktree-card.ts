@@ -19,7 +19,7 @@ import {
 } from './cards';
 import { post, raise, withdraw, type DeliveryContext } from './context';
 import { handMadeCards } from './hand-made-cards';
-import { keepHandMadeFolderOutOfSpotlight, removeMergedHandMade } from './hand-made-worktrees';
+import { removeMergedHandMade } from './hand-made-worktrees';
 import { jobKey, JobQueue } from './jobs';
 import type { BatchStarter } from './start';
 import { retireWorktree } from './worktree-cleanup';
@@ -179,11 +179,9 @@ export function createWorktreeCardAnswers(
         });
         return;
       }
-      case 'spotlight': {
-        if (answer.choice !== WorktreeChoice.KeepSpotlightOut) return;
-        keepHandMadeFolderOutOfSpotlight(ctx, getProject(ctx.state.db, item.projectId));
+      case 'spotlight':
+        // The card only tells the builder; its answer changes nothing.
         return;
-      }
       case 'branch': {
         if (answer.choice !== CheckoutChoice.SwitchBack) return;
         const batch = getBatch(ctx.state.db, offer.batchId);

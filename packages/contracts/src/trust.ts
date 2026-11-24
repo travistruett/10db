@@ -86,11 +86,23 @@ export function effectiveTrust(app: TrustSwitches, overrides: TrustOverrides): T
   return merged;
 }
 
+/** One skill or plugin that would load, and the switch that brings it; null when none of them owns it. */
+const SetupLoadedItem = z.object({ what: z.string(), from: z.enum(TRUST_SWITCH_KEYS).nullable() });
+
 /** What would load into a project's next session, and what was left out and why. */
 export const SetupPreviewDto = z.object({
-  skills: z.array(z.string()),
-  plugins: z.array(z.string()),
-  leftOut: z.array(z.object({ what: z.string(), why: z.string() })),
+  skills: z.array(SetupLoadedItem),
+  plugins: z.array(SetupLoadedItem),
+  leftOut: z.array(
+    z.object({
+      what: z.string(),
+      why: z.string(),
+      /** The switch whose setup this was left out of; null when none of them owns it. */
+      from: z.enum(TRUST_SWITCH_KEYS).nullable(),
+      /** Left out as the builder would expect (a duplicate name, 10db's own skill): shown folded and quiet. */
+      expected: z.boolean(),
+    }),
+  ),
 });
 export type SetupPreviewDto = z.infer<typeof SetupPreviewDto>;
 

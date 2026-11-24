@@ -17,3 +17,14 @@
 - The hook judge that runs them is `inbox/hook-judge.ts` (`createHookJudge`, `LimitNotes`); the card a noted limit
   raises is `inbox/limit-card.ts`, with the three answers, and Always in this project stores a grant in the
   answer's write (`inbox/service.ts`).
+- `propose-production.ts` (`proposeProduction`, behind `GET /projects/:id/live-systems/proposals`) reads a capped set of
+  files from `origin/<base>`'s commit, else HEAD, in git's object store and proposes live-system entries (vercel.json
+  aliases, `*PROD*` names and production URLs in `.env*.example`, prod compose images, production workflow urls, prod
+  AWS and GCP profiles), each with its file and line, minus those already listed. Nothing is added by it; the builder's
+  click writes through `setProjectLiveSystems`.
+- `skip-recorder.ts` records each skipped call once. A skipped shell call (`Bash`, Codex's too) whose summary isn't cut and
+  whose program `sandbox/program-reach.ts` (`programRunnable`, handed in as the recorder's `runnable`) finds outside what the lane's kernel profile reads (`spec.settings.filesystem.allowRead`: the system roots, the
+  checkout, the toolchain and the lane's own reads), by its real path on the lane's `PATH` (a program not found or a command that isn't
+  a plain first word counts as runnable), is recorded `cant_run_in_lane` in place of its own kind, with the original reason kept after the new one. No Run these now clears
+  it: the program fails in the sandbox however it is approved, and the card says to use 10db's browser or run it
+  yourself. `programRunnable` lives in the sandbox module, since the sandbox reaches the trust module through the guard.

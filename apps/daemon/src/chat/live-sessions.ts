@@ -1,5 +1,6 @@
 import type { ConversationId, SessionId } from '@10db/contracts';
 import type { WaitObserver } from '../inbox';
+import type { ToolImages } from '../mcp';
 import type { ShapeReviewTurn } from '../shape';
 
 // A chat's session that is open now, as its tools need it: a card a tool raises is told to the
@@ -23,6 +24,11 @@ export interface ChatLive {
   readonly review: () => readonly ShapeReviewTurn[];
   /** Whether this session runs no subagents, so does Plan's reviews itself. */
   readonly inSession: () => boolean;
+  /**
+   * Hands the session the pictures a tool answered, as a message into its open turn. Present only for an
+   * agent that drops the image blocks of a tool result.
+   */
+  readonly showImages?: (images: ToolImages) => void;
 }
 
 export interface ChatLiveSessions {

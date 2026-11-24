@@ -102,8 +102,10 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   pass on its own head (`docs/architecture/decisions/2026-11-02-main-has-no-merge-queue.md`). CI
   still runs on `merge_group`, which is inert without a queue.
 - Sessions running in parallel each work in their own worktree, never in a shared checkout. A
-  worktree made by hand goes in `10db-worktrees/` beside the checkout:
-  `git worktree add ../10db-worktrees/<name> -b <branch> origin/main`. Never put one inside the
+  worktree made by hand goes in `10db-worktrees.noindex/` beside the checkout, a name Spotlight skips
+  (`docs/architecture/decisions/2026-11-24-hand-made-worktrees-live-in-a-noindex-folder.md`; the older
+  `10db-worktrees/` is still accepted while it drains):
+  `git worktree add ../10db-worktrees.noindex/<name> -b <branch> origin/main`. Never put one inside the
   checkout, where the linters, tests and gate would read it too. Remove it once its work merges: once
   its PR merges, or, for an implementer's worktree that never gets its own PR, once its branch merges
   into the integration branch. Its `.dev/data/tools` is read-only, so make it writable first
@@ -130,7 +132,7 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   `--no-verify`, `LEFTHOOK=0`, `LEFTHOOK_EXCLUDE` or `core.hooksPath`.
 - `commit --amend`, `stash`, `reset --hard/--keep/--merge`, rebases, `clean -f`, `checkout -- .`,
   `branch -D`, force pushes and pushes to `main` ask first. One exception, in the Claude guard
-  and inside a worktree in `10db-worktrees/` only: discarding named tracked files
+  and inside a worktree in `10db-worktrees.noindex/` (or the older `10db-worktrees/`) only: discarding named tracked files
   (`git checkout -- <file>`, `git restore <file>`) doesn't ask. It holds only where git runs: the
   command's cwd, or the directory that plain `cd <dir> &&` segments right before the git call lead
   to. `git -C <worktree>`, a `cd` joined by `;` or `||`, a `cd` the guard can't read or that
@@ -146,7 +148,7 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   (never for `-d`), and all its lookups for one command wait at most 20 s together; a branch not
   confirmed by then counts as unconfirmed. Codex has no such check; its rule always prompts.
   A bare `git push` is judged in the directory the command runs in: the Claude guard follows a
-  `cd` (and `git -C`) earlier in the same command line, so `cd ../10db-worktrees/x && git push`
+  `cd` (and `git -C`) earlier in the same command line, so `cd ../10db-worktrees.noindex/x && git push`
   on a feature branch doesn't ask, while a `cd` to a checkout on main, or to a path it can't read
   (a variable, substitution, `~`, glob, `pushd`, `eval`, a subshell, a `cd` that may not run, a
   relative name without `./` or `../`, which CDPATH may redirect, or zsh's stack entries `+N` and

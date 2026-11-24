@@ -79,6 +79,9 @@ const STUBS: Record<string, readonly string[]> = {
   gh: [
     'if [ -n "${STUB_GH_OFFLINE:-}" ]; then echo "error connecting to api.github.com" >&2; exit 1; fi',
     'case "$*" in',
+    // The commits whose ci.yml push run finished green: STUB_CI_GREEN, else every commit the stub lists.
+    "  'api repos/{owner}/{repo}/actions/workflows/ci.yml/runs'*)",
+    '    for sha in ${STUB_CI_GREEN-${STUB_COMMITS:-$STUB_HEAD_SHA}}; do echo "$sha"; done ;;',
     "  'api repos/{owner}/{repo}/commits/'*)",
     '    [ -n "$STUB_HEAD_SHA" ] || { echo "gh: No commit found for SHA: x (HTTP 422)" >&2; exit 1; }',
     '    echo "$STUB_HEAD_SHA" ;;',

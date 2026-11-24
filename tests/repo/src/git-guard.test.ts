@@ -667,7 +667,7 @@ describe("git guard with another session's work already staged", () => {
 });
 
 // A checkout laid out as AGENTS.md says: the main checkout `10db/`, an agent's linked worktree in
-// `10db-worktrees/` beside it, and a linked worktree anywhere else. Inside the agent's worktree,
+// `10db-worktrees.noindex/` beside it (the older `10db-worktrees/` still counts), and a linked worktree anywhere else. Inside the agent's worktree,
 // discarding named files is that agent's own business; everywhere else it still asks.
 describe('git guard in an agent worktree beside the checkout', TABLE, () => {
   let layout: string;
@@ -675,6 +675,7 @@ describe('git guard in an agent worktree beside the checkout', TABLE, () => {
   let agent: string;
   let elsewhere: string;
   let replaced: string;
+  let drained: string;
   let fakeOfCheckout: string;
   let fakeOfAgent: string;
 
@@ -683,7 +684,9 @@ describe('git guard in an agent worktree beside the checkout', TABLE, () => {
     checkout = createThrowawayRepo('10db-guard', join(layout, '10db'));
     for (const file of ['a.ts', 'b.ts', 'src/c.ts']) checkout.stage(file, 'x\n');
     checkout.commit('seed');
-    agent = join(layout, '10db-worktrees', 'agent');
+    agent = join(layout, '10db-worktrees.noindex', 'agent');
+    drained = join(layout, '10db-worktrees', 'drained');
+    checkout.git('worktree', 'add', '-q', '-b', 'feat/drained', drained);
     elsewhere = join(layout, 'elsewhere', 'agent');
     checkout.git('worktree', 'add', '-q', '-b', 'feat/agent', agent);
     checkout.git('worktree', 'add', '-q', '-b', 'feat/elsewhere', elsewhere);
@@ -694,14 +697,14 @@ describe('git guard in an agent worktree beside the checkout', TABLE, () => {
     symlinkSync(agent, join(checkout.dir, '+0'));
     symlinkSync(agent, join(checkout.dir, 'agentlink'));
     // A worktree whose tracked directory src/ was replaced on disk by a file named src.
-    replaced = join(layout, '10db-worktrees', 'replaced');
+    replaced = join(layout, '10db-worktrees.noindex', 'replaced');
     checkout.git('worktree', 'add', '-q', '-b', 'feat/replaced', replaced);
     rmSync(join(replaced, 'src'), { recursive: true });
     writeFileSync(join(replaced, 'src'), 'X\n');
-    // Directories in 10db-worktrees/ that are not linked worktrees: a `.git` file pointing at the
+    // Directories in 10db-worktrees.noindex/ that are not linked worktrees: a `.git` file pointing at the
     // main checkout's repository, and one pointing at another worktree's git directory.
-    fakeOfCheckout = join(layout, '10db-worktrees', 'fake-checkout');
-    fakeOfAgent = join(layout, '10db-worktrees', 'fake-agent');
+    fakeOfCheckout = join(layout, '10db-worktrees.noindex', 'fake-checkout');
+    fakeOfAgent = join(layout, '10db-worktrees.noindex', 'fake-agent');
     for (const [dir, gitdir] of [
       [fakeOfCheckout, join(checkout.dir, '.git')],
       [fakeOfAgent, join(checkout.dir, '.git', 'worktrees', 'agent')],
@@ -832,6 +835,10 @@ describe('git guard in an agent worktree beside the checkout', TABLE, () => {
     ]);
   });
 
+  it('still treats a worktree in the older folder as the agent’s own', () => {
+    expect(inAgent('git restore a.ts', drained)).toBe('allow');
+  });
+
   it('asks about a path that names a tracked directory replaced by a file on disk', () => {
     expect(inAgent('git checkout -- src', replaced)).toBe('ask');
     expect(inAgent('git restore src', replaced)).toBe('ask');
@@ -883,7 +890,7 @@ describe('git guard in an agent worktree beside the checkout', TABLE, () => {
       ['a ./ cd within the agent worktree', 'cd ./src && git restore c.ts', 'agent', 'allow'],
       [
         'a ../ cd into the agent worktree',
-        'cd ../10db-worktrees/agent && git restore a.ts',
+        'cd ../10db-worktrees.noindex/agent && git restore a.ts',
         'checkout',
         'allow',
       ],
@@ -976,7 +983,7 @@ describe('git guard judging a push in the directory the command runs in', TABLE,
     checkout.stage('a.ts', 'x\n');
     checkout.commit('seed');
     checkout.git('branch', '-m', 'main');
-    worktree = join(layout, '10db-worktrees', 'pr147');
+    worktree = join(layout, '10db-worktrees.noindex', 'pr147');
     checkout.git('worktree', 'add', '-q', '-b', 'feat/pr147', worktree);
     onMainSub = join(checkout.dir, 'sub');
     mkdirSync(onMainSub);
@@ -1034,7 +1041,7 @@ describe('git guard judging a push in the directory the command runs in', TABLE,
       ['cd -- path', 'cd -- WT && git push', 'allow'],
       ['cd -L path', 'cd -L WT && git push', 'allow'],
       ['quoted path', "cd 'WT' && git push", 'allow'],
-      ['relative cd', 'cd ../10db-worktrees/pr147 && git push', 'allow'],
+      ['relative cd', 'cd ../10db-worktrees.noindex/pr147 && git push', 'allow'],
       ['push with a remote and no refspec', 'cd WT && git push origin', 'allow'],
       ['git -C the worktree', 'git -C WT push', 'allow'],
       ['cd, then git -C a relative path', 'cd WT/.. && git -C pr147 push', 'allow'],

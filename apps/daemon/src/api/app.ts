@@ -57,6 +57,8 @@ import {
   PlaybookInput,
   LanePermissionsDto,
   LiveSystemsDto,
+  McpServerName,
+  SetRepoMcpVerdict,
   TrustOverrides,
   TrustSwitches,
   ApproveYourMcpServer,
@@ -549,6 +551,24 @@ export function createApp(deps: ApiDeps) {
         c.json(
           deps.services.setLiveSystems(
             ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/projects/:projectId/live-systems/proposals', async (c) =>
+      c.json(await deps.services.liveSystemProposals(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/projects/:projectId/repo-mcp-servers', (c) =>
+      c.json(deps.services.repoMcpServers(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/repo-mcp-servers/:name',
+      validator('json', (value): SetRepoMcpVerdict => SetRepoMcpVerdict.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setRepoMcpVerdict(
+            ProjectId.parse(c.req.param('projectId')),
+            McpServerName.parse(c.req.param('name')),
             c.req.valid('json'),
           ),
         ),
