@@ -286,7 +286,7 @@ import {
 import { ConnectServiceDto } from './connect-service';
 import { LinearSignInsDto } from './linear-sign-ins';
 import { FigmaPressInput, FigmaSignInsDto } from './figma';
-import { LinearPostDto, LinearReporterSettings } from './linear-posts';
+import { LinearPostDto, LinearReporterSettings, TaskLinearDto } from './linear-posts';
 import { StepPlanDto } from './steps';
 import { WorkstreamChangesDto } from './workstream-changes';
 import {
@@ -535,6 +535,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'figma-sign-ins-dto': FigmaSignInsDto,
   'figma-press-input': FigmaPressInput,
   'linear-post-dto': LinearPostDto,
+  'task-linear-dto': TaskLinearDto,
   'linear-reporter-settings': LinearReporterSettings,
   'compose-preview-dto': ComposePreviewDto,
   'step-plan-dto': StepPlanDto,

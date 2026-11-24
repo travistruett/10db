@@ -1,9 +1,4 @@
-import {
-  LinearEventKind,
-  LinearPostState,
-  type LinearPostDto,
-  type TaskDto,
-} from '@10db/contracts';
+import { LinearEventKind, LinearPostState, type LinearPostDto, type TaskId } from '@10db/contracts';
 import { Badge, Group, Stack, Text } from '@mantine/core';
 import { useTaskLinearPosts } from '../../daemon/linear-queries';
 import { absoluteTime, fromNow, useNow } from '../../shell/relative';
@@ -86,29 +81,43 @@ function PostRow({
   );
 }
 
-/** What the reporter owes a task's Linear issue and has posted to it, newest first. */
-export function LinearTab({ task }: { readonly task: Pick<TaskDto, 'id' | 'external'> }) {
+/**
+ * What the reporter owes a task's Linear issue and has posted to it, newest first. A follow-up shows its source's
+ * issue and only the updates made for the follow-up itself.
+ */
+export function LinearTab({ taskId }: { readonly taskId: TaskId }) {
   const now = useNow();
-  const query = useTaskLinearPosts(task.id);
-  const posts = query.data ?? [];
-  if (task.external == null || query.isPending) return null;
+  const query = useTaskLinearPosts(taskId);
+  if (query.isPending) return null;
   if (query.isError)
     return (
       <Text size="sm" c="red">
         Couldn't read the Linear updates: {query.error.message}
       </Text>
     );
-  if (posts.length === 0)
-    return (
-      <Text size="sm" c="dimmed">
-        Nothing has been reported to {task.external.id} yet.
-      </Text>
-    );
+  const { link, followUpOf, posts } = query.data;
+  if (link === null) return null;
   return (
-    <Stack gap="sm" role="list" aria-label="Linear updates">
-      {posts.map((post) => (
-        <PostRow key={post.id} post={post} issueUrl={task.external?.url ?? ''} now={now} />
-      ))}
+    <Stack gap="sm">
+      <Group gap={8}>
+        <ExternalLink url={link.url} label={link.id} size="sm" />
+        {followUpOf === null ? null : (
+          <Text size="xs" c="dimmed">
+            Follow-up of {followUpOf.title}; it reports to this issue.
+          </Text>
+        )}
+      </Group>
+      {posts.length === 0 ? (
+        <Text size="sm" c="dimmed">
+          Nothing has been reported to {link.id} yet.
+        </Text>
+      ) : (
+        <Stack gap="sm" role="list" aria-label="Linear updates">
+          {posts.map((post) => (
+            <PostRow key={post.id} post={post} issueUrl={link.url} now={now} />
+          ))}
+        </Stack>
+      )}
     </Stack>
   );
 }

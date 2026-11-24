@@ -72,6 +72,7 @@ import {
 import { sameSetting } from '../settings/model-setting-options';
 import { ModelSettingSelect } from '../settings/model-setting-select';
 import { KeptWork } from './kept-work';
+import { useTaskLinearPosts } from '../../daemon/linear-queries';
 import { LinearTab } from './linear-tab';
 import { TaskPictures } from './task-pictures';
 import { TaskPlan } from './task-plan';
@@ -178,6 +179,8 @@ export function TaskDrawer({
   const patch = usePatchTask();
   // The placement is saved on its own the moment it is chosen, so its refusal stays beside it.
   const placementPatch = usePatchTask();
+  // A follow-up of a Linear-linked task reports to its source's issue, so the link is the daemon's to say.
+  const linearLink = useTaskLinearPosts(task.id).data?.link ?? null;
   const placementIsOpen = placementOpen(task, workstream?.state);
   const [landing, setLanding] = useState<LandingDraft>(() => draftOf(task.landing));
   const [landingError, setLandingError] = useState<string | null>(null);
@@ -375,7 +378,7 @@ export function TaskDrawer({
             >
               Reviews
             </Tabs.Tab>
-            {task.external == null ? null : <Tabs.Tab value="linear">Linear</Tabs.Tab>}
+            {linearLink === null ? null : <Tabs.Tab value="linear">Linear</Tabs.Tab>}
             <Tabs.Tab value="edit">Edit</Tabs.Tab>
           </Tabs.List>
           <Tabs.Panel value="overview" pt="lg">
@@ -437,7 +440,7 @@ export function TaskDrawer({
             )}
           </Tabs.Panel>
           <Tabs.Panel value="linear" pt="md">
-            <LinearTab task={task} />
+            <LinearTab taskId={task.id} />
           </Tabs.Panel>
           <Tabs.Panel value="edit" pt="md">
             <Stack gap="lg">

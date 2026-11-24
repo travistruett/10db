@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ExternalLink } from './external';
 import { LinearPostId, SessionId, TaskId } from './ids';
 
 /** The moments of a task's life that the Linear reporter writes about. */
@@ -42,6 +43,17 @@ export const LinearPostDto = z.strictObject({
   recordedAt: z.iso.datetime().nullable(),
 });
 export type LinearPostDto = z.infer<typeof LinearPostDto>;
+
+/**
+ * A task's Linear issue and the updates made for it. A follow-up of a linked task reports to that task's issue,
+ * so its link is the source's and `followUpOf` names the source; its `posts` are its own rows only.
+ */
+export const TaskLinearDto = z.strictObject({
+  link: ExternalLink.nullable(),
+  followUpOf: z.strictObject({ id: TaskId, title: z.string() }).nullable(),
+  posts: z.array(LinearPostDto),
+});
+export type TaskLinearDto = z.infer<typeof TaskLinearDto>;
 
 /** `linear-reporter.<projectId>` in app_settings; absent reads as { on: true, note: '' }; a malformed value reads as off. */
 export const LinearReporterSettings = z.strictObject({
