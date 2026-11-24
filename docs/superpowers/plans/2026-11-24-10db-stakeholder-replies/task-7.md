@@ -1,7 +1,7 @@
 # Card 7: the invite line, the e2e, the spec section and the decision record
 
 **Spec:** §7.2 "The message" (its last lines).
-**Track:** A, last. Small. Rebase on the opening-line PR if it has landed; don't touch the opening line.
+**Track:** A, last. Small. The opening line (#812) is on main; don't touch it.
 
 ## Files
 

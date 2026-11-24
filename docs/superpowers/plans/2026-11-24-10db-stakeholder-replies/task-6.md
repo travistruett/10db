@@ -1,7 +1,7 @@
 # Card 6: the builder's reply, the "Mark asked" card and its notification
 
 **Spec:** §8.3 "The builder answers instead"; §10.2 "The question card"; §10.3 "The Inbox's Waiting tab".
-**Track:** A, after card 5. Feature. Rebase on the Waiting-view tidy-up if it has landed.
+**Track:** A, after card 5. Feature. The calmer Waiting card (#812) is on main; build on it.
 
 ## Files
 

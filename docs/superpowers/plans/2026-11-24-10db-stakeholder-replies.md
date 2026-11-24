@@ -5,8 +5,7 @@ when a reply answers a card and what a send records. So it gets this index, one 
 Per card: 1, 2, 4 and 5 are Core; 3 is Core because it is the Codex writer's tool lock; 6 is Feature; 7 is Small.
 **Spec:** `docs/superpowers/specs/2026-11-11-10db-stakeholder-questions-design.md`: S8, S9, S13, §7.3, §7.4,
 §8.2, §8.3 and §8.5. Card 7 adds a section to it.
-**Builds on:** `main` at 163a454e. Two pieces ship separately: the friendlier opening line and the Waiting-view
-tidy-up. Card 7 rebases on the opening line if it lands first, and card 6 does the same for the Waiting view.
+**Builds on:** `main` at f46749b2, which already has the friendlier opening line and the calmer Waiting card (#812).
 
 ## Brief
 
