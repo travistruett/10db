@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -3571,7 +3572,24 @@ export function createGit(opts: GitOptions = {}): Git {
       await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
         () => undefined,
       );
-      const changed = (await changes(c)).filter((path) => written.has(path));
+      // Staged changes too: `changes` compares files to HEAD, so a staged file that matches HEAD
+      // would pass it and then stop read-tree.
+      const staged =
+        paths.length === 0
+          ? ''
+          : await git(
+              c,
+              ['diff-index', '--cached', '--name-only', '--no-renames', '-z', from, '--', ...paths],
+              {
+                env: { GIT_LITERAL_PATHSPECS: '1' },
+              },
+            );
+      const changed = [
+        ...new Set([
+          ...(await changes(c)).filter((path) => written.has(path)),
+          ...staged.split('\0').filter(Boolean),
+        ]),
+      ].sort();
       const reported = new Set(changed);
       const kept = (await untrackedInTheWay(c, from, to, written)).filter(
         (path) => !reported.has(path),
@@ -3615,6 +3633,68 @@ export function createGit(opts: GitOptions = {}): Git {
   /** One path of the classifier: what the index and the file hold, and what a commit's tree does. */
   type Entry = { readonly mode: string; readonly oid: string } | null;
 
+  /**
+   * Reads what `paths` hold in the folder (index entry and file content hash) and in commits' trees,
+   * for comparing. Read-only. A file is its blob's hash, null when absent, 'unreadable' when a
+   * directory is in its place; a symlink is the hash of its target text, as git stores it.
+   */
+  async function readWritten(c: Pinned, paths: readonly string[]) {
+    const literal = { env: { GIT_LITERAL_PATHSPECS: '1' } };
+    const treeOf = async (rev: string): Promise<Map<string, Entry>> => {
+      const found = new Map<string, Entry>(paths.map((path) => [path, null]));
+      if (paths.length === 0) return found;
+      const out = await git(
+        c,
+        ['ls-tree', '-r', '-z', '--full-tree', rev, '--', ...paths],
+        literal,
+      );
+      for (const entry of parseTree(out))
+        found.set(entry.path, { mode: entry.mode, oid: entry.oid });
+      return found;
+    };
+    // Index: stage 0 only; a path in conflict reads as 'conflict', which matches no tree.
+    const index = new Map<string, Entry | 'conflict'>(paths.map((path) => [path, null]));
+    if (paths.length > 0) {
+      const out = await git(c, ['ls-files', '-s', '-z', '--', ...paths], literal);
+      for (const record of out.split('\0').filter(Boolean)) {
+        const tab = record.indexOf('\t');
+        const [mode = '', oid = '', stage = ''] = record.slice(0, tab).split(' ');
+        const path = record.slice(tab + 1);
+        index.set(path, stage === '0' ? { mode, oid } : 'conflict');
+      }
+    }
+    const files = new Map<string, string | null>();
+    for (const path of paths) {
+      const kind = entryAt(c.real, path);
+      if (kind === 'missing') files.set(path, null);
+      else if (kind === 'directory') files.set(path, 'unreadable');
+      else if (lstatSync(join(c.real, path)).isSymbolicLink())
+        // hash-object would follow the link; git stores its text.
+        files.set(
+          path,
+          (
+            await git(c, ['hash-object', '--no-filters', '--stdin'], {
+              input: readlinkSync(join(c.real, path)),
+            })
+          ).trim(),
+        );
+      else files.set(path, (await git(c, ['hash-object', '--no-filters', '--', path])).trim());
+    }
+    const indexIs = (path: string, tree: Map<string, Entry>): boolean => {
+      const held = index.get(path) ?? null;
+      const want = tree.get(path) ?? null;
+      if (held === 'conflict') return false;
+      return held === null || want === null
+        ? held === want
+        : held.mode === want.mode && held.oid === want.oid;
+    };
+    const fileIs = (path: string, tree: Map<string, Entry>): boolean =>
+      (files.get(path) ?? null) === (tree.get(path)?.oid ?? null);
+    const matches = (tree: Map<string, Entry>): boolean =>
+      paths.every((path) => indexIs(path, tree) && fileIs(path, tree));
+    return { treeOf, indexIs, fileIs, matches };
+  }
+
   async function classifyFolder(input: PromotionInput): Promise<FolderRead> {
     return withRepoLock(realpathSync(input.repo), async () => {
       const c = await pinned(input.repo);
@@ -3626,58 +3706,10 @@ export function createGit(opts: GitOptions = {}): Git {
       const base = symbolic ? null : await revParse(c, `${ref}^{commit}`);
       if (base !== null && (await isAncestor(c, to, base))) return { row: 'B' };
       const paths = await writtenBy(c, from, to);
-      const literal = { env: { GIT_LITERAL_PATHSPECS: '1' } };
-      const treeOf = async (rev: string): Promise<Map<string, Entry>> => {
-        const found = new Map<string, Entry>(paths.map((path) => [path, null]));
-        if (paths.length === 0) return found;
-        const out = await git(
-          c,
-          ['ls-tree', '-r', '-z', '--full-tree', rev, '--', ...paths],
-          literal,
-        );
-        for (const entry of parseTree(out))
-          found.set(entry.path, { mode: entry.mode, oid: entry.oid });
-        return found;
-      };
+      const { treeOf, indexIs, fileIs, matches } = await readWritten(c, paths);
       const atT = await treeOf(from);
       const atC = await treeOf(to);
       const atR = base === null ? null : await treeOf(base);
-      // Index: stage 0 only; a path in conflict reads as 'conflict', which matches no tree.
-      const index = new Map<string, Entry | 'conflict'>(paths.map((path) => [path, null]));
-      if (paths.length > 0) {
-        const out = await git(c, ['ls-files', '-s', '-z', '--', ...paths], literal);
-        for (const record of out.split('\0').filter(Boolean)) {
-          const tab = record.indexOf('\t');
-          const [mode = '', oid = '', stage = ''] = record.slice(0, tab).split(' ');
-          const path = record.slice(tab + 1);
-          index.set(path, stage === '0' ? { mode, oid } : 'conflict');
-        }
-      }
-      // The file's content hash, null when absent, 'unreadable' for a directory in its place.
-      const files = new Map<string, string | null>();
-      for (const path of paths) {
-        const entry = entryAt(c.real, path);
-        files.set(
-          path,
-          entry === 'missing'
-            ? null
-            : entry === 'directory'
-              ? 'unreadable'
-              : (await git(c, ['hash-object', '--no-filters', '--', path])).trim(),
-        );
-      }
-      const indexIs = (path: string, tree: Map<string, Entry>): boolean => {
-        const held = index.get(path) ?? null;
-        const want = tree.get(path) ?? null;
-        if (held === 'conflict') return false;
-        return held === null || want === null
-          ? held === want
-          : held.mode === want.mode && held.oid === want.oid;
-      };
-      const fileIs = (path: string, tree: Map<string, Entry>): boolean =>
-        (files.get(path) ?? null) === (tree.get(path)?.oid ?? null);
-      const matches = (tree: Map<string, Entry>): boolean =>
-        paths.every((path) => indexIs(path, tree) && fileIs(path, tree));
       if (base === from) {
         if (matches(atT)) return { row: 'C' };
         if (matches(atC)) return { row: 'D' };
@@ -3687,7 +3719,9 @@ export function createGit(opts: GitOptions = {}): Git {
         if (base !== from && matches(atR)) return { row: 'E', now: base };
         if (paths.every((path) => indexIs(path, atR))) {
           const edited = paths.filter((path) => !fileIs(path, atR) && !fileIs(path, atC));
-          if (edited.length > 0) return { row: 'F', paths: edited };
+          // A file already at C that the base lacks is 10db's own write, half done.
+          const written = paths.some((path) => fileIs(path, atC) && !fileIs(path, atR));
+          if (edited.length > 0 && !written) return { row: 'F', paths: edited };
         }
       }
       const odd =
@@ -3699,6 +3733,11 @@ export function createGit(opts: GitOptions = {}): Git {
   async function finishPromotion(input: PromotionInput): Promise<'promoted' | 'raced'> {
     return withRepoLock(realpathSync(input.repo), async () => {
       const c = await pinned(input.repo);
+      // The folder may have changed since the classifier read it: C's files must still be all there.
+      if ((await currentBranch(c)) !== input.branch) return 'raced';
+      const paths = await writtenBy(c, input.expected, input.candidate);
+      const { treeOf, matches } = await readWritten(c, paths);
+      if (!matches(await treeOf(input.candidate))) return 'raced';
       try {
         await git(c, [
           'update-ref',
