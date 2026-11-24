@@ -192,6 +192,16 @@ export interface Gh {
     input: { readonly repo: string; readonly jobId: string },
     call: GhCall,
   ): Promise<boolean>;
+  /**
+   * The names of the checks whose last finished result on `branch` is a failure. Each check is read
+   * on the newest of the branch's latest few commits where it finished, so a commit whose runs are
+   * still going does not hide an older red. A cancelled run decides nothing. Throws a GhError when a
+   * call fails.
+   */
+  baseFailingChecks(
+    input: { readonly repo: string; readonly branch: string },
+    call: GhCall,
+  ): Promise<ReadonlySet<string>>;
   /** The branches the pull request merges from and into, or null when GitHub has no such pull request. */
   prBranches(
     input: { readonly repo: string; readonly ref: string },
@@ -418,6 +428,23 @@ const ActionsJobView = z.object({
 const AnnotationsView = z.array(z.object({ message: z.string().nullable().optional() }));
 /** GitHub's annotation on a job that no hosted runner picked up before it cancelled the job. */
 const NOT_ACQUIRED = /was not acquired by runner of type hosted/i;
+
+/** `GET /repos/{repo}/commits?sha=<branch>`: the newest commits of a branch. */
+const BranchCommitsView = z.array(z.object({ sha: z.string() }));
+/** `GET /repos/{repo}/commits/{sha}/check-runs`. */
+const CommitCheckRunsView = z.object({
+  check_runs: z.array(
+    z.object({ name: z.string(), status: z.string(), conclusion: z.string().nullable() }),
+  ),
+});
+/** How many of a branch's newest commits are read for a check's last finished result. */
+const BASE_COMMITS_READ = 5;
+/** The conclusions of a finished check that say it failed. */
+const FAILED_CONCLUSIONS: ReadonlySet<string> = new Set([
+  'failure',
+  'timed_out',
+  'startup_failure',
+]);
 
 /** The merge queue read: `isInMergeQueue` is the pull request's own field in GitHub's GraphQL schema. */
 const MergeQueueView = z.object({
@@ -844,6 +871,25 @@ export function createGh(exec: GhExec): Gh {
       const noteArgs = ['api', `repos/${repo}/check-runs/${jobId}/annotations`];
       const notes = parseOutput(AnnotationsView, noteArgs, await ok(noteArgs, call));
       return notes.some((note) => NOT_ACQUIRED.test(note.message ?? ''));
+    },
+    async baseFailingChecks({ repo, branch }, call) {
+      const listArgs = [
+        'api',
+        `repos/${repo}/commits?sha=${encodeURIComponent(branch)}&per_page=${String(BASE_COMMITS_READ)}`,
+      ];
+      const commits = parseOutput(BranchCommitsView, listArgs, await ok(listArgs, call));
+      const decided = new Map<string, boolean>();
+      for (const { sha } of commits) {
+        const args = ['api', `repos/${repo}/commits/${sha}/check-runs?per_page=100`];
+        const runs = parseOutput(CommitCheckRunsView, args, await ok(args, call));
+        for (const run of runs.check_runs) {
+          if (decided.has(run.name) || run.status !== 'completed' || run.conclusion === null)
+            continue;
+          if (run.conclusion === 'cancelled' || run.conclusion === 'skipped') continue;
+          decided.set(run.name, FAILED_CONCLUSIONS.has(run.conclusion));
+        }
+      }
+      return new Set([...decided].filter(([, failed]) => failed).map(([name]) => name));
     },
     async prCreate({ repo, base, head, title, bodyFile, draft }, call) {
       const args = [

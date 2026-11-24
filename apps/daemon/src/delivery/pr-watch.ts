@@ -37,6 +37,7 @@ import {
   type RequiredChecks,
 } from '../github';
 import { prCardKey, prCards, detailOf } from './cards';
+import { classifyCiFailures } from './ci-failure-class';
 import { startCiFix } from './ci-fix';
 import { queuePassSettle, settleClosedPass } from './pass-settle';
 import { recordPassPullRequest, watchedAsPass } from './pass-watch';
@@ -56,9 +57,13 @@ import {
   rerunNoticeHead,
   rerunNotices,
   rerunRecord,
+  waitingOnBaseHead,
+  waitingOnBaseNotice,
+  waitingOnBaseRecord,
   type CancelledWhy,
   type NoRunnerRecord,
   type RerunRuns,
+  type WaitingOnBaseRecord,
 } from './notices';
 
 /** How often the watch reads every followed pull request. */
@@ -77,6 +82,14 @@ const RUN_STILL_RUNNING = /already running/i;
  * pull request. A shortage of macOS runners can last hours; past this the builder is told once.
  */
 const MAX_RUNNER_RERUNS = 3;
+/** How long a pull request waits on a base that fails its checks before the failure counts as its own. */
+const BASE_WAIT_MS = 60 * 60_000;
+/**
+ * How long, in minutes, a shortage of runners is given before each rerun, by the reruns made so far,
+ * and after the last one before the builder is told. A shortage comes in bursts of hours, so a rerun
+ * at once lands inside the same burst.
+ */
+const RUNNER_BACKOFF_MINUTES = [10, 20, 40, 20] as const;
 
 /** Longest reason kept on a batch: it is shown in the UI. */
 const MAX_REASON = 500;
@@ -131,6 +144,12 @@ export interface PullRequestLanding {
    * drain for an update is on) and did nothing: the watch counts it as not asked and asks again.
    */
   restartCi(batchId: BatchId): boolean;
+  /**
+   * The open pull request failed required checks the base failed too, and the base passes them
+   * again: merges the base into it and pushes it, so its checks run on a new head. Returns false
+   * when the shipper holds the ask (a drain is on): the watch asks again next round.
+   */
+  catchUpToBase(batchId: BatchId): boolean;
   /**
    * The open pull request is clean: a merge GitHub refused, or one 10db just pushed to, is asked again.
    * `catchUpCardWasOpen`: this round withdrew the card for a catch-up that stopped, so a merge is due.
@@ -285,6 +304,24 @@ export function createPrWatch(input: {
   const awaitingRuns = new Map<BatchId, { head: string | null; since: number; asked: boolean }>();
   /** Whether GitHub cancelled each Actions job (by job id) for want of a runner: a job's record never changes. */
   const noRunnerJobs = new Map<string, boolean>();
+  /** The required checks that failed on a pull request's head: one that then passes there was flaky. */
+  const failedOnHead = new Map<BatchId, { readonly head: string; readonly names: Set<string> }>();
+  /** When a head's runner shortage was first seen, or last rerun: the backoff counts from it. */
+  const noRunnerSince = new Map<BatchId, { readonly head: string; readonly at: number }>();
+  /**
+   * The open pull requests whose failing required checks fail on their base too, by root batch: no
+   * fix starts for them, and when the base passes again their checks start over.
+   */
+  const waitingOnBase = new Map<
+    BatchId,
+    {
+      readonly projectId: ProjectId;
+      readonly repo: string;
+      readonly branch: string;
+      readonly head: string;
+      readonly checks: readonly string[];
+    }
+  >();
   /** Each open pull request with a cancelled required check, by its root batch. */
   const cancelledRuns = new Map<BatchId, CancelledRun>();
   /**
@@ -879,9 +916,9 @@ export function createPrWatch(input: {
    * Runs again a required job GitHub cancelled because no hosted runner picked it up (the job has no
    * runner, no steps and the annotation "not acquired by Runner of type hosted"): a shortage of
    * runners, not a failure of the code, so no CI fix starts and no card is raised until the limit.
-   * Reruns it at once, up to `MAX_RUNNER_RERUNS` for one head of the pull request; the count is the
-   * stored notice's record, so a restart keeps it and a new head starts from zero. At the limit it
-   * raises one card naming the job and the attempts. A cancelled job that had a runner or ran a step,
+   * Reruns it after a backoff (`RUNNER_BACKOFF_MINUTES`), up to `MAX_RUNNER_RERUNS` for one head of the pull request; the count is the
+   * stored notice's record, so a restart keeps it and a new head starts from zero. Still stuck a
+   * last wait after the limit, it raises one card naming the job and the attempts. A cancelled job that had a runner or ran a step,
    * and a run a person cancelled, are no case of this and stay for `followCancelled`. Returns the
    * required checks without the jobs it dealt with. Throws gh's failure only when gh itself is down.
    */
@@ -931,6 +968,14 @@ export function createPrWatch(input: {
     const fresh = shortage.filter((job) => job.jobId !== null && !record.jobs.includes(job.jobId));
     if (fresh.length === 0) return rest;
     const names = [...new Set([...record.names, ...fresh.map((job) => job.name)])];
+    const nowMs = clock.now().getTime();
+    const since = noRunnerSince.get(root.id);
+    if (since?.head !== head) {
+      noRunnerSince.set(root.id, { head, at: nowMs });
+      return rest;
+    }
+    const wait = RUNNER_BACKOFF_MINUTES[Math.min(record.attempts, MAX_RUNNER_RERUNS)] ?? 0;
+    if (nowMs - since.at < wait * 60_000) return rest;
     if (record.attempts >= MAX_RUNNER_RERUNS) {
       if (record.carded) return rest;
       const next: NoRunnerRecord = { ...record, names, carded: true };
@@ -990,7 +1035,212 @@ export function createPrWatch(input: {
       };
       store('ran');
     }
+    noRunnerSince.set(root.id, { head, at: nowMs });
     return rest;
+  }
+
+  /**
+   * Remembers which required checks failed on the head, and when the same head's checks pass, raises
+   * one card per check that failed first, counting how often it did. Cards are per project, so a
+   * restart loses only the failure not yet seen to pass.
+   */
+  function noteFlaky(
+    root: BatchDto,
+    read: PullRequestStatus | null,
+    required: RequiredChecks | null,
+  ): void {
+    if (read?.state !== PrState.Open || required === null || root.ciFixOf !== null) {
+      failedOnHead.delete(root.id);
+      return;
+    }
+    const known = failedOnHead.get(root.id);
+    if (read.headSha === null) return;
+    if (required.state === 'failing') {
+      const entry =
+        known?.head === read.headSha ? known : { head: read.headSha, names: new Set<string>() };
+      for (const job of required.failing) entry.names.add(job.name);
+      failedOnHead.set(root.id, entry);
+      return;
+    }
+    if (required.state !== 'passing' || known?.head !== read.headSha) return;
+    failedOnHead.delete(root.id);
+    ctx.state.write((write) => {
+      for (const name of known.names) {
+        const open = findOpenByFoldKey(write.tx, root.projectId, prCardKey.flakyCheck(name));
+        const seen = open?.detail?.['occurrences'];
+        const before = typeof seen === 'number' ? seen : 0;
+        const card = prCards.flakyCheck(name, before + 1);
+        if (open === undefined) raiseIn(write, root.projectId, card);
+        else rewriteIn(write, root.projectId, card);
+      }
+    });
+  }
+
+  /**
+   * The checks failing on a pull request's base, read once a round per branch; null when the read
+   * fails (every failing check then counts as the pull request's own).
+   */
+  function readBase(
+    repo: string,
+    branch: string,
+    reads: Map<string, Promise<ReadonlySet<string> | null>>,
+    signal: AbortSignal,
+  ): Promise<ReadonlySet<string> | null> {
+    const key = prCardKey.baseRed(repo, branch);
+    let read = reads.get(key);
+    if (read === undefined) {
+      read = ctx.gh
+        .baseFailingChecks({ repo, branch }, ghCall(ctx, signal))
+        .catch((error: unknown) => {
+          if (ghDown(error)) throw error;
+          logger.warn({ repo, branch, err: detailOf(error) }, 'could not read the base checks');
+          return null;
+        });
+      reads.set(key, read);
+    }
+    return read;
+  }
+
+  /**
+   * Sorts a pull request's failing required checks into the base's and its own. Returns the checks a
+   * fix is for, or null while the pull request waits: every failing check fails on the base too, or
+   * the base has passed them and the pull request's checks are being run again on a new head.
+   * The wait is stored on the batch (a restart keeps it) and ends after `BASE_WAIT_MS` with the
+   * base still failing, which makes the failure the pull request's own.
+   */
+  async function followBase(
+    root: BatchDto,
+    head: string,
+    branch: string | null,
+    required: RequiredChecksDto,
+    reads: Map<string, Promise<ReadonlySet<string> | null>>,
+    signal: AbortSignal,
+  ): Promise<RequiredChecksDto | null> {
+    if (root.repo === null || branch === null || head === '') return required;
+    clearWaitingNotices(root, head);
+    const stored = getBatch(ctx.state.db, root.id).notices.find(
+      (n) => waitingOnBaseHead(n.key) === head,
+    );
+    const was = stored === undefined ? null : waitingOnBaseRecord(stored);
+    const now = clock.now().getTime();
+    const base = await readBase(root.repo, branch, reads, signal);
+    const sorted = classifyCiFailures(required.failing, base);
+    const names = sorted.base.map((job) => job.name);
+    const record: WaitingOnBaseRecord = {
+      since: was?.since ?? now,
+      checks: was?.checks ?? names,
+      asked: was?.asked ?? false,
+    };
+    const store = (next: WaitingOnBaseRecord): void => {
+      ctx.state.write((write) => {
+        setBatchNotice(write, root.id, waitingOnBaseNotice(head, branch, next));
+      });
+    };
+    const track = (checks: readonly string[]): void => {
+      waitingOnBase.set(root.id, {
+        projectId: root.projectId,
+        repo: root.repo ?? '',
+        branch,
+        head,
+        checks,
+      });
+    };
+    // A wait that outlived the bound is over: whatever the base does, the failure is this pull request's.
+    if (was !== null && now - was.since >= BASE_WAIT_MS) {
+      waitingOnBase.delete(root.id);
+      return required;
+    }
+    if (sorted.base.length > 0) {
+      if (was?.checks.join() !== names.join()) store({ ...record, checks: names });
+      track(names);
+      return sorted.change.length === 0 ? null : { ...required, failing: sorted.change };
+    }
+    // The base passes what this head waited on, which ran before the base's fix.
+    if (was !== null && base !== null) {
+      waitingOnBase.delete(root.id);
+      if (!was.asked) {
+        const asked = await askNewHead(root, required, signal);
+        if (asked) store({ ...record, asked: true });
+      }
+      return null;
+    }
+    waitingOnBase.delete(root.id);
+    return required;
+  }
+
+  /** Takes the waiting-on-base notices off the batch, except the one for `keepHead`. */
+  function clearWaitingNotices(root: BatchDto, keepHead: string | null): void {
+    const stale = root.notices.filter((n) => {
+      const head = waitingOnBaseHead(n.key);
+      return head !== null && head !== keepHead;
+    });
+    if (stale.length === 0) return;
+    ctx.state.write((write) => {
+      for (const n of stale) clearBatchNotice(write, root.id, n.key);
+    });
+  }
+
+  /**
+   * Asks for the checks to run on a head that holds the base: the shipper merges the base in and
+   * pushes when the batch lands itself; a batch the builder merges has its failed jobs run again.
+   * False when nothing was asked (a drain holds the shipper), so the next round asks again.
+   */
+  async function askNewHead(
+    root: BatchDto,
+    required: RequiredChecksDto,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    if (landing !== undefined && root.autoMerge) return landing.catchUpToBase(root.id);
+    const repo = root.repo;
+    if (repo === null) return false;
+    const runs = new Set(
+      required.failing.flatMap((job) => (job.runId === null ? [] : [job.runId])),
+    );
+    for (const runId of runs) {
+      try {
+        await ctx.gh.rerunFailed({ repo, runId }, ghCall(ctx, signal));
+      } catch (error) {
+        if (controller.signal.aborted || ghDown(error)) throw error;
+        logger.warn({ batchId: root.id, err: detailOf(error) }, 'could not rerun after the base');
+      }
+    }
+    return true;
+  }
+
+  /**
+   * One card per base branch that blocks pull requests, naming how many wait on it; withdrawn when
+   * none waits any more. `seen`: the card key and project of each branch a pull request read this round.
+   */
+  function syncBaseCards(seen: ReadonlyMap<string, ProjectId>): void {
+    const waiting = new Map<
+      string,
+      { repo: string; branch: string; checks: Set<string>; n: number }
+    >();
+    for (const { repo, branch, checks } of waitingOnBase.values()) {
+      const key = prCardKey.baseRed(repo, branch);
+      const entry = waiting.get(key) ?? { repo, branch, checks: new Set<string>(), n: 0 };
+      for (const name of checks) entry.checks.add(name);
+      entry.n += 1;
+      waiting.set(key, entry);
+    }
+    ctx.state.write((write) => {
+      for (const [key, projectId] of seen) {
+        const entry = waiting.get(key);
+        if (entry === undefined) {
+          withdrawIn(write, projectId, [key]);
+          continue;
+        }
+        const card = prCards.baseRed({
+          repo: entry.repo,
+          branch: entry.branch,
+          checks: [...entry.checks],
+          waiting: entry.n,
+        });
+        if (findOpenByFoldKey(write.tx, projectId, key) === undefined)
+          raiseIn(write, projectId, card);
+        else rewriteIn(write, projectId, card);
+      }
+    });
   }
 
   async function round(signal: AbortSignal): Promise<void> {
@@ -1009,6 +1259,10 @@ export function createPrWatch(input: {
     );
     if (groups.length === 0) return;
     const unanswered: Unanswered[] = [];
+    // The failing checks of each base read this round, by repository and branch.
+    const baseReads = new Map<string, Promise<ReadonlySet<string> | null>>();
+    // The base-red card keys of the pull requests read this round, with their project.
+    const seenBases = new Map<string, ProjectId>();
     let ended: { readonly error: unknown; readonly at: BatchId } | null = null;
     let failed: { readonly error: unknown } | null = null;
     let answered = false;
@@ -1086,6 +1340,7 @@ export function createPrWatch(input: {
       }
       // A pull request the queue removed reads as a failed required check.
       required = followQueue(root, read, required, queue);
+      noteFlaky(root, read, required);
       // Whether this round withdrew the catch-up card: the stored sign that the merge is still to ask.
       let catchUpCardWasOpen = false;
       ctx.state.write((write) => {
@@ -1154,20 +1409,46 @@ export function createPrWatch(input: {
         required.state === 'failing'
       ) {
         try {
-          await startCiFix({
-            ctx,
-            dataDir: ciFix.dataDir,
+          const own = await followBase(
             root,
-            required: requiredOf(required),
-            head: read.headSha,
+            read.headSha ?? '',
+            read.baseRef,
+            requiredOf(required),
+            baseReads,
             signal,
-          });
+          );
+          if (own !== null)
+            await startCiFix({
+              ctx,
+              dataDir: ciFix.dataDir,
+              root,
+              required: own,
+              head: read.headSha,
+              signal,
+            });
         } catch (error) {
           if (controller.signal.aborted) return;
           logger.warn({ batchId: root.id, err: detailOf(error) }, 'could not start a CI fix');
           if (ghDown(error)) ended = { error, at: root.id };
         }
+      } else {
+        waitingOnBase.delete(root.id);
+        clearWaitingNotices(root, null);
       }
+      if (root.repo !== null && read?.baseRef != null)
+        seenBases.set(prCardKey.baseRed(root.repo, read.baseRef), root.projectId);
+    }
+    if (ended === null) {
+      // A pull request that left the watch (merged, closed, deleted) waits on nothing.
+      const watched = new Set(
+        groupByPullRequest(listWatchedPullRequests(ctx.state.db)).map((group) => group.root.id),
+      );
+      for (const [id, entry] of waitingOnBase) {
+        if (watched.has(id)) continue;
+        waitingOnBase.delete(id);
+        seenBases.set(prCardKey.baseRed(entry.repo, entry.branch), entry.projectId);
+      }
+      syncBaseCards(seenBases);
     }
     resumeAfter = ended?.at ?? null;
     settle(unanswered, ended ?? (answered ? null : failed), answered, recheck);

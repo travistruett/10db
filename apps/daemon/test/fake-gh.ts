@@ -30,6 +30,7 @@ export type GhMethod =
   | 'jobLog'
   | 'rerunFailed'
   | 'jobHadNoRunner'
+  | 'baseFailingChecks'
   | 'prCreate'
   | 'prAutoMerge'
   | 'prMerge'
@@ -76,6 +77,8 @@ export class FakeGh implements Gh {
   readonly failRerunOf = new Map<string, GhError>();
   /** The Actions jobs GitHub cancelled because no hosted runner picked them up (no runner, no steps). */
   readonly noRunnerJobs = new Set<string>();
+  /** The checks failing on the base branch, as `baseFailingChecks` reads them. */
+  readonly baseFailing = new Set<string>();
   private readonly required = new Map<string, RequiredChecks>();
   private readonly jobLogs = new Map<string, JobLog>();
   private readonly byRef = new Map<
@@ -207,6 +210,13 @@ export class FakeGh implements Gh {
 
   jobHadNoRunner(input: { readonly repo: string; readonly jobId: string }): Promise<boolean> {
     return this.call('jobHadNoRunner', input, () => this.noRunnerJobs.has(input.jobId));
+  }
+
+  baseFailingChecks(input: {
+    readonly repo: string;
+    readonly branch: string;
+  }): Promise<ReadonlySet<string>> {
+    return this.call('baseFailingChecks', input, () => new Set(this.baseFailing));
   }
 
   rerunFailed(input: { readonly repo: string; readonly runId: string }): Promise<void> {

@@ -220,6 +220,7 @@ describe('the pull request watch', () => {
         intervalMs: INTERVAL,
         landing: {
           catchUp: (id) => asked.push(`catch-up ${id}`),
+          catchUpToBase: () => true,
           restartCi: (id) => {
             asked.push(`restart-ci ${id}`);
             return true;
@@ -294,6 +295,7 @@ describe('a pull request whose head never got its required checks', () => {
       landing: {
         catchUp: (id) => asked.push(`catch-up ${id}`),
         // A restart held by a drain is asked about and does nothing, as the shipper's is.
+        catchUpToBase: () => true,
         restartCi: (id) => {
           asked.push(`restart-ci ${id}${held() ? ' (held)' : ''}`);
           return !held();
@@ -552,6 +554,7 @@ describe('gh unavailable', () => {
       jobLog: (input) => h.gh.jobLog(input),
       rerunFailed: (input) => h.gh.rerunFailed(input),
       jobHadNoRunner: (input) => h.gh.jobHadNoRunner(input),
+      baseFailingChecks: (input) => h.gh.baseFailingChecks(input),
       prInMergeQueue: (input) => h.gh.prInMergeQueue(input),
       prReady: (input) => h.gh.prReady(input),
       prEditBase: (input) => h.gh.prEditBase(input),
@@ -633,6 +636,7 @@ describe('restart and stop', () => {
       jobLog: (input) => h.gh.jobLog(input),
       rerunFailed: (input) => h.gh.rerunFailed(input),
       jobHadNoRunner: (input) => h.gh.jobHadNoRunner(input),
+      baseFailingChecks: (input) => h.gh.baseFailingChecks(input),
       prInMergeQueue: (input) => h.gh.prInMergeQueue(input),
       prReady: (input) => h.gh.prReady(input),
       prEditBase: (input) => h.gh.prEditBase(input),
@@ -1197,11 +1201,15 @@ describe('a required job GitHub cancelled because no runner picked it up', () =>
     return { ...made, w: watcher() };
   }
 
-  it('runs its failed jobs again at the first read, with a notice and no card, and keeps the count through a restart', async () => {
+  it('runs its failed jobs again after a backoff, with a notice and no card, and keeps the count through a restart', async () => {
     const { id, prUrl, w } = watching();
+    const MINUTE = 60_000;
     h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
     w.start();
     await w.idle();
+    // The first read only notes the shortage: a rerun at once lands in the same burst.
+    expect(h.gh.reruns).toEqual([]);
+    await round(w, 10 * MINUTE);
     expect(h.gh.reruns).toEqual(['77']);
     expect(h.cards()).toEqual([]);
     const notice = noticeOf(id);
@@ -1214,7 +1222,9 @@ describe('a required job GitHub cancelled because no runner picked it up', () =>
     expect(stored(id).notices.map((n) => n.key)).toEqual([`checks-no-runner:${HEAD_A}`]);
 
     h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(2)));
-    await round(w);
+    await round(w, 10 * MINUTE);
+    expect(h.gh.reruns).toHaveLength(1);
+    await round(w, 10 * MINUTE);
     expect(h.gh.reruns).toHaveLength(2);
     await w.stop();
 
@@ -1223,10 +1233,11 @@ describe('a required job GitHub cancelled because no runner picked it up', () =>
     await second.idle();
     expect(h.gh.reruns).toHaveLength(2);
     h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(3)));
-    await round(second);
+    await round(second, 2 * MINUTE);
+    await round(second, 45 * MINUTE);
     expect(h.gh.reruns).toHaveLength(3);
     h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(4)));
-    await round(second);
+    await round(second, 25 * MINUTE);
     expect(h.gh.reruns).toHaveLength(3);
     expect(h.only(h.cards()).title).toContain('no runner');
   });
