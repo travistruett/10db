@@ -11,7 +11,7 @@ import {
   type InboxRowRef,
   type InboxRowSort,
 } from '@10db/contracts';
-import { and, eq, exists, inArray, not, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, exists, inArray, not, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import { INBOX_URGENCY_ORDER, toInboxItemDto } from './inbox';
 import { sendIsOut, textMatches } from './inbox-sql';
@@ -85,7 +85,8 @@ export function openRowsPage(
     })
     .from(items)
     .where(and(...where))
-    .orderBy(INBOX_URGENCY_ORDER, items.createdAt, items.id)
+    // By urgency, then newest first, as `compareRowSort` orders Open.
+    .orderBy(INBOX_URGENCY_ORDER, desc(items.createdAt), desc(items.id))
     .all();
 
   const rows: OpenRow[] = [];
