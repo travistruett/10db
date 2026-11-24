@@ -73,6 +73,10 @@ const DaemonEnv = z.object({
   TENDB_DISK: z.enum(['on', 'off']).optional(),
   // `off` gives lanes no browser tools and fetches no browser for them. The installed app's daemon turns it on.
   TENDB_LANE_BROWSER: z.enum(['on', 'off']).optional(),
+  // `off` reads a lane's ports from lsof alone. macOS answers netstat's socket table with nothing when
+  // a process's ancestors include an ad-hoc-signed program (pnpm, tsx under it), as `make dev` runs the
+  // daemon; without it every port is refused there. The installed app's daemon leaves it unset.
+  TENDB_LANE_NETSTAT: z.enum(['on', 'off']).optional(),
   // Test only: runs claude-adapter.live.test.ts against the real claude on the builder's subscription.
   TENDB_LIVE_CLAUDE: z.enum(['0', '1']).optional(),
   // Test only: with TENDB_LIVE_CLAUDE, runs auto-mode.live.test.ts's Bedrock rows too.

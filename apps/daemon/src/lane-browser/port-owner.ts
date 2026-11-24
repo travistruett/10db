@@ -79,6 +79,20 @@ function parseSockets(output: string, port: number): PortSocket[] {
   return found;
 }
 
+/**
+ * The sockets as `lsof` alone shows them, for a daemon whose process tree netstat's socket table does not
+ * answer (see `TENDB_LANE_NETSTAT`): the same listeners without other users' sockets.
+ */
+function socketsFromListeners(
+  listeners: readonly { readonly pid: number; readonly address: string }[],
+): PortSocket[] {
+  return listeners.map(({ pid, address }) => ({
+    pid,
+    address,
+    family: address === '*' ? 'tcp46' : address.includes(':') ? 'tcp6' : 'tcp4',
+  }));
+}
+
 /** The mappings of a `docker ps` `.Ports` column that publish exactly `port`: each one's host address. */
 function publishedOn(ports: string, port: number): string[] {
   const ips: string[] = [];
@@ -115,7 +129,7 @@ export function systemPortReaders(
     const value = defined[name];
     if (value !== undefined) dockerEnv[name] = value;
   }
-  return {
+  const readers: PortReaders = {
     async listeners(port) {
       try {
         const { stdout } = await run(
@@ -140,6 +154,8 @@ export function systemPortReaders(
       }
     },
     async sockets(port) {
+      if (defined['TENDB_LANE_NETSTAT'] === 'off')
+        return socketsFromListeners(await readers.listeners(port));
       const { stdout } = await run(NETSTAT, ['-anv', '-p', 'tcp'], {
         env: { LC_ALL: 'C' },
         timeout: READ_DEADLINE_MS,
@@ -184,6 +200,7 @@ export function systemPortReaders(
             return entries;
           },
   };
+  return readers;
 }
 
 export interface PortOwner {
