@@ -1,5 +1,14 @@
 import { Delivery, ProjectLanding, WorkspaceMode, type ProjectDto } from '@10db/contracts';
-import { NumberInput, SegmentedControl, Select, Stack, TagsInput, TextInput } from '@mantine/core';
+import {
+  Group,
+  NumberInput,
+  SegmentedControl,
+  Select,
+  Stack,
+  Switch,
+  TagsInput,
+  TextInput,
+} from '@mantine/core';
 import { asNumber, MONO_INPUT, useProjectFields } from './project-fields-state';
 import { ProjectArchiveCard } from './project-archive-card';
 import { HiddenFieldAlert } from './hidden-field-alert';
@@ -35,12 +44,17 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
     'workspaceMode',
     'worktreeSeed',
     'isolate',
+    'localCopies',
+    'copyTeardownCommand',
   ]);
   const { values, errors, set } = fields;
   const pullRequests = values.delivery === Delivery.PullRequest;
   // checkGeneral checks the pull-request fields whatever the delivery, so one with an error stays shown.
   const showPrFields =
     pullRequests || errors.baseBranch !== undefined || errors.prTitlePrefix !== undefined;
+
+  const showCopyFields =
+    values.delivery === Delivery.Local || errors.copyTeardownCommand !== undefined;
 
   return (
     <Stack gap="xl">
@@ -138,6 +152,41 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             }}
           />
         </SettingRow>
+        {showCopyFields ? (
+          <SettingRow
+            label="Separate Copies"
+            description="A task can run in its own copy and lands only after review and the gate."
+            help="A task you place in a Separate Copy gets its own branch, folder and databases. 10db moves the base branch to its work only after review accepts it and the gate passes on the exact commit that lands, by fast-forward. One copy runs at a time. Changing Delivery waits until no copy is unfinished."
+          >
+            <Group justify="flex-end">
+              <Switch
+                aria-label="Separate Copies"
+                checked={values.localCopies}
+                onChange={(e) => {
+                  set({ localCopies: e.currentTarget.checked });
+                }}
+              />
+            </Group>
+          </SettingRow>
+        ) : null}
+        {showCopyFields && (values.localCopies || errors.copyTeardownCommand !== undefined) ? (
+          <SettingRow
+            label="Teardown Command"
+            description="Runs when a copy is retired; it drops the copy's databases."
+            help="Run in a fresh checkout of the commit the copy was cut from, with TENDB_COPY_ID set to the copy's id. It must be safe to run twice."
+          >
+            <TextInput
+              aria-label="Teardown Command"
+              placeholder="make copy-teardown"
+              styles={MONO_INPUT}
+              value={values.copyTeardownCommand}
+              error={errors.copyTeardownCommand}
+              onChange={(e) => {
+                set({ copyTeardownCommand: e.currentTarget.value });
+              }}
+            />
+          </SettingRow>
+        ) : null}
         {showPrFields ? (
           <SettingRow
             label="Base Branch"

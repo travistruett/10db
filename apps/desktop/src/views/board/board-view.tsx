@@ -469,7 +469,7 @@ function BoardColumns({
           batches={allBatches}
           workstreams={workstreams}
           {...(openPlace !== undefined ? { place: openPlace } : {})}
-          placementEditable={pullRequests}
+          placementEditable={pullRequests || project.localCopies}
           gateCommand={project.gateCommand}
           accountId={project.accountId}
           areaNames={project.areas.map((area) => area.name)}
