@@ -1,4 +1,6 @@
 import {
+  Approval,
+  approvalOf,
   SKIP_SUMMARY_MAX,
   SkipKind,
   type LimitName,
@@ -55,7 +57,11 @@ export function createSkipRecorder(
     deps.runnable !== undefined &&
     skip.toolName === 'Bash' &&
     skip.summary.length <= SKIP_SUMMARY_MAX &&
-    skip.kind !== SkipKind.Question &&
+    // Only a call that would have run on approval, with no limit named: a hazard, secret or safety skip
+    // keeps its own kind and reason.
+    skip.limit === null &&
+    (approvalOf(skip.kind, false) === Approval.Intent ||
+      approvalOf(skip.kind, false) === Approval.Exact) &&
     !deps.runnable(skip.summary)
       ? { ...skip, kind: SkipKind.CantRunInLane, reason: CANT_RUN_REASON }
       : skip;
