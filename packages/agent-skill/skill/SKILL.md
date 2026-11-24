@@ -65,6 +65,11 @@ task as soon as it is drafted, then report it. No confirmation step: a wrong tas
    - **rigor**: leave it out, so 10db sizes the task (rules, then the judge; the project's default without one).
      Give `light`, `standard`, `careful` or `critical` only when the user names one; it pins, and the daemon
      refuses one below a kind's minimum.
+   - **external**: when the task comes from a Linear issue, link it, so 10db reports the task's runs and
+     outcome on the issue (when Linear updates are on for the project):
+     `{"kind": "linear", "id": "AMP-56", "issueId": "<Linear's own issue id>", "url": "https://linear.app/..."}`.
+     Read `issueId` and `url` from Linear (`get_issue`); a Linear URL in the description alone links nothing.
+     One issue is one open task in a project, so `create` refuses a second.
 3. **Write** the draft to a temp file (the session's scratchpad if there is one) and run `create`.
    If it reports problems, fix the draft and rerun.
 4. **Report** the task id, title, areas and criteria in a few lines, and say it can be changed or
