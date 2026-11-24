@@ -45,7 +45,7 @@ export interface FastPathContext {
    */
   readonly setupReads: readonly string[];
   /**
-   * The commit the checkout was on when the session started; null when it could not be read. Only a program
+   * The commit the workstream first started from; null when it has none or it could not be read. Only a program
    * that matches it is the repo's own code rather than the session's.
    */
   readonly startCommit: string | null;

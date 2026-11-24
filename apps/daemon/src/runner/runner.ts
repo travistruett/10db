@@ -2771,8 +2771,13 @@ export function createRunner(opts: RunnerOptions): Runner {
               );
               return [];
             });
+    // The commit the workstream first started from, kept on its row for every later step, fix round and
+    // resumed session: a script an earlier session committed is not the repo's. A workstream that began before
+    // the row kept it has none.
     const startCommit =
-      laneSession === null || !tendbReady ? null : await opts.git.head(checkout).catch(() => null);
+      laneSession === null || !tendbReady
+        ? null
+        : (row.baseHead ?? (listSessions(db, id).length === 0 ? baseHead : null));
     const startFloor =
       laneSession === null
         ? null
