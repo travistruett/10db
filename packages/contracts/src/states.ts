@@ -252,6 +252,8 @@ export const EvidenceKind = {
   Builder: 'builder',
   /** Retry's record that no revert of the run stands: earlier notes naming one no longer hold. */
   NoRevert: 'no_revert',
+  /** A picture a lane's own browser took of the running app, kept as the run's evidence. */
+  Browser: 'browser',
 } as const;
 export type EvidenceKind = ValueOf<typeof EvidenceKind>;
 

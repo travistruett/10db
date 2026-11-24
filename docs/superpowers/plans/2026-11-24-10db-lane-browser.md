@@ -84,7 +84,7 @@ with screenshots as evidence that review, QA and the reporter can cite.
   the final merge of `main` it regenerates once more. Only one open PR adds migrations at a time: the coordinator
   checks before the PR leaves draft.
 - **Reach is never widened by a fallback.** No code path connects to a name it resolved, to a port the rule didn't
-  answer `owned` for in this check, or to an address the listener didn't report. A reading that fails (`lsof`,
+  answer `owned` for in this check, or to an address the listener didn't report. The ownership probe is a byteless connect to exactly that address, made only after `lsof` shows every listener on the port is the lane's, and it must be accepted by one of those listeners. A reading that fails (`lsof`,
   `docker ps`, the process table) is a refusal that says so, never an allow.
 - **Nothing waits on the builder.** Every tool call answers within `CALL_DEADLINE_MS` (60 s) with text; a refusal
   is final and says why. No tool raises an Inbox card.

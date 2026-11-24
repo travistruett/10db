@@ -27,10 +27,11 @@ export {
   reapLaneProcessLedgers,
   removeProcessLedger,
   type LaneProcessSetup,
+  type ProcessMember,
   type LedgerSweep,
 } from './lane-processes';
 export { secretFilesIn } from './project-access';
-export { systemProcessTable, type ProcessRow } from './process-table';
+export { systemProcessTable, type ProcessRow, type ProcessTable } from './process-table';
 export {
   claudeCodeTmpPath,
   codexLaneTempRoot,
@@ -63,6 +64,7 @@ export {
   type FileAccessContext,
   type ReadAccess,
 } from './file-access';
+export { programRunnable } from './program-reach';
 export {
   createGateSandbox,
   DOCKER_REFUSAL,
@@ -91,3 +93,4 @@ export {
   prepareYourMcpRun,
   YourMcpServer,
 } from './your-mcp-launch';
+export { dockerEnvNames } from './docker-access';

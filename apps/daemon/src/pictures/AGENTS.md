@@ -1,14 +1,14 @@
 # apps/daemon/src/pictures
 
 - `pictures/`'s browser (`decisions/2026-11-10-task-pictures-come-from-a-pinned-chromium-and-stay-on-the-mac.md`): only
-  `pictures/playwright.ts` and `pictures/playwright-camera.ts` touch `playwright-core`, and only `playwright.ts`
+  `pictures/playwright.ts`, `pictures/playwright-camera.ts` and `lane-browser/playwright-driver.ts` touch `playwright-core`, and only `playwright.ts`
   loads it at runtime (a dynamic import). The browser is Chrome for Testing's headless shell at `BROWSER_PIN`
   (`browser-pin.ts`), which must be the build the pinned `playwright-core`'s `browsers.json` names (a test fails
   when they part); it is fetched, checked and locked down by `environment/pinned-install.ts` (`PinnedRelease`,
   `extractZipWithTar`). `browser-host.ts` launches it on first use with the renderer sandbox on, `HOME` and
   `TMPDIR` only, artifacts under `<data dir>/browser/artifacts`, and every request, loopback included, through
   `app-proxy.ts`'s proxy as Chromium's own switches (`launchOptions`); it runs one shot or sign-in at a time,
-  holds the browser's processes in a lane process ledger (`browser-ledger.ts`: the browser is the daemon's child
+  holds the browser's processes in a lane process ledger (`browser-ledger.ts`, one lock for every browser, pictures' and each lane's, `createBrowserLaunches`: a launch marks the daemon's children first and a ledger never takes a marked or held root: the browser is the daemon's child
   whose executable, by its real path, is the pinned one; `ps`'s `comm` on macOS, `/proc/<pid>/exe` on Linux, whose
   `comm` is a cut name), refuses to launch with no ledger sweep, and closes after five idle minutes. The proxy
   forwards only the app's origin and a `CONNECT` to its host and port (`origin-guard.ts`, `proxyAllows`), and,
@@ -46,7 +46,10 @@
 /screens/:screenId` (a PNG, private and immutable; 404 once pruned) and `GET /projects/:projectId/pictures`
   are refused to screens. `DaemonOptions.pictures` is `{ kind: 'pinned' }` from the entry point; tests give a
   camera (`test/fake-camera.ts`); absent, the daemon takes no pictures and fetches nothing. No picture is
-  uploaded or sent to a model.
+  uploaded or sent to a model, except a design review's and `check_design`'s (to the session's model), a PR's (uploaded
+  with `prPictures`) and a `lane` screen taken by a lane's own browser, which goes to that
+  session's model as an image block when it fits the account's limits
+  (`decisions/2026-11-24-lane-screenshots-go-to-the-lanes-model.md`).
 - The broken preview (Workbench spec §8.2, §8.4,
   `decisions/2026-11-10-a-broken-preview-is-read-from-the-page-load-that-takes-the-picture.md`): each capture of
   a pass page judges the load of its page route (`pageRoute`, its viewports and themes as one, `routeLoad`) by

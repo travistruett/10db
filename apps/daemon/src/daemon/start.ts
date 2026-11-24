@@ -213,6 +213,9 @@ import {
   sessionConfigDir,
   createLauncher,
   exportAwsCredentials,
+  downloadFile,
+  ensurePinned,
+  extractZipWithTar,
   REQUIRED_TOOLS,
   slackBotAccount,
   unavailableKeychain,
@@ -320,7 +323,9 @@ import {
   type TakeOutDeps,
 } from '../pass';
 import {
+  BROWSER_PIN,
   createBrowserHost,
+  createBrowserLaunches,
   createPlaywrightCamera,
   launchChromium,
   refusedCamera,
@@ -330,6 +335,14 @@ import {
   type PageCamera,
   type Pictures,
 } from '../pictures';
+import {
+  createLaneBrowsers,
+  systemPortReaders,
+  type LaneBrowsers,
+  type LaunchLaneDriver,
+  type PortReaders,
+  launchPlaywrightDriver,
+} from '../lane-browser';
 import { startPreview, type Preview } from '../preview';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { offeredModels } from '../routing';
@@ -515,6 +528,13 @@ export interface DaemonOptions {
   readonly pictures?:
     | { readonly kind: 'pinned' }
     | { readonly kind: 'given'; readonly camera: PageCamera; readonly prepare: () => void };
+  /**
+   * The lane browser: the pinned build (the entry point), or a driver tests give. Absent, lanes get no
+   * browser tools and nothing is fetched.
+   */
+  readonly laneBrowser?:
+    | { readonly kind: 'pinned' }
+    | { readonly kind: 'given'; readonly launch: LaunchLaneDriver; readonly readers: PortReaders };
   /**
    * Lane caps across all projects; each account has its own `laneCap`. Absent, the cap is the
    * Capacity setting, read at each tick.
@@ -1311,6 +1331,57 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ledgerSweep.later();
     }
   }
+  // Every browser, pictures' and each lane's, is launched and found under one lock, and they share one
+  // fetch of the pinned build: the fetch is lazy, and neither fetches while the other does.
+  const browserLaunches = createBrowserLaunches();
+  const pinnedBuild = (() => {
+    let current: Promise<string> | null = null;
+    let fetching = false;
+    return {
+      ready(): Promise<string> {
+        if (current !== null) return current;
+        fetching = true;
+        const made = ensurePinned(opts.dataDir, BROWSER_PIN, {
+          download: downloadFile,
+          extract: extractZipWithTar,
+        }).then(
+          (exe) => {
+            fetching = false;
+            return exe;
+          },
+          (error: unknown) => {
+            // A refused fetch is tried again by the next ask.
+            fetching = false;
+            current = null;
+            throw error;
+          },
+        );
+        current = made;
+        return made;
+      },
+      fetching: () => fetching,
+    };
+  })();
+  const laneBrowsers: LaneBrowsers | null =
+    opts.laneBrowser === undefined
+      ? null
+      : createLaneBrowsers({
+          dataDir: opts.dataDir,
+          ledgers:
+            ledgerSweep && sandboxRoots ? { sweep: ledgerSweep, root: sandboxRoots.files } : null,
+          processes: laneProcesses,
+          launches: browserLaunches,
+          build: pinnedBuild,
+          launch:
+            opts.laneBrowser.kind === 'given' ? opts.laneBrowser.launch : launchPlaywrightDriver,
+          readers:
+            opts.laneBrowser.kind === 'given'
+              ? opts.laneBrowser.readers
+              : systemPortReaders(homedir(), process.env, laneProcesses.table, clock),
+          daemonPort: () => listenPort,
+          clock,
+          logger: logger.child({ component: 'lane-browser' }),
+        });
   // After the reap, before any lane session or gate can start: a sealed file of 10db's in a system
   // temp dir is readable to every ChatGPT lane, and a ledger there could be one a lane wrote.
   if (sandboxRoots !== null) {
@@ -2076,6 +2147,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     laneWritableRoots: allSandboxRoots,
     hold: startHold,
     laneTempDirs,
+    ...(laneBrowsers === null ? {} : { endLaneBrowser: (id) => laneBrowsers.end(id) }),
     state,
     adapter,
     inbox,
@@ -2375,6 +2447,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           clock,
           logger: logger.child({ component: 'pictures' }),
           launch: launchChromium,
+          launches: browserLaunches,
+          ensure: () => pinnedBuild.ready(),
         })
       : null;
   const pictureCamera =
@@ -3112,6 +3186,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       log: logger,
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
+      dataDir: opts.dataDir,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
       showImages: (id, images) => {
         const lane = live.get(id);
@@ -3131,6 +3206,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       dependencyChanges,
       shapeTools: shape.toolsFor,
       pictures: picturesNow,
+      ...(laneBrowsers === null
+        ? {}
+        : { laneBrowser: { browsers: laneBrowsers, sessionOf: (id) => live.get(id)?.browser } }),
       reporter: linearReporter,
       chatTools: createChatTools({
         state,
@@ -3301,6 +3379,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await preview?.stop();
       picturePruning.stop();
       await pictureCamera.close();
+      await laneBrowsers?.close();
       unsubscribeTurnChecks();
       await Promise.all([passPullRequests.stop(), turnChecks.stopAll()]);
       // A gate that waits must not start because shutdown freed the slot of the one it killed.

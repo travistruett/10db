@@ -24,6 +24,7 @@ import {
   SessionId,
   TaskId,
   TaskMessageId,
+  TaskScreenId,
   WorkstreamId,
 } from './ids';
 import {
@@ -1378,8 +1379,8 @@ const EvidenceBase = {
 };
 
 /**
- * What a check left behind: a gate's or agent's command and exit code, the builder's note, or 10db's
- * record that no revert of the run stands.
+ * What a check left behind: a gate's or agent's command and exit code, the builder's note, 10db's
+ * record that no revert of the run stands, or a picture a lane's browser took (`screenId`).
  */
 export const EvidenceDto = z.discriminatedUnion('kind', [
   z.object({
@@ -1405,6 +1406,13 @@ export const EvidenceDto = z.discriminatedUnion('kind', [
     kind: z.literal(EvidenceKind.NoRevert),
     command: z.null(),
     exitCode: z.null(),
+  }),
+  z.object({
+    ...EvidenceBase,
+    kind: z.literal(EvidenceKind.Browser),
+    command: z.null(),
+    exitCode: z.null(),
+    screenId: TaskScreenId,
   }),
 ]);
 export type EvidenceDto = z.infer<typeof EvidenceDto>;

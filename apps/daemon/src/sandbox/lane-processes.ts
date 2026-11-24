@@ -134,6 +134,8 @@ export interface LaneProcessWatch {
    * when the machine's processes cannot be read, having stopped nothing.
    */
   endJobs(): Promise<void>;
+  /** The processes it remembers now, the session's own among them, by pid and start time. */
+  members(): readonly ProcessMember[];
 }
 
 const SHELLS: ReadonlySet<string> = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'tcsh']);
@@ -588,6 +590,7 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
       persist();
     },
     pending: () => known.length > 0,
+    members: () => known.map((member) => ({ ...member })),
   };
 }
 
