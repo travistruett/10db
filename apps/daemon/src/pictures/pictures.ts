@@ -784,6 +784,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
       if (
         task.status === TaskStatus.Done &&
         task.passId == null &&
+        !inLocalCopy(task) &&
         Date.parse(task.updatedAt) >= since &&
         !hasTaskScreen(db, task.id, ScreenKind.After)
       )
