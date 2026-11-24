@@ -57,6 +57,8 @@ export function TitleRow({
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
+            // A badge or other element centres on the title; a plain string keeps its ellipsis.
+            ...(typeof meta === 'string' ? {} : { display: 'flex', alignItems: 'center' }),
           }}
           data-tauri-drag-region
         >
