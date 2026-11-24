@@ -27,7 +27,7 @@ accepts, and every repository value is a quoted value in the line.
 ## Why
 
 On 2026-11-24 the crosses-limit judge left 12 of 127 calls below its 0.8 floor in two hours, nearly all
-leaning allow; Ampsio's AMP-137 failed on 11 such skips: `docker exec` into its own backend and frontend
+leaning allow; one task failed on 11 such skips: `docker exec` into its own backend and frontend
 containers to list files, format, lint and run tests, and read-only `docker run --rm --network none` type
 checks. The judge was never told Docker was open or which containers were the project's own, so it could not
 tell them from a remote host.

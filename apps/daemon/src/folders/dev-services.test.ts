@@ -13,15 +13,15 @@ describe('composeServices', () => {
         'keys and container_name; the project from the folder',
         [
           [
-            'amps/docker-compose.yml',
-            'services:\n  backend:\n    image: x\n  db:\n    container_name: amps-db\n  frontend: {}\n',
+            'app/docker-compose.yml',
+            'services:\n  backend:\n    image: x\n  db:\n    container_name: app-db\n  frontend: {}\n',
           ],
         ],
         {
-          files: ['amps/docker-compose.yml'],
-          project: 'amps',
+          files: ['app/docker-compose.yml'],
+          project: 'app',
           services: ['backend', 'db', 'frontend'],
-          containerNames: ['amps-db'],
+          containerNames: ['app-db'],
         },
       ],
       [

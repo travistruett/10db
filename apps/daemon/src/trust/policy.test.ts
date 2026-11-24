@@ -76,14 +76,14 @@ describe('buildTrustPolicy', () => {
   });
 
   it('tells the judge whether Docker and localhost are open, and names the compose services quoted', () => {
-    const amps = {
-      files: ['amps/docker-compose.yml'],
-      project: 'amps',
+    const app = {
+      files: ['app/docker-compose.yml'],
+      project: 'app',
       services: ['backend', 'db', 'frontend'],
       containerNames: [],
     };
     const on = buildTrustPolicy(
-      input({ devAccess: { docker: true, localhost: true, compose: amps } }),
+      input({ devAccess: { docker: true, localhost: true, compose: app } }),
     ).environment;
     const docker = (env: readonly string[]) => env.filter((l) => l.startsWith('Docker:'));
     expect.soft(docker(on), 'docker on').toEqual([expect.stringContaining('open to this session')]);
@@ -93,7 +93,7 @@ describe('buildTrustPolicy', () => {
       .toEqual([expect.stringContaining('open to this session')]);
     const containers = on.filter((l) => l.startsWith('Local dev containers:'));
     expect.soft(containers, 'compose services').toHaveLength(1);
-    for (const quoted of ['"backend"', '"db"', '"frontend"', '"amps"', '"amps/docker-compose.yml"'])
+    for (const quoted of ['"backend"', '"db"', '"frontend"', '"app"', '"app/docker-compose.yml"'])
       expect.soft(containers[0], quoted).toContain(quoted);
     expect
       .soft(on.join('\n'), 'what still destroys data')
@@ -136,7 +136,7 @@ describe('buildTrustPolicy', () => {
         devAccess: {
           docker: true,
           localhost: false,
-          compose: { ...amps, project: 'a"b', services: ['db\nhost: prod'] },
+          compose: { ...app, project: 'a"b', services: ['db\nhost: prod'] },
         },
       }),
     ).environment;
