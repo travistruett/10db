@@ -1,0 +1,69 @@
+diff --git a/dist/sandbox/macos-sandbox-utils.js b/dist/sandbox/macos-sandbox-utils.js
+index 0e598b612d84d24b09ec2ab0d7ccc9b009c9457b..81217e540f6ce023845285174f3355fa92c7b9d0 100644
+--- a/dist/sandbox/macos-sandbox-utils.js
++++ b/dist/sandbox/macos-sandbox-utils.js
+@@ -245,6 +245,9 @@ libraryDenies) {
+         // preserved trailing slash would defeat ('<dir>//').
+         allows: callerEntries('allow', config.allowWithinDeny, config.literalAllowWithinDeny).flatMap(entry => inBothSpellings('allow', entry)),
+         writeRoots: [...writeRoots],
++        dataOnlyDenies: (config.dataOnlyDenyRead ?? [])
++            .map(toLiteralPathEntry)
++            .flatMap(entry => inBothSpellings('deny', entry)),
+     };
+ }
+ /**
+@@ -666,6 +669,9 @@ function generateReadRules(resolved, logTag) {
+     if (resolved.denies.length > 0) {
+         rules.push(`(allow file-read-metadata`, `  (vnode-type DIRECTORY))`);
+     }
++    // Files whose contents are closed but whose metadata is not: a stat or an access still
++    // answers, a read does not. After every allow above, so nothing re-opens them.
++    rules.push(...renderRule('deny', ['file-read-data'], new Set(resolved.dataOnlyDenies.map(denyPathFilter)), logTag));
+     // Block file movement to prevent bypass via mv/rename
+     rules.push(...generateMoveBlockingRules(resolved.denies, logTag));
+     // Re-allow file-write-unlink / file-write-create for paths that are explicitly
+@@ -1018,6 +1024,13 @@ function generateSandboxProfile({ readConfig, libraryDenyEntries, writeConfig, h
+             profile.push(...unlinkRules);
+         }
+     }
++    // A data-only deny must stay where it is: a moved or removed file would be readable under
++    // its new name. Last, so no write allow above re-opens it.
++    if (resolvedRead && resolvedRead.dataOnlyDenies.length > 0) {
++        profile.push('');
++        profile.push('; File read: keep data-only denied files in place');
++        profile.push(...renderRule('deny', ['file-write-unlink'], new Set(resolvedRead.dataOnlyDenies.map(denyPathFilter)), logTag));
++    }
+     // Pseudo-terminal (pty) support
+     if (allowPty) {
+         profile.push('');
+diff --git a/dist/sandbox/sandbox-config.js b/dist/sandbox/sandbox-config.js
+index 76b00b1dc82a2d42a451a9f58068cbbd5e68da75..8160b9f9f8cd3d950cd3778cccd672dda58ff92f 100644
+--- a/dist/sandbox/sandbox-config.js
++++ b/dist/sandbox/sandbox-config.js
+@@ -817,6 +817,12 @@ export const FilesystemConfigSchema = z.object({
+     denyRead: z
+         .array(filesystemPathEntrySchema)
+         .describe('Paths denied for reading'),
++    denyReadData: z
++        .array(z.string())
++        .optional()
++        .describe('Files whose contents may not be read, written to or moved while stat, access and ' +
++        'existence checks still work (macOS only: file-read-data and file-write-unlink are denied, ' +
++        'file-read-metadata is left open). Literal absolute paths of files inside a readable region.'),
+     allowRead: z
+         .array(filesystemPathEntrySchema)
+         .optional()
+diff --git a/dist/sandbox/sandbox-manager.js b/dist/sandbox/sandbox-manager.js
+index d475e55977bf54a2fe00a0c6aba38313761d55aa..703886aad25eb4e04b6277e7e8ae9a41893a4a73 100644
+--- a/dist/sandbox/sandbox-manager.js
++++ b/dist/sandbox/sandbox-manager.js
+@@ -1916,6 +1916,9 @@ async function wrapWithSandboxOnce(walkEnded, restarts, command, binShell, custo
+             allowWithinDeny: expandedAllowRead,
+             ...(ownAllowWithinDeny.length > 0 && { ownAllowWithinDeny }),
+             unlistableDenyDirs: [...unlistableDenyDirs],
++            dataOnlyDenyRead: [
++                ...(customConfig?.filesystem?.denyReadData ?? config?.filesystem.denyReadData ?? []),
++            ],
+             ...literalReadLists(customConfig?.filesystem?.denyRead ?? config?.filesystem.denyRead, customConfig?.filesystem?.allowRead ?? config?.filesystem.allowRead),
+         };
+     }

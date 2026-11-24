@@ -28,6 +28,7 @@ import {
   type SweepLog,
 } from './pnpm-lock-dir';
 import { createSealedFile, removeSealedFile, type SealedFileKind } from './sealed-file';
+import { splitSecrets } from './secret-stat';
 import {
   allowlisted,
   checkRuntime,
@@ -289,12 +290,13 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           ...prepareCommandEnv(tmpDir, deps.home, input.env),
           PATH: [binDir, ...(input.env['PATH'] ? [input.env['PATH']] : [])].join(':'),
         };
+        const secrets = splitSecrets(checkout, access.checkoutSecrets);
         const profile = buildLaneProfile({
           checkout,
           tmpDir,
           home: deps.home,
           protectedReads: access.protectedReads,
-          secretFiles: access.checkoutSecrets,
+          secretFiles: secrets.closed,
           toolchainSecrets: toolchain.secretFiles,
           toolchainReads: toolchain.reads,
           toolchainListings: toolchain.listings,
@@ -352,7 +354,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         settingsFile = createSealedFile(
           filesRoot,
           SETTINGS_FILE,
-          JSON.stringify(srtSettings(profile), null, 2),
+          JSON.stringify(srtSettings(profile, secrets.statVisible), null, 2),
         );
         let disposed: Promise<void> | null = null;
         return {

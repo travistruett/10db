@@ -1,6 +1,14 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -172,6 +180,37 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
 
   const connect = (target: string): string =>
     `node -e "require('net').connect(${target}).on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"`;
+
+  it("shows a checkout's .env to stat but not to a read or a move", async () => {
+    writeFileSync(join(checkout, '.env'), `SECRET=${token}\n`);
+    // A link to it, as a copy of the checkout's tree holds, must not close the target it leads to.
+    symlinkSync(join(checkout, '.env'), join(checkout, '.env.linked'));
+    try {
+      const seen = await probe({
+        stat: 'stat .env',
+        'test-f': 'test -f .env',
+        read: 'cat .env',
+        'read-link': 'cat .env.linked',
+        move: 'mv .env moved.env',
+        remove: 'rm .env',
+        // A command that must run, as `make` does, when its prerequisite exists.
+        'make-prerequisite': `printf 'all: .env\\n\\t@true\\n' > Makefile.probe && make -f Makefile.probe`,
+      });
+      expect(seen).toEqual({
+        stat: 'ok',
+        'test-f': 'ok',
+        read: 'denied',
+        'read-link': 'denied',
+        move: 'denied',
+        remove: 'denied',
+        'make-prerequisite': 'ok',
+      });
+    } finally {
+      rmSync(join(checkout, '.env'), { force: true });
+      rmSync(join(checkout, '.env.linked'), { force: true });
+      rmSync(join(checkout, 'Makefile.probe'), { force: true });
+    }
+  }, 60_000);
 
   it('passes a normal test command that reads the checkout and writes its own output', async () => {
     const result = await run('node --test check.test.mjs && test -f out.txt && git status --short');

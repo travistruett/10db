@@ -287,21 +287,18 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     });
   });
 
-  it('reads what lanes read: no home, no ~/.ssh, no ~/.config, no data dir, no .env file', async () => {
+  it('reads what lanes read: no home, no ~/.ssh, no ~/.config, no data dir, no .env contents', async () => {
     const envFile = join(checkout, '.env.local');
     writeFileSync(envFile, 'SECRET=1');
     await withRun(input(), (run) => {
       const { filesystem } = settingsOf(run);
       const allowRead = filesystem['allowRead'] ?? [];
       expect(filesystem['denyRead']).toEqual(
-        expect.arrayContaining([
-          '/',
-          dataDir,
-          join(home, '.claude'),
-          join(home, '.claude-work'),
-          envFile,
-        ]),
+        expect.arrayContaining(['/', dataDir, join(home, '.claude'), join(home, '.claude-work')]),
       );
+      // A checkout's .env file answers a stat but not a read: srt's data-only list, not denyRead.
+      expect(filesystem['denyRead']).not.toContain(envFile);
+      expect(filesystem['denyReadData']).toEqual([envFile]);
       // A built-in read that holds a sandbox root is left out (on Linux the roots lie under `/tmp`).
       const builtIn = SYSTEM_READS.filter(
         (path) => ![tmpRoot, lanesRoot, filesRoot].some((held) => isEqualOrUnder(held, path)),
