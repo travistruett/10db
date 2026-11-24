@@ -11,7 +11,7 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
-import { IconRoute, IconTrash, IconUsers } from '@tabler/icons-react';
+import { IconPencil, IconRoute, IconTrash, IconUsers } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { EmptyState } from '../../shell/empty-state';
@@ -22,7 +22,7 @@ import { useTasks } from '../../daemon/queries';
 import { categoryWord } from '../inbox/route-line';
 import { AddRouteModal } from './add-route-modal';
 import { HelpHint } from './help-hint';
-import { RouteScope, routeRows, ruleInputs } from './route-rows';
+import { RouteScope, routeRows, ruleInputs, type RouteRow } from './route-rows';
 import { SettingsSectionKey } from './sections';
 
 /** Settings › Question Routing: who a question goes to, by scope, most specific first. */
@@ -34,6 +34,8 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
   const judge = useJudgeStatus();
   const save = useSetRoutingRules(project.id);
   const [adding, setAdding] = useState(false);
+  // The row open in the modal to edit; adding opens it empty.
+  const [editing, setEditing] = useState<RouteRow | null>(null);
   const rows = routeRows(rules.data ?? [], people.data ?? []);
   const judgeOn =
     judge.data !== undefined &&
@@ -122,34 +124,56 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
                 <Table.Th>For</Table.Th>
                 <Table.Th>Questions</Table.Th>
                 <Table.Th>Goes To</Table.Th>
-                <Table.Th w={48} />
+                <Table.Th w={80} />
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {rows.map((row) => (
-                <Table.Tr key={row.key}>
+                <Table.Tr
+                  key={row.key}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => {
+                    setEditing(row);
+                  }}
+                >
                   <Table.Td>{row.scope}</Table.Td>
                   <Table.Td>{subjectWords(row.scope, row.subject)}</Table.Td>
                   <Table.Td>{row.categories.map(categoryWord).join(', ')}</Table.Td>
                   <Table.Td>{row.people.join(', ')}</Table.Td>
                   <Table.Td ta="right">
-                    <Tooltip label="Remove route">
-                      <ActionIcon
-                        variant="subtle"
-                        color="red"
-                        aria-label={`Remove route for ${row.people.join(', ')}`}
-                        loading={save.isPending}
-                        onClick={() => {
-                          save.mutate({
-                            rules: ruleInputs(
-                              rules.data.filter((r) => !row.ruleIds.includes(r.id)),
-                            ),
-                          });
-                        }}
-                      >
-                        <IconTrash size={14} />
-                      </ActionIcon>
-                    </Tooltip>
+                    <Group gap={4} justify="flex-end" wrap="nowrap">
+                      <Tooltip label="Edit route">
+                        <ActionIcon
+                          variant="subtle"
+                          color="gray"
+                          aria-label={`Edit route for ${row.people.join(', ')}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setEditing(row);
+                          }}
+                        >
+                          <IconPencil size={14} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip label="Remove route">
+                        <ActionIcon
+                          variant="subtle"
+                          color="red"
+                          aria-label={`Remove route for ${row.people.join(', ')}`}
+                          loading={save.isPending}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            save.mutate({
+                              rules: ruleInputs(
+                                rules.data.filter((r) => !row.ruleIds.includes(r.id)),
+                              ),
+                            });
+                          }}
+                        >
+                          <IconTrash size={14} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
                   </Table.Td>
                 </Table.Tr>
               ))}
@@ -171,10 +195,12 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
       ) : null}
       <AddRouteModal
         project={project}
-        opened={adding}
+        opened={adding || editing !== null}
         rules={rules.data ?? []}
+        route={editing}
         onClose={() => {
           setAdding(false);
+          setEditing(null);
         }}
       />
     </Stack>

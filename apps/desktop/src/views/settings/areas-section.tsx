@@ -4,6 +4,7 @@ import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
 import { ConfirmModal } from '../../shell/confirm-modal';
 import { AreaDrawer } from './area-drawer';
+import { ReviewSuggestions } from './review-suggestions';
 import { SectionHeading } from './section-heading';
 import { PathSummary, Pill, RowActions } from './table-cells';
 import { useListPatch } from './use-list-patch';
@@ -123,14 +124,17 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
           </>
         }
         action={
-          <Button
-            data-keeps-drawer
-            onClick={() => {
-              request(null);
-            }}
-          >
-            Add Area
-          </Button>
+          <Group gap="sm" wrap="nowrap">
+            <ReviewSuggestions project={project} />
+            <Button
+              data-keeps-drawer
+              onClick={() => {
+                request(null);
+              }}
+            >
+              Add Area
+            </Button>
+          </Group>
         }
       />
       <DataTable<Area>

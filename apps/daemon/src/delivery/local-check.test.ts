@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shipCheck, stepCheck } from './local-check';
+import { finalCheck, shipCheck, stepCheck } from './local-check';
 
 const project = {
   delivery: 'pull_request',
@@ -61,5 +61,20 @@ describe('the check that runs on the Mac', () => {
     ];
     for (const [name, input, expected] of rows)
       expect.soft(shipCheck(input), name).toEqual(expected);
+  });
+
+  it('after the last step of a Commit Directly task: the full gate, unless the step check was it', () => {
+    const rows: [string, Project, Check][] = [
+      [
+        'local, changed check',
+        { ...project, delivery: 'local', changedCheckCommand: 'make changed' },
+        GATE,
+      ],
+      ['local, gate alone', { ...project, delivery: 'local' }, null],
+      ['pull request', { ...project, changedCheckCommand: 'make changed' }, null],
+      ['local, no gate', { ...project, delivery: 'local', gateCommand: null }, null],
+    ];
+    for (const [name, input, expected] of rows)
+      expect.soft(finalCheck(input), name).toEqual(expected);
   });
 });
