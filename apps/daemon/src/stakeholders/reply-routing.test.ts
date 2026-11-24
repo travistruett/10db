@@ -7,6 +7,7 @@ import {
   insertPerson,
   markSending,
   markSent,
+  moveSend,
   openSends,
   seedProject,
   sendForCard,
@@ -28,6 +29,7 @@ import { saveSlackWorkspace, setProjectSlack } from './slack-workspaces';
 const TEAM = 'TA';
 const BOT = 'UBOT';
 const MARK = 'UMARK';
+const ANA = 'UANA';
 const CHANNEL = 'D1';
 const THREAD = '100.000001';
 
@@ -167,9 +169,9 @@ function world() {
       matched: { assigned: new Map(), asked: new Map() },
     });
   /** What Mark writes; two ticks after it make the conversation quiet. */
-  const say = (text: string): string => {
+  const say = (text: string, user: string = MARK): string => {
     const ts = nextTs();
-    thread.push({ ts, user: MARK, text });
+    thread.push({ ts, user, text });
     return ts;
   };
   /** A line 10db already posted for a send, as Slack keeps it. */
@@ -295,15 +297,52 @@ describe('a stakeholder reply is sorted before it answers the card', () => {
     const first = w.say('what is B?');
     w.botLine(sendForCard(w.state.db, id)?.id ?? '', 'auto_answer', first);
     const last = w.say('and C?');
-    const watch = w.makeWatch(judging(ReplyKind.SimpleQuestion, 0.9), answering('unused'));
+    const watch = w.makeWatch(judging(ReplyKind.SimpleQuestion, 0.9), answering('answered'));
     await watch.tick();
     await watch.tick();
 
+    // Only what was said before the found line is recorded; the later message is not swallowed.
     expect(w.posted).toHaveLength(0);
     expect(openSends(w.state.db)[0]).toMatchObject({
       autoAnswers: 1,
-      handledThroughTs: last,
+      handledThroughTs: first,
       lastReadTs: THREAD,
     });
+    await watch.tick();
+    expect(w.lines('auto_answer').map((m) => m.metadata?.event_payload['key'])).toEqual([
+      first,
+      last,
+    ]);
+  });
+
+  it('a bring-in sorts what was said after the move, not the mention that moved it', async () => {
+    const w = world();
+    const id = w.sentCard();
+    const sendId = sendForCard(w.state.db, id)?.id;
+    if (sendId === undefined) throw new Error('no send');
+    w.say('Ana, can you weigh in on B?');
+    w.botLine(sendId, 'moved', 'x');
+    const moveTs = w.thread.at(-1)?.ts ?? '';
+    w.state.write((ctx) => {
+      moveSend(ctx, sendId, {
+        channelId: CHANNEL,
+        threadTs: THREAD,
+        messageTs: moveTs,
+        permalink: null,
+        added: [{ userId: ANA, personId: null, name: 'Ana', recipient: false }],
+      });
+    });
+    const asked: string[] = [];
+    const writer: AnswerWriter = (input) => {
+      asked.push(input.question);
+      return Promise.resolve({ kind: 'answer', text: 'B is the second option.' });
+    };
+    const watch = w.makeWatch(judging(ReplyKind.SimpleQuestion, 0.9), writer);
+    const ts = w.say('what is B?', ANA);
+    await watch.tick();
+    await watch.tick();
+
+    expect(asked).toEqual(['what is B?']);
+    expect(w.lines('auto_answer').map((m) => m.metadata?.event_payload['key'])).toEqual([ts]);
   });
 });

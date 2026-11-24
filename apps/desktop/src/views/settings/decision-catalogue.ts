@@ -171,9 +171,10 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
     label: 'Reply Kind',
     asks: "Whether a stakeholder's reply answers the question, asks something 10db can explain, needs you, or is chatter",
     onAnswer:
-      'Answers or chatter are handled; a question 10db can explain is answered; anything else goes to you.',
-    whenUnsure: 'A question goes to you; anything else is read as an answer.',
-    fellBack: 'sorted by rule',
+      'Answers or chatter are handled; 10db tries to answer a question and passes it to you when it cannot or it needs your call.',
+    whenUnsure:
+      '10db still tries to answer a question first; anything else is read as an answer. With this switched off nothing is posted and questions come to you.',
+    fellBack: 'sorted by rule, with 10db trying to answer questions first',
     mode: DecisionMode.Acting,
   },
 };

@@ -170,6 +170,7 @@ const DECLINED_REASONS: Readonly<Record<NonNullable<AskedQuestion['declined']>, 
   failed: "10db couldn't write an answer.",
   no_account: "The project's account is paused, so 10db couldn't answer.",
   provider: "10db can't answer on Codex yet.",
+  slack_unavailable: "Slack wasn't available to answer it.",
 };
 
 /** The question a stakeholder asked, with a reply box that says the builder's words in their thread. */

@@ -791,7 +791,10 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
                   pending.threadTs,
                   searchFrom(pending.startedAt),
                 );
-          const found = messages.find((m) => namesSend(m, pending.id));
+          const bot =
+            readSlackWorkspaces(state.db).find((w) => w.teamId === teamId)?.botUserId ??
+            (await client.authTest()).botUserId;
+          const found = messages.find((m) => namesSend(m, pending.id, bot));
           if (moved) {
             // Only a race leaves this: the send is taken back, and a post that did land is told so.
             fail(pending.id, send.inboxItemId, SendFailure.WorkspaceChanged);
@@ -859,8 +862,10 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
   };
 }
 
-function namesSend(message: SlackMessage, sendId: string): boolean {
+/** A message 10db's own bot posted for the send: another app can attach the same metadata. */
+function namesSend(message: SlackMessage, sendId: string, bot: string): boolean {
   return (
+    message.user === bot &&
     message.metadata?.eventType === SEND_METADATA &&
     message.metadata.eventPayload['sendId'] === sendId
   );

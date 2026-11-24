@@ -66,7 +66,6 @@ import type { StakeholderSends } from './sends';
 import { failSendsToBuilder, recordBot } from './send-returns';
 import type { SlackConnections } from './slack-connection';
 import { boundTeam, projectSlack } from './slack-workspaces';
-import { blocksOf } from './slack-text';
 import { dueTimers } from './timers';
 import { matchReply, type MatchState } from './reply-match';
 import { saveMatchState } from './reply-match-store';
@@ -319,12 +318,12 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   }
 
   /** Answers the card from a lone recipient's reply, in one transaction with the send's own state. */
-  function answerLone(c: Conversation, reply: { words: string; messageCount: number }): void {
+  function answerLone(c: Conversation, reply: { words: string; messageCount: number }): boolean {
     const { words } = reply;
     const { open } = c;
     const person = open.people.find((p) => p.recipient && p.personId !== null);
     const last = c.counted.at(-1);
-    if (!person?.personId || !last) return;
+    if (!person?.personId || !last) return false;
     const personId: PersonId = person.personId;
     // The reply is the messages the conversation reader joined, not everything he ever wrote.
     const read = readReply({ words, messageCount: reply.messageCount }, stakeholderOptions(c.card));
@@ -354,6 +353,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       if (!(error instanceof ConflictError)) throw error;
       log.info({ sendId: open.id }, 'a reply came after the card was answered');
     }
+    return true;
   }
 
   const currentOpen = (id: OpenSendRow['id']): OpenSendRow | undefined =>
@@ -382,6 +382,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     reply: Reply,
     read: ReplyKindRead,
     declined: AskedQuestion['declined'],
+    acknowledge = true,
   ): Promise<void> {
     recordRoute(read, (ctx) => {
       markAsked(ctx, c.open.id, {
@@ -397,7 +398,12 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     });
     const { open } = c;
     const key = reply.firstTs;
-    if (!bindingIntact(c) || findLine(c.thread, open.id, 'asked_ack', { bot: c.bot, key })) return;
+    if (
+      !acknowledge ||
+      !bindingIntact(c) ||
+      findLine(c.thread, open.id, 'asked_ack', { bot: c.bot, key })
+    )
+      return;
     const text = askedAckLine(draftContext(state.db, c.card).builderName);
     if (scanOutbound(text).some((hit) => hit.severity === 'hold')) return;
     try {
@@ -432,15 +438,29 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     const { open, card } = c;
     const bound = (): boolean => bindingIntact(c);
     if (!bound()) {
-      await ask(client, c, reply, read, null);
+      await ask(client, c, reply, read, 'slack_unavailable');
       return;
     }
     // The reply's first message keys the line: it holds if more is written before a restart.
     const key = reply.firstTs;
-    if (findLine(c.thread, open.id, 'auto_answer', { bot: c.bot, key }) === undefined) {
+    const earlier = findLine(c.thread, open.id, 'auto_answer', { bot: c.bot, key });
+    // What the cursor passes: the whole reply, or after a crash only what was said before the line that
+    // already answered it, so a later message is sorted on its own.
+    let through = reply.lastTs;
+    if (earlier !== undefined) {
+      through =
+        c.counted
+          .filter(
+            (m) =>
+              compareTs(m.ts, reply.firstTs) >= 0 &&
+              compareTs(m.ts, reply.lastTs) <= 0 &&
+              compareTs(m.ts, earlier.ts) < 0,
+          )
+          .at(-1)?.ts ?? reply.firstTs;
+    } else {
       const written = await deps.answerWriter({
         cardId: card.id,
-        question: reply.words,
+        question: reply.words.slice(0, ASKED_LIMIT),
         askerName: reply.name,
         signal: shutdown.signal,
       });
@@ -469,18 +489,40 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         await ask(client, c, reply, read, 'held');
         return;
       }
-      await postLine(client, {
-        channel: open.channelId,
-        threadTs: open.threadTs,
-        text,
-        sendId: open.id,
-        line: 'auto_answer',
-        key,
-      });
+      try {
+        await postLine(client, {
+          channel: open.channelId,
+          threadTs: open.threadTs,
+          text,
+          sendId: open.id,
+          line: 'auto_answer',
+          key,
+        });
+      } catch (error) {
+        // What is wrong with the whole connection or conversation is the tick's; a post that failed alone
+        // is this question's, which then goes to the builder rather than being tried (and billed) again.
+        if (
+          error instanceof SlackError &&
+          (slackRefusedToken(error) ||
+            error.code === 'no_token' ||
+            error.code === 'ratelimited' ||
+            GONE.has(error.code))
+        )
+          throw error;
+        log.warn({ err: error, sendId: open.id }, 'an automated answer could not be posted');
+        await ask(client, c, reply, read, 'failed');
+        return;
+      }
     }
     recordRoute(read, (ctx) => {
-      recordAutoAnswer(ctx, open.id, reply.lastTs);
+      recordAutoAnswer(ctx, open.id, through);
     });
+  }
+
+  /** The master switch or the Reply Kind switch was turned off, as against no account to run it on. */
+  function replyKindSwitchedOff(): boolean {
+    const config = getJudgeConfig(state.db);
+    return !config.enabled || !config.decisions[JudgeDecision.ReplyKind].enabled;
   }
 
   /**
@@ -527,7 +569,10 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         await ask(client, c, reply, read, null);
         return false;
       case ReplyKind.SimpleQuestion:
-        if (c.open.returnedAt !== null) await ask(client, c, reply, read, null);
+        if (replyKindSwitchedOff()) {
+          // Switched off on purpose: nothing is posted, not even an acknowledgement.
+          await ask(client, c, reply, read, null, false);
+        } else if (c.open.returnedAt !== null) await ask(client, c, reply, read, null);
         else await autoAnswer(client, c, reply, read);
         return false;
       default: {
@@ -553,7 +598,11 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   async function sortGroup(client: SlackClient, c: Conversation): Promise<void> {
     if (!(await deps.judge.ready(JudgeDecision.ReplyKind))) return;
     let sorted = 0;
-    for (const m of c.counted) {
+    // After a bring-in, what was said before the move (the mention that brought someone in) is context.
+    const { movedFrom, messageTs } = c.open;
+    const sayings =
+      movedFrom === null ? c.counted : c.counted.filter((m) => compareTs(m.ts, messageTs) > 0);
+    for (const m of sayings) {
       if (sorted >= SORTED_PER_TICK) return;
       const open = currentOpen(c.open.id);
       if (open === undefined) return;
@@ -670,7 +719,11 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         await turn(open, async () => {
           const reply: Reply = { ...verdict, userId: person.userId, name: person.name };
           if (await sortReply(client, conversation, reply, false))
-            answerLone(conversation, verdict);
+            if (!answerLone(conversation, verdict))
+              // No one to answer as: it is sorted once and not again every tick.
+              state.write((ctx) => {
+                markHandled(ctx, open.id, verdict.lastTs);
+              });
         });
         break;
       }
@@ -730,7 +783,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   }
 
   /** Posts the reminder once, unless the thread already holds it; a reminder that comes due is re-checked first. */
-  async function remind(client: SlackClient, r: Reading): Promise<void> {
+  async function remind(client: SlackClient, r: Reading, bot: string): Promise<void> {
     const timers = getStakeholderTimers(state.db);
     const fresh = openSends(state.db, teamId).find((o) => o.id === r.open.id);
     if (!fresh || dueTimers(fresh, timers, clock.now()) !== 'remind') return;
@@ -742,20 +795,13 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       });
       return;
     }
-    const already = r.messages.some(
-      (m) =>
-        m.metadata?.eventType === 'tendb_send' &&
-        m.metadata.eventPayload['sendId'] === fresh.id &&
-        m.metadata.eventPayload['line'] === 'reminder',
-    );
-    if (!already) {
-      const text = reminderLine();
-      await client.post({
+    if (findLine(r.messages, fresh.id, 'reminder', { bot }) === undefined) {
+      await postLine(client, {
         channel: fresh.channelId,
-        text,
-        blocks: blocksOf(text),
         threadTs: fresh.threadTs,
-        metadata: { eventType: 'tendb_send', eventPayload: { sendId: fresh.id, line: 'reminder' } },
+        text: reminderLine(),
+        sendId: fresh.id,
+        line: 'reminder',
       });
     }
     state.write((ctx) => {
@@ -796,7 +842,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         const stillOpen = getInboxItem(state.db, r.open.inboxItemId).state === InboxState.Open;
         if (stillOpen) await guard([r.open], () => process(client, r, bot));
         if (openSends(state.db, teamId).some((o) => o.id === r.open.id))
-          await guard([r.open], () => remind(client, r));
+          await guard([r.open], () => remind(client, r, bot));
       }
       failures = 0;
       if (connections.get(teamId)?.state !== 'connected') connections.set(teamId, 'connected');

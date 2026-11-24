@@ -337,7 +337,8 @@
                                   "unparseable",
                                   "failed",
                                   "no_account",
-                                  "provider"
+                                  "provider",
+                                  "slack_unavailable"
                                 ]
                               },
                               {
