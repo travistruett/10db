@@ -303,6 +303,7 @@ import {
   laneWritableRoots,
   SandboxProfileError,
   SandboxTempDirError,
+  withCopyId,
   type GateSandbox,
   type LaneSandbox,
   type LaneSession,
@@ -2767,10 +2768,18 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Where Claude Code keeps this account's sessions, and with them each one's saved tool results.
     const configDir = sessionConfigDir(agent.harness, launch.env, homedir());
     let laneSession: LaneSession | null = null;
+    let sessionCopyId: CopyId | null;
+    try {
+      sessionCopyId = copyIdForBatch(db, row.batchId);
+    } catch (error) {
+      releaseStart();
+      if (!(error instanceof CopyJournalMissingError)) throw error;
+      return { kind: 'refused', message: error.message, providerSessionId: savedResumeId };
+    }
     if (opts.laneSandbox) {
       try {
         laneSession = await opts.laneSandbox.forSession({
-          copyId: copyIdForBatch(db, row.batchId),
+          copyId: sessionCopyId,
           setup: setupPlan.input,
           project: projectAtCheckout(project, checkout),
           env: launch.env,
@@ -2789,9 +2798,6 @@ export function createRunner(opts: RunnerOptions): Runner {
       } catch (error) {
         releaseStart();
         // A profile or temp dir the sandbox refuses would be refused the same way on a retry.
-        if (error instanceof CopyJournalMissingError) {
-          return { kind: 'refused', message: error.message, providerSessionId: savedResumeId };
-        }
         if (error instanceof SandboxProfileError || error instanceof SandboxTempDirError) {
           return {
             kind: 'refused',
@@ -3465,7 +3471,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         model: launch.model,
         effort: launchStep.effort,
         resumeProviderSessionId: resumeId,
-        env: launch.env,
+        // An ambient copy id never reaches a session, and a copy's own is never missing from it.
+        env: withCopyId(launch.env, sessionCopyId),
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
         yourMcpServers: yourServers,

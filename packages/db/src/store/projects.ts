@@ -224,9 +224,10 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
   if (nudgePct <= handoffPct) throw new InvalidError('nudgePct must be above handoffPct');
   if (changes.delivery !== undefined && changes.delivery !== current.delivery) {
     // A copy's landing reads the project's delivery from the journal's pinned facts, so the change waits.
-    if (unfinishedCopyOf(ctx.tx, id) !== null)
+    const copy = unfinishedCopyOf(ctx.tx, id);
+    if (copy !== null)
       throw new ConflictError(
-        `${current.name} is in a separate copy; let it ship or abandon it first`,
+        `${copy.title} is in a separate copy; let it ship or abandon it first`,
       );
     // A QUEUED pull-request workstream needs a batch to launch, so delivery can't change under work.
     const busy = ctx.tx
@@ -245,9 +246,10 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
       );
   }
   // A copy lands only after the gate runs, so the command stays while a copy is unfinished.
-  if (changes.gateCommand === null && unfinishedCopyOf(ctx.tx, id) !== null)
+  const copyLanding = changes.gateCommand === null ? unfinishedCopyOf(ctx.tx, id) : null;
+  if (copyLanding !== null)
     throw new ConflictError(
-      `${current.name} is in a separate copy, which lands through the gate command; let it ship or abandon it first`,
+      `${copyLanding.title} is in a separate copy, which lands through the gate command; let it ship or abandon it first`,
     );
   if (changes.areas !== undefined || changes.hazards !== undefined) {
     const areas = changes.areas ?? current.areas;

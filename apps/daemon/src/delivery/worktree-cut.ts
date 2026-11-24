@@ -226,6 +226,9 @@ export async function cutWorktree(
       return;
     }
     made.worktree = true;
+    // Never a fix batch's: its branch is the pull request's and outlives a refused cut.
+    made.branch = fix === null;
+    made.base = baseSha;
     if (local) {
       // Keeps the commit the copy's databases are made by reachable until the copy is retired; a
       // cut made again overwrites it.
@@ -237,9 +240,6 @@ export async function cutWorktree(
         return;
       }
     }
-    // Never a fix batch's: its branch is the pull request's and outlives a refused cut.
-    made.branch = fix === null;
-    made.base = baseSha;
     const prepared = await seedAndInstall(ctx, {
       owner: { kind: 'batch', id: batchId },
       project,
