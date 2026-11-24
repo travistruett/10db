@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { SlackMemberDto } from '@10db/contracts';
+import type { SlackChannelDto, SlackMemberDto } from '@10db/contracts';
 
 /** A reaction on a message: its name and the user ids that added it. */
 export interface SlackReaction {
@@ -156,3 +156,30 @@ export const MembersReply = z
     })),
     nextCursor: r.response_metadata,
   }));
+
+const RawChannel = z.object({
+  id: z.string().min(1),
+  name: z.string().default(''),
+  is_private: z.boolean().default(false),
+  is_member: z.boolean().default(false),
+  is_archived: z.boolean().default(false),
+});
+
+export const ChannelsReply = z
+  .object({ channels: z.array(RawChannel).default([]), response_metadata: NextCursor })
+  .transform((r) => ({
+    channels: r.channels
+      .filter((c) => !c.is_archived)
+      .map((c): SlackChannelDto => ({
+        id: c.id,
+        name: c.name,
+        isPrivate: c.is_private,
+        isMember: c.is_member,
+      })),
+    nextCursor: r.response_metadata,
+  }));
+
+export const UploadUrlReply = z.object({
+  upload_url: z.url(),
+  file_id: z.string().min(1),
+});
