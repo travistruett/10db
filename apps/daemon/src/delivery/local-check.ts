@@ -43,3 +43,15 @@ export function shipCheck(project: CheckProject): LocalCheck | null {
   if (project.gateCommand === null) return null;
   return precheckOf(project) ?? { kind: 'gate', command: project.gateCommand };
 }
+
+/**
+ * The full check a Commit Directly task runs once, after its last step's own check passed. Work in
+ * that delivery has no batch and no ship, so nothing else runs the gate before it is Done. Null for
+ * other deliveries, and when the step check already is that command.
+ */
+export function finalCheck(project: CheckProject): LocalCheck | null {
+  if (project.delivery !== Delivery.Local) return null;
+  const full = shipCheck(project);
+  if (full === null || full.command === stepCheck(project)?.command) return null;
+  return full;
+}

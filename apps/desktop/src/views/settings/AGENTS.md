@@ -37,13 +37,7 @@ Decision Models (`decision-models-view.tsx`, Settings › Models › Decision Mo
   unread account (`unchecked`) is a maybe and gets no button. A new service is one entry in `CONNECTABLE_SERVICES`,
   one in `ConnectableService` and its label, and its card using the button. Then Artificial Analysis. Settings › People (`views/settings/people/`) is only the people, with
   how 10db reaches each one, and the timers; Add Person never shows a handle (`person-handle.ts` makes one from
-  the name and numbers a clash). Settings › Question Routing (`who-answers-section.tsx`) is the routing table, with Manage People (a link to People) beside Add Route; a row (or its pencil) opens the same modal as Edit Route, prefilled, and Save Route replaces that row's rules. Goes To takes several people. A question card shows what its
-  people will get (`slack-preview.tsx`: the route line under the title with Change, the card's one reroute
-  control; ⌘↵ sends, a bare Enter and the digits do nothing), Ask Someone (`ask-someone.tsx`), and, for someone
-  not in Slack, the message with Copy for them beside it, from `InboxItemDto.copyFor`. Take Back posts in Slack,
-  so it asks first (`take-back-modal.tsx`). The Inbox has an Open, a Waiting and a
-  Resolved state (the daemon's placement, `InboxPlacement` in `packages/db/src/store/inbox-open-rows.ts`: a sent,
-  unreturned card is Waiting only while Slack is connected).
+  the name and numbers a clash). Settings › Question Routing (`who-answers-section.tsx`) is the routing table, with Manage People (a link to People) beside Add Route; a row opens that modal as Edit Route, whose Save replaces the row's rules, and Goes To takes several people.
   `WorkstreamDto.waitingOn` draws "Waiting on Mark in Slack · 3h" on a card that keeps its plain border. A popover
   that holds a Select draws the Select's list inside itself (`comboboxProps={{ withinPortal: false }}`), or a click
   on an option closes it. `e2e/stakeholder-questions.spec.ts` seeds its cards with `apps/daemon/scripts/seed-*.ts`.
