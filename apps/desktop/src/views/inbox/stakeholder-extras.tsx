@@ -173,7 +173,7 @@ const OUTAGE_NOTICES: Readonly<Record<string, string>> = {
     "Slack can't be reached right now. Replies are read again when it is; you can answer this yourself meanwhile.",
 };
 
-const DECLINED_REASONS: Readonly<Record<string, string>> = {
+const DECLINED_REASONS: Readonly<Record<NonNullable<AskedQuestion['declined']>, string>> = {
   not_answerable: "10db couldn't answer this from what it holds.",
   held: "10db's answer was held by the outbound check.",
   too_long: "10db's answer was too long to send.",
@@ -208,7 +208,7 @@ function AskedQuestionBox({
         </Text>
         {asked.declined === null ? null : (
           <Text size="xs" c="dimmed">
-            {DECLINED_REASONS[asked.declined] ?? "10db didn't answer it itself."}
+            {DECLINED_REASONS[asked.declined]}
           </Text>
         )}
         <Textarea
