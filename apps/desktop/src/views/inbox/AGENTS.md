@@ -21,3 +21,4 @@
   `detail.opens` is a `CardOpens` shows its link (`card-opens-link.tsx`): a Settings section through the router, or a
   `file://` link for a path, as the step log's is.
 - A question card (Settings › Question Routing decides where it goes) shows what its people will get (`slack-preview.tsx`: the route line under the title with Change, the card's one reroute control; ⌘↵ sends, a bare Enter and the digits do nothing), Ask Someone (`ask-someone.tsx`), and, for someone not in Slack, the message with Copy for them beside it, from `InboxItemDto.copyFor`. Withdraw Question posts in Slack, so it asks first (`take-back-modal.tsx`). The Inbox has an Open, a Waiting and a Resolved state (the daemon's placement, `InboxPlacement` in `packages/db/src/store/inbox-open-rows.ts`: a sent, unreturned card is Waiting only while Slack is connected).
+- Buttons in a card are filled (primary) or default (outline), never subtle: a subtle button floats and reads as text.
