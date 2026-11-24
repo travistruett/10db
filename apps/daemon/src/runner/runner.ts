@@ -376,7 +376,7 @@ import {
   withUndelivered,
 } from './next-action';
 import { readBackThread, type ReadBack } from './read-back';
-import { takesPictures } from '../pictures';
+import { takesPictures, taskInLocalCopy } from '../pictures';
 import { checkTaskAnchors } from '../plan-record';
 import {
   buildThreadDigest,
@@ -3029,7 +3029,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       brief: opts.laneBrief ?? LaneBrief.Full,
       inPass: pass !== null,
       attended: policy.attended,
-      pictures: project.appUrl !== null && takesPictures(project, task),
+      pictures:
+        project.appUrl !== null && takesPictures(project, task, [], taskInLocalCopy(db, task.id)),
       browser: laneSession !== null && opts.endLaneBrowser !== undefined,
       sandboxed: Boolean(opts.laneSandbox),
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),

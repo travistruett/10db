@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import {
   APP_URL_IS_DAEMON,
+  BatchId,
+  BatchState,
   BrowserState,
   isDaemonAddress,
   EventType,
@@ -43,6 +45,8 @@ import {
   getWorkstream,
   hasTaskScreen,
   insertSystemNotice,
+  isLocalCopy,
+  listBatches,
   listLivePasses,
   listPassTasks,
   listProjects,
@@ -55,6 +59,7 @@ import {
   latestPassTurn,
   listTaskPageReports,
   listTaskToolCalls,
+  listWorkstreams,
   listTaskTurns,
   openPassTurn,
   openPreviewMark,
@@ -75,6 +80,7 @@ import {
   writePicture,
   type ScreenToKeep,
 } from './picture-files';
+import { taskInLocalCopy } from './copy-task';
 import { keptRoute, pageAreaRoutes } from './kept-route';
 import {
   pageRoute,
@@ -367,10 +373,20 @@ export function startPictures(deps: PicturesDeps): Pictures {
     codexStarts: listTaskCodexStarts(db, taskId),
   });
 
+  const inLocalCopy = (task: TaskDto): boolean => taskInLocalCopy(db, task.id);
+
+  /** Asks an after for each task of a shipped local copy that has none. */
+  function askCopyAfters(batchId: BatchId): void {
+    for (const run of listWorkstreams(db, { batchId })) {
+      const task = getTask(db, run.taskId);
+      if (!hasTaskScreen(db, task.id, ScreenKind.After)) askAfter(task, null);
+    }
+  }
+
   /** Asks a before for the task when it takes pictures, has none, and has started nothing. */
   function askBefore(task: TaskDto, passId: PassId | null): void {
     const project = getProject(db, task.projectId);
-    if (project.appUrl === null || !takesPictures(project, task)) return;
+    if (project.appUrl === null || !takesPictures(project, task, [], inLocalCopy(task))) return;
     if (pictureRoutes(project, task).length === 0) return;
     if (hasTaskScreen(db, task.id, ScreenKind.Before)) return;
     if (!beforeAllowed({ inPass: passId !== null, ...taskStartFacts(db, task.id) })) return;
@@ -429,7 +445,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
   function askAfter(task: TaskDto, passId: PassId | null): void {
     const project = getProject(db, task.projectId);
     const reported = reportedFor(ScreenKind.After, task, null, passId !== null);
-    if (project.appUrl === null || !takesPictures(project, task, reported)) return;
+    if (project.appUrl === null || !takesPictures(project, task, reported, inLocalCopy(task)))
+      return;
     if (pictureRoutes(project, task, reported).length === 0) return;
     ask({ kind: ScreenKind.After, projectId: project.id, passId, taskId: task.id, turnId: null });
   }
@@ -721,8 +738,16 @@ export function startPictures(deps: PicturesDeps): Pictures {
         return;
       const runId = WorkstreamId.safeParse(event.entityId);
       if (!runId.success) return;
-      const task = getTask(db, getWorkstream(db, runId.data).taskId);
+      const run = getWorkstream(db, runId.data);
+      // A copy task's after waits for its batch to ship: only then is its change in the copy.
+      if (run.batchId !== null && isLocalCopy(db, run.batchId)) return;
+      const task = getTask(db, run.taskId);
       if (task.passId == null) askAfter(task, null);
+    },
+    [EventType.BatchUpdated]: (event) => {
+      if (event.data['to'] !== BatchState.Shipped) return;
+      const batchId = BatchId.safeParse(event.entityId);
+      if (batchId.success && isLocalCopy(db, batchId.data)) askCopyAfters(batchId.data);
     },
     [EventType.ProjectChanged]: (event) => {
       const projectId = ProjectId.safeParse(event.entityId);
@@ -764,6 +789,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
       )
         askAfter(task, null);
   }
+  for (const batch of listBatches(db, { states: [BatchState.Shipped] }))
+    if (Date.parse(batch.updatedAt) >= since && isLocalCopy(db, batch.id)) askCopyAfters(batch.id);
   const unsubscribe = deps.bus.subscribe((event) => {
     handlers[event.type]?.(event);
   });

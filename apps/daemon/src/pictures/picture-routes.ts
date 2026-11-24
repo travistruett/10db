@@ -68,17 +68,19 @@ export function pageRoute(
 }
 
 /**
- * Whether pictures are taken of the task: a page of a pass, or a Your-folder task naming a routed page
- * or reporting a route.
+ * Whether pictures are taken of the task: a page of a pass, or a Your-folder task or a task of a local
+ * copy naming a routed page or reporting a route.
  */
 export function takesPictures(
   project: RoutedProject,
   task: Pick<TaskDto, 'areas' | 'passId' | 'workspaceMode'>,
   reported: readonly string[] = [],
+  inLocalCopy = false,
 ): boolean {
   if (task.passId != null) return true;
   return (
-    task.workspaceMode === WorkspaceMode.Shared && pictureRoutes(project, task, reported).length > 0
+    (task.workspaceMode === WorkspaceMode.Shared || inLocalCopy) &&
+    pictureRoutes(project, task, reported).length > 0
   );
 }
 
