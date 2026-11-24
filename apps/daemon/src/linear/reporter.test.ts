@@ -34,7 +34,7 @@ import { FakeAdapter, type FakeScriptBook } from '../sessions';
 import { createLinearReporter, REPORTER_STARTER, type LinearReporter } from './reporter';
 import { reporterConversations } from './reporter-conversation';
 import { reporterHooks } from './reporter-owner';
-import { SNAPSHOT_STARTER } from './snapshot';
+import { SNAPSHOT_FIRST_LINE, SNAPSHOT_STARTER } from './snapshot';
 
 // The reporter on the real pipeline: the store, the explore engine with the fake adapter, the daemon's own
 // MCP endpoint and a manual clock. Only the agent is scripted.
@@ -327,7 +327,10 @@ describe('the Linear reporter', () => {
         { do: 'tool', toolName: `${PREFIX}get_issue`, input: { id: ISSUE }, result: '{}' },
         // A write is refused by the read-only guard.
         { do: 'tool', toolName: `${PREFIX}save_comment`, input: { issueId: ISSUE, body: 'x' } },
-        { do: 'say', text: 'AMP-1: Add search. Blocked by AMP-2 (Backlog).' },
+        {
+          do: 'say',
+          text: `${SNAPSHOT_FIRST_LINE}\nAMP-1: Add search. Blocked by AMP-2 (Backlog).`,
+        },
         { do: 'turn_complete' },
       ],
       [{ do: 'turn_complete' }],
@@ -339,6 +342,12 @@ describe('the Linear reporter', () => {
     expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(1);
     expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(1);
     // A run that answers nothing is a missing snapshot, never a lane that waits.
-    await expect(reporter.snapshot(task.id)).resolves.toMatchObject({ kind: 'missing' });
+    // The first run's conversation retires on the clock; the second snapshot waits for it.
+    const second = reporter.snapshot(task.id);
+    clock.advance(0);
+    await expect(second).resolves.toEqual({
+      kind: 'missing',
+      reason: 'the session answered with nothing',
+    });
   });
 });

@@ -2476,6 +2476,29 @@ export function createRunner(opts: RunnerOptions): Runner {
         return { kind: 'stopped', reason: stoppedWhileWaiting, providerSessionId: savedResumeId };
       if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
     }
+    // Each fresh build attempt reads its Linear issue again, since comments and blockers move between attempts.
+    // It is read before the start gate, so the wait holds no slot, and a stop ends it at once.
+    let linearIssue: LinearSnapshot | null = null;
+    if (opts.linearSnapshot !== undefined && action.kind === 'start' && !readOnly) {
+      const reading = new AbortController();
+      ctl.holdAbort = reading;
+      try {
+        linearIssue = await Promise.race([
+          opts.linearSnapshot(row.taskId),
+          new Promise<null>((resolve) => {
+            reading.signal.addEventListener('abort', () => {
+              resolve(null);
+            });
+          }),
+        ]);
+      } finally {
+        ctl.holdAbort = null;
+      }
+      const stoppedWhileReading = stopRequested(ctl);
+      if (stoppedWhileReading)
+        return { kind: 'stopped', reason: stoppedWhileReading, providerSessionId: savedResumeId };
+      if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
+    }
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
     const resumeId = resumedSessionOf(action);
     const claims = () => activeClaims(db, id).map((c) => ({ kind: c.kind, name: c.name }));
@@ -2890,11 +2913,6 @@ export function createRunner(opts: RunnerOptions): Runner {
       action.kind === 'start' &&
       !step.earlier.some((r) => r.verdict === Verdict.Reject)
         ? testValueBrief(await testValueFlags(row, checkout))
-        : null;
-    // Each fresh build attempt reads the issue again, since its comments and blockers move between attempts.
-    const linearIssue =
-      opts.linearSnapshot !== undefined && action.kind === 'start' && !readOnly
-        ? await opts.linearSnapshot(row.taskId)
         : null;
     const prompt = buildSessionPrompt({
       provider,

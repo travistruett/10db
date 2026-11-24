@@ -40,7 +40,12 @@ import { refreshReporterCard } from './reporter-inbox';
 import { taskPrUrl } from './reporter-brief';
 import { judgeReporterCall, type ReporterRun } from './reporter-guard';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
-import { SNAPSHOT_MAX_READS, SNAPSHOT_STARTER, type LinearSnapshot } from './snapshot';
+import {
+  SNAPSHOT_FIRST_LINE,
+  SNAPSHOT_MAX_READS,
+  SNAPSHOT_STARTER,
+  type LinearSnapshot,
+} from './snapshot';
 import { linearLinkOf } from './task-link';
 
 // The Linear reporter's run: one timer per task, one short session per run,
@@ -157,6 +162,8 @@ export function createLinearReporter(
   const byConversation = new Map<ConversationId, Flight>();
   /** The zero-delay timers that retire a settled run's conversation and re-arm its task. */
   const afters = new Set<Timer>();
+  /** Snapshots waiting for a task's run to finish; each is woken with whether the task went idle. */
+  const idleWaiters = new Map<TaskId, Set<(idle: boolean) => void>>();
   let stopped = false;
   /** Read again after an await, where the compiler has narrowed `stopped`. */
   const halted = (): boolean => stopped;
@@ -336,8 +343,7 @@ export function createLinearReporter(
       settleRows(flight, reason);
     }
     if (flight.sessionId !== null) bySession.delete(flight.sessionId);
-    flights.delete(flight.taskId);
-    byConversation.delete(flight.conversationId);
+    // The task stays in flight until its conversation is retired, so nothing starts on a conversation still closing.
     retireAfter(flight);
   };
 
@@ -355,7 +361,10 @@ export function createLinearReporter(
           .map((item) => parseItemBody(ConversationItemKind.AgentMessage, item.body).text.trim())
           .filter((text) => text !== '');
         const text = said.at(-1);
-        if (text !== undefined) return { kind: 'read', text };
+        if (text?.startsWith(SNAPSHOT_FIRST_LINE) === true)
+          return { kind: 'read', text: text.slice(SNAPSHOT_FIRST_LINE.length).trim() };
+        if (text !== undefined)
+          return { kind: 'missing', reason: 'the session did not return the issue' };
       } catch (error) {
         log.error({ err: error, taskId: flight.taskId }, 'a snapshot run could not be read back');
       }
@@ -400,11 +409,31 @@ export function createLinearReporter(
           );
         })
         .finally(() => {
+          flights.delete(flight.taskId);
+          byConversation.delete(flight.conversationId);
+          for (const wake of idleWaiters.get(flight.taskId) ?? []) wake(true);
+          idleWaiters.delete(flight.taskId);
           arm(flight.taskId);
         });
     }, 0);
     afters.add(after);
   };
+
+  /** Waits for the task's run to finish and its conversation to retire, for at most the snapshot deadline. */
+  const untilIdle = (taskId: TaskId): Promise<boolean> =>
+    new Promise((resolve) => {
+      const waiters = idleWaiters.get(taskId) ?? new Set();
+      idleWaiters.set(taskId, waiters);
+      const wake = (idle: boolean): void => {
+        timer.cancel();
+        waiters.delete(wake);
+        resolve(idle);
+      };
+      const timer = clock.setTimeout(() => {
+        wake(false);
+      }, SNAPSHOT_DEADLINE_MS);
+      waiters.add(wake);
+    });
 
   const runOf = (sessionId: SessionId): { flight: Flight; guard: ReporterRun } => {
     const flight = bySession.get(sessionId);
@@ -430,16 +459,17 @@ export function createLinearReporter(
         flight.deadline = null;
         flight.snapshot?.resolve({ kind: 'missing', reason: '10db is shutting down.' });
       }
+      for (const waiters of idleWaiters.values()) for (const wake of [...waiters]) wake(false);
+      idleWaiters.clear();
       return Promise.resolve();
     },
 
     poke: arm,
 
     async snapshot(taskId) {
-      const link = linearLinkOf(state.db, taskId)?.link;
-      if (link === undefined) return null;
       const missing = (reason: string): LinearSnapshot => ({ kind: 'missing', reason });
       try {
+        if (linearLinkOf(state.db, taskId) === null) return null;
         if (stopped) return missing('10db is shutting down.');
         const task = getTask(state.db, taskId);
         const blocked = reporterBlockedBy(state.db, task.projectId);
@@ -452,6 +482,9 @@ export function createLinearReporter(
             row.note ??
               "This account's agent has no Linear. Connect Linear under Settings › Integrations.",
           );
+        if (halted()) return missing('10db is shutting down.');
+        if (flights.has(taskId) && !(await untilIdle(taskId)))
+          return missing('A Linear update for this task was still running.');
         if (halted()) return missing('10db is shutting down.');
         if (flights.has(taskId)) return missing('A Linear update for this task was running.');
         const conversationId = deps.conversations.reporterOf(taskId, task.projectId);
