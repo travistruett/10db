@@ -25,6 +25,8 @@ export const DEV_UI_READS: readonly string[] = [
   '/projects/:projectId/shape-jev',
   '/projects/:projectId/one-way-paths',
   '/projects/:projectId/live-systems',
+  '/projects/:projectId/live-systems/proposals',
+  '/projects/:projectId/repo-mcp-servers',
   '/projects/:projectId/trust-grants',
   '/projects/:projectId/network-hosts',
   '/projects/:projectId/hazard-assessment',
