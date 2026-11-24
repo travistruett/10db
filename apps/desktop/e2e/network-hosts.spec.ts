@@ -37,15 +37,6 @@ async function expectAccessible(page: Page, label: string): Promise<void> {
   expect(found).toEqual([]);
 }
 
-// The bar slides up when an edit makes the page unsaved, and on a slow runner a click can land before it
-// settles and miss the button. Save is pressed again until the page reads as saved.
-async function saveEdit(page: Page): Promise<void> {
-  await expect(async () => {
-    await page.getByRole('button', { name: 'Save', exact: true }).click({ timeout: 2_000 });
-    await expect(page.getByText('Unsaved changes')).toHaveCount(0, { timeout: 2_000 });
-  }).toPass({ timeout: 20_000 });
-}
-
 // Core flow 10, with process-per-rigor.spec.ts: a setting the builder changes in Settings that changes
 // what an agent may do, here which hosts a project's sandbox lets it reach.
 test('a builder allows two hosts, is refused localhost and removes them', async ({
@@ -100,7 +91,7 @@ test('a builder allows two hosts, is refused localhost and removes them', async 
   await expect(unsaved).toHaveCount(0);
   // A value saved with a trailing space leaves nothing unsaved, so leaving does not ask.
   await preview.fill('pnpm dev ');
-  await saveEdit(page);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
   await expect(unsaved).toHaveCount(0);
   await page.getByRole('link', { name: 'Sharing' }).click();
@@ -126,5 +117,6 @@ test('a builder allows two hosts, is refused localhost and removes them', async 
   // Put the preview command back for the specs that share this project.
   await page.getByRole('link', { name: 'App Preview' }).click();
   await preview.fill('');
-  await saveEdit(page);
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(unsaved).toHaveCount(0);
 });
