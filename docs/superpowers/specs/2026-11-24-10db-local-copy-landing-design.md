@@ -80,6 +80,12 @@ Rules that change:
   placement control. A project default of `worktree` stays pull-request only.
 - `startBatchApart` (`delivery/start.ts:269`) still refuses several tasks at once for a local project. One task in a
   copy starts.
+- **Start routes by the task's placement, not the project's delivery.** Today a local project's start goes straight
+  to `startTaskWithPlan` in your folder (`daemon/services.ts:547-551`). A task placed in a copy goes through
+  `starter.startTask`, which cuts its batch, as a pull-request task does. The scheduler's checkout checks (missing
+  worktree and wrong branch, `scheduler/scheduler.ts:534-554`; the branch snapshot, `scheduler.ts:640-649`) run for
+  any batch with a worktree, read from the pinned batch, instead of only for pull-request projects. So a copy task
+  can never launch in your folder.
 
 A task can go into a copy only when all of these hold. Otherwise placement is refused with the reason:
 - the project has a gate command (a copy lands only after one);
@@ -100,14 +106,19 @@ journal row (§5) is written in the cut's transaction.
    - the branch starts at `refs/heads/<base>`, recorded as `batches.base_sha`;
    - no origin, fetch or `gh` check runs (`worktree-cut.ts:102-162` are pull-request only);
    - seed and install run as today (`worktree-seed.ts`, `worktree-dependencies.ts`).
+   - the journal row pins the teardown: `teardown_command` is the project's `copyTeardownCommand` now, and
+     `teardown_sha` is `base_sha`, the commit the copy's databases are made by. A ref,
+     `refs/10db/copies/<batch id>/teardown`, keeps that commit reachable until the copy is retired.
    The cut makes nothing outside git and the worktree, so recutting a CUTTING row after a crash is safe.
 2. **Open.** Lanes, reviewer sessions and takeovers of the task run in the copy. Every command they run carries
    `TENDB_COPY_ID` (§4). Step and final checks run in the copy, as they do for a worktree batch.
 3. **Land** (§5) once the task's run is accepted by review and no workstream of the batch has work in hand.
 4. **Retire** on SHIPPED or ABANDONED:
-   - `copyTeardownCommand` runs through the gate runner, unslotted, in a fresh scratch worktree of the base's tip
-     (no seed, no install), never in the copy. It gets `TENDB_COPY_ID`. The tip it ran from goes in the journal.
-   - Exit 0 is done. Then the worktree and branch go as today (`worktree-cleanup.ts`).
+   - The pinned `teardown_command` runs through the gate runner, unslotted, in a fresh scratch worktree of the
+     pinned `teardown_sha` (no seed, no install), never in the copy. It gets `TENDB_COPY_ID`. Later changes to
+     `build` or to the setting can't break a copy's teardown, since the code that made its databases is the code
+     that drops them.
+   - Exit 0 is done. Then the worktree, the branch and the teardown ref go as today (`worktree-cleanup.ts`).
    - A failure leaves one card with the command's log and a Retry. The worktree stays until teardown succeeds.
    - The command must be idempotent. Recovery reruns it.
 
@@ -118,18 +129,21 @@ A FAILED batch keeps its copy and database for Retry, as worktree batches do now
 - **Value.** `copyIdOf(batchId)`: the first 12 hex digits of the SHA-256 of the batch id. It's lowercase hex, so
   it is safe as part of a Postgres name and needs no escaping. It is not a secret.
 - **Stored** in the journal row, so recovery and teardown don't recompute it from a changed rule.
-- **Handed** by `prepareCommandEnv` (`sandbox/command-env.ts`), which builds the variables every sandboxed command
-  gets on top of the allowlisted env. It gets an optional `copyId` and sets `TENDB_COPY_ID`, as it sets
-  `TENDB_SANDBOX`. One function, so the paths can't differ:
+- **Handed** by one function, `withCopyId(env, copyId | null)` in `sandbox/command-env.ts`. It removes
+  `TENDB_COPY_ID` from the merged env, then sets it only when `copyId` is given. Each builder applies it **last**,
+  after the allowlisted env, `prepareCommandEnv` and any server's own env are merged. So the project's env, the
+  builder's shell and an MCP server's `env` can never supply the name, and a command with no copy never has it.
+  The builders:
   - Claude lanes, on any account (plan, API key, Bedrock): the env file the sandboxed shell sources
     (`lane-sandbox.ts`, `createLaneEnvFile`);
   - Codex lanes: `shellEnv` (`lane-sandbox.ts:571`), which `codex-lane-config.ts:65` sets as
     `shell_environment_policy.set`;
   - gate runs and the teardown: `gate-sandbox.ts`'s `commandEnv`;
   - the session's sandboxed MCP servers: `mcp-sandbox.ts:166`.
-- The runner passes `copyId` from the session's batch on every start and resume, and for reviewer and takeover
-  sessions. A session of a copy batch whose journal row can't be read doesn't start, and raises one card. Without
-  the id, Ampsio's targets would act on the folder's own databases.
+- `copyId` comes only from the journal row of the batch the command runs for: a session's batch (on every start
+  and resume, reviewer and takeover sessions included), the gate's batch, or the copy being torn down. A session,
+  gate or teardown of a copy batch whose journal row can't be read doesn't run, and raises one card. Without the id,
+  Ampsio's targets would act on the folder's own databases.
 - `TENDB_COPY_ID` joins `ALLOWED_NAMES` (`sandbox/env-allowlist.ts`), as `TENDB_SANDBOX` has. A name off the list
   becomes a `credentials.envVars` deny in the Claude profile (`lane-sandbox.ts:526`, `profile.ts:407`), while Codex
   and the gate would still get it, so the providers would differ.
@@ -153,13 +167,18 @@ journal's step, never from step 0.
 | `wait` | null, `folder_off_base`, `edits_in_the_way`, `index_locked`, `base_moving` or `conflict` |
 | `wait_detail` | the paths or branch the wait's card names |
 | `retry_at` | when a timed wait checks again |
-| `teardown_sha` | the base tip the last teardown ran from |
+| `teardown_command` | the teardown command, pinned at the cut |
+| `teardown_sha` | the commit the teardown runs from, pinned at the cut (§3) |
 | `updated_at` | |
 
 A step's row is written before it acts. Its outcome is written before the next step's intent.
 
 **Leaving and re-entering.** Any transition of the batch to FAILED or back to OPEN (a gate failure, a merge fix, a
-refusal) resets the journal to `step: open`, clears C and the wait, and keeps `attempt` at 0. Every entry at
+refusal) resets the journal to `step: open`, clears C and the wait, and sets `attempt` to 0. There is one exception:
+an interrupted landing (§8 row G) fails the batch with the journal kept at `promoting`, T and C, because its Retry
+needs them. Retry of that batch goes SHIPPING and resumes the landing at `promoting`, which runs the classifier
+again (`ship.ts:1400-1403`'s `toShipping` then `resume`). Abandon is refused while the journal is at `promoting`:
+the folder may hold files of C, so it is settled first. Every entry at
 `gating`, `gated` or `promoting`, live or at recovery, first checks that the copy's head is still C, and goes back
 to step 2 if it isn't.
 
@@ -256,7 +275,7 @@ file, against both T and C:
 | D | R is T; W's index and files match C; nothing staged in W besides C's | crashed between `read-tree` and `update-ref` | compare-and-swap T → C; a race is row G |
 | E | R descends from T, not from C; W's index and files match R | build moved; nothing of 10db's written | back to step 2 |
 | F | R is T or descends from T, not from C; W's index matches R; some W files differ from both R and C | your edits, nothing of 10db's written | `wait: edits_in_the_way`, naming those files |
-| G | anything else | mixed index or files, or build moved under files 10db wrote | the batch fails (`BatchFailure` for an interrupted landing) with one card naming the paths and refs, and a Retry that runs the classifier again. Nothing in your folder is touched; the copy keeps the work |
+| G | anything else | mixed index or files, or build moved under files 10db wrote | the batch fails (`BatchFailure` for an interrupted landing) with the journal kept at `promoting` (§5), and one card naming the paths and refs, with a Retry that runs the classifier again. Nothing in your folder is touched; the copy keeps the work |
 
 10db never runs `read-tree`, a reset or a checkout on your folder at recovery, except for the swap in row D. Row G is
 the only one a person settles: they put the folder in a state of rows B to F, then press Retry.
@@ -273,7 +292,7 @@ the only one a person settles: they put the folder in a state of rows B to F, th
 | `promoting` | the classifier |
 | any wait | restored from the journal. `retry_at` holds for `base_moving`; the others recheck at once |
 | `landed` | the migrations card by its key, then retire. Pictures catch up by themselves (§6) |
-| `retiring` | the teardown reruns |
+| `retiring` | the pinned teardown reruns from `teardown_sha` |
 
 A SHIPPING local-copy batch goes to `shipper.resume`, which routes it to the landing, starting from the journal's
 step. A SHIPPED copy's worktree is removed only after its teardown succeeds (`recover.ts` step 5 calls the copy's
@@ -311,7 +330,7 @@ retirement).
 
 - **Same everywhere.** The copy, its id, the gate, landing and recovery are 10db's, not the model's. The id reaches
   Claude lanes (plan, API key, Bedrock) through the env file and Codex lanes through `shellEnv`, both from
-  `prepareCommandEnv`, so no provider can differ.
+  `withCopyId`, so no provider can differ.
 - **Unattended.** Every wait and refusal above is a card, the same on every account. The project never moves to
   another account.
 - **The pilot** runs on a Claude plan lane and a Codex lane. API-key and Bedrock lanes are checked before any preset
@@ -338,8 +357,9 @@ Following `.claude/rules/testing.md`: git and recovery are core. Each commit tha
    - a file touched but unchanged doesn't block (refresh before check);
    - a commit on the base between `read-tree` and `update-ref` answers `unclear` and leaves the files alone.
 2. **The classifier as one table test** in a real repository: rows A to G, each from a real folder state.
-3. **One wiring test:** a resumed copy session's Claude env file, its Codex `shellEnv` and its gate env all carry the
-   same `TENDB_COPY_ID`, and the Claude profile's `credentials.envVars` denies don't name it.
+3. **One wiring test:** a resumed copy session's Claude env file, its Codex `shellEnv`, an MCP server whose own env
+   sets `TENDB_COPY_ID` to something else, and its gate env all carry the journal's id; the Claude profile's
+   `credentials.envVars` denies don't name it; and a shared-folder gate whose project env sets it gets none.
 4. **One e2e flow extended** (`apps/desktop/e2e/loop.spec.ts`, real daemon and app, local delivery already): with
    `localCopies` on, a task is put in a separate copy from its placement control, runs, and its commit reaches the
    folder's base only after its gate.
@@ -396,4 +416,8 @@ One file each under `docs/architecture/decisions/` when built:
 | Fable r2 B1: the copy id off the allowlist is a Claude deny | `TENDB_COPY_ID` joins `ALLOWED_NAMES`; the wiring test checks the denies (§4, §12.3) |
 | Fable r2 B2: classifier's last row stuck | row F waits on your edits; row G fails the batch with a Retry (§8) |
 | Fable r2 B3: the journal isn't reset after a fix | leaving SHIPPING resets it; re-entry checks the head is C (§5) |
+| Astra r2 3: teardown runs moving code | command and revision pinned at the cut, the revision kept by a ref (§3) |
+| Astra r2 5: row G's failure clears C | row G keeps the journal at `promoting`; Retry resumes there; no Abandon meanwhile (§5, §8) |
+| Astra r2 7: the id from another source | `withCopyId` strips the name and sets it last, from the journal only; gates and teardown refuse without it (§4) |
+| Astra r2 8: a copy task starts in your folder | start routes by placement; the scheduler's checkout checks read the pinned batch (§2) |
 | Astra: the brief's deferred items | §1 Out |
