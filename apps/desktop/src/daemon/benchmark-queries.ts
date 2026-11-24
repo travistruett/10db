@@ -24,6 +24,8 @@ export function useSyncBenchmarks() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
+    // An action, not a saved setting: a settings page's bar does not say Saved for it.
+    meta: { quiet: true },
     mutationFn: async () => readJson(await client.benchmarks.sync.$post(), BenchmarkStatusDto),
     onSuccess: (status) => {
       queryClient.setQueryData(benchmarkKeys.status, status);

@@ -101,6 +101,8 @@ export function useTestAccount(id: AccountId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
+    // An action, not a saved setting: a settings page's bar does not say Saved for it.
+    meta: { quiet: true },
     mutationFn: async () =>
       readJson(
         await client.accounts[':accountId'].test.$post({ param: { accountId: id } }),

@@ -43,7 +43,7 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
 A view never renders the frame's parts; it draws into slots (`frame-slots.ts`, read with `useFrameSlots`) while it
 is mounted:
 
-- `SaveBar` (`save-bar.tsx`): the sticky Reset and Save bar under a page of typed settings, with the last save's refusal at its left and "Saved" beside the button.
+- `SaveBar` (`save-bar.tsx`): the sticky bar under a settings page, shown only while it has something to say: "Unsaved changes" (or the last save's refusal) with Discard and Save, then "Saved" for a moment.
 - `TitleRow` (`title-row.tsx`): the title, an optional `switcher`, a dim `meta` line and `actions` at the right.
   The row's box and the space between its parts carry `data-tauri-drag-region`; a control a view puts in never
   does. A view with no title passes `title={null}` (Sessions draws its tab strip as the switcher; Settings, the Inbox and the Workbench have a panel; the Workbench's only while a pass is open).

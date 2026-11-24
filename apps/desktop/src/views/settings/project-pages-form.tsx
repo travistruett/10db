@@ -3,7 +3,7 @@ import { Stack, Textarea, TextInput } from '@mantine/core';
 import { PicturesStatus } from './pictures-status';
 import { MONO_INPUT, useProjectFields } from './project-fields-state';
 import { ScreensMatrixField } from './screens-matrix-field';
-import { ProjectSaveBar } from './project-save-bar';
+import { HiddenFieldAlert } from './hidden-field-alert';
 import { SettingRow, SettingsCard } from './setting-row';
 
 /** Where the app runs and how pictures of its pages are taken, saved as one patch of what changed. */
@@ -87,7 +87,7 @@ export function ProjectPagesForm({ project }: { readonly project: ProjectDto }) 
         </SettingRow>
       </SettingsCard>
 
-      <ProjectSaveBar fields={fields} />
+      <HiddenFieldAlert fields={fields} />
     </Stack>
   );
 }

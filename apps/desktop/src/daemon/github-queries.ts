@@ -31,6 +31,8 @@ export function useRecheckGithub() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
+    // An action, not a saved setting: a settings page's bar does not say Saved for it.
+    meta: { quiet: true },
     mutationFn: async () =>
       readJson(await client.github.$get({ query: { recheck: '1' } }), GithubStatusDto),
     onSuccess: (status) => {
@@ -47,6 +49,8 @@ export function useStartGithubSignin() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
+    // An action, not a saved setting: a settings page's bar does not say Saved for it.
+    meta: { quiet: true },
     mutationFn: async () => {
       queryClient.setQueryData(githubKeys.loginEnd, null);
       const signin = await readJson(await client.github.signin.$post(), GithubSigninDto);
@@ -69,6 +73,8 @@ export function useCancelGithubSignin() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
+    // An action, not a saved setting: a settings page's bar does not say Saved for it.
+    meta: { quiet: true },
     mutationFn: async () => {
       // The answer is 204 with no body; a refusal throws with the daemon's message.
       await readJson(await client.github.signin.$delete(), z.unknown());

@@ -16,7 +16,6 @@ import {
 } from '@mantine/core';
 import { IconAlertCircle } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
-import { useState } from 'react';
 import {
   useInstallNow,
   useSelfUpdate,
@@ -27,6 +26,7 @@ import { clockTime } from '../../shell/relative';
 import { HelpText } from './help-hint';
 import { SettingsSectionKey } from './sections';
 import { SettingRow, SettingsCard } from './setting-row';
+import { useDraft } from './settings-drafts';
 import { updateDeadline, updateWaitsFor } from './update-waits-for';
 
 /** The sentence the daemon's reasons use to send the builder to GitHub's card. */
@@ -71,8 +71,24 @@ export function updateProgressText(data: SelfUpdateStatusDto): string | null {
 export function SelfUpdateSection() {
   const status = useSelfUpdate();
   const set = useSetSelfUpdate();
+  const setWait = useSetSelfUpdateWait();
   const installNow = useInstallNow();
   const data = status.data;
+  const enabled = useDraft({
+    saved: data?.enabled,
+    save: (on: boolean) => set.mutateAsync(on),
+  });
+  const wait = useDraft<number | string>({
+    saved: data?.waitMinutes,
+    save: (minutes) => setWait.mutateAsync(Number(minutes)),
+    problem: (value) =>
+      typeof value === 'number' &&
+      Number.isInteger(value) &&
+      value >= 0 &&
+      value <= MAX_SELF_UPDATE_WAIT_MINUTES
+        ? null
+        : `Whole minutes, 0 to ${String(MAX_SELF_UPDATE_WAIT_MINUTES)}`,
+  });
   const running =
     data === undefined
       ? null
@@ -144,11 +160,11 @@ export function SelfUpdateSection() {
           )}
           <Switch
             aria-label={SELF_UPDATE_SWITCH}
-            checked={data?.enabled ?? false}
+            checked={enabled.value ?? false}
             // A blocked update can't run whatever the switch says, so the switch waits for the blocker to go.
-            disabled={data === undefined || set.isPending || blocker !== null}
+            disabled={data === undefined || blocker !== null}
             onChange={(event) => {
-              set.mutate(event.currentTarget.checked);
+              enabled.set(event.currentTarget.checked);
             }}
           />
         </Group>
@@ -165,7 +181,17 @@ export function SelfUpdateSection() {
             </HelpText>
           }
         >
-          <WaitLimit key={data.waitMinutes} minutes={data.waitMinutes} />
+          <NumberInput
+            aria-label="Minutes before lanes pause"
+            min={0}
+            max={MAX_SELF_UPDATE_WAIT_MINUTES}
+            allowDecimal={false}
+            allowNegative={false}
+            clampBehavior="none"
+            value={wait.value ?? ''}
+            error={wait.problem}
+            onChange={wait.set}
+          />
         </SettingRow>
       ) : null}
       {progress !== null ? (
@@ -204,32 +230,5 @@ export function SelfUpdateSection() {
         </SettingRow>
       ) : null}
     </SettingsCard>
-  );
-}
-
-function WaitLimit({ minutes }: { readonly minutes: number }) {
-  const set = useSetSelfUpdateWait();
-  const [value, setValue] = useState<number | string>(minutes);
-  const valid =
-    typeof value === 'number' &&
-    Number.isInteger(value) &&
-    value >= 0 &&
-    value <= MAX_SELF_UPDATE_WAIT_MINUTES;
-  return (
-    <NumberInput
-      aria-label="Minutes before lanes pause"
-      min={0}
-      max={MAX_SELF_UPDATE_WAIT_MINUTES}
-      allowDecimal={false}
-      allowNegative={false}
-      clampBehavior="none"
-      value={value}
-      error={valid ? null : `Whole minutes, 0 to ${String(MAX_SELF_UPDATE_WAIT_MINUTES)}`}
-      disabled={set.isPending}
-      onChange={setValue}
-      onBlur={() => {
-        if (valid && value !== minutes) set.mutate(value);
-      }}
-    />
   );
 }

@@ -76,15 +76,47 @@ test('a builder allows two hosts, is refused localhost and removes them', async 
   }
   await expect(card.getByText('No Hosts Allowed Yet')).toBeVisible();
 
-  // App Preview holds where the app runs and how its pictures are taken.
+  // App Preview holds where the app runs and how its pictures are taken. Its fields wait for the save
+  // bar, which shows only while Save would send something; Discard puts the field back.
   await page.goto('/settings/pages-and-pictures');
-  await expect(page.getByRole('textbox', { name: 'App Address' })).toBeVisible();
+  const preview = page.getByRole('textbox', { name: 'Preview Command' });
+  const unsaved = page.getByText('Unsaved changes');
+  await expect(preview).toHaveValue('');
+  await expect(unsaved).toHaveCount(0);
+  await preview.fill('pnpm dev');
+  await expect(unsaved).toBeVisible();
   await expectAccessible(page, 'app preview');
+  await page.getByRole('button', { name: 'Discard' }).click();
+  await expect(preview).toHaveValue('');
+  await expect(unsaved).toHaveCount(0);
+  // A value saved with a trailing space leaves nothing unsaved, so leaving does not ask.
+  await preview.fill('pnpm dev ');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
+  await expect(unsaved).toHaveCount(0);
+  await page.getByRole('link', { name: 'Sharing' }).click();
+  await expect(page).toHaveURL(/\/settings\/sharing$/);
+  await expect(page.getByRole('dialog', { name: 'Discard Your Changes?' })).toHaveCount(0);
 
-  // Sharing holds Pictures in Pull Requests and the Slack post; this daemon runs with Slack off.
-  await page.goto('/settings/sharing');
-  await expect(page.getByRole('switch', { name: 'Pictures in Pull Requests' })).toBeVisible();
+  // Sharing holds Pictures in Pull Requests and the Slack post; this daemon runs with Slack off. A page
+  // of switches saves each at once, with no bar to press.
+  const pictures = page.getByRole('switch', { name: 'Pictures in Pull Requests' });
+  await expect(pictures).toBeVisible();
+  const picturesOn = await pictures.isChecked();
+  await pictures.click({ force: true });
+  await expect(page.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
+  await expect(unsaved).toHaveCount(0);
+  await page.reload();
+  await expect(pictures).toBeChecked({ checked: !picturesOn });
+  await pictures.click({ force: true });
+  await expect(pictures).toBeChecked({ checked: picturesOn });
   await expect(page.getByRole('switch', { name: 'Post Pictures to Slack' })).toBeDisabled();
   await expect(page.getByText('Slack is turned off in this copy of 10db.')).toBeVisible();
   await expectAccessible(page, 'sharing');
+
+  // Put the preview command back for the specs that share this project.
+  await page.getByRole('link', { name: 'App Preview' }).click();
+  await preview.fill('');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(unsaved).toHaveCount(0);
 });

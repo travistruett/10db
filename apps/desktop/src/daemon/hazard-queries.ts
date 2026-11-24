@@ -27,6 +27,8 @@ export function useLookAgainAtHazards(projectId: ProjectId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
+    // An action, not a saved setting: a settings page's bar does not say Saved for it.
+    meta: { quiet: true },
     mutationFn: async () =>
       readJson(
         await client.projects[':projectId']['hazard-assessment']['look-again'].$post({
