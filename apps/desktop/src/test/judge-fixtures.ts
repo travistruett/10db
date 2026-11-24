@@ -134,6 +134,7 @@ export function serveJudge(initial: {
             thread_answer: merged(JudgeDecision.ThreadAnswer),
             reply_match: merged(JudgeDecision.ReplyMatch),
             approval_read: merged(JudgeDecision.ApprovalRead),
+            reply_kind: merged(JudgeDecision.ReplyKind),
             task_rigor: merged(JudgeDecision.TaskRigor),
             task_kinds: merged(JudgeDecision.TaskKinds),
             crosses_limit: merged(JudgeDecision.CrossesLimit),

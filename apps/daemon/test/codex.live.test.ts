@@ -47,12 +47,16 @@ import {
 } from '../src/sandbox';
 import {
   CODEX_COMMANDS,
+  codexHomes,
+  completeWithCodex,
   createCodexAdapter,
+  type CodexCompleteOptions,
   guardSocketPath,
   patchPaths,
   spawnAppServer,
   type CodexChild,
   type AgentAdapter,
+  CompletionError,
   type SessionEvent,
   type ExploreSessionSpec,
   type LaneSessionSpec,
@@ -463,6 +467,8 @@ interface World {
   /** The bearer token of the session's MCP server, which Codex alone holds. */
   readonly mcpToken: string;
   readonly adapter: AgentAdapter;
+  /** What `completeWithCodex` is given, on the same fake model and stand-in account. */
+  readonly complete: CodexCompleteOptions;
   readonly laneSandbox: LaneSandbox;
   /** The daemon's roots, made as its start makes them: the lane temp root is the shared one. */
   readonly roots: SandboxRoots;
@@ -546,23 +552,26 @@ async function openWorldIn(root: string, opened: (() => Promise<void>)[]): Promi
   const started: StartedCodex[] = [];
   // Codex writes its state in the home until it exits, so the directory goes after it.
   opened.push(() => endCodexes(started));
-  const adapter = createCodexAdapter({
+  const spawn = (path: string, env: Readonly<Record<string, string>>): CodexChild => {
+    const child = spawnAppServer(path, env);
+    let running = true;
+    const exit = new Promise<void>((done) => {
+      child.once('exit', () => {
+        running = false;
+        done();
+      });
+    });
+    started.push({ child, exit, running: () => running });
+    return withStandInAccount(child);
+  };
+  const adapter = createCodexAdapter({ codexPath: wrapper, logger, socketDir, spawn });
+  const complete: CodexCompleteOptions = {
     codexPath: wrapper,
     logger,
     socketDir,
-    spawn: (path, env) => {
-      const child = spawnAppServer(path, env);
-      let running = true;
-      const exit = new Promise<void>((done) => {
-        child.once('exit', () => {
-          running = false;
-          done();
-        });
-      });
-      started.push({ child, exit, running: () => running });
-      return withStandInAccount(child);
-    },
-  });
+    spawn,
+    homes: codexHomes(),
+  };
   const roots = openSandboxRoots({}, homedir());
   if (roots.refusal !== null) throw roots.refusal;
   // Marked as a running daemon's, so a test daemon that starts meanwhile leaves the lanes' files alone.
@@ -606,6 +615,7 @@ async function openWorldIn(root: string, opened: (() => Promise<void>)[]): Promi
     mcp,
     mcpToken: token,
     adapter,
+    complete,
     laneSandbox,
     roots,
     account,
@@ -976,6 +986,59 @@ describe.skipIf(!live)(
       expect(
         world.logs.filter((line) => line.includes(STAND_IN.email) || line.includes(world.mcpToken)),
       ).toEqual([]);
+    });
+
+    it('answers one question with no tool, and ends a turn that starts one', async () => {
+      const empty = join(world.root, 'empty');
+      mkdirSync(empty);
+      const marker = join(world.root, 'ran-a-command');
+      const launch = launcher.session(world.account, MODEL, []);
+      const ask = (step: FakeStep) =>
+        completeWithCodex(
+          {
+            cwd: empty,
+            prompt: world.model.script([step, { say: 'unreachable' }]),
+            model: launch.model,
+            env: launch.env,
+            account: launch.expect,
+            effort: 'low',
+            timeoutMs: 60_000,
+          },
+          world.complete,
+        );
+      for (const step of [
+        run(`touch '${marker}'`),
+        patch(`*** Begin Patch\n*** Add File: ${marker}\n+x\n*** End Patch\n`),
+        {
+          item: {
+            type: 'web_search_call',
+            id: 'ws_1',
+            status: 'completed',
+            action: { type: 'search', query: 'x' },
+          },
+          say: 'A plausible answer.',
+        },
+      ] satisfies FakeStep[]) {
+        await expect(ask(step)).rejects.toBeInstanceOf(CompletionError);
+      }
+      expect(existsSync(marker)).toBe(false);
+      expect(world.mcp.calls).toEqual([]);
+
+      const text = world.model.script([{ say: 'Because it is.' }]);
+      await expect(
+        completeWithCodex(
+          {
+            cwd: empty,
+            prompt: text,
+            model: launch.model,
+            env: launch.env,
+            account: launch.expect,
+            effort: 'low',
+            timeoutMs: 60_000,
+          },
+          world.complete,
+        ),
+      ).resolves.toBe('Because it is.');
     });
 
     it('ignores a planted .codex/ on a first session, a second session and a resume', async () => {

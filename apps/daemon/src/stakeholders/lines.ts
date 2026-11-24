@@ -32,6 +32,11 @@ export function replyWithLine(letters: readonly string[]): string {
     : `Reply with ${letters.join(', ')}, or your own words.`;
 }
 
+/** The invitation to ask questions in the thread, last in every question message. */
+export function questionsInviteLine(builderName: string): string {
+  return `Questions? Ask here: 10db answers what it can and passes the rest to ${escapeMrkdwn(builderName)}.`;
+}
+
 export function broughtInLine(broughtBy: string, names: readonly string[]): string {
   return `${escapeMrkdwn(broughtBy)} brought in ${joinNames(names)}. Here's the question:`;
 }
@@ -68,4 +73,23 @@ export function whichWayLine(
 
 export function reminderLine(): string {
   return 'Bumping this: the work is still waiting on your answer.';
+}
+
+/** Told in the thread when a question goes to the builder. */
+export function askedAckLine(builderName: string): string {
+  return `🤖 *10db:* I've passed this to ${escapeMrkdwn(builderName)}; they'll reply here.`;
+}
+
+/** 10db's own answer to a simple question, marked as unreviewed by the builder. */
+export function automatedAnswerLine(
+  answer: string,
+  letters: readonly string[],
+  builderName: string,
+): string {
+  return `🤖 *10db (automated reply):* ${escapeMrkdwn(answer)}\n\n_${escapeMrkdwn(builderName)} hasn't reviewed this. ${replyWithLine(letters)}_`;
+}
+
+/** The builder's own reply to a stakeholder's question, said by 10db's bot under the builder's name. */
+export function builderReplyLine(builderName: string, text: string): string {
+  return `*${escapeMrkdwn(builderName)} (via 10db):* ${escapeMrkdwn(text)}`;
 }

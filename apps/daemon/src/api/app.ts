@@ -67,6 +67,7 @@ import {
   NetworkHostInput,
   Month,
   ModelProfilePatch,
+  StakeholderReplyInput,
   AskSomeoneInput,
   PersonId,
   SendInput,
@@ -1743,6 +1744,17 @@ export function createApp(deps: ApiDeps) {
     )
     .post('/inbox/:id/keep-waiting', (c) =>
       c.json(deps.services.keepWaiting(InboxItemId.parse(c.req.param('id')))),
+    )
+    .post(
+      '/inbox/:id/stakeholder-reply',
+      validator('json', (value): StakeholderReplyInput => StakeholderReplyInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.stakeholderReply(
+            InboxItemId.parse(c.req.param('id')),
+            c.req.valid('json'),
+          ),
+        ),
     )
     .get(
       '/inbox/:id/compose',

@@ -158,6 +158,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     askSomeone: track('askSomeone'),
     takeBack: track('takeBack'),
     keepWaiting: track('keepWaiting'),
+    stakeholderReply: track('stakeholderReply'),
     composeFor: track('composeFor'),
     listModelProfiles: track('listModelProfiles'),
     patchModelProfile: track('patchModelProfile'),

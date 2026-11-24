@@ -21,6 +21,7 @@ import {
   BUILDER_HANDLE,
   COPY_FOR_KEY,
   SEED_BUILDER_NAME,
+  answerAsked,
   closeSend,
   dropDraft,
   getInboxItem,
@@ -32,6 +33,7 @@ import {
   markSending,
   markSent,
   newThreadsSince,
+  openSends,
   sendForCard,
   sendingSends,
   sendSummary,
@@ -56,7 +58,9 @@ import type { SlackClients } from './slack-clients';
 import { readSlackWorkspaces } from './slack-workspaces';
 import { draftContext, draftFor, previewDraft } from './drafts';
 import { OPTION_LETTERS } from './letters';
-import { scanOutbound } from './outbound-scan';
+import { SECRET_PATTERN_NAMES, scanOutbound } from './outbound-scan';
+import { findLine, postLine } from './bot-lines';
+import { builderReplyLine } from './lines';
 import { neutralizeAngles } from './escape';
 import { blocksOf } from './slack-text';
 import { failSendsToBuilder } from './send-returns';
@@ -96,6 +100,11 @@ export interface StakeholderSends {
   takeBack(cardId: InboxItemId): Promise<void>;
   /** The builder keeps waiting on a card that came back: both timers start again from now. */
   keepWaiting(cardId: InboxItemId): void;
+  /**
+   * The builder's reply to a question a stakeholder asked: said in the thread once (found again by its key
+   * after a crash), then the card goes back to waiting on them.
+   */
+  replyAsBuilder(cardId: InboxItemId, text: string): Promise<InboxItemDto>;
   /** Sends of this workspace that were mid-flight: found posts are recorded, the rest posted. */
   recoverSending(teamId: string): Promise<void>;
   /** The closing line a card settled by the builder is owed in a conversation, or null when it is not settled. */
@@ -709,6 +718,63 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       });
     },
 
+    async replyAsBuilder(cardId, text) {
+      const found = liveSend(cardId);
+      const asked = found?.state === 'sent' ? found.asked : null;
+      if (found === null || asked === null)
+        throw new ConflictError("This question isn't waiting on your reply");
+      const card = getInboxItem(state.db, cardId);
+      const teamId = found.teamId;
+      if (teamId === null || deps.boundTo(card.projectId) !== teamId)
+        throw new ConflictError('This question was sent in another Slack workspace');
+      const workspace = readSlackWorkspaces(state.db).find((w) => w.teamId === teamId);
+      const client = clientOf(teamId);
+      if (client === null)
+        throw new ConflictError(
+          `Slack isn't connected for ${workspace?.teamName ?? 'this workspace'}`,
+        );
+      // Only secrets are held: the builder is the reviewer of their own words.
+      const secret = scanOutbound(text).find((hit) => SECRET_PATTERN_NAMES.includes(hit.pattern));
+      if (secret)
+        throw new InvalidError(
+          `The reply is held for ${secret.pattern} on line ${String(secret.line)}; edit it first`,
+        );
+      const open = openSends(state.db, teamId).find((o) => o.id === found.id);
+      if (open === undefined) throw new ConflictError("This question isn't waiting on your reply");
+      const key = `${asked.ts}${sha256(text).slice(0, 12)}`;
+      try {
+        const bot = workspace?.botUserId ?? (await client.authTest()).botUserId;
+        const thread = await client.replies(open.channelId, open.threadTs, asked.ts);
+        if (findLine(thread, found.id, 'builder_reply', { bot, key }) === undefined)
+          await postLine(client, {
+            channel: open.channelId,
+            threadTs: open.threadTs,
+            text: builderReplyLine(draftContext(state.db, card).builderName, text),
+            sendId: found.id,
+            line: 'builder_reply',
+            key,
+          });
+      } catch (error) {
+        throw new ConflictError(
+          `Slack could not be reached (${slackCode(error)}); nothing was sent`,
+        );
+      }
+      // A newer question replaces this one in the same write, so a stale reply changes nothing.
+      try {
+        state.write((ctx) => {
+          answerAsked(ctx, found.id, { askedTs: asked.ts, at: nowIso() });
+        });
+      } catch (error) {
+        // The reply is in the thread; the send moved meanwhile (answered, taken back), so there is nothing to undo.
+        if (!(error instanceof ConflictError)) throw error;
+        log.warn(
+          { err: error, sendId: found.id },
+          'a builder reply landed after its question moved',
+        );
+      }
+      return getInboxItem(state.db, cardId);
+    },
+
     async recoverSending(teamId) {
       // A workspace that is not signed in leaves its sends waiting, as a missing token does.
       const client = clientOf(teamId);
@@ -733,7 +799,10 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
                   pending.threadTs,
                   searchFrom(pending.startedAt),
                 );
-          const found = messages.find((m) => namesSend(m, pending.id));
+          const bot =
+            readSlackWorkspaces(state.db).find((w) => w.teamId === teamId)?.botUserId ??
+            (await client.authTest()).botUserId;
+          const found = messages.find((m) => namesSend(m, pending.id, bot));
           if (moved) {
             // Only a race leaves this: the send is taken back, and a post that did land is told so.
             fail(pending.id, send.inboxItemId, SendFailure.WorkspaceChanged);
@@ -801,8 +870,10 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
   };
 }
 
-function namesSend(message: SlackMessage, sendId: string): boolean {
+/** A message 10db's own bot posted for the send: another app can attach the same metadata. */
+function namesSend(message: SlackMessage, sendId: string, bot: string): boolean {
   return (
+    message.user === bot &&
     message.metadata?.eventType === SEND_METADATA &&
     message.metadata.eventPayload['sendId'] === sendId
   );

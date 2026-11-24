@@ -50,6 +50,8 @@ export interface AgreeDeps {
 /** What one send's conversation has to work with this tick. */
 export interface Conversation {
   readonly open: OpenSendRow;
+  /** 10db's own bot user: only its lines are 10db's. */
+  readonly bot: string;
   readonly card: InboxItemDto;
   /** Messages that count, oldest first. */
   readonly counted: readonly CountedMessage[];
@@ -172,7 +174,7 @@ export async function settleConversation(deps: AgreeDeps, c: Conversation): Prom
     ];
     const label = options[letters.indexOf(letter)]?.label ?? letter;
     const text = proposalLine(letter, label, favoured, recipients);
-    const found = findLine(c.thread, open.id, 'proposal', { after: newest.ts });
+    const found = findLine(c.thread, open.id, 'proposal', { bot: c.bot, after: newest.ts });
     const ts =
       found?.ts ??
       (await postLine(deps.client, {
@@ -198,7 +200,7 @@ export async function settleConversation(deps: AgreeDeps, c: Conversation): Prom
     return;
   }
   const text = whichWayLine(letters, recipients);
-  const found = findLine(c.thread, open.id, 'which_way', { after: newest.ts });
+  const found = findLine(c.thread, open.id, 'which_way', { bot: c.bot, after: newest.ts });
   const ts =
     found?.ts ??
     (await postLine(deps.client, {

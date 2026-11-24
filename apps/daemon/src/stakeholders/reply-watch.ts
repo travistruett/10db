@@ -2,7 +2,10 @@ import {
   ConflictError,
   InboxState,
   JudgeDecision,
+  JudgeOutcome,
+  ReplyKind,
   SendFailure,
+  type AskedQuestion,
   type InboxItemId,
   type PersonId,
 } from '@10db/contracts';
@@ -12,7 +15,11 @@ import {
   getStakeholderTimers,
   markAnswered,
   markApprovalSeen,
+  markAsked,
+  markHandled,
   markLoneReplyPending,
+  recordAutoAnswer,
+  recordJudgeOutcome,
   setProposal,
   threadStarts,
   markReminded,
@@ -21,8 +28,10 @@ import {
   setLastRead,
   type DbReader,
   type OpenSendRow,
+  type WriteContext,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
+import type { AnswerWriter } from './answer-writer';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Judge } from '../judge';
@@ -43,17 +52,20 @@ import {
   type Conversation,
 } from './agree';
 import { bringIn } from './bring-in';
+import { findLine, postLine, SEND_EVENT } from './bot-lines';
 import { stakeholderOptions } from './compose';
-import { conversationState, newMessages } from './conversation';
+import { conversationState, newMessages, onLoneBranch } from './conversation';
+import { draftContext } from './drafts';
 import { escapeMrkdwn } from './escape';
-import { reminderLine } from './lines';
+import { OPTION_LETTERS } from './letters';
+import { askedAckLine, automatedAnswerLine, reminderLine } from './lines';
+import { classifyReply, type ReplyKindRead } from './reply-kind';
 import { scanOutbound } from './outbound-scan';
 import { readReply } from './read-reply';
 import type { StakeholderSends } from './sends';
 import { failSendsToBuilder, recordBot } from './send-returns';
 import type { SlackConnections } from './slack-connection';
-import { boundTeam } from './slack-workspaces';
-import { blocksOf } from './slack-text';
+import { boundTeam, projectSlack } from './slack-workspaces';
 import { dueTimers } from './timers';
 import { matchReply, type MatchState } from './reply-match';
 import { saveMatchState } from './reply-match-store';
@@ -85,6 +97,8 @@ export interface ReplyWatchDeps {
   readonly clock: Clock;
   readonly log: Logger;
   readonly connections: SlackConnections;
+  /** Writes the answer to a simple question. */
+  readonly answerWriter: AnswerWriter;
   /** Shared by every watch; saved after each tick. */
   readonly matched: MatchState;
   readonly intervalMs?: number;
@@ -119,6 +133,25 @@ function dedupe(messages: readonly SlackMessage[]): SlackMessage[] {
 /** The first `ts` of a conversation: the question's own, or where it started before it moved. */
 const floorOf = (open: OpenSendRow): string => open.movedFrom?.messageTs ?? open.messageTs;
 
+/** The most replies a group's messages are sorted in one tick. */
+const SORTED_PER_TICK = 5;
+/** The longest question kept for the builder. */
+const ASKED_LIMIT = 4000;
+
+/** What a participant said that is sorted as one reply: a lone recipient's joined words, or one group message. */
+interface Reply {
+  readonly words: string;
+  readonly messageCount: number;
+  readonly firstTs: string;
+  readonly lastTs: string;
+  readonly userId: string;
+  readonly name: string;
+}
+
+/** The judge call's outcome when the sorter used one: a rule fallback below the floor, else acted on. */
+const outcomeOf = (read: ReplyKindRead): JudgeOutcome =>
+  read.source === 'rule' ? JudgeOutcome.BelowFloor : JudgeOutcome.Acted;
+
 const firstAfter = (starts: readonly string[], ts: string): string | undefined =>
   starts.filter((t) => compareTs(t, ts) > 0).sort(compareTs)[0];
 
@@ -143,6 +176,8 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   let paused = false;
   let timer: Timer | null = null;
   let inFlight: Promise<void> = Promise.resolve();
+  /** Aborted by `stop()`, so shutdown never waits out the answer writer. */
+  const shutdown = new AbortController();
   let lastTickAt = clock.now().getTime();
   let notBefore = 0;
   let failures = 0;
@@ -254,25 +289,46 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     log,
   });
 
+  /**
+   * What the lane is told was said: after a "which way" line, a sorted reply or any line 10db or the builder
+   * posted, the whole exchange (the participants' messages and those lines, in order), else nothing beyond the words.
+   */
+  function quotedExchange(c: Conversation): { name: string; text: string }[] {
+    const { open } = c;
+    const builder = draftContext(state.db, c.card).builderName;
+    const lines = c.thread.flatMap((m) => {
+      const payload =
+        m.user === c.bot && m.metadata?.eventType === SEND_EVENT ? m.metadata.eventPayload : null;
+      if (payload?.['sendId'] !== open.id || compareTs(m.ts, floorOf(open)) <= 0) return [];
+      if (payload['line'] === 'auto_answer')
+        return [{ ts: m.ts, name: '10db (automated)', text: m.text }];
+      if (payload['line'] === 'builder_reply') return [{ ts: m.ts, name: builder, text: m.text }];
+      return [];
+    });
+    if (open.askedWhichWayAt === null && open.handledThroughTs === null && lines.length === 0)
+      return [];
+    const said = c.counted.map((m) => ({
+      ts: m.ts,
+      name: open.people.find((p) => p.userId === m.userId)?.name ?? m.userId,
+      text: m.text,
+    }));
+    return [...said, ...lines]
+      .sort((a, b) => compareTs(a.ts, b.ts))
+      .map(({ name, text }) => ({ name, text }));
+  }
+
   /** Answers the card from a lone recipient's reply, in one transaction with the send's own state. */
-  function answerLone(c: Conversation, reply: { words: string; messageCount: number }): void {
+  function answerLone(c: Conversation, reply: { words: string; messageCount: number }): boolean {
     const { words } = reply;
     const { open } = c;
     const person = open.people.find((p) => p.recipient && p.personId !== null);
     const last = c.counted.at(-1);
-    if (!person?.personId || !last) return;
+    if (!person?.personId || !last) return false;
     const personId: PersonId = person.personId;
     // The reply is the messages the conversation reader joined, not everything he ever wrote.
     const read = readReply({ words, messageCount: reply.messageCount }, stakeholderOptions(c.card));
     const via = c.topLevel.has(last.ts) ? 'top_level' : 'thread';
-    // After a "which way" line the whole conversation is quoted to the lane, not only his words.
-    const conversation =
-      open.askedWhichWayAt === null
-        ? []
-        : c.counted.map((m) => ({
-            name: open.people.find((p) => p.userId === m.userId)?.name ?? m.userId,
-            text: m.text,
-          }));
+    const conversation = quotedExchange(c);
     try {
       deps.inbox.answerAs(
         c.card.id,
@@ -296,6 +352,274 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       // Answered some other way meanwhile: the first answer wins and this reply changes nothing.
       if (!(error instanceof ConflictError)) throw error;
       log.info({ sendId: open.id }, 'a reply came after the card was answered');
+    }
+    return true;
+  }
+
+  const currentOpen = (id: OpenSendRow['id']): OpenSendRow | undefined =>
+    openSends(state.db, teamId).find((o) => o.id === id);
+
+  /** One write for a route's own change and the sorting judge call's outcome. */
+  function recordRoute(read: ReplyKindRead, write: (ctx: WriteContext) => void): void {
+    state.write((ctx) => {
+      write(ctx);
+      if (read.callId !== null) recordJudgeOutcome(ctx, read.callId, outcomeOf(read));
+    });
+  }
+
+  /** The binding is the send's own and Slack is on for the project. */
+  const bindingIntact = (c: Conversation): boolean =>
+    boundTeam(state.db, c.card.projectId) === c.open.teamId &&
+    projectSlack(state.db, c.card.projectId).teamId !== null;
+
+  /**
+   * The question goes to the builder: the send is returned (or keeps its return) with the question on it, and
+   * the thread is told once per question, when the binding allows a post.
+   */
+  async function ask(
+    client: SlackClient,
+    c: Conversation,
+    reply: Reply,
+    read: ReplyKindRead,
+    declined: AskedQuestion['declined'],
+    acknowledge = true,
+  ): Promise<void> {
+    recordRoute(read, (ctx) => {
+      markAsked(ctx, c.open.id, {
+        asked: {
+          userId: reply.userId,
+          name: reply.name,
+          text: reply.words.slice(0, ASKED_LIMIT),
+          ts: reply.lastTs,
+          declined,
+        },
+        throughTs: reply.lastTs,
+      });
+    });
+    const { open } = c;
+    const key = reply.firstTs;
+    if (
+      !acknowledge ||
+      !bindingIntact(c) ||
+      findLine(c.thread, open.id, 'asked_ack', { bot: c.bot, key })
+    )
+      return;
+    const text = askedAckLine(draftContext(state.db, c.card).builderName);
+    if (scanOutbound(text).some((hit) => hit.severity === 'hold')) return;
+    try {
+      await postLine(client, {
+        channel: open.channelId,
+        threadTs: open.threadTs,
+        text,
+        sendId: open.id,
+        line: 'asked_ack',
+        key,
+      });
+    } catch (error) {
+      // The question already reached the builder; a missed acknowledgement costs only a line.
+      log.warn(
+        { err: error, sendId: open.id },
+        'the thread could not be told the question was passed on',
+      );
+    }
+  }
+
+  /**
+   * Answers a simple question in the thread from the card, once per question. Any step that fails sends the
+   * question to the builder; a change while the answer was being written posts nothing and leaves the reply for
+   * the next tick.
+   */
+  async function autoAnswer(
+    client: SlackClient,
+    c: Conversation,
+    reply: Reply,
+    read: ReplyKindRead,
+  ): Promise<void> {
+    const { open, card } = c;
+    const bound = (): boolean => bindingIntact(c);
+    if (!bound()) {
+      await ask(client, c, reply, read, 'slack_unavailable');
+      return;
+    }
+    // The reply's first message keys the line: it holds if more is written before a restart.
+    const key = reply.firstTs;
+    const earlier = findLine(c.thread, open.id, 'auto_answer', { bot: c.bot, key });
+    // What the cursor passes: the whole reply, or after a crash only what was said before the line that
+    // already answered it, so a later message is sorted on its own.
+    let through = reply.lastTs;
+    if (earlier !== undefined) {
+      through =
+        c.counted
+          .filter(
+            (m) =>
+              compareTs(m.ts, reply.firstTs) >= 0 &&
+              compareTs(m.ts, reply.lastTs) <= 0 &&
+              compareTs(m.ts, earlier.ts) < 0,
+          )
+          .at(-1)?.ts ?? reply.firstTs;
+    } else {
+      const written = await deps.answerWriter({
+        cardId: card.id,
+        question: reply.words.slice(0, ASKED_LIMIT),
+        askerName: reply.name,
+        signal: shutdown.signal,
+      });
+      if (shutdown.signal.aborted) return;
+      const now = currentOpen(open.id);
+      if (
+        now?.returnedAt !== null ||
+        now.handledThroughTs !== open.handledThroughTs ||
+        getInboxItem(state.db, card.id).state !== InboxState.Open ||
+        !bound()
+      )
+        return;
+      if (written.kind !== 'answer') {
+        await ask(client, c, reply, read, written.reason);
+        return;
+      }
+      const letters = stakeholderOptions(card)
+        .slice(0, OPTION_LETTERS.length)
+        .map((_o, i) => OPTION_LETTERS[i] ?? '');
+      const text = automatedAnswerLine(
+        written.text,
+        letters,
+        draftContext(state.db, card).builderName,
+      );
+      if (scanOutbound(text).some((hit) => hit.severity === 'hold')) {
+        await ask(client, c, reply, read, 'held');
+        return;
+      }
+      try {
+        await postLine(client, {
+          channel: open.channelId,
+          threadTs: open.threadTs,
+          text,
+          sendId: open.id,
+          line: 'auto_answer',
+          key,
+        });
+      } catch (error) {
+        // What is wrong with the whole connection or conversation is the tick's; a post that failed alone
+        // is this question's, which then goes to the builder rather than being tried (and billed) again.
+        if (
+          error instanceof SlackError &&
+          (slackRefusedToken(error) ||
+            error.code === 'no_token' ||
+            error.code === 'ratelimited' ||
+            GONE.has(error.code))
+        )
+          throw error;
+        log.warn({ err: error, sendId: open.id }, 'an automated answer could not be posted');
+        await ask(client, c, reply, read, 'failed');
+        return;
+      }
+    }
+    recordRoute(read, (ctx) => {
+      recordAutoAnswer(ctx, open.id, through);
+    });
+  }
+
+  /** The master switch or the Reply Kind switch was turned off, as against no account to run it on. */
+  function replyKindSwitchedOff(): boolean {
+    const config = getJudgeConfig(state.db);
+    return !config.enabled || !config.decisions[JudgeDecision.ReplyKind].enabled;
+  }
+
+  /**
+   * Sorts one reply and acts on it. True when it answers the card (the caller answers it); anything else is
+   * done here: chatter is handled, a question is answered or goes to the builder. A returned send never
+   * auto-answers.
+   */
+  async function sortReply(
+    client: SlackClient,
+    c: Conversation,
+    reply: Reply,
+    group: boolean,
+  ): Promise<boolean> {
+    const read = await classifyReply(
+      {
+        judge: deps.judge,
+        floor: () => getJudgeConfig(state.db).decisions[JudgeDecision.ReplyKind].floor,
+        log,
+      },
+      {
+        card: c.card,
+        words: reply.words,
+        messageCount: reply.messageCount,
+        author: reply.name,
+        group,
+      },
+    );
+    switch (read.kind) {
+      case ReplyKind.Answer:
+        if (!group) {
+          if (read.callId !== null) recordRoute(read, () => undefined);
+          return true;
+        }
+        recordRoute(read, (ctx) => {
+          markHandled(ctx, c.open.id, reply.lastTs);
+        });
+        return false;
+      case ReplyKind.Chatter:
+        recordRoute(read, (ctx) => {
+          markHandled(ctx, c.open.id, reply.lastTs);
+        });
+        return false;
+      case ReplyKind.BuilderQuestion:
+        await ask(client, c, reply, read, null);
+        return false;
+      case ReplyKind.SimpleQuestion:
+        if (replyKindSwitchedOff()) {
+          // Switched off on purpose: nothing is posted, not even an acknowledgement.
+          await ask(client, c, reply, read, null, false);
+        } else if (c.open.returnedAt !== null) await ask(client, c, reply, read, null);
+        else await autoAnswer(client, c, reply, read);
+        return false;
+      default: {
+        const unreachable: never = read.kind;
+        return unreachable;
+      }
+    }
+  }
+
+  /** A conflict means the send moved: this send's turn ends, and the other sends go on. */
+  async function turn(open: OpenSendRow, run: () => Promise<void> | void): Promise<boolean> {
+    try {
+      await run();
+      return true;
+    } catch (error) {
+      if (!(error instanceof ConflictError)) throw error;
+      log.warn({ sendId: open.id, err: error }, 'a reply could not be recorded; the send moved');
+      return false;
+    }
+  }
+
+  /** In a group, each participant message is sorted on its own, oldest first, a few a tick. */
+  async function sortGroup(client: SlackClient, c: Conversation): Promise<void> {
+    if (!(await deps.judge.ready(JudgeDecision.ReplyKind))) return;
+    let sorted = 0;
+    // After a bring-in, what was said before the move (the mention that brought someone in) is context.
+    const { movedFrom, messageTs } = c.open;
+    const sayings =
+      movedFrom === null ? c.counted : c.counted.filter((m) => compareTs(m.ts, messageTs) > 0);
+    for (const m of sayings) {
+      if (sorted >= SORTED_PER_TICK) return;
+      const open = currentOpen(c.open.id);
+      if (open === undefined) return;
+      if (open.handledThroughTs !== null && compareTs(m.ts, open.handledThroughTs) <= 0) continue;
+      sorted += 1;
+      const reply: Reply = {
+        words: m.text,
+        messageCount: 1,
+        firstTs: m.ts,
+        lastTs: m.ts,
+        userId: m.userId,
+        name: open.people.find((p) => p.userId === m.userId)?.name ?? m.userId,
+      };
+      const ok = await turn(open, async () => {
+        await sortReply(client, { ...c, open }, reply, true);
+      });
+      if (!ok) return;
     }
   }
 
@@ -329,6 +653,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     });
     const conversation: Conversation = {
       open,
+      bot,
       card,
       counted,
       thread: r.thread,
@@ -347,7 +672,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       open.movedFrom === null
         ? r.messages
         : r.messages.filter((m) => compareTs(m.ts, open.messageTs) > 0);
-    const verdict = conversationState({
+    const verdictInput = {
       messages: sinceMove,
       recipients,
       participants,
@@ -358,6 +683,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         proposal !== null && proposal.ts !== null
           ? { ts: proposal.ts, letter: proposal.choice, reactions }
           : null,
+      handledThroughTs: open.handledThroughTs,
       settledThroughTs: open.settledThroughTs,
       askedWhichWay:
         open.askedWhichWayAt !== null && open.askedWhichWayTs !== null
@@ -370,19 +696,37 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       optionCount: stakeholderOptions(card).length,
       afterDisagreement: open.returnedReason === 'disagreed',
       judgedApprovals: await judgeApprovals(agreeDeps(client), conversation, judged),
-    });
+    };
+    // A group's messages are each sorted before the conversation settles as it always has.
+    if (!onLoneBranch(verdictInput) && proposal === null) await sortGroup(client, conversation);
+    const verdict = conversationState(verdictInput);
     const newest = counted.at(-1);
     const countedSinceMove =
       open.movedFrom === null
         ? counted
         : counted.filter((m) => compareTs(m.ts, open.messageTs) > 0);
     const newestSinceMove = countedSinceMove.at(-1);
+    const unhandled =
+      open.handledThroughTs === null
+        ? countedSinceMove
+        : countedSinceMove.filter((m) => compareTs(m.ts, open.handledThroughTs ?? '0') > 0);
     if (newestSinceMove) quiet.set(open.id, newestSinceMove.ts);
     const agree = agreeDeps(client);
     switch (verdict.kind) {
-      case 'lone_reply':
-        if (recipients.length === 1) answerLone(conversation, verdict);
+      case 'lone_reply': {
+        const person = open.people.find((p) => p.recipient);
+        if (recipients.length !== 1 || !person) break;
+        await turn(open, async () => {
+          const reply: Reply = { ...verdict, userId: person.userId, name: person.name };
+          if (await sortReply(client, conversation, reply, false))
+            if (!answerLone(conversation, verdict))
+              // No one to answer as: it is sorted once and not again every tick.
+              state.write((ctx) => {
+                markHandled(ctx, open.id, verdict.lastTs);
+              });
+        });
         break;
+      }
       case 'settled':
         await settleConversation(agree, conversation);
         break;
@@ -426,11 +770,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         });
         break;
       case 'waiting':
-        if (
-          recipients.length === 1 &&
-          countedSinceMove.length > 0 &&
-          open.loneReplyPendingSince === null
-        )
+        if (recipients.length === 1 && unhandled.length > 0 && open.loneReplyPendingSince === null)
           state.write((ctx) => {
             markLoneReplyPending(ctx, open.id, ctx.now);
           });
@@ -443,7 +783,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   }
 
   /** Posts the reminder once, unless the thread already holds it; a reminder that comes due is re-checked first. */
-  async function remind(client: SlackClient, r: Reading): Promise<void> {
+  async function remind(client: SlackClient, r: Reading, bot: string): Promise<void> {
     const timers = getStakeholderTimers(state.db);
     const fresh = openSends(state.db, teamId).find((o) => o.id === r.open.id);
     if (!fresh || dueTimers(fresh, timers, clock.now()) !== 'remind') return;
@@ -455,20 +795,13 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       });
       return;
     }
-    const already = r.messages.some(
-      (m) =>
-        m.metadata?.eventType === 'tendb_send' &&
-        m.metadata.eventPayload['sendId'] === fresh.id &&
-        m.metadata.eventPayload['line'] === 'reminder',
-    );
-    if (!already) {
-      const text = reminderLine();
-      await client.post({
+    if (findLine(r.messages, fresh.id, 'reminder', { bot }) === undefined) {
+      await postLine(client, {
         channel: fresh.channelId,
-        text,
-        blocks: blocksOf(text),
         threadTs: fresh.threadTs,
-        metadata: { eventType: 'tendb_send', eventPayload: { sendId: fresh.id, line: 'reminder' } },
+        text: reminderLine(),
+        sendId: fresh.id,
+        line: 'reminder',
       });
     }
     state.write((ctx) => {
@@ -509,7 +842,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         const stillOpen = getInboxItem(state.db, r.open.inboxItemId).state === InboxState.Open;
         if (stillOpen) await guard([r.open], () => process(client, r, bot));
         if (openSends(state.db, teamId).some((o) => o.id === r.open.id))
-          await guard([r.open], () => remind(client, r));
+          await guard([r.open], () => remind(client, r, bot));
       }
       failures = 0;
       if (connections.get(teamId)?.state !== 'connected') connections.set(teamId, 'connected');
@@ -584,6 +917,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     async stop() {
       running = false;
       stopped = true;
+      shutdown.abort();
       timer?.cancel();
       timer = null;
       await inFlight;

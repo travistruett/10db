@@ -15,6 +15,7 @@ export type ConversationState =
       readonly kind: 'lone_reply';
       readonly words: string;
       readonly messageCount: number;
+      readonly firstTs: string;
       readonly lastTs: string;
     }
   | { readonly kind: 'settled' }
@@ -45,6 +46,11 @@ export interface ConversationInput {
     readonly letter: string;
     readonly reactions: readonly SlackReaction[];
   } | null;
+  /**
+   * The newest message the sorting cursor has passed: a lone recipient's reply is the counted messages after it.
+   * Settling still reads from `settledThroughTs`, so a group's questions stay part of what it said.
+   */
+  readonly handledThroughTs: string | null;
   /** The newest message an earlier settle, proposal or which-way line already covered. */
   readonly settledThroughTs: string | null;
   readonly askedWhichWay: { readonly at: Date; readonly ts: string } | null;
@@ -236,12 +242,14 @@ function seenApproval(
 }
 
 function joined(messages: readonly CountedMessage[]): ConversationState {
+  const first = messages[0];
   const last = messages.at(-1);
-  if (last === undefined) return WAITING;
+  if (first === undefined || last === undefined) return WAITING;
   return {
     kind: 'lone_reply',
     words: messages.map((m) => m.text).join('\n'),
     messageCount: messages.length,
+    firstTs: first.ts,
     lastTs: last.ts,
   };
 }
@@ -312,6 +320,44 @@ function settle(reading: Reading): ConversationState {
 }
 
 /**
+ * A lone recipient's conversation: the messages that are the reply (theirs, after the sorting cursor and after a
+ * "which way" line when one was posted) and the newest one that counts for quiet. Null when the conversation is
+ * not on the lone branch: several recipients, or anyone but the recipient spoke after the cursor.
+ */
+function loneMessages(
+  reading: Reading,
+): { readonly mine: CountedMessage[]; readonly newest: CountedMessage | undefined } | null {
+  const { input, counted } = reading;
+  const [only, ...others] = input.recipients;
+  if (only === undefined || others.length > 0) return null;
+  const fresh =
+    input.handledThroughTs === null ? [...counted] : afterTs(counted, input.handledThroughTs);
+  if (input.askedWhichWay !== null) {
+    const after = afterTs(fresh, input.askedWhichWay.ts);
+    const mine = after.filter((m) => m.userId === only);
+    return mine.length > 0 ? { mine, newest: after.at(-1) } : null;
+  }
+  if (counted.length === 0) return null;
+  if (!(fresh.length > 0 ? fresh : counted).every((m) => m.userId === only)) return null;
+  return { mine: fresh, newest: fresh.at(-1) };
+}
+
+/** Whether a conversation is on the lone branch: its reply is judged as one person's words, not settled. */
+export function onLoneBranch(input: ConversationInput): boolean {
+  if (input.proposal !== null) return false;
+  const counted = newMessages({
+    messages: input.messages,
+    participants: input.participants,
+    botUserId: input.botUserId,
+    afterTs: '0',
+  });
+  return (
+    loneMessages({ counted, input, optionCount: input.optionCount ?? OPTION_LETTERS.length }) !==
+    null
+  );
+}
+
+/**
  * Where a send's conversation stands, from what was said and what the last tick already saw. Pure: the
  * watch acts on the answer (posts a line, asks the judge, answers the card) and stores the marks.
  *
@@ -335,18 +381,11 @@ export function conversationState(input: ConversationInput): ConversationState {
   };
   if (input.proposal !== null) return openProposal(reading);
 
-  const [only, ...others] = input.recipients;
-  if (only !== undefined && others.length === 0) {
-    if (input.askedWhichWay !== null) {
-      const after = afterTs(counted, input.askedWhichWay.ts);
-      const mine = after.filter((m) => m.userId === only);
-      const newest = after.at(-1);
-      if (mine.length > 0 && newest !== undefined)
-        return isQuiet(reading, newest.ts) ? joined(mine) : WAITING;
-    } else if (counted.length > 0 && counted.every((m) => m.userId === only)) {
-      const newest = counted.at(-1);
-      return newest !== undefined && isQuiet(reading, newest.ts) ? joined(counted) : WAITING;
-    }
+  const lone = loneMessages(reading);
+  if (lone !== null) {
+    const { newest, mine } = lone;
+    if (newest === undefined) return WAITING;
+    return isQuiet(reading, newest.ts) ? joined(mine) : WAITING;
   }
   return settle(reading);
 }

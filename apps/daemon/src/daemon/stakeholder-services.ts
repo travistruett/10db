@@ -69,6 +69,7 @@ export type StakeholderApiServices = Pick<
   | 'askSomeone'
   | 'takeBack'
   | 'keepWaiting'
+  | 'stakeholderReply'
   | 'composeFor'
 >;
 
@@ -321,6 +322,7 @@ export function createStakeholderApiServices(deps: {
       deps.sends.keepWaiting(id);
       return getInboxItem(deps.state.db, id);
     },
+    stakeholderReply: (id, input) => deps.sends.replyAsBuilder(id, input.text),
     composeFor: (id, personIds) =>
       previewDraft(
         deps.state.db,

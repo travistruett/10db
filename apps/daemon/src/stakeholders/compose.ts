@@ -1,7 +1,7 @@
 import { isParkChoice, type InboxItemDto, type InboxOption } from '@10db/contracts';
 import type { SlackBlock } from '../slack';
 import { escapeMrkdwn } from './escape';
-import { joinNames, replyWithLine } from './lines';
+import { joinNames, questionsInviteLine, replyWithLine } from './lines';
 import { OPTION_LETTERS } from './letters';
 
 const BODY_LIMIT = 2500;
@@ -69,6 +69,7 @@ export function composeSlackQuestion(input: ComposeInput): { text: string; block
   const closing = [
     'The work on this waits for your answer.',
     replyWithLine(OPTION_LETTERS.slice(0, options.length)),
+    questionsInviteLine(input.builderName),
   ].join('\n');
 
   const sections = [header, question, optionLines.join('\n'), closing].filter((s) => s !== '');

@@ -3,7 +3,7 @@ import { useTakeBack } from '../../daemon/people';
 import { ConfirmModal } from '../../shell/confirm-modal';
 import { joinNames } from './route-line';
 
-/** Take Back posts in the person's Slack thread, so it asks first and says what it will do. */
+/** Withdraw Question posts in the person's Slack thread, so it asks first and says what it will do. */
 export function TakeBackModal({
   item,
   opened,

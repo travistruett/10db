@@ -70,6 +70,8 @@ export function sendDto(over: Record<string, unknown> = {}): StakeholderSendDto 
     answeredAt: null,
     returnedAt: null,
     returnedReason: null,
+    asked: null,
+    autoAnswers: 0,
     heldBy: 'review',
     proposal: null,
     askedWhichWay: false,

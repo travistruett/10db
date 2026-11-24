@@ -295,13 +295,70 @@
                   "type": "string",
                   "enum": [
                     "timer",
-                    "disagreed"
+                    "disagreed",
+                    "asked"
                   ]
                 },
                 {
                   "type": "null"
                 }
               ]
+            },
+            "asked": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "userId": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "ts": {
+                      "type": "string"
+                    },
+                    "declined": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "not_answerable",
+                            "held",
+                            "too_long",
+                            "unparseable",
+                            "failed",
+                            "no_account",
+                            "provider",
+                            "slack_unavailable"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "userId",
+                    "name",
+                    "text",
+                    "ts",
+                    "declined"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "autoAnswers": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "heldBy": {
               "anyOf": [
@@ -457,6 +514,8 @@
             "answeredAt",
             "returnedAt",
             "returnedReason",
+            "asked",
+            "autoAnswers",
             "heldBy",
             "proposal",
             "askedWhichWay",

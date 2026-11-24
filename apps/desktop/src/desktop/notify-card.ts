@@ -63,3 +63,20 @@ export function disagreementNotices(
     return [{ title: `${joinNames(recipientNames(item))} disagree`, body: item.title }];
   });
 }
+
+const ASKED_BODY_LIMIT = 200;
+
+/** "Mark asked" for each card whose send holds a question newer than any it held at `before`. */
+export function askedNotices(
+  before: readonly InboxItemDto[],
+  now: readonly InboxItemDto[],
+): Notice[] {
+  return now.flatMap((item) => {
+    const asked = item.send?.asked;
+    if (asked === null || asked === undefined) return [];
+    const was = before.find((card) => card.id === item.id);
+    // A card first seen with its question already on it was seen before this run; only a change notifies.
+    if (was === undefined || was.send?.asked?.ts === asked.ts) return [];
+    return [{ title: `${asked.name} asked`, body: asked.text.slice(0, ASKED_BODY_LIMIT) }];
+  });
+}

@@ -28,6 +28,8 @@ export const JudgeDecision = {
   ReplyMatch: 'reply_match',
   /** Stakeholder questions: whether a reply approves the open proposal. */
   ApprovalRead: 'approval_read',
+  /** Stakeholder questions: whether a reply answers, asks 10db, asks the builder, or is chatter. */
+  ReplyKind: 'reply_kind',
   /** Sizing: how much process a task needs, one of the four rigors. */
   TaskRigor: 'task_rigor',
   /** Sizing: whether a task touches one kind of work, asked once per kind. */
@@ -86,6 +88,7 @@ export const JudgeConfig = z.object({
     [JudgeDecision.ThreadAnswer]: shapeDecision(),
     [JudgeDecision.ReplyMatch]: shapeDecision(),
     [JudgeDecision.ApprovalRead]: shapeDecision(),
+    [JudgeDecision.ReplyKind]: shapeDecision(),
     [JudgeDecision.TaskRigor]: shapeDecision(),
     [JudgeDecision.TaskKinds]: shapeDecision(),
     [JudgeDecision.CrossesLimit]: shapeDecision(),
@@ -107,6 +110,7 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
     [JudgeDecision.ThreadAnswer]: { ...DEFAULT_DECISION },
     [JudgeDecision.ReplyMatch]: { ...DEFAULT_DECISION },
     [JudgeDecision.ApprovalRead]: { ...DEFAULT_DECISION },
+    [JudgeDecision.ReplyKind]: { ...DEFAULT_DECISION },
     [JudgeDecision.TaskRigor]: { ...DEFAULT_DECISION },
     [JudgeDecision.TaskKinds]: { ...DEFAULT_DECISION },
     [JudgeDecision.CrossesLimit]: { ...DEFAULT_DECISION },
@@ -156,6 +160,7 @@ export const JudgeConfigPatch = z
         [JudgeDecision.ThreadAnswer]: JudgeDecisionConfigPatch,
         [JudgeDecision.ReplyMatch]: JudgeDecisionConfigPatch,
         [JudgeDecision.ApprovalRead]: JudgeDecisionConfigPatch,
+        [JudgeDecision.ReplyKind]: JudgeDecisionConfigPatch,
         [JudgeDecision.TaskRigor]: JudgeDecisionConfigPatch,
         [JudgeDecision.TaskKinds]: JudgeDecisionConfigPatch,
         [JudgeDecision.CrossesLimit]: JudgeDecisionConfigPatch,

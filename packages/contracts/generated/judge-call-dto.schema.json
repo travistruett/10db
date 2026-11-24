@@ -17,6 +17,7 @@
         "thread_answer",
         "reply_match",
         "approval_read",
+        "reply_kind",
         "task_rigor",
         "task_kinds",
         "crosses_limit",

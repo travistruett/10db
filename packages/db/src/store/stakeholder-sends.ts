@@ -5,6 +5,7 @@ import {
   mintId,
   NotFoundError,
   SendState,
+  type AskedQuestion,
   type InboxItemId,
   type OutboundHit,
   type PersonId,
@@ -51,7 +52,10 @@ export interface OpenSendRow {
   readonly waitStartedAt: string;
   readonly remindedAt: string | null;
   readonly returnedAt: string | null;
-  readonly returnedReason: 'timer' | 'disagreed' | null;
+  readonly returnedReason: 'timer' | 'disagreed' | 'asked' | null;
+  readonly handledThroughTs: string | null;
+  readonly autoAnswers: number;
+  readonly asked: AskedQuestion | null;
   readonly proposal: { choice: string; confidence: number; ts: string | null } | null;
   readonly settledThroughTs: string | null;
   readonly askedWhichWayAt: string | null;
@@ -91,6 +95,8 @@ function toDto(db: DbReader, row: SendRow): StakeholderSendDto {
     answeredAt: row.answeredAt,
     returnedAt: row.returnedAt,
     returnedReason: row.returnedReason,
+    asked: row.asked,
+    autoAnswers: row.autoAnswers,
     // A draft held for a first send, before that hold was removed, reads as one held for review.
     heldBy: row.heldBy === 'first_send' ? 'review' : row.heldBy,
     proposal: row.proposal && { choice: row.proposal.choice, confidence: row.proposal.confidence },
@@ -465,7 +471,7 @@ export function failSend(ctx: WriteContext, id: StakeholderSendId, error: string
 export function markReturned(
   ctx: WriteContext,
   id: StakeholderSendId,
-  reason: 'timer' | 'disagreed',
+  reason: 'timer' | 'disagreed' | 'asked',
 ): void {
   const row = guarded(ctx, id, 'be returned', [SendState.Sent]);
   change(ctx, row, { returnedAt: ctx.now, returnedReason: reason });
@@ -477,8 +483,73 @@ export function keepWaiting(ctx: WriteContext, id: StakeholderSendId, at: string
   change(ctx, row, {
     returnedAt: null,
     returnedReason: null,
+    asked: null,
     remindedAt: null,
     waitStartedAt: at,
+  });
+}
+
+/** The sorting cursor after `throughTs`, or unchanged when it is already past it. */
+function handledThrough(row: SendRow, throughTs: string): string {
+  return row.handledThroughTs !== null && compareTsText(throughTs, row.handledThroughTs) <= 0
+    ? row.handledThroughTs
+    : throughTs;
+}
+
+/** A reply sorted as chatter: the sorting cursor moves forward, and the send stays out. */
+export function markHandled(ctx: WriteContext, id: StakeholderSendId, throughTs: string): void {
+  const row = guarded(ctx, id, 'handle a reply', [SendState.Sent]);
+  change(ctx, row, { handledThroughTs: handledThrough(row, throughTs) });
+}
+
+/** An automated answer was posted: it counts toward the send's cap, and the cursor moves forward. */
+export function recordAutoAnswer(
+  ctx: WriteContext,
+  id: StakeholderSendId,
+  throughTs: string,
+): void {
+  const row = guarded(ctx, id, 'record an automated answer', [SendState.Sent]);
+  change(ctx, row, {
+    autoAnswers: row.autoAnswers + 1,
+    handledThroughTs: handledThrough(row, throughTs),
+  });
+}
+
+/**
+ * A question waits on the builder. A send still out is returned with reason 'asked'; one already returned
+ * (asked before, or by timer or disagreement) keeps its return and reason, and `asked` is replaced.
+ */
+export function markAsked(
+  ctx: WriteContext,
+  id: StakeholderSendId,
+  input: { readonly asked: AskedQuestion; readonly throughTs: string },
+): void {
+  const row = guarded(ctx, id, 'be asked', [SendState.Sent]);
+  change(ctx, row, {
+    asked: input.asked,
+    handledThroughTs: handledThrough(row, input.throughTs),
+    ...(row.returnedAt === null ? { returnedAt: ctx.now, returnedReason: 'asked' as const } : {}),
+  });
+}
+
+/**
+ * The builder replied to the question asked at `askedTs`: the question and the return clear and the timers
+ * restart from `at`. A newer question has replaced it meanwhile, so nothing changes then.
+ */
+export function answerAsked(
+  ctx: WriteContext,
+  id: StakeholderSendId,
+  input: { readonly askedTs: string; readonly at: string },
+): void {
+  const row = guarded(ctx, id, 'answer a question', [SendState.Sent]);
+  if (row.asked === null) throw new ConflictError('The send has no question waiting');
+  if (row.asked.ts !== input.askedTs) return;
+  change(ctx, row, {
+    asked: null,
+    returnedAt: null,
+    returnedReason: null,
+    remindedAt: null,
+    waitStartedAt: input.at,
   });
 }
 
@@ -538,6 +609,9 @@ function toOpen(db: DbReader, row: SendRow): OpenSendRow | null {
     remindedAt: row.remindedAt,
     returnedAt: row.returnedAt,
     returnedReason: row.returnedReason,
+    handledThroughTs: row.handledThroughTs,
+    autoAnswers: row.autoAnswers,
+    asked: row.asked,
     proposal: row.proposal,
     settledThroughTs: row.settledThroughTs,
     askedWhichWayAt: row.askedWhichWayAt,

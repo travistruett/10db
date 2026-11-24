@@ -30,6 +30,41 @@ const ConversationMessage = z.object({
   ts: z.string(),
 });
 
+/** What a stakeholder's reply is, as sorted when it arrives. */
+export const ReplyKind = {
+  Answer: 'answer',
+  SimpleQuestion: 'simple_question',
+  BuilderQuestion: 'builder_question',
+  Chatter: 'chatter',
+} as const;
+export type ReplyKind = (typeof ReplyKind)[keyof typeof ReplyKind];
+
+/** A stakeholder's question waiting on the builder. */
+export const AskedQuestion = z.object({
+  userId: z.string(),
+  name: z.string(),
+  text: z.string(),
+  ts: z.string(),
+  /** Why 10db didn't answer it itself; null when the sorter sent it straight to the builder. */
+  declined: z
+    .enum([
+      'not_answerable',
+      'held',
+      'too_long',
+      'unparseable',
+      'failed',
+      'no_account',
+      'provider',
+      'slack_unavailable',
+    ])
+    .nullable(),
+});
+export type AskedQuestion = z.infer<typeof AskedQuestion>;
+
+/** `POST /inbox/:id/stakeholder-reply`: the builder's reply to a waiting question. */
+export const StakeholderReplyInput = z.strictObject({ text: z.string().trim().min(1).max(2000) });
+export type StakeholderReplyInput = z.infer<typeof StakeholderReplyInput>;
+
 export const StakeholderSendDto = z.object({
   id: StakeholderSendId,
   inboxItemId: InboxItemId,
@@ -44,7 +79,11 @@ export const StakeholderSendDto = z.object({
   remindedAt: z.iso.datetime().nullable(),
   answeredAt: z.iso.datetime().nullable(),
   returnedAt: z.iso.datetime().nullable(),
-  returnedReason: z.enum(['timer', 'disagreed']).nullable(),
+  returnedReason: z.enum(['timer', 'disagreed', 'asked']).nullable(),
+  /** The question waiting on the builder. */
+  asked: AskedQuestion.nullable(),
+  /** Automated answers posted on this send. */
+  autoAnswers: z.int().min(0),
   /** Why a draft waits for the builder. */
   heldBy: z.enum(['review', 'limit', 'scan', 'slack_off']).nullable(),
   /** The option a settled conversation landed on, waiting for a recipient to approve it. */

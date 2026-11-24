@@ -21,3 +21,17 @@
   (`workspace_changed`, `bot_changed`) is never recorded sent or drafted again; its thread is told it was taken back
   with the send's own client.
 - A follow-up joins only threads sent at or after the workspace's `botSince`; older ones are never joined.
+- A reply is one of four kinds (`reply-kind.ts`): answer, simple question, builder question, chatter. The reply
+  watch routes it: `handledThroughTs` is the sorting cursor (a lone recipient's reply is the counted messages after
+  it; a group's messages are sorted one by one, at most five a tick, and only when the judge can run), and
+  `lastReadTs` still moves only when the card is answered. An automated answer is `autoAnswer`: the stored
+  binding, the writer, a re-check of the send, the card and the binding right before the post, the scan, then the
+  `auto_answer` line keyed on the reply's first `ts`, found again with `findLine` after a crash. A returned send
+  never auto-answers; any question there replaces `asked`. A `ConflictError` from a route ends that send's turn only.
+- The lane is told the whole exchange (the recipient's messages, `auto_answer` lines as "10db (automated)" and
+  `builder_reply` lines under the builder's name) once the cursor has moved or a which-way line was posted.
+- The builder answers a waiting question with `POST /inbox/:id/stakeholder-reply` (`replyAsBuilder`): it needs a
+  `sent` send with `asked` set, the send's own signed-in workspace and a binding that still holds, holds the text for
+  secrets only, posts a `builder_reply` line keyed on the question's `ts` and the text's hash (found again with
+  `findLine` after a crash), then `answerAsked` clears the return in one write. A newer question makes that write a
+  no-op and stays.

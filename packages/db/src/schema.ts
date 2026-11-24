@@ -92,6 +92,7 @@ import type {
   SendMode,
   SendState,
   StakeholderSendId,
+  AskedQuestion,
   OutboundHit,
   PrincipleId,
   PrincipleKind,
@@ -1150,7 +1151,13 @@ export const stakeholderSends = sqliteTable(
     waitStartedAt: text('wait_started_at'),
     remindedAt: text('reminded_at'),
     returnedAt: text('returned_at'),
-    returnedReason: text('returned_reason').$type<'timer' | 'disagreed'>(),
+    returnedReason: text('returned_reason').$type<'timer' | 'disagreed' | 'asked'>(),
+    /** The newest reply `ts` already sorted as a question or chatter; the sorting cursor, apart from `lastReadTs`. */
+    handledThroughTs: text('handled_through_ts'),
+    /** Automated answers posted on this send. */
+    autoAnswers: integer('auto_answers').notNull().default(0),
+    /** The question waiting on the builder. */
+    asked: text('asked', { mode: 'json' }).$type<AskedQuestion>(),
     settledThroughTs: text('settled_through_ts'),
     askedWhichWayAt: text('asked_which_way_at'),
     askedWhichWayTs: text('asked_which_way_ts'),

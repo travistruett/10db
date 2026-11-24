@@ -8,7 +8,11 @@ import { z } from 'zod';
  * as `tools.exec_command({ cmd })` and `tools.apply_patch(patch)` and reports with `text(...)`, or a
  * message that ends the turn.
  */
-export type FakeStep = { readonly js: string } | { readonly say: string };
+export type FakeStep =
+  | { readonly js: string }
+  | { readonly say: string }
+  /** A raw response item, such as a hosted tool's `web_search_call`, and the message that follows it in the same response. */
+  | { readonly item: Readonly<Record<string, unknown>>; readonly say?: string };
 
 /** What the model was sent in one request for a script. */
 export interface FakeRequest {
@@ -124,6 +128,30 @@ function answer(res: ServerResponse, step: FakeStep, n: number): void {
   const id = `resp_${String(n)}`;
   res.writeHead(200, { 'content-type': 'text/event-stream' });
   send({ type: 'response.created', response: { id } });
+  if ('item' in step) {
+    send({ type: 'response.output_item.added', output_index: 0, item: step.item });
+    send({ type: 'response.output_item.done', output_index: 0, item: step.item });
+    if (step.say !== undefined) {
+      const message = {
+        type: 'message',
+        role: 'assistant',
+        id: `msg_${String(n)}`,
+        content: [{ type: 'output_text', text: step.say }],
+      };
+      send({
+        type: 'response.output_item.added',
+        output_index: 1,
+        item: { ...message, content: [] },
+      });
+      send({ type: 'response.output_item.done', output_index: 1, item: message });
+    }
+    send({
+      type: 'response.completed',
+      response: { id, usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } },
+    });
+    res.end();
+    return;
+  }
   const item =
     'js' in step
       ? {

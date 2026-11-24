@@ -178,6 +178,12 @@ write a module's notes there, not here. This file keeps what crosses modules.
   ticks make it `unreachable`). With several open questions in one DM a top-level reply is matched by the judge
   (`reply_match`) or by asking "Which one is this for?" (`reply-match.ts`). `timer-watch.ts` returns an overdue
   send to the builder from the wall clock alone, with no Slack (`timers.ts` holds the pure rule).
+- A reply is sorted before it answers the card (`reply-kind.ts`, the `reply_kind` judge decision, a rule when no judge
+  runs): an `answer` answers as it always did; a `simple_question` is answered in the thread by the answer writer
+  (an `auto_answer` line keyed on the reply's first `ts`, so one per question; none from a returned send; only a
+  human participant's words are ever sorted); a `builder_question`, or any automated answer that cannot be posted, is put on the send (`asked`) and
+  returns it to the Inbox; `chatter` is skipped. `handledThroughTs` is the sorting cursor, `lastReadTs` moves only
+  when the card is answered, and the lane is quoted `auto_answer` and `builder_reply` lines with the conversation.
 - `bring-in.ts` moves a conversation to a group DM when a participant mentions someone (`moveSend` keeps the old
   thread as `moved_from`, forgets the proposal and approval marks, and counts nobody toward a limit), and `agree.ts`
   settles a conversation with several voices: the judge's `thread_answer` becomes a proposal line with the bot's own

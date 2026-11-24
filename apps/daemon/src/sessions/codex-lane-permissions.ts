@@ -223,3 +223,16 @@ export function readOnlyPermissions(
     },
   };
 }
+
+/**
+ * The profile of a one-shot question: nothing but Codex's base grant, read-only over the empty folder it
+ * starts in, and no network, so a command that ever ran would reach nothing.
+ */
+export function noToolPermissions(emptyFolder: string): Record<string, unknown> {
+  return {
+    lane: {
+      filesystem: { [MINIMAL]: 'read', [realOrSelf(emptyFolder)]: 'read' },
+      network: { enabled: false },
+    },
+  };
+}
