@@ -18,6 +18,7 @@ import {
   Group,
   Kbd,
   Radio,
+  Spoiler,
   Stack,
   Text,
   Textarea,
@@ -107,12 +108,18 @@ export function CardBody({ item }: { readonly item: InboxItemDto }) {
       </Code>
     );
   }
+  // A long body folds to its first lines, so the answer sits near the top of the card.
   return (
-    <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-      <CodeSpans text={item.body} />
-    </Text>
+    <Spoiler maxHeight={BODY_FOLD_PX} showLabel="Show All" hideLabel="Show Less">
+      <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+        <CodeSpans text={item.body} />
+      </Text>
+    </Spoiler>
   );
 }
+
+/** About twelve lines of a card's body before the rest folds behind Show All. */
+const BODY_FOLD_PX = 260;
 
 /** The pages the desktop app's opener may open, as its capability (`opener:allow-open-url`) says. */
 const GITHUB_PAGE = 'https://github.com/';
@@ -348,28 +355,34 @@ export function InboxCard({
           </Radio.Group>
         ) : null}
         {recordable ? <RecordDecision item={item} value={recording} onChange={onRecord} /> : null}
-        {hasOptions ? (
-          <Textarea
-            ref={noteRef}
-            label="Note"
-            placeholder="Optional. Sent with your answer."
-            autosize
-            minRows={2}
-            value={note}
-            onChange={(e) => {
-              onNote(e.currentTarget.value);
-            }}
-            onFocus={onNoteFocus}
-            onKeyDown={sendFromNote}
-          />
-        ) : null}
         {error ? (
           <Alert color="red" variant="light">
             {error}
           </Alert>
         ) : null}
       </Stack>
-      <CardActions framed={framed}>
+      <CardActions
+        framed={framed}
+        note={
+          hasOptions ? (
+            // The note rides in the bar beside Send Answer, so it is in reach however long the card is.
+            <Textarea
+              ref={noteRef}
+              aria-label="Note"
+              placeholder="Add a note (optional)"
+              autosize
+              minRows={1}
+              maxRows={4}
+              value={note}
+              onChange={(e) => {
+                onNote(e.currentTarget.value);
+              }}
+              onFocus={onNoteFocus}
+              onKeyDown={sendFromNote}
+            />
+          ) : null
+        }
+      >
         {(mode === StakeholderMode.Unrouted || mode === StakeholderMode.Pending) && hasOptions ? (
           <AskSomeoneFooter item={item} people={people} />
         ) : null}

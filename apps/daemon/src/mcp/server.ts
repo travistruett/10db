@@ -200,7 +200,9 @@ export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Respo
           try {
             const output = await tool.run(tool.schema.parse(args));
             // A tool whose result is pictures answers image blocks, which the session sees as its result.
-            if (output instanceof ToolImages)
+            if (output instanceof ToolImages) {
+              // Before the answer, so a session that gets the pictures as a message has them by its next request.
+              deps.showImages?.(session.id, output);
               return {
                 content: [
                   { type: 'text' as const, text: output.text },
@@ -211,6 +213,7 @@ export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Respo
                   })),
                 ],
               };
+            }
             return { content: [{ type: 'text' as const, text: JSON.stringify(output) }] };
           } catch (error) {
             return {
