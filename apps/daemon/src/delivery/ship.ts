@@ -540,7 +540,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     // A separate copy's landing that may have written the builder's folder fails as interrupted, with
     // its journal kept, whatever else went wrong.
     const copy = getLocalCopy(db, batch.id);
-    if (copy !== null && isLivePromoting(copy)) {
+    if (copy !== null && isLivePromoting(copy) && failure !== BatchFailure.InterruptedLanding) {
       const interrupted = copyLandingCards.interruptedLanding(batch, [], batch.baseBranch);
       failure = interrupted.failure;
       card = interrupted.card;
@@ -1093,11 +1093,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
-   * Batch delivery spec §6, steps 0–5, in the batch's worktree when it has one (made whole first) and
-   * in the project's checkout otherwise; the push always runs in the project's checkout, whose pin
-   * holds the origin the builder trusted. Each step is safe to repeat, so a restart runs them all again.
-   */
-  /**
    * The check before a ship (the gate, or the pre-check in its place) on the batch's copy, in the batch's
    * gate slot, with the base brought in first. Resolves true when it passed; false when it stopped, or a
    * failure was recorded, or the batch was sent to merge. `afterBase` runs once the base update is done
@@ -1263,6 +1258,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
     return true;
   }
 
+  /**
+   * Batch delivery spec §6, steps 0–5, in the batch's worktree when it has one (made whole first) and
+   * in the project's checkout otherwise; the push always runs in the project's checkout, whose pin
+   * holds the origin the builder trusted. Each step is safe to repeat, so a restart runs them all again.
+   */
   async function shipSteps(batchId: BatchId, signal: AbortSignal): Promise<void> {
     const batch = getBatch(db, batchId);
     // A function, so the check in the catch below is not narrowed away by this one.

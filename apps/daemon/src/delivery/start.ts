@@ -41,6 +41,7 @@ import {
   getLocalCopy,
   insertLocalCopy,
   isLivePromoting,
+  unfinishedCopyOf,
   listBatches,
   listWorkstreams,
   patchBatch,
@@ -50,7 +51,6 @@ import {
   placeTaskByRule,
   setBatchNotice,
   transitionBatch,
-  unfinishedCopyOf,
   type WriteContext,
 } from '@10db/db';
 import { githubRepoOf } from '../github';
@@ -63,6 +63,7 @@ import {
 } from '../team';
 import { batchBranchName } from './branch-name';
 import { forTasks, startCards, wrongBranchCard, type CardText, type StartRequest } from './cards';
+import { withdrawWaitCards } from './copy-landing-cards';
 import { resetCopyJournal } from './copy-reset';
 import { batchCheckout, lanesInProjectCheckout } from './checkout';
 import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
@@ -562,6 +563,13 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         `Your folder is in the UI Workbench pass "${pass.name}", so ${titles} can't start there until the pass closes. Set ${tasks.length === 1 ? 'it' : 'them'} to a separate copy, or start ${tasks.length === 1 ? 'it' : 'them'} once the pass has closed.`,
       );
     }
+    // Nothing starts in Your folder while a separate copy's landing may have half written it.
+    const landing = unfinishedCopyOf(db, project.id);
+    const landingCopy = landing === null ? null : getLocalCopy(db, landing.id);
+    if (landing !== null && landingCopy !== null && isLivePromoting(landingCopy))
+      throw new ConflictError(
+        `Batch "${landing.title}": a landing is settling in your folder, so ${tasks.map((t) => t.title).join(', ')} can't start there yet. Start again once it has settled.`,
+      );
     const unfinished = findUnfinishedBatch(db, project.id) ?? null;
     // A dry run before starting over treats the batch it will abandon as already gone.
     const existing = unfinished?.id === ending ? null : unfinished;
@@ -712,6 +720,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         return getBatch(w.tx, batch.id);
       },
       launch: () => {
+        if (waiting) withdrawWaitCards(ctx, project.id, batch.id);
         queueJoin(batch, tasks, plans, inBatch, goal);
       },
     };
