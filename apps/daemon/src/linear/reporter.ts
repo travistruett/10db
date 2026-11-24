@@ -3,7 +3,6 @@ import {
   ConversationItemAuthor,
   ConversationItemKind,
   ConversationState,
-  ExternalKind,
   LinearVia,
   type ConversationId,
   type LinearPostDto,
@@ -38,6 +37,7 @@ import { refreshReporterCard } from './reporter-inbox';
 import { taskPrUrl } from './reporter-brief';
 import { judgeReporterCall, type ReporterRun } from './reporter-guard';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
+import { linearLinkOf } from './task-link';
 
 // The Linear reporter's run: one timer per task, one short session per run,
 // and the in-memory run the session's tools and guard answer from. A run is a Reporter conversation's
@@ -372,9 +372,8 @@ export function createLinearReporter(
         (p) => dueAtMs(p) <= now,
       );
       if (posts.length === 0) throw new ConflictError('No Linear update is owed any more.');
-      const link = getTask(state.db, flight.taskId).external;
-      if (link?.kind !== ExternalKind.Linear)
-        throw new ConflictError('The task is not linked to a Linear issue.');
+      const link = linearLinkOf(state.db, flight.taskId)?.link;
+      if (link === undefined) throw new ConflictError('The task is not linked to a Linear issue.');
       state.write((ctx) => {
         takeLinearPosts(
           ctx,

@@ -82,6 +82,7 @@ function request(over: Partial<CrossesLimitRequest> = {}, surface: TrustSurface 
       tmpDir: join(root, 'tmp'),
       secretFiles: [join(checkout, '.env')],
       preExisting: [],
+      setupReads: [],
     },
     policy: buildTrustPolicy({
       surface,
@@ -238,6 +239,7 @@ describe('crossesLimit', () => {
         tmpDir: join(root, 'tmp'),
         secretFiles: [join(checkout, '.env')],
         preExisting: ['data/', 'notes "old".txt'],
+        setupReads: [],
       },
       allow: ['Allowed by the builder in this project: deploys to staging'],
     });

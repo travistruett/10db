@@ -1,9 +1,12 @@
-import { ConflictError, InboxKind, type WorkstreamId } from '@10db/contracts';
+import { ConflictError, ExternalKind, InboxKind, type WorkstreamId } from '@10db/contracts';
 import {
   approvedSkipsForTask,
   getTask,
   getWorkstream,
+  insertTask,
+  insertWorkstream,
   listInbox,
+  listLinearPosts,
   pendingSkipFollowUps,
   recordSkip,
   skipFollowUpOf,
@@ -11,6 +14,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { raiseSkippedCard, SKIPPED_DETAIL, SkippedChoice } from '../src/delivery';
 import { createGit } from '../src/git';
+import { subscribeLinearEvents } from '../src/linear';
 import { silentLogger } from '../src/log';
 import type { FakeScriptBook } from '../src/sessions';
 import { createTestEngine, type TestEngine } from './engine';
@@ -113,5 +117,61 @@ describe('Run these now', () => {
     expect(lines.slice(1)).toEqual([
       `- ${JSON.stringify(summary)}: skipped because ${JSON.stringify(reason.slice(0, 200))}`,
     ]);
+  });
+
+  // Escaped from the AMP-56 pilot: the follow-up of a Linear-linked task reported nothing to the issue.
+  it("reports the follow-up's run to the source task's Linear issue", async () => {
+    engine = await createTestEngine({ Alpha: [blocked, [turn]] });
+    const link = {
+      kind: ExternalKind.Linear,
+      id: 'AMP-56',
+      issueId: 'issue-uuid-56',
+      url: 'https://linear.app/a/issue/AMP-56',
+    };
+    const task = engine.state.write((ctx) =>
+      insertTask(ctx, engine.project.id, {
+        title: 'Alpha',
+        description: 'Import the workbook in a fresh firm.',
+        acceptanceCriteria: ['three companies are shown'],
+        areas: ['api'],
+        dependsOn: [],
+        external: link,
+      }),
+    );
+    const workstream = engine.state.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: null,
+      }),
+    );
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    await raiseSkippedCard(
+      { state: engine.state, git: createGit(), log: silentLogger },
+      workstream.id,
+    );
+    const stop = subscribeLinearEvents(engine.bus, {
+      state: engine.state,
+      clock: engine.clock,
+      reporter: { poke: () => undefined },
+      log: silentLogger,
+    });
+    let followTask;
+    try {
+      engine.inbox.answer(openSkipped().id, { choice: SkippedChoice.RunTheseNow });
+      const follow = followUpsOf(workstream.id);
+      if (!follow) throw new Error('no follow-up');
+      followTask = getTask(engine.store.db, follow.taskId);
+      if (followTask.workstreamId == null) throw new Error('the follow-up has no run');
+      engine.launch(followTask.workstreamId);
+      await engine.runner.idle();
+    } finally {
+      stop();
+    }
+    expect(followTask.acceptanceCriteria).toContain('three companies are shown');
+    expect(followTask.description).toContain('Import the workbook in a fresh firm.');
+    expect(listLinearPosts(engine.store.db, followTask.id).map((p) => p.event)).toContain(
+      'run_started',
+    );
   });
 });
