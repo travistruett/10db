@@ -79,6 +79,25 @@ describe('install-app.sh --stage', () => {
     });
     expect(none.status).toBe(0);
     expect(existsSync(join(box.root, 'other', 'commit'))).toBe(false);
+
+    // The running commit is newer than the newest green one: nothing to fetch or build.
+    const ahead = run(['--stage', join(box.root, 'ahead'), '--running', HEAD_SHA], {
+      STUB_COMMITS: `${HEAD_SHA} ${OLD}`,
+      STUB_CI_GREEN: OLD,
+    });
+    expect(ahead.status).toBe(0);
+    expect(existsSync(join(box.root, 'ahead', 'commit'))).toBe(false);
+    expect(box.calls().filter((call) => call.startsWith('gh workflow run'))).toEqual([]);
+
+    // The green commit has no live build, so a build of the ref's head is waited for: it is of a
+    // commit with red CI, and is not staged.
+    const dispatched = run(['--stage', join(box.root, 'waited'), '--running', 'e'.repeat(40)], {
+      STUB_COMMITS: `${HEAD_SHA} ${OLD}`,
+      STUB_CI_GREEN: OLD,
+      STUB_SUCCESS_RUN: '',
+    });
+    expect(dispatched.status).toBe(0);
+    expect(existsSync(join(box.root, 'waited', 'commit'))).toBe(false);
   });
 
   it.each([

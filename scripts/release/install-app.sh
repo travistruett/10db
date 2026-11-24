@@ -289,6 +289,20 @@ while :; do
       fi
       fail "no recent commit of $ref has green CI"
     fi
+    # The running commit is the newest green one, or newer than it: nothing to stage, and nothing
+    # is built or downloaded every minute for a commit that is not green.
+    if [ -n "$running_commit" ]; then
+      while IFS= read -r commit; do
+        if [ "$commit" = "$running_commit" ] || [ "$commit" = "$green_head" ]; then
+          if [ "$commit" = "$running_commit" ]; then
+            step=current
+            echo "The app runs ${running_commit:0:12}, the newest commit of $ref with green CI or newer; nothing was fetched."
+            exit 0
+          fi
+          break
+        fi
+      done <<< "$commits"
+    fi
     sha="$green_head"
   fi
 
@@ -411,6 +425,14 @@ while :; do
 done
 
 if [ "$mode" != apply ]; then
+  # A build found or waited for may be of a commit whose CI is not green (a dispatch builds the ref's
+  # head as it is then; a commit pushed since): it is never staged.
+  if [ "$mode" = stage ] && ! grep -qx "$head" <<< "$ci_green"; then
+    step=current
+    echo "The build of ${head:0:12} is not of a commit with green CI; nothing was fetched."
+    if [ -n "$running_commit" ]; then exit 0; fi
+    fail "the build of ${head:0:12} is not of a commit with green CI"
+  fi
   if [ -n "$running_commit" ] && [ "$head" = "$running_commit" ]; then
     # Nothing newer has finished: the app already runs the newest finished build.
     step=current
