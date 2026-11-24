@@ -1,8 +1,8 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Button, Group, Textarea } from '@mantine/core';
-import { useState } from 'react';
+import { Textarea } from '@mantine/core';
 import { useOneWayPaths, useSetOneWayPaths } from '../../daemon/shape-measures-queries';
 import { SettingRow } from './setting-row';
+import { useDraft } from './settings-drafts';
 
 const MONO_INPUT = { input: { fontFamily: 'var(--mantine-font-family-monospace)' } };
 
@@ -23,10 +23,12 @@ const fromLines = (text: string): string[] =>
 export function OneWayPathsSetting({ project }: { readonly project: ProjectDto }) {
   const setting = useOneWayPaths(project.id);
   const set = useSetOneWayPaths(project.id);
-  const [draft, setDraft] = useState<string | null>(null);
-  const saved = setting.data === undefined ? '' : toLines(setting.data.paths);
-  const text = draft ?? saved;
-  const changed = draft !== null && draft !== saved;
+  // Compared as Save sends them, so a blank line or a trailing space is not an edit.
+  const paths = useDraft({
+    saved: setting.data === undefined ? undefined : toLines(setting.data.paths),
+    save: (text) => set.mutateAsync(fromLines(text)),
+    same: (a, b) => toLines(fromLines(a)) === toLines(fromLines(b)),
+  });
   return (
     <SettingRow
       label={ONE_WAY_PATHS_LABEL}
@@ -34,35 +36,19 @@ export function OneWayPathsSetting({ project }: { readonly project: ProjectDto }
       help="A task that touches a file matching one of these globs, one per line, makes Plan write a spec with scope and engineering review before Convert. You can still pin a task to direct."
       stacked
     >
-      <Group align="flex-end" wrap="nowrap" gap="sm">
-        <Textarea
-          aria-label={ONE_WAY_PATHS_LABEL}
-          placeholder="One pattern per line, such as packages/db/drizzle/**"
-          styles={MONO_INPUT}
-          style={{ flex: 1 }}
-          autosize
-          minRows={2}
-          value={text}
-          disabled={setting.data === undefined}
-          onChange={(event) => {
-            setDraft(event.currentTarget.value);
-          }}
-        />
-        <Button
-          variant="default"
-          size="compact-md"
-          disabled={!changed || set.isPending}
-          onClick={() => {
-            set.mutate(fromLines(text), {
-              onSuccess: () => {
-                setDraft(null);
-              },
-            });
-          }}
-        >
-          Save One-Way Paths
-        </Button>
-      </Group>
+      <Textarea
+        aria-label={ONE_WAY_PATHS_LABEL}
+        placeholder="One pattern per line, such as packages/db/drizzle/**"
+        styles={MONO_INPUT}
+        style={{ flex: 1 }}
+        autosize
+        minRows={2}
+        value={paths.value ?? ''}
+        disabled={setting.data === undefined}
+        onChange={(event) => {
+          paths.set(event.currentTarget.value);
+        }}
+      />
     </SettingRow>
   );
 }

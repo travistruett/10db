@@ -2,7 +2,7 @@ import type { ProjectDto } from '@10db/contracts';
 import { Group, Stack, Switch, Textarea } from '@mantine/core';
 import { NetworkHostsSection } from './network-hosts-section';
 import { MONO_INPUT, useProjectFields } from './project-fields-state';
-import { ProjectSaveBar } from './project-save-bar';
+import { HiddenFieldAlert } from './hidden-field-alert';
 import { SettingRow, SettingsCard } from './setting-row';
 
 /**
@@ -68,7 +68,7 @@ export function SandboxSection({ project }: { readonly project: ProjectDto }) {
 
       <NetworkHostsSection project={project} />
 
-      <ProjectSaveBar fields={fields} />
+      <HiddenFieldAlert fields={fields} />
     </Stack>
   );
 }
