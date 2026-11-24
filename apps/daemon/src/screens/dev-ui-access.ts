@@ -45,6 +45,7 @@ export const DEV_UI_READS: readonly string[] = [
   '/slack',
   '/stakeholders/timers',
   '/projects/:projectId/integrations',
+  '/projects/:projectId/slack-sharing',
   '/projects/archived',
   '/tasks/:taskId/question-routes',
   '/inbox/:id/compose',
@@ -105,6 +106,8 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/passes/:passId/pull-request': "Reading a pass's pull request runs gh.",
   '/dev-ui/connection': "The dev UI's own token is for the 10db app's Open Page.",
   '/slack/members': "The workspace's people are read from Slack, which the dev UI never reaches.",
+  '/projects/:projectId/slack/channels':
+    "The workspace's channels are read from Slack, which the dev UI never reaches.",
   '/settings/trust/mcp-sign-ins':
     "Sign-in rows start Codex to read each account's sign-ins, which only the 10db app does.",
   '/settings/sign-ins/linear':

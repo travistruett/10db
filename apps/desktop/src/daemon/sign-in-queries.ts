@@ -5,9 +5,12 @@ import {
   FigmaSignInsDto,
   LinearSignInsDto,
   ProjectIntegrationsDto,
+  ProjectSlackSharingDto,
+  SlackChannelsDto,
   type LinearReporterSettings,
   type ProjectId,
   type ProjectIntegrationsInput,
+  type ProjectSlackSharingInput,
 } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { chatKeys } from './chat-queries';
@@ -24,6 +27,9 @@ export const PROJECT_INTEGRATIONS_KEY = [...SLACK_KEY, 'project'] as const;
 const projectIntegrationsKey = (projectId: ProjectId) =>
   [...PROJECT_INTEGRATIONS_KEY, projectId] as const;
 
+const slackSharingKey = (projectId: ProjectId) => [...SLACK_KEY, 'sharing', projectId] as const;
+const slackChannelsKey = (projectId: ProjectId) => [...SLACK_KEY, 'channels', projectId] as const;
+
 /** The GitHub login a project uses and its Slack workspace. */
 export function useProjectIntegrations(projectId: ProjectId) {
   const { client } = useDaemon();
@@ -33,6 +39,52 @@ export function useProjectIntegrations(projectId: ProjectId) {
       readJson(
         await client.projects[':projectId'].integrations.$get({ param: { projectId } }),
         ProjectIntegrationsDto,
+      ),
+  });
+}
+
+/** Whether a pass's pictures go to Slack, and the channel they go to. */
+export function useSlackSharing(projectId: ProjectId) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: slackSharingKey(projectId),
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId']['slack-sharing'].$get({ param: { projectId } }),
+        ProjectSlackSharingDto,
+      ),
+  });
+}
+
+export function useSetSlackSharing(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: ProjectSlackSharingInput) =>
+      readJson(
+        await client.projects[':projectId']['slack-sharing'].$put({
+          param: { projectId },
+          json: input,
+        }),
+        ProjectSlackSharingDto,
+      ),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(slackSharingKey(projectId), saved);
+    },
+  });
+}
+
+/** The channels of the project's workspace, or `missing_scope` when the token can't list them. */
+export function useSlackChannels(projectId: ProjectId, enabled: boolean) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: slackChannelsKey(projectId),
+    enabled,
+    retry: false,
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId'].slack.channels.$get({ param: { projectId } }),
+        SlackChannelsDto,
       ),
   });
 }
@@ -87,6 +139,9 @@ export function useSetProjectIntegrations(projectId: ProjectId) {
       ),
     onSuccess: (saved) => {
       queryClient.setQueryData(projectIntegrationsKey(projectId), saved);
+      // A new workspace takes the channel back, and its channels are another list.
+      void queryClient.invalidateQueries({ queryKey: slackSharingKey(projectId) });
+      void queryClient.invalidateQueries({ queryKey: slackChannelsKey(projectId) });
     },
   });
 }

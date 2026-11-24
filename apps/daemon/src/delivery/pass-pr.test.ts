@@ -13,6 +13,7 @@ import {
 import { AbandonStep } from '@10db/contracts';
 import {
   abandonPassAndBatch,
+  getAppSetting,
   setAbandonStep,
   getBatch,
   getBatchRow,
@@ -33,6 +34,8 @@ import { systemProcesses } from '../recovery';
 import type { Git } from '../git';
 import { PrState } from '../github';
 import { createGateRunner } from '../verify';
+import { createSlackClient } from '../slack';
+import { ManualClock } from '../clock';
 import { SANDBOXED, waitFor } from '../../test/fixtures';
 import { alive, orphanGateGroup } from '../../test/orphan-gate';
 import { openPass, recoverBatches, type PutBackKeptWork } from './index';
@@ -73,6 +76,7 @@ function setup(
     holdShips?: () => boolean;
     review?: PassReviewDeps;
     wrapGit?: (git: Git) => Git;
+    slack?: NonNullable<Parameters<typeof createPassPullRequests>[0]['slack']>;
   } = {},
 ) {
   h = createDeliveryHarness(
@@ -86,6 +90,7 @@ function setup(
     sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
     identifyProcess: (pid: number) => systemProcesses.identify(pid),
     review: opts.review ?? null,
+    ...(opts.slack ? { slack: opts.slack } : {}),
     ...(opts.holdShips ? { holdShips: opts.holdShips } : {}),
   };
   prs = createPassPullRequests(deps);
@@ -611,6 +616,64 @@ describe('a restart during an Open Pull Request gate', () => {
   );
 });
 
+describe('Pictures to Slack', () => {
+  it('posts a pass’s pictures to its Slack channel once per pull request, joins a public channel, and tries again at the next push after a refusal', async () => {
+    const slack = fakeSlack();
+    const client = createSlackClient({
+      fetch: slack.fetch,
+      token: () => Promise.resolve('xoxb-test'),
+      clock: new ManualClock(),
+      timeoutMs: 5_000,
+    });
+    // Setting off: the channel is null, so nothing is uploaded.
+    let channel: { teamId: string; channelId: string } | null = null;
+    setup({}, { slack: { channelOf: () => channel, clientFor: () => client } });
+    const { passId, settings, people } = await openedPass();
+    picture(settings, 'before', '/settings', 'settings before');
+    picture(settings, 'after', '/settings', 'settings after');
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    const signal = new AbortController().signal;
+    const push = async () => {
+      await prs.pushPassBranch(passId, signal);
+      return prs.ensurePassPr({ passId, ready: false }, signal);
+    };
+    const off = await push();
+    await h.jobs.idle();
+    expect(slack.uploads).toHaveLength(0);
+
+    // On, with the join refused: nothing is uploaded and one Inbox item says why.
+    channel = { teamId: 'T1', channelId: 'C1' };
+    slack.joinError = 'method_not_supported_for_channel_type';
+    await push();
+    await waitFor(() => h.cards().some((c) => c.title.includes('did not reach Slack')));
+    expect(slack.uploads).toHaveLength(0);
+
+    // The next push retries, joins, and posts one message with both pictures and the link.
+    slack.joinError = null;
+    signOff(people, 'src/people/page.tsx', 'people\n// signed\n');
+    await push();
+    await waitFor(() => slack.uploads.length > 0 || undefined);
+    expect(slack.uploads).toHaveLength(1);
+    expect(slack.joins).toEqual(['C1']);
+    expect(slack.uploads[0]).toMatchObject({ channel_id: 'C1', files: 2 });
+    expect(slack.uploads[0]?.comment).toContain(off?.url ?? 'missing');
+    expect(slack.uploads[0]?.comment).toContain('Polish pages');
+    expect(h.cards().filter((c) => c.title.includes('did not reach Slack'))).toHaveLength(0);
+
+    // Marked posted for the pass (the post runs detached, so the mark is what keeps the next push from posting
+    // again): another push to the same pull request posts nothing.
+    await waitFor(
+      () => getAppSetting(h.state.db, `slack-pictures-posted.${h.project.id}`) ?? undefined,
+    );
+    expect(getAppSetting(h.state.db, `slack-pictures-posted.${h.project.id}`)).toEqual({
+      [passId]: off?.url,
+    });
+    await push();
+    await h.jobs.idle();
+    expect(slack.uploads).toHaveLength(1);
+  });
+});
+
 /** A daemon killed mid-gate on the pass's batch, `abandoned` or not, and start-up's recovery after it. */
 async function reapsTheGate(name: string, abandoned: boolean): Promise<void> {
   setup();
@@ -669,4 +732,54 @@ async function reapsTheGate(name: string, abandoned: boolean): Promise<void> {
     if (alive(gate.grandchildPid)) process.kill(gate.grandchildPid, 'SIGKILL');
     gate.cleanup();
   }
+}
+
+/** A fake Slack over `fetch`: one public channel the bot is not in, and every upload recorded. */
+function fakeSlack() {
+  const state = {
+    uploads: [] as { channel_id: string; comment: string; files: number }[],
+    joins: [] as string[],
+    joinError: null as string | null,
+    fetch: ((input: URL | string, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const json = (body: unknown) => Promise.resolve(Response.json(body));
+      if (url.hostname === 'files.example') return Promise.resolve(new Response('OK'));
+      switch (url.pathname.split('/').pop() ?? '') {
+        case 'conversations.list':
+          return json({
+            ok: true,
+            channels: [
+              { id: 'C1', name: 'ui', is_private: false, is_member: state.joins.length > 0 },
+            ],
+          });
+        case 'conversations.join': {
+          if (state.joinError !== null) return json({ ok: false, error: state.joinError });
+          state.joins.push('C1');
+          return json({ ok: true });
+        }
+        case 'files.getUploadURLExternal':
+          return json({
+            ok: true,
+            upload_url: `https://files.example/${url.searchParams.get('filename') ?? ''}`,
+            file_id: `F-${url.searchParams.get('filename') ?? ''}`,
+          });
+        case 'files.completeUploadExternal': {
+          const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
+            channel_id: string;
+            initial_comment: string;
+            files: unknown[];
+          };
+          state.uploads.push({
+            channel_id: body.channel_id,
+            comment: body.initial_comment,
+            files: body.files.length,
+          });
+          return json({ ok: true });
+        }
+        default:
+          return json({ ok: false, error: 'unknown_method' });
+      }
+    }) as typeof fetch,
+  };
+  return state;
 }

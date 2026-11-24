@@ -1,4 +1,4 @@
-import type { SlackMemberDto } from '@10db/contracts';
+import type { SlackChannelDto, SlackMemberDto } from '@10db/contracts';
 import type { z } from 'zod';
 import type { Clock, Timer } from '../clock';
 import type { SlackBlock, SlackMetadata } from './blocks';
@@ -6,6 +6,7 @@ import { SlackError } from './errors';
 import {
   AuthTestReply,
   ChannelOpenReply,
+  ChannelsReply,
   MembersReply,
   MessagesReply,
   PermalinkReply,
@@ -13,6 +14,7 @@ import {
   ReactionsReply,
   SlackEnvelope,
   SlackErrorCode,
+  UploadUrlReply,
   UserInfoReply,
   type SlackIdentity,
   type SlackMessage,
@@ -26,6 +28,7 @@ const MAX_PAGES = 20;
 const GROUP_MIN = 2;
 const GROUP_MAX = 8;
 const MEMBERS_PAGE_SIZE = 200;
+const CHANNELS_PAGE_SIZE = 200;
 
 export interface SlackClientDeps {
   readonly fetch: typeof fetch;
@@ -42,6 +45,12 @@ interface SlackPostInput {
   readonly blocks: readonly SlackBlock[];
   readonly threadTs?: string;
   readonly metadata?: SlackMetadata;
+}
+
+/** One file of an upload: its name in the message and its bytes. */
+export interface SlackUploadFile {
+  readonly name: string;
+  readonly bytes: Uint8Array;
 }
 
 export interface SlackMemberPage {
@@ -67,6 +76,16 @@ export interface SlackClient {
   addReaction(channel: string, ts: string, name: string): Promise<void>;
   /** The name of a person, for someone brought into a conversation. */
   userInfo(userId: string): Promise<string>;
+  /** Every public channel and every private channel the bot is in, archived ones left out. */
+  listChannels(): Promise<SlackChannelDto[]>;
+  /** The bot joins a public channel. */
+  joinChannel(channelId: string): Promise<void>;
+  /** One message in the channel carrying every file: each is sent to Slack's upload address, then completed together. */
+  uploadFiles(input: {
+    readonly channelId: string;
+    readonly comment: string;
+    readonly files: readonly SlackUploadFile[];
+  }): Promise<void>;
 }
 
 type Request =
@@ -128,13 +147,8 @@ export function createSlackClient(deps: SlackClientDeps): SlackClient {
     return body;
   }
 
-  async function call<S extends z.ZodType>(
-    method: string,
-    request: Request,
-    schema: S,
-  ): Promise<z.output<S>> {
-    const token = await deps.token();
-    if (token === null || token === '') throw new SlackError(method, 'no_token');
+  /** Runs `work` bounded by the injected clock: past `timeoutMs` its signal aborts and it fails as `timeout`. */
+  async function bounded<T>(method: string, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const controller = new AbortController();
     const pending: { timer: Timer | null } = { timer: null };
     const timedOut = new Promise<never>((_resolve, reject) => {
@@ -144,16 +158,48 @@ export function createSlackClient(deps: SlackClientDeps): SlackClient {
       }, deps.timeoutMs);
     });
     try {
-      const body = await Promise.race([
-        exchange(method, request, token, controller.signal),
-        timedOut,
-      ]);
-      const parsed = schema.safeParse(body);
-      if (!parsed.success) throw new SlackError(method, 'bad_reply');
-      return parsed.data;
+      return await Promise.race([work(controller.signal), timedOut]);
     } finally {
       pending.timer?.cancel();
     }
+  }
+
+  async function call<S extends z.ZodType>(
+    method: string,
+    request: Request,
+    schema: S,
+  ): Promise<z.output<S>> {
+    const token = await deps.token();
+    if (token === null || token === '') throw new SlackError(method, 'no_token');
+    const body = await bounded(method, (signal) => exchange(method, request, token, signal));
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) throw new SlackError(method, 'bad_reply');
+    return parsed.data;
+  }
+
+  /** Sends a file's bytes to the address Slack gave for it: no token, and no envelope in the answer. */
+  async function sendBytes(uploadUrl: string, file: SlackUploadFile): Promise<void> {
+    const method = 'files.upload';
+    await bounded(method, async (signal) => {
+      let response: Response;
+      try {
+        response = await deps.fetch(uploadUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: file.bytes,
+          signal,
+        });
+      } catch {
+        throw new SlackError(method, 'unreachable');
+      }
+      if (response.status === 429)
+        throw new SlackError(
+          method,
+          'ratelimited',
+          retryAfter(response.headers.get('Retry-After')),
+        );
+      if (!response.ok) throw new SlackError(method, `http_${String(response.status)}`);
+    });
   }
 
   const read = <S extends z.ZodType>(method: string, query: Record<string, string>, schema: S) =>
@@ -188,8 +234,58 @@ export function createSlackClient(deps: SlackClientDeps): SlackClient {
     };
   }
 
+  async function listChannels(): Promise<SlackChannelDto[]> {
+    const all: SlackChannelDto[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const reply: z.output<typeof ChannelsReply> = await read(
+        'conversations.list',
+        {
+          types: 'public_channel,private_channel',
+          exclude_archived: 'true',
+          limit: String(CHANNELS_PAGE_SIZE),
+          ...(cursor === null ? {} : { cursor }),
+        },
+        ChannelsReply,
+      );
+      all.push(...reply.channels);
+      cursor = reply.nextCursor;
+      if (cursor === null) break;
+    }
+    return all;
+  }
+
+  async function uploadFiles(input: {
+    readonly channelId: string;
+    readonly comment: string;
+    readonly files: readonly SlackUploadFile[];
+  }): Promise<void> {
+    const ids: { id: string; title: string }[] = [];
+    for (const file of input.files) {
+      // Slack takes this call's arguments in the query, not as JSON.
+      const slot = await read(
+        'files.getUploadURLExternal',
+        { filename: file.name, length: String(file.bytes.byteLength) },
+        UploadUrlReply,
+      );
+      await sendBytes(slot.upload_url, file);
+      ids.push({ id: slot.file_id, title: file.name });
+    }
+    await write(
+      'files.completeUploadExternal',
+      { files: ids, channel_id: input.channelId, initial_comment: input.comment },
+      SlackEnvelope,
+    );
+  }
+
   return {
     authTest,
+    listChannels,
+    uploadFiles,
+
+    joinChannel: async (channelId) => {
+      await write('conversations.join', { channel: channelId }, SlackEnvelope);
+    },
 
     async listMembers(cursor) {
       const identity = await authTest();

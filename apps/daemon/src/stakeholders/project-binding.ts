@@ -17,6 +17,7 @@ import {
 import type { Logger } from '../log';
 import { draftOnOpen } from './drafts';
 import { failSendsToBuilder } from './send-returns';
+import { dropSharingChannelOutside } from './slack-sharing';
 import { projectSlack, setProjectSlack } from './slack-workspaces';
 
 /**
@@ -32,6 +33,7 @@ export function rebindProjectSlack(
   opts: { readonly afterDraft: (id: InboxItemId) => void; readonly log: Logger },
 ): (() => void)[] {
   setProjectSlack(ctx, projectId, teamId);
+  dropSharingChannelOutside(ctx, projectId, teamId);
   const now = projectSlack(ctx.tx, projectId).teamId;
   const live = liveSendsWhere(ctx.tx, { projectId });
   const elsewhere = (sendTeam: string | null): boolean => now === null || sendTeam !== now;

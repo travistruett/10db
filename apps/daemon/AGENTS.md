@@ -43,6 +43,13 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   to one workspace (`stakeholders/slack-clients.ts` makes one per signed-in team). Reads are GETs and
   writes JSON POSTs. `stakeholders/` holds the pure texts and rules around it (compose, escape, scan, read a reply,
   read a conversation); neither module ever sees the token outside `slack/client.ts`.
+  A file upload is the exception to JSON writes: `files.getUploadURLExternal` takes query arguments, its bytes go
+  to the returned address with no token, and one `files.completeUploadExternal` posts every file as one message.
+- `delivery/pass-slack-post.ts` posts a pass's pictures to the project's Slack channel when its pull request exists
+  and its URL is not yet in `slack-pictures-posted.<projectId>`. It is detached from the Ship job (`void`, its own
+  catch, the client's own timeouts), one in flight per pass, and a failure folds into one Inbox item per pass; the
+  next push retries. The setting (`slack-sharing.<projectId>`, `stakeholders/slack-sharing.ts`) is cleared of its
+  channel by `rebindProjectSlack`; the posted marks are written by no one else.
 - `src/api/` is typechecked by the desktop app too (it imports `AppType`). Code there must not import
   `node:*` modules or `@10db/db`; receive services through the `ApiServices` interface (passed in `ApiDeps`).
 - The package entry (`src/index.ts`) exports types only.

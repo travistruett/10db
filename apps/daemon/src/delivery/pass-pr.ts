@@ -35,11 +35,13 @@ import { ghCall, networkCall, pushCall, type DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
 import { createPassChecks } from './pass-checks';
+import { createPassSlackPost, type PassSlackPostDeps } from './pass-slack-post';
 import { passHasReview, REVIEW_CUT_NOTICE, type PassReviewDeps } from './pass-review';
 import { PASS_PR_CLOSED_NOTICE } from './pass-watch';
 import { reviewHasUnread } from './review-left';
 import { readPrTemplate } from './pr-template';
 import { picturePlan, picturesSection } from './pr-pictures';
+import { signedOffTasks } from './pass-signed-off';
 import { passPrBody, prTitle, titlePrefix, type PassPrCheck } from './pr-text';
 import { gateInScratch, type ScratchGateDeps } from './scratch-gate';
 import { pushBranch, runGate } from './ship';
@@ -86,6 +88,8 @@ export interface PassPullRequestDeps extends ScratchGateDeps, DeliveryContext {
   readonly holdShips?: () => boolean;
   /** The one review's model; null runs no review. */
   readonly review: PassReviewDeps | null;
+  /** Where the pass's pictures go in Slack; absent or null with Slack off. */
+  readonly slack?: Pick<PassSlackPostDeps, 'channelOf' | 'clientFor'> | null;
 }
 
 /** A pass's pull request: what the routes ask, and the close's steps. */
@@ -138,15 +142,6 @@ export function passPrBase(db: DbReader, pass: PassDto): string {
   return holds && !merged && branch !== null ? branch : batch.baseBranch;
 }
 
-/** The titles of the pass's signed-off pages, in the order they joined it. */
-function signedOffTasks(db: DbReader, passId: PassId) {
-  return listPassTasks(db, passId).filter(
-    (task) =>
-      task.workstreamId !== null &&
-      getWorkstream(db, task.workstreamId).state === WorkstreamState.Done,
-  );
-}
-
 function signedOff(db: DbReader, passId: PassId): string[] {
   return signedOffTasks(db, passId).map((task) => task.title);
 }
@@ -161,6 +156,16 @@ const message = (error: unknown): string =>
 
 export function createPassPullRequests(deps: PassPullRequestDeps): PassPullRequests {
   const db = deps.state.db;
+  const slackPost =
+    deps.slack == null
+      ? null
+      : createPassSlackPost({
+          state: deps.state,
+          inbox: deps.inbox,
+          logger: deps.logger,
+          channelOf: deps.slack.channelOf,
+          clientFor: deps.slack.clientFor,
+        });
   /**
    * How each pass's body says it was checked, as its last gate left it. A pass with none here has
    * had no gate finish in this daemon's life.
@@ -405,6 +410,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
         clearPassNotice(w, pass.id, PASS_PR_CLOSED_NOTICE);
       });
       deps.logger.info({ passId: pass.id, url, draft: !i.ready }, 'pass pull request opened');
+      slackPost?.announce(pass.id, url);
       return { url };
     }
     const url = found.url;
@@ -428,6 +434,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
         setPassPullRequest(w, pass.id, { url, draft: false });
       });
     }
+    slackPost?.announce(pass.id, url);
     return { url };
   }
 

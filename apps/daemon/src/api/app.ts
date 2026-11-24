@@ -74,6 +74,7 @@ import {
   ConnectableService,
   ConnectServiceInput,
   ProjectIntegrationsInput,
+  ProjectSlackSharingInput,
   StakeholderTimersDto,
   PersonaId,
   PersonaInput,
@@ -1637,6 +1638,23 @@ export function createApp(deps: ApiDeps) {
       async (c) =>
         c.json(
           await deps.services.setProjectIntegrations(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/projects/:projectId/slack/channels', async (c) =>
+      c.json(await deps.services.projectSlackChannels(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/projects/:projectId/slack-sharing', (c) =>
+      c.json(deps.services.slackSharing(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/slack-sharing',
+      validator('json', (value): ProjectSlackSharingInput => ProjectSlackSharingInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setSlackSharing(
             ProjectId.parse(c.req.param('projectId')),
             c.req.valid('json'),
           ),

@@ -2,6 +2,7 @@ export { OUTBOUND_PATTERNS, SECRET_PATTERN_NAMES, scanOutbound } from './outboun
 export { createTriage } from './triage';
 export { draftOnOpen, previewDraft, sweepDrafts } from './drafts';
 export { rebindProjectSlack } from './project-binding';
+export { readSlackSharing, writeSlackSharing } from './slack-sharing';
 export { createStakeholderSends, type StakeholderSends } from './sends';
 export { createReplyWatches, type ReplyWatches } from './reply-watches';
 export { createSlackClients, type SlackClients } from './slack-clients';

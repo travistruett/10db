@@ -29,3 +29,16 @@ const REFUSED_CODES: ReadonlySet<string> = new Set([
 export function slackRefusedToken(error: unknown): boolean {
   return error instanceof SlackError && REFUSED_CODES.has(error.code);
 }
+
+/** The Slack error words the pictures post tells apart from the rest. */
+export const SlackFailure = {
+  MissingScope: 'missing_scope',
+  NotInChannel: 'not_in_channel',
+  ChannelNotFound: 'channel_not_found',
+} as const;
+export type SlackFailure = (typeof SlackFailure)[keyof typeof SlackFailure];
+
+/** Whether Slack refused the call for a scope the token lacks. */
+export function slackLacksScope(error: unknown): boolean {
+  return error instanceof SlackError && error.code === SlackFailure.MissingScope;
+}

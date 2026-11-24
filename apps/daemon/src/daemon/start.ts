@@ -135,6 +135,7 @@ import {
   createTriage,
   draftOnOpen,
   projectSlack,
+  readSlackSharing,
   routedAway,
   sweepDrafts,
   type SlackClients,
@@ -1463,6 +1464,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     dataDir: opts.dataDir,
     sessionEnv: () => launcher.projectEnv(),
     identifyProcess: (pid) => processes.identify(pid),
+    slack:
+      slackClients === null
+        ? null
+        : {
+            channelOf: (projectId) => {
+              const sharing = readSlackSharing(state.db, projectId);
+              // The channel belongs to the workspace it was picked in; another binding now leaves it unused.
+              if (
+                !sharing.enabled ||
+                sharing.teamId === null ||
+                sharing.channelId === null ||
+                projectSlack(state.db, projectId).teamId !== sharing.teamId
+              )
+                return null;
+              return { teamId: sharing.teamId, channelId: sharing.channelId };
+            },
+            clientFor: (teamId) => slackClients.clientFor(teamId),
+          },
     review: {
       adapter,
       launch: (accountId, model) => {

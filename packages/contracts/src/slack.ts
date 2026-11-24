@@ -203,3 +203,41 @@ export const ProjectIntegrationsInput = z.strictObject({
   slack: ProjectSlackSetting,
 });
 export type ProjectIntegrationsInput = z.infer<typeof ProjectIntegrationsInput>;
+
+/** A channel the bot can name in a post: public ones it may join, private ones it is already in. */
+export const SlackChannelDto = z.strictObject({
+  id: z.string().min(1),
+  name: z.string(),
+  isPrivate: z.boolean(),
+  /** Whether the bot is in it now; a public channel it is not in is joined at the first post. */
+  isMember: z.boolean(),
+});
+export type SlackChannelDto = z.infer<typeof SlackChannelDto>;
+
+/** `GET /projects/:projectId/slack/channels`: the channels of the project's workspace, or why they can't be read. */
+export const SlackChannelsDto = z.discriminatedUnion('state', [
+  z.strictObject({ state: z.literal('ok'), channels: z.array(SlackChannelDto) }),
+  /** The bot token lacks `channels:read` or `groups:read`: add the scopes, reinstall, Replace Token. */
+  z.strictObject({ state: z.literal('missing_scope') }),
+]);
+export type SlackChannelsDto = z.infer<typeof SlackChannelsDto>;
+
+/**
+ * A project's `slack-sharing.<projectId>` setting and `GET /projects/:projectId/slack-sharing`: whether
+ * a pass's pictures are posted to a channel, and the channel with the workspace it belongs to.
+ */
+export const ProjectSlackSharingDto = z.strictObject({
+  enabled: z.boolean(),
+  teamId: z.string().min(1).nullable(),
+  channelId: z.string().min(1).nullable(),
+  channelName: z.string().nullable(),
+});
+export type ProjectSlackSharingDto = z.infer<typeof ProjectSlackSharingDto>;
+
+/** `PUT /projects/:projectId/slack-sharing`: the switch and the channel, in the project's own workspace. */
+export const ProjectSlackSharingInput = z.strictObject({
+  enabled: z.boolean(),
+  channelId: z.string().min(1).nullable(),
+  channelName: z.string().nullable(),
+});
+export type ProjectSlackSharingInput = z.infer<typeof ProjectSlackSharingInput>;

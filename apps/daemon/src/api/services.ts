@@ -218,6 +218,9 @@ import type {
   SlackTokenInput,
   ProjectIntegrationsDto,
   ProjectIntegrationsInput,
+  ProjectSlackSharingDto,
+  ProjectSlackSharingInput,
+  SlackChannelsDto,
   FigmaPressInput,
   FigmaSignInsDto,
   LinearSignInsDto,
@@ -934,6 +937,11 @@ export interface ApiServices extends PlanRecordServices {
   figmaSignIns(): Promise<FigmaSignInsDto>;
   /** A workspace's people, optionally filtered; read from Slack at most every ten minutes. 409 when it is not signed in. */
   listSlackMembers(teamId: string, query: string): Promise<SlackMemberDto[]>;
+  /** The channels of the project's Slack workspace, read at most every ten minutes; `missing_scope` when the token can't list them. 409 with no workspace. */
+  projectSlackChannels(projectId: ProjectId): Promise<SlackChannelsDto>;
+  slackSharing(projectId: ProjectId): ProjectSlackSharingDto;
+  /** The switch and channel for posting a pass's pictures to Slack; a channel needs the project's workspace. */
+  setSlackSharing(projectId: ProjectId, input: ProjectSlackSharingInput): ProjectSlackSharingDto;
   getStakeholderTimers(): StakeholderTimersDto;
   setStakeholderTimers(input: StakeholderTimersDto): StakeholderTimersDto;
   /** Who a task's questions go to, by scope. */

@@ -6,6 +6,7 @@ import {
   type InboxItemId,
   type ProjectId,
   type ProjectIntegrationsDto,
+  type SlackChannelDto,
   type SlackMemberDto,
 } from '@10db/contracts';
 import {
@@ -23,7 +24,7 @@ import type { Clock } from '../clock';
 import { KeychainError, slackBotAccount, type Keychain } from '../environment';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
-import { createSlackClient, SlackError, type SlackClient } from '../slack';
+import { createSlackClient, SlackError, slackLacksScope, type SlackClient } from '../slack';
 import {
   previewDraft,
   projectSlack,
@@ -32,6 +33,8 @@ import {
   removeSlackWorkspace,
   saveSlackWorkspace,
   rebindProjectSlack,
+  readSlackSharing,
+  writeSlackSharing,
   type ReplyWatches,
   type SlackClients,
   type SlackConnections,
@@ -55,6 +58,9 @@ export type StakeholderApiServices = Pick<
   | 'setLinearReporter'
   | 'setProjectIntegrations'
   | 'listSlackMembers'
+  | 'projectSlackChannels'
+  | 'slackSharing'
+  | 'setSlackSharing'
   | 'updatePerson'
   | 'removePerson'
   | 'getStakeholderTimers'
@@ -142,6 +148,8 @@ export function createStakeholderApiServices(deps: {
     return list;
   }
 
+  const channels = new Map<string, { readonly at: number; readonly list: SlackChannelDto[] }>();
+
   return {
     slackStatus: () => deps.connections.list(),
 
@@ -177,6 +185,7 @@ export function createStakeholderApiServices(deps: {
         recordBot(ctx, identity, 'token');
       });
       members.delete(identity.teamId);
+      channels.delete(identity.teamId);
       // The watch's check sets the state.
       await deps.watches.reconnect(identity.teamId);
       return deps.connections.list();
@@ -223,9 +232,54 @@ export function createStakeholderApiServices(deps: {
         });
       });
       members.delete(teamId);
+      channels.delete(teamId);
       deps.connections.drop(teamId);
       await deps.watches.drop(teamId);
       return deps.connections.list();
+    },
+
+    async projectSlackChannels(projectId) {
+      getProject(deps.state.db, projectId);
+      const teamId = projectSlack(deps.state.db, projectId).teamId;
+      const client = deps.slack?.clientFor(teamId) ?? null;
+      if (teamId === null || client === null)
+        throw new ConflictError('Slack is not connected for this project');
+      const now = deps.clock.now().getTime();
+      const cached = channels.get(teamId);
+      if (cached && now - cached.at < MEMBERS_TTL_MS) return { state: 'ok', channels: cached.list };
+      try {
+        const list = await client.listChannels();
+        channels.set(teamId, { at: now, list });
+        return { state: 'ok', channels: list };
+      } catch (error) {
+        // Not remembered: the builder adds the scopes and asks again at once.
+        if (slackLacksScope(error)) return { state: 'missing_scope' };
+        throw error;
+      }
+    },
+
+    slackSharing: (projectId) => {
+      getProject(deps.state.db, projectId);
+      return readSlackSharing(deps.state.db, projectId);
+    },
+
+    setSlackSharing(projectId, input) {
+      getProject(deps.state.db, projectId);
+      const teamId = projectSlack(deps.state.db, projectId).teamId;
+      if (input.channelId !== null && teamId === null)
+        throw new InvalidError(
+          'Connect a Slack workspace to this project before picking a channel',
+        );
+      const next = {
+        enabled: input.enabled,
+        teamId: input.channelId === null ? null : teamId,
+        channelId: input.channelId,
+        channelName: input.channelId === null ? null : input.channelName,
+      };
+      deps.state.write((ctx) => {
+        writeSlackSharing(ctx, projectId, next);
+      });
+      return next;
     },
 
     async listSlackMembers(teamId, query) {
