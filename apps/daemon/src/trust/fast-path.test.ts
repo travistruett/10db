@@ -34,6 +34,12 @@ beforeAll(() => {
   symlinkSync(root, join(checkout, 'deps', 'node_modules', 'escape'));
   // A link inside the checkout that leads out of it.
   symlinkSync(root, join(checkout, 'out'));
+  // A session's setup dir linking a builder skill folder by name, as `createSetupDir` makes it.
+  mkdirSync(join(root, 'skills', 'tool'), { recursive: true });
+  writeFileSync(join(root, 'skills', 'tool', 'SKILL.md'), '# tool\n');
+  writeFileSync(join(root, 'skills', 'tool', 'id_rsa'), 'key\n');
+  mkdirSync(join(root, 'setup', 'yours', 'skills'), { recursive: true });
+  symlinkSync(join(root, 'skills', 'tool'), join(root, 'setup', 'yours', 'skills', 'tool'));
   // The sandbox's own list: each `.env*` file, and each `.env*` link with its target.
   // `data/` is ignored and `notes.md` untracked, and both were there before the session.
   ctx = {
@@ -41,6 +47,7 @@ beforeAll(() => {
     tmpDir,
     secretFiles: [join(checkout, '.env')],
     preExisting: ['data/', 'notes.md'],
+    setupReads: [join(root, 'setup'), join(root, 'skills', 'tool')],
   };
 });
 afterAll(() => {
@@ -178,6 +185,26 @@ describe('fastPathAllows', () => {
     ],
     ['grep -f a file outside', 'Bash', bash('grep -o -f <root>/outside.txt src/a.ts'), false],
     ['cat a file outside the checkout', 'Bash', bash('cat <root>/outside.txt'), false],
+    [
+      'cat a skill through its setup link',
+      'Bash',
+      bash('cat <root>/setup/yours/skills/tool/SKILL.md'),
+      true,
+    ],
+    [
+      'a read of a skill by its real path',
+      'Read',
+      { file_path: '<root>/skills/tool/SKILL.md' },
+      true,
+    ],
+    [
+      'cat a key in a skill folder',
+      'Bash',
+      bash('cat <root>/setup/yours/skills/tool/id_rsa'),
+      false,
+    ],
+    ['a climb out of the setup dir', 'Bash', bash('cat <root>/setup/../outside.txt'), false],
+    ['a write in a skill folder', 'Write', { file_path: '<root>/skills/tool/SKILL.md' }, false],
     [
       'diff with a file outside the checkout',
       'Bash',

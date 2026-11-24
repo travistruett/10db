@@ -38,6 +38,11 @@ export interface FastPathContext {
    * them (an ignored folder once, ending in `/`).
    */
   readonly preExisting: readonly string[];
+  /**
+   * What the session's setup opens read-only (`SessionSetup.reads`): its setup dir and the builder's kept skill
+   * and plugin folders, already judged free of secrets. A read there crosses no limit; an edit is never fast-pathed.
+   */
+  readonly setupReads: readonly string[];
 }
 
 /** Key and credential files, by their last segment, case-folded, beside the sandbox's own `.env*`. */
@@ -122,6 +127,16 @@ function staysIn(path: string, cwd: string, ctx: FastPathContext): boolean {
   return [ctx.checkout, ctx.tmpDir].some((dir) => isWithinOnEveryReading(dir, written));
 }
 
+/** Whether every reading of a path is inside one of the session's setup reads. */
+function inSetup(path: string, cwd: string, ctx: FastPathContext): boolean {
+  const written = isAbsolute(path) ? path : `${cwd}${sep}${path}`;
+  return ctx.setupReads.some((dir) => isWithinOnEveryReading(dir, written));
+}
+
+/** Whether a read or a listing stays where the session may read freely: inside, or in its setup. */
+const readStaysIn = (path: string, cwd: string, ctx: FastPathContext): boolean =>
+  staysIn(path, cwd, ctx) || inSetup(path, cwd, ctx);
+
 /** Brace, extglob and escape syntax: each can spell a path no segment-by-segment check sees. */
 const GLOB_SYNTAX = /[{}\\]|[@!+*?]\(/;
 
@@ -175,7 +190,7 @@ function readTargetIsSafe(
   if (word === '-') return true;
   const target = from(cwd, word);
   if (!isRegularFile(target) && !(folders && isDirectory(target))) return false;
-  return !namesSecret(target, ctx.secretFiles) && staysIn(word, cwd, ctx);
+  return !namesSecret(target, ctx.secretFiles) && readStaysIn(word, cwd, ctx);
 }
 
 function operandsAreSafe(read: ReadCall, cwd: string, ctx: FastPathContext): boolean {
@@ -282,7 +297,7 @@ export function fastPathAllows(call: LimitCall, ctx: FastPathContext): boolean {
       return (
         isPlainPath(path) &&
         !namesSecret(from(call.cwd, path), ctx.secretFiles) &&
-        staysIn(path, call.cwd, ctx)
+        readStaysIn(path, call.cwd, ctx)
       );
     }
     case 'Glob': {
@@ -298,7 +313,7 @@ export function fastPathAllows(call: LimitCall, ctx: FastPathContext): boolean {
         isPlainPath(path) &&
         isRegularFile(target) &&
         !namesSecret(target, ctx.secretFiles) &&
-        staysIn(path, call.cwd, ctx)
+        readStaysIn(path, call.cwd, ctx)
       );
     }
     case 'Bash': {

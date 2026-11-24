@@ -151,6 +151,7 @@ function hookJudge(
         tmpDir: join(root, 'tmp'),
         secretFiles: [join(checkout, '.env')],
         preExisting: [],
+        setupReads: [],
       },
       policy: buildTrustPolicy({
         surface,
