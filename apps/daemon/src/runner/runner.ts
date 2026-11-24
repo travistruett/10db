@@ -257,7 +257,7 @@ import {
 } from '../inbox';
 import type { Judge } from '../judge';
 import type { Logger } from '../log';
-import { mintSessionToken } from '../mcp';
+import { mintSessionToken, type ToolImages } from '../mcp';
 import {
   closeHoldsOf,
   foldHandEdits,
@@ -3183,6 +3183,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       askedToHandOff: () => {
         st.handoffAskedByTool = true;
       },
+      // Codex's code mode answers a script text only, so the pictures a tool returned reach its model as a
+      // message steered into the turn instead.
+      ...(provider === Provider.Codex
+        ? { showImages: (shown: ToolImages) => handle?.send(shown.text, shown.images) }
+        : {}),
       ...(unattended === null ? {} : { away: unattended }),
     });
     const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
