@@ -5,10 +5,11 @@ import { useNow } from '../../shell/relative';
 import { shortAgo } from '../factory/short-ago';
 import { TakeBackModal } from './take-back-modal';
 import { WaitingDetail, WhoCell } from './waiting-row';
+import { WaitingTaskLink } from './waiting-task-link';
 
 /**
- * The content for a Waiting row: who the question is out with and since when, the message and the builder's
- * own answers, and Withdraw Question, which asks first since it posts in the Slack thread. There is no link to
+ * The content for a Waiting row: who the question is out with and since when, the task it holds up, the
+ * message and the builder's own answers, and Withdraw Question, which asks first since it posts in the Slack thread. There is no link to
  * the thread: it is @10db's direct message with them, which the builder can't open.
  */
 export function WaitingContent({ item }: { readonly item: InboxItemDto }) {
@@ -29,6 +30,7 @@ export function WaitingContent({ item }: { readonly item: InboxItemDto }) {
           )}
         </Stack>
       </Group>
+      <WaitingTaskLink item={item} />
       <WaitingDetail item={item} />
       <Group gap="sm">
         <Button
