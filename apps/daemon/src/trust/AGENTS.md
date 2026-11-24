@@ -13,7 +13,7 @@
   alike (a hook's `allow` ends the check, so Claude's auto mode classifier never sees the call) and in the broker
   before a limit or escalation card. Codex's hook can't approve a call, so a granted call there still meets Auto-review
   when it escalates; only 10db's judge honours the grant ahead of a model. `call-judge.ts` starts a `tendb` session on the rules when 10db's judge isn't ready.
-- The fast path also reads a Markdown file in the session's setup with no model, for Read, LS, Grep and the listed read commands (not Glob, and never an edit): every reading of it must be inside one of `FastPathContext.setupReads`, the setup folders the profile opens (`FileAccessContext.setupReads`), so an advertised `SKILL.md` and its references cost no judge call while a skill's or plugin's other files still go to the judge. A path in a secret folder counts as a secret everywhere (`namesSecret`).
+- The fast path also reads a Markdown file in the session's setup with no model, for Read, Grep and the listed read commands on that file (a listing of a setup folder, a Glob and an edit still go to the judge), its name and every real path it leads to ending in `.md`: every reading of it must be inside one of `FastPathContext.setupReads`, the setup folders the profile opens (`FileAccessContext.setupReads`), so an advertised `SKILL.md` and its references cost no judge call while a skill's or plugin's other files still go to the judge. A path in a secret folder counts as a secret everywhere (`namesSecret`).
 - The hook judge that runs them is `inbox/hook-judge.ts` (`createHookJudge`, `LimitNotes`); the card a noted limit
   raises is `inbox/limit-card.ts`, with the three answers, and Always in this project stores a grant in the
   answer's write (`inbox/service.ts`).

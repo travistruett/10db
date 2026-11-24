@@ -169,11 +169,9 @@ export function readReporterFacts(
     link,
     note: reporterSettings(db, task.projectId).note,
     owed: posts.map((p) => ({ id: p.id, event: p.event, attempt: p.attempt, detail: p.detail })),
-    // A follow-up's issue is its source's, so what 10db already set there includes the source's rows.
-    recorded: [
-      ...(followUpOf === null ? [] : listLinearPosts(db, followUpOf.id)),
-      ...listLinearPosts(db, taskId),
-    ]
+    // A follow-up's issue is its chain's, so what 10db already set there includes every earlier task's rows.
+    recorded: [...[...linked.chain].reverse(), taskId]
+      .flatMap((id) => listLinearPosts(db, id))
       .filter((p) => p.state === LinearPostState.Recorded)
       .map((p) => ({
         id: p.id,

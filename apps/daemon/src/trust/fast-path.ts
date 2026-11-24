@@ -137,7 +137,8 @@ function staysIn(path: string, cwd: string, ctx: FastPathContext): boolean {
 /** Whether a path is a Markdown file whose every reading is inside one of the session's setup reads. */
 function inSetup(path: string, cwd: string, ctx: FastPathContext): boolean {
   const written = isAbsolute(path) ? path : `${cwd}${sep}${path}`;
-  if (!isMarkdown(written)) return false;
+  // The name as written and every real path it leads to, so a link named `x.md` can't open another file.
+  if (!isMarkdown(written) || !realPathReadings(written).paths.every(isMarkdown)) return false;
   return ctx.setupReads.some((dir) => isWithinOnEveryReading(dir, written));
 }
 

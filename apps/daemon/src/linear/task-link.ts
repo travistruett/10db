@@ -12,6 +12,8 @@ export interface LinearTaskLink {
   readonly link: ExternalLink;
   /** The task that holds the link, when it is not this one: the first of its follow-up chain. */
   readonly followUpOf: TaskDto | null;
+  /** The chain's earlier tasks, nearest first and ending with `followUpOf`; empty for a task that holds the link. */
+  readonly chain: readonly TaskId[];
 }
 
 /**
@@ -21,17 +23,20 @@ export interface LinearTaskLink {
  */
 export function linearLinkOf(db: DbReader, taskId: TaskId): LinearTaskLink | null {
   const task = getTask(db, taskId);
-  if (task.external?.kind === ExternalKind.Linear) return { link: task.external, followUpOf: null };
+  if (task.external?.kind === ExternalKind.Linear)
+    return { link: task.external, followUpOf: null, chain: [] };
   if (task.external !== undefined && task.external !== null) return null;
   const seen = new Set<TaskId>([taskId]);
+  const chain: TaskId[] = [];
   let sourceId = skipFollowUpSourceTask(db, taskId);
   while (sourceId !== null && !seen.has(sourceId)) {
     seen.add(sourceId);
+    chain.push(sourceId);
     const source = getTask(db, sourceId);
     if (source.status === TaskStatus.Cancelled) return null;
     // Linear is the only tracker a task links today.
     if (source.external !== undefined && source.external !== null)
-      return { link: source.external, followUpOf: source };
+      return { link: source.external, followUpOf: source, chain };
     sourceId = skipFollowUpSourceTask(db, sourceId);
   }
   return null;
