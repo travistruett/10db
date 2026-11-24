@@ -36,7 +36,9 @@ function folderOf(tokens: readonly string[], cwd: string, root: string | null): 
   const shortFlag = SHORT_DIR_TOOLS.has(tokens[0] ?? '');
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i] ?? '';
-    const flag = [...DIR_FLAGS, ...(shortFlag ? ['-C'] : [])].find(
+    // git's `-C` moves it only before the subcommand; after it, `-C` is an option of the subcommand.
+    const shortHere = shortFlag && (tokens[0] !== 'git' || i === 1);
+    const flag = [...DIR_FLAGS, ...(shortHere ? ['-C'] : [])].find(
       (f) => token === f || token.startsWith(`${f}=`),
     );
     if (flag === undefined) continue;

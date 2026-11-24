@@ -4324,13 +4324,13 @@ export function createRunner(opts: RunnerOptions): Runner {
     checkout: string,
     head: string,
     command: string,
-    update: BaseUpdate | null,
   ): Promise<CheckCoverage | null> {
     if (checkCoverage(command, [], checkout) === null) return null;
     try {
       let own: string[];
       if (checkout !== getProject(db, row.projectId).repoPath) {
-        const base = update?.kind === 'merged' ? update.base : (row.baseHead ?? head);
+        // Read again: the gate's base update moves the task's base.
+        const base = getWorkstreamRow(db, row.id).baseHead ?? head;
         own = await opts.git.filesChangedBetween(checkout, base, head);
       } else {
         const { ranges } = await ownWork(row, checkout, row.baseHead ?? head);
@@ -4706,7 +4706,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       // With no Review after this step, the judge's flags on the new tests become follow-up tasks.
       const testValue = await testValueFollowUpsAfter(id, ctl, row, checkout, forced);
       // Information only: a check that passed on less than the step changed says so in its record.
-      const note = coverageNote(await coverageOf(row, checkout, head, gateCommand, before.update));
+      const note = coverageNote(await coverageOf(row, checkout, head, gateCommand));
       if (note !== null) evidence.summary = `${note}\n\n${evidence.summary}`;
       // The read took time; a cancel that landed meanwhile must not be overwritten.
       if (stopRequested(ctl) === 'cancelled') {

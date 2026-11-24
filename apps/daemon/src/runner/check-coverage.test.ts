@@ -42,6 +42,12 @@ describe('checkCoverage', () => {
       'make -C amps/frontend lint',
       ['amps/backend/apps/access/grants.py', 'amps/backend/b.py', 'docs/x.md'],
     ],
+    [
+      'git -C counts before the subcommand',
+      'git -C amps/frontend diff',
+      ['amps/backend/apps/access/grants.py', 'amps/backend/b.py', 'docs/x.md'],
+    ],
+    ['git -C after the subcommand has no claim', 'git diff -C --exit-code', null],
     ['-C is context after grep', 'grep -C 3 foo file', null],
     ['make has no claim', 'make check', null],
     ['unknown has no claim', 'pnpm run typecheck', null],
