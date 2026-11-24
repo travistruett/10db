@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { mintId, type BrowserAnswer } from '@10db/contracts';
 import { createEventBus, createStateStore } from '../src/events';
 import { createBrowserLaunches } from '../src/pictures';
-import { systemClock } from '../src/clock';
+import { ManualClock, systemClock } from '../src/clock';
 import {
   createLaneBrowsers,
   type LaneBrowsers,
@@ -179,4 +179,47 @@ it('a lane browser reaches the server its lane started and is refused one that i
   const other = await open.run({ url: `http://127.0.0.1:${String(b.port)}/` });
   expect(other).toMatchObject({ page: { status: 403 } });
   expect(b.requests).toEqual([]);
+});
+
+it('a session ends at once while the browser is still downloading', async () => {
+  const ledgerRoot = join(root, 'ledgers');
+  mkdirSync(ledgerRoot);
+  const processes = { table: systemProcessTable, ownPid: process.pid };
+  const clock = new ManualClock();
+  browsers = createLaneBrowsers({
+    dataDir: root,
+    ledgers: {
+      sweep: createLedgerSweep(ledgerRoot, { ...processes, intervalMs: 3_600_000 }),
+      root: ledgerRoot,
+    },
+    processes,
+    launches: createBrowserLaunches(),
+    // A download that never finishes.
+    build: { ready: () => new Promise<string>(() => undefined), fetching: () => false },
+    launch: () => Promise.reject(new Error('no launch')),
+    readers: {
+      listeners: () => Promise.resolve([]),
+      acceptors: () => Promise.resolve([]),
+      table: () => Promise.resolve([]),
+      compose: null,
+    },
+    daemonPort: () => null,
+    clock,
+    logger: silentLogger,
+  });
+  const session = {
+    sessionId: mintId('Session'),
+    copy: root,
+    tempDir: root,
+    registeredCheckouts: [],
+    loopback: true,
+    docker: false,
+    members: () => [],
+  } as unknown as LaneBrowserSession;
+  const call = browsers.use(session, new AbortController().signal, () => Promise.resolve('ran'));
+  const refused = expect(call).rejects.toThrow('fetching');
+  await new Promise((resolve) => setImmediate(resolve));
+  clock.advance(1_000);
+  await refused;
+  await browsers.end(session.sessionId);
 });

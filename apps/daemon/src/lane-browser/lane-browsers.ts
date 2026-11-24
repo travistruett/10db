@@ -26,6 +26,8 @@ export const CALL_DEADLINE_MS = 60_000;
 /** How long the browser stays open after a session's last call. */
 export const LANE_BROWSER_IDLE_MS = BROWSER_IDLE_MS;
 
+/** How long a call waits for the pinned build to be found before it answers "fetching". */
+const BUILD_CHECK_MS = 1_000;
 const FETCHING = '10db is fetching its browser; try again in a minute';
 const FRESH_BROWSER = 'a fresh browser: no cookies from earlier sessions';
 const IDLE_CLOSED =
@@ -162,14 +164,30 @@ export function createLaneBrowsers(deps: {
     await rm(sessionDir(sessionId), { recursive: true, force: true });
   }
 
-  async function launchBrowser(entry: Entry, session: LaneBrowserSession): Promise<Running> {
+  async function launchBrowser(
+    entry: Entry,
+    session: LaneBrowserSession,
+    signal: AbortSignal,
+  ): Promise<Running> {
     const ledgers = deps.ledgers;
     if (ledgers === null) throw new LaneBrowserError(NO_LEDGER_PROBLEM);
     if (deps.build.fetching()) throw new LaneBrowserError(FETCHING);
+    // A build that is not at hand downloads in the background (up to 15 min): the call answers
+    // "fetching" instead of holding the queue, which a session's end waits behind.
+    const pending = deps.build.ready();
     let exe: string;
     try {
-      exe = await deps.build.ready();
+      exe = await withDeadline(
+        deps.clock,
+        BUILD_CHECK_MS,
+        () => pending,
+        () => undefined,
+        signal,
+      );
     } catch (error) {
+      pending.catch(() => undefined);
+      if (error instanceof DeadlineError) throw new LaneBrowserError(FETCHING);
+      if (signal.aborted) throw new LaneBrowserError('the session ended');
       throw new LaneBrowserError(`10db's browser could not be fetched: ${message(error)}`);
     }
     if (isClosed() || isEnded(entry)) throw new LaneBrowserError('the session ended');
@@ -267,7 +285,7 @@ export function createLaneBrowsers(deps: {
         await shutBrowser(entry, sessionId, 'the browser stopped');
       }
       if (entry.running === null) {
-        entry.running = await launchBrowser(entry, session);
+        entry.running = await launchBrowser(entry, session, call);
         if (!entry.launchedBefore) {
           entry.launchedBefore = true;
           notes.push(FRESH_BROWSER);
@@ -323,7 +341,10 @@ export function createLaneBrowsers(deps: {
       const joined = AbortSignal.any([signal, own.end.signal]);
       let settled = false;
       const isSettled = (): boolean => settled;
-      const job = enqueue(own, () => work(own, session, call.signal, fn));
+      // The session's end stops the call in flight as its own deadline does, so the end never waits on it.
+      const job = enqueue(own, () =>
+        work(own, session, AbortSignal.any([call.signal, own.end.signal]), fn),
+      );
       const done = (): void => {
         settled = true;
       };
