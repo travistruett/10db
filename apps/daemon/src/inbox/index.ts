@@ -4,6 +4,7 @@ export {
   raiseDockerMayBeNeededNote,
   raiseDockerOnNote,
 } from './docker-card';
+export { createJudgeOutageCard } from './judge-outage-card';
 export { leftWithBuilder } from './builder-card';
 export { raiseGateHostCards } from './gate-host-card';
 export { hazardCardFoldKey, hazardRemovalCard, pendingHazardRemovals } from './hazard-card';
