@@ -76,7 +76,8 @@ describe('flattenRows', () => {
 
 describe('mergeRow', () => {
   const T = (n: number) => new Date(Date.UTC(2026, 9, 13, 12, 0, n)).toISOString();
-  const at = (n: number) => inboxItemDto({ createdAt: T(n) });
+  // Open shows the newest first, so `at(1)` is the newest card and each later n an older one.
+  const at = (n: number) => inboxItemDto({ createdAt: T(10 - n) });
   const project = mintId('Project');
   const flag = (n: number) =>
     inboxItemDto({
@@ -85,7 +86,7 @@ describe('mergeRow', () => {
       options: [],
       title: 'Flag',
       body: 'same',
-      createdAt: T(n),
+      createdAt: T(10 - n),
     });
   const single = (item: InboxItemDto, state: InboxListState = 'open'): InboxRow => ({
     key: inboxRowKey(item),
@@ -154,14 +155,14 @@ describe('mergeRow', () => {
       name: '8: a sort change moves the row',
       pages: [page([ra, rb, rc])],
       card: a.id,
-      row: single({ ...a, createdAt: T(9) }),
+      row: single({ ...a, createdAt: T(0) }),
       keys: [[b.id, c.id, a.id]],
     },
     {
       name: '8: a sort change past next drops the row',
       pages: [page([ra, rb], rb.sort)],
       card: a.id,
-      row: single({ ...a, createdAt: T(9) }),
+      row: single({ ...a, createdAt: T(0) }),
       keys: [[b.id]],
     },
     {
@@ -190,8 +191,9 @@ describe('mergeRow', () => {
     const [f1, f2] = [flag(1), flag(2)];
     const before = single(f1);
     const joined: InboxRow = { ...before, items: [f1, f2] };
-    const merged = mergeRow([page([ra, before, rc])], 'open', { cardId: f2.id, row: joined });
-    expect(merged[0]?.rows.map((row) => row.items.length)).toEqual([1, 2, 1]);
+    // The flag ties with a on time and was made later, so it shows first.
+    const merged = mergeRow([page([before, ra, rc])], 'open', { cardId: f2.id, row: joined });
+    expect(merged[0]?.rows.map((row) => row.items.length)).toEqual([2, 1, 1]);
   });
 
   it('22: resolved inserts at the top, and a tie on the time places by id, descending', () => {
