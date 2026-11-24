@@ -4,16 +4,20 @@
 
 ## Decision
 
-A session's `TrustPolicy.environment` says whether Docker and loopback are open to it, as its sandbox opens
-them: a lane or pass step that may write has Docker when the project's `sandboxDocker` is on, and loopback
-when `sandboxLoopback` is; a chat has neither. With Docker open it also names the project's compose
-services, their compose project and the usual `<project>-<service>-<n>` container name, as the project's
-local dev environment, not live systems. It says what is routine in them (reading, the project's tests,
-linters, formatters, type checks, builds and file generators, and `docker run --rm` mounting only the
-checkout or the session's temp folder) and what still crosses a limit (dropping or truncating tables,
-deleting rows, applying migrations to their database, resetting it, `docker compose down -v`,
-`docker volume rm`, and anything a container reaches outside this Mac). The four limits' text does not
-change.
+A session's `TrustPolicy.environment` says whether Docker and loopback are open to it, by one rule for a
+lane, a pass, a chat and the Linear reporter (`sessionDevAccess`): Docker when the session has a sandbox, may
+write and the project's `sandboxDocker` is on; loopback when it has a sandbox and `sandboxLoopback` is on. A
+chat that writes (Work Here, or a branch worktree) so has Docker like a lane. A lane step that only reads is
+told Docker is closed although its sandbox holds the socket, because the guard refuses every docker command
+in it. With Docker open it also names the project's compose services, their compose project and the usual
+`<project>-<service>-<n>` container name, as the project's local dev environment, not live systems. It says
+that running a command in them, or in `docker run --rm` mounting only the checkout or the session's temp
+folder, crosses no limit by itself, and that the project's tests, linters, formatters, type checks, builds
+and file generators are routine there. What the command does is still judged under the four limits: the
+kernel sandbox does not reach into a container, so reading a `.env` file, a key or a credential there is
+reading secrets, and reaching a host outside this Mac is judged by what it sends or writes. It also says
+what destroys data in them (dropping or truncating tables, deleting rows, applying migrations to their
+database, resetting it, `docker compose down -v`, `docker volume rm`). The four limits' text does not change.
 
 `trust/policy.ts` builds the lines from a `devAccess` input (`DevAccess`). `folders/dev-services.ts`
 (`readComposeServices`) reads the compose files tracked at `refs/remotes/origin/<base>`, never the working
@@ -40,4 +44,5 @@ Turned down: a rule that allows `docker exec` into named containers without a mo
 container can still drop a shared table or reach a remote host; and feeding the judge the repository's
 `AGENTS.md` or Makefile, which the lane can write and which is far longer than the facts the judge needs.
 Whether the model allows each routine command at the floor is checked by hand with
-`apps/daemon/scripts/crosses-limit-replay.ts`, which also replays controls that must stay limits.
+`apps/daemon/scripts/crosses-limit-replay.ts`, which also replays controls that must stay limits; a control
+fails when the judge answers `allow` at any confidence.

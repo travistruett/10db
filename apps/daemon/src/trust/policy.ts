@@ -1,4 +1,10 @@
-import { SkipKind, TrustPolicy, TrustSurface, type TrustSwitches } from '@10db/contracts';
+import {
+  SkipKind,
+  TrustPolicy,
+  TrustSurface,
+  type ProjectDto,
+  type TrustSwitches,
+} from '@10db/contracts';
 import { coordinationLines } from './coordination';
 import type { ComposeServices } from '../folders';
 import { LIMIT_ORDER, LIMITS } from './limits';
@@ -23,14 +29,29 @@ export interface TrustPolicyInput {
   readonly devAccess: DevAccess;
 }
 
-/** What of this Mac's dev environment is open to the session, as its sandbox opens it. */
+/** What of this Mac's dev environment is open to the session (`sessionDevAccess`). */
 export interface DevAccess {
-  /** The sandbox lets the session reach this Mac's Docker engine. */
+  /** The session's commands may reach this Mac's Docker engine. */
   readonly docker: boolean;
-  /** The sandbox lets the session reach loopback addresses. */
+  /** The session's commands may reach loopback addresses. */
   readonly localhost: boolean;
   /** The project's compose services, read from its committed base; null when Docker is closed or none. */
   readonly compose: ComposeServices | null;
+}
+
+/**
+ * Whether Docker and loopback are open to a session, by the rule its sandbox is built on: the engine's socket
+ * only for a session that may write, loopback by the project's switch alone. A session with no sandbox runs no
+ * command, and a lane step that only reads has every docker command refused by the guard, so both are closed.
+ */
+export function sessionDevAccess(
+  project: Pick<ProjectDto, 'sandboxDocker' | 'sandboxLoopback'>,
+  session: { readonly sandboxed: boolean; readonly writes: boolean },
+): Pick<DevAccess, 'docker' | 'localhost'> {
+  return {
+    docker: session.sandboxed && session.writes && project.sandboxDocker,
+    localhost: session.sandboxed && project.sandboxLoopback,
+  };
 }
 
 /** The lines that tell the judge what Docker, the project's compose services and loopback are to it. */
@@ -38,7 +59,7 @@ function devAccessLines(access: DevAccess): string[] {
   const lines = [
     access.docker
       ? "Docker: open to this session. It may run docker and docker compose against this Mac's Docker engine. Containers run outside the macOS sandbox, so a command run in one is judged by what it can reach, as if the session ran it."
-      : 'Docker: closed to this session; the sandbox refuses docker and docker compose.',
+      : 'Docker: closed to this session; 10db refuses docker and docker compose in it.',
   ];
   const compose = access.docker ? access.compose : null;
   if (compose !== null) {
@@ -53,14 +74,14 @@ function devAccessLines(access: DevAccess): string[] {
         : `, or by their container_name ${compose.containerNames.map(quotedValue).join(', ')}`;
     lines.push(
       `Local dev containers: the compose services ${compose.services.map(quotedValue).join(', ')}${project === null ? '' : ` of the compose project ${project}`}, from ${compose.files.map(quotedValue).join(', ')} at the project's base. Their containers are ${named}${containers}. They are this project's local dev environment on this Mac, not live systems.`,
-      "Routine in them: reading files, and running the project's tests, linters, formatters, type checks, builds and file generators (docker exec, docker compose exec or run), such as making migration files or an API client that land in the checkout, crosses no limit; so does docker run --rm with only this checkout or this session's temp folder mounted.",
-      "Still a limit in them: their databases and volumes are shared by this project's sessions and hold data this session didn't create. Dropping or truncating a table, deleting rows, applying migrations to their database (migrate), resetting or re-seeding it, docker compose down -v and docker volume rm destroy data. A command in them that reaches a host outside this Mac is judged as if the session ran it.",
+      "Routine in them: running a command in one of these containers (docker exec, docker compose exec or run), or in docker run --rm with only this checkout or this session's temp folder mounted, crosses no limit by itself. Listing and reading the project's source there, and running its tests, linters, formatters, type checks, builds and file generators, such as making migration files or an API client that land in the checkout, are routine. What the command does is still judged under the four limits, as if the session ran it: reading a .env file, a key or a credential there is reading secrets, and reaching a host outside this Mac is judged by what it sends or writes there.",
+      "Still a limit in them: their databases and volumes are shared by this project's sessions and hold data this session didn't create. Dropping or truncating a table, deleting rows, applying migrations to their database (migrate), resetting or re-seeding it, docker compose down -v and docker volume rm destroy data.",
     );
   }
   lines.push(
     access.localhost
       ? "Localhost: open to this session. Loopback addresses (localhost, 127.0.0.1, a dev server, a container's published port) are this Mac, not live systems."
-      : 'Localhost: closed to this session; the sandbox refuses connections to loopback addresses.',
+      : 'Localhost: closed to this session; its commands reach no loopback address.',
   );
   return lines;
 }

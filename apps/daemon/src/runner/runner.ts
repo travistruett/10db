@@ -73,6 +73,7 @@ import {
 import {
   approvedLines,
   buildTrustPolicy,
+  sessionDevAccess,
   CROSSES_LIMIT_QUESTION,
   PRE_EXISTING_READ_MAX,
   callKey,
@@ -2791,12 +2792,12 @@ export function createRunner(opts: RunnerOptions): Runner {
           : 'default';
     // A plan account takes the builder's claude.ai connectors under the same switch as the servers.
     const claudeConnectors = yours.connectorsOn && account.kind === AccountKind.ClaudeSubscription;
-    // As the lane's sandbox opens them: Docker only to a step that may write.
-    const dockerOpen = project.sandboxDocker && !readOnly;
+    // A step that only reads has the engine's socket in its sandbox, but the guard refuses every docker
+    // command in it, so Docker is closed to it too.
+    const open = sessionDevAccess(project, { sandboxed: true, writes: !readOnly });
     const devAccess = {
-      docker: dockerOpen,
-      localhost: project.sandboxLoopback,
-      compose: dockerOpen ? await readComposeServices(opts.git, project) : null,
+      ...open,
+      compose: open.docker ? await readComposeServices(opts.git, project) : null,
     };
     const policy = buildTrustPolicy({
       surface: pass === null ? TrustSurface.Lane : TrustSurface.Pass,

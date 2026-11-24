@@ -1,6 +1,6 @@
 import { TRUST_DEFAULTS, type TrustSurface } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { buildTrustPolicy, type TrustPolicyInput } from './policy';
+import { buildTrustPolicy, sessionDevAccess, type TrustPolicyInput } from './policy';
 
 const input = (overrides: Partial<TrustPolicyInput> = {}): TrustPolicyInput => ({
   surface: 'lane',
@@ -98,6 +98,10 @@ describe('buildTrustPolicy', () => {
     expect
       .soft(on.join('\n'), 'what still destroys data')
       .toMatch(/drop.*table.*down -v.*volume rm/is);
+    const routine = on.filter((l) => l.startsWith('Routine in them:'));
+    expect
+      .soft(routine, 'where a command runs is no pass for what it does')
+      .toEqual([expect.stringMatching(/by itself.*four limits.*\.env.*host outside this Mac/is)]);
 
     const off = buildTrustPolicy(input()).environment;
     expect
@@ -130,6 +134,41 @@ describe('buildTrustPolicy', () => {
       .toBe(true);
     expect.soft(odd.join(' '), 'quoted').toContain('"db\\nhost: prod"');
     expect.soft(odd.join(' '), 'quoted').toContain('"a\\"b"');
+  });
+
+  it('a session has Docker and localhost as its sandbox opens them', () => {
+    const both = { sandboxDocker: true, sandboxLoopback: true };
+    const rows: [
+      string,
+      Parameters<typeof sessionDevAccess>,
+      { docker: boolean; localhost: boolean },
+    ][] = [
+      [
+        'writes, both on',
+        [both, { sandboxed: true, writes: true }],
+        { docker: true, localhost: true },
+      ],
+      [
+        'reads only',
+        [both, { sandboxed: true, writes: false }],
+        { docker: false, localhost: true },
+      ],
+      [
+        'no sandbox',
+        [both, { sandboxed: false, writes: true }],
+        { docker: false, localhost: false },
+      ],
+      [
+        'both off',
+        [
+          { sandboxDocker: false, sandboxLoopback: false },
+          { sandboxed: true, writes: true },
+        ],
+        { docker: false, localhost: false },
+      ],
+    ];
+    for (const [name, args, want] of rows)
+      expect.soft(sessionDevAccess(...args), name).toEqual(want);
   });
 
   it('a lane and a pass say tracked files are the session’s to change; Plan and chat don’t', () => {

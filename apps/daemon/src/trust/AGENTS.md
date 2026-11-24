@@ -2,8 +2,9 @@
 
 - `trust/` builds each session's `TrustPolicy` (`@10db/contracts`): the four limits, whose prose lives in one
   place (`trust/limits.ts`), the environment the judge reads them in, and the coordination lines of its surface.
-  The environment says whether Docker and loopback are open to the session (`DevAccess`, as its sandbox opens
-  them) and, with Docker open, names the project's compose services read by `folders/dev-services.ts` from
+  The environment says whether Docker and loopback are open to the session (`DevAccess`; `sessionDevAccess` is
+  the one rule every caller, a lane, a pass, a chat and the reporter, takes them from, so a chat that writes has
+  Docker as its sandbox does) and, with Docker open, names the project's compose services read by `folders/dev-services.ts` from
   `origin/<base>` only, never the lane-writable checkout (`decisions/2026-11-24-judges-know-the-projects-dev-containers.md`).
   `scripts/crosses-limit-replay.ts` replays routine dev commands and controls through the judge by hand.
 - 10db's judge: `fast-path.ts` (`fastPathAllows`, `namesSecret`; its `JUDGED_OWN_TOOLS`, a chat's push, pull request and merge, are never fast) answers the calls that can't cross a limit

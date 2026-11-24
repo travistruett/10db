@@ -21,7 +21,7 @@ import type { Logger } from '../log';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import type { LaneSandboxSpec } from '../sandbox';
 import type { YourSessionServer } from '../sessions';
-import { buildTrustPolicy } from '../trust';
+import { buildTrustPolicy, sessionDevAccess } from '../trust';
 import { readReporterFacts, reporterBrief } from './reporter-brief';
 import { linearToolPrefixes } from './reporter-guard';
 import { snapshotBrief } from './snapshot';
@@ -138,8 +138,11 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
         grants: [],
         yourMcpServers: Object.keys(prepared.yourMcpServers),
         claudeConnectors: connector,
-        // A chat's sandbox opens neither Docker nor loopback.
-        devAccess: { docker: false, localhost: false, compose: null },
+        // The session only reads, so Docker is closed to it and no compose service is named.
+        devAccess: {
+          ...sessionDevAccess(project, { sandboxed: prepared.sandbox !== null, writes: false }),
+          compose: null,
+        },
       });
       const prompt = [
         run.readOnly

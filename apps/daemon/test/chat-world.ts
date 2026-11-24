@@ -255,6 +255,7 @@ export function chatWorld(
       webSearchOf: (account, model) => adapter.capabilities(account, model).webSearch,
       subagentsOf: (account, model) => adapter.capabilities(account, model).subagents,
       clock,
+      composeServices: () => Promise.resolve(null),
       firstChange: (chatId) => {
         work.firstChange(chatId);
       },
