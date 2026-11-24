@@ -66,3 +66,17 @@ export function skipFollowUpOf(
 ): SkipFollowUp | null {
   return live(db, and(eq(schema.skipFollowUps.sourceWorkstreamId, sourceWorkstreamId)))[0] ?? null;
 }
+
+/** The task whose skipped calls `taskId` was made to run, whatever state either is in; null for any other task. */
+export function skipFollowUpSourceTask(db: DbReader, taskId: TaskId): TaskId | null {
+  const row = db
+    .select({ taskId: schema.workstreams.taskId })
+    .from(schema.skipFollowUps)
+    .innerJoin(
+      schema.workstreams,
+      eq(schema.workstreams.id, schema.skipFollowUps.sourceWorkstreamId),
+    )
+    .where(eq(schema.skipFollowUps.taskId, taskId))
+    .get();
+  return row?.taskId ?? null;
+}

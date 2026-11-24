@@ -33,8 +33,8 @@ import { SessionsSection } from './sessions-section';
 import { SelfUpdateSection } from './self-update-section';
 import { TrustSection } from './trust-section';
 
-/** What a settings page applies to, beside its title: the project with its tile, or All Projects. */
-function ScopeBadge({ tile, children }: { readonly tile?: string; readonly children: string }) {
+/** The project a This Project page applies to, beside its title; an All Projects page shows none. */
+function ScopeBadge({ tile, children }: { readonly tile: string; readonly children: string }) {
   return (
     <Badge
       variant="light"
@@ -42,7 +42,7 @@ function ScopeBadge({ tile, children }: { readonly tile?: string; readonly child
       tt="none"
       fw={500}
       size="md"
-      leftSection={tile === undefined ? undefined : <ProjectTile name={tile} size={14} />}
+      leftSection={<ProjectTile name={tile} size={14} />}
     >
       {children}
     </Badge>
@@ -65,9 +65,7 @@ export function SectionBody({
     <TitleRow
       title={section.label}
       meta={
-        section.scope === SettingsScope.App ? (
-          <ScopeBadge>All Projects</ScopeBadge>
-        ) : project === null ? undefined : (
+        section.scope === SettingsScope.App || project === null ? undefined : (
           <ScopeBadge tile={project.name}>{project.name}</ScopeBadge>
         )
       }

@@ -260,6 +260,10 @@ const FOLLOW_UP_REASON_MAX = 200;
 const followUpLine = (s: SkippedActionDto): string =>
   `- ${JSON.stringify(s.summary)}: skipped because ${JSON.stringify(s.reason.slice(0, FOLLOW_UP_REASON_MAX))}`;
 
+/** The follow-up's own criterion, before the source's. */
+const FOLLOW_UP_CRITERION =
+  'Each approved call has run, and what it held up in the earlier run is done.';
+
 /** The longest source title the follow-up's own title quotes whole. */
 const SOURCE_TITLE_MAX = 160;
 
@@ -304,9 +308,16 @@ export function applySkippedChoice(
     description: [
       `The builder approved these calls, which an earlier run of "${sourceTask.title}" skipped. Run them, then finish what that run left undone because of them.`,
       ...approved.map(followUpLine),
+      // The source's scope comes along, so the follow-up is checked against what the source promised.
+      // Quoted as one JSON string, as the calls are, so none of it reads as an approved call.
+      ...(sourceTask.description.trim() === ''
+        ? []
+        : ['', `What "${quoted}" set out to do: ${JSON.stringify(sourceTask.description)}`]),
     ].join('\n'),
     acceptanceCriteria: [
-      'Each approved call has run, and what it held up in the earlier run is done.',
+      FOLLOW_UP_CRITERION,
+      // A follow-up of a follow-up already holds this line.
+      ...sourceTask.acceptanceCriteria.filter((c) => c !== FOLLOW_UP_CRITERION),
     ],
     areas: sourceTask.areas,
   });

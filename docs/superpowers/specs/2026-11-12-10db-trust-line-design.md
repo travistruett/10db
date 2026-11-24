@@ -167,6 +167,8 @@ and the `rules` floor. Its other refusals stop applying where a judge runs:
   - It is unattended.
   - Its brief lists the skipped actions as approved, and each judge gets them as allow lines. They are matched
     by intent, not exact input, so a rewritten command still counts.
+  - It carries the task's description and acceptance criteria, so its review checks what the task promised,
+    and it reports to the task's Linear issue when the task has one.
 - **What the sandbox keeps as rules** (§2) is handled without waiting:
   - An agent may write `.claude/settings*.json`, `.claude/hooks`, `.mcp.json` or a mise config in its checkout.
     What it wrote doesn't run until the builder approves its hash (the built `.mcp.json` approval). The Inbox

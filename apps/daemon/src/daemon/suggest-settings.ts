@@ -44,7 +44,7 @@ import type { AddressProbe } from './loopback-probe';
 
 /** Shown with the Allow Docker suggestion, as Settings › Sandbox says it. */
 export const DOCKER_NOTE =
-  'Docker can mount any host folder into a container, so a gate or task with Docker can reach outside the sandbox.';
+  'A container can mount any folder on this Mac and reach every local port, so a gate or task with Docker can reach outside the sandbox, past Allow localhost too.';
 
 /** The most of one repository file read. */
 const MAX_FILE_BYTES = 256 * 1024;

@@ -759,7 +759,13 @@ describe('judgeHookCall with the session judge', () => {
             projectId: seedProject(store).id,
             workstreamId: null,
             taskId: null,
-            fastPath: { checkout: root, tmpDir: root, secretFiles: [], preExisting: [] },
+            fastPath: {
+              checkout: root,
+              tmpDir: root,
+              secretFiles: [],
+              preExisting: [],
+              setupReads: [],
+            },
             policy: buildTrustPolicy({
               surface: TrustSurface.Chat,
               projectName: 'demo',
