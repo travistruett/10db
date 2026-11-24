@@ -1,5 +1,16 @@
 import { SendState, type AskedQuestion, type InboxItemDto, type PersonDto } from '@10db/contracts';
-import { Alert, Anchor, Button, Group, Loader, Paper, Stack, Text, Textarea } from '@mantine/core';
+import {
+  Alert,
+  Anchor,
+  Button,
+  Group,
+  Loader,
+  Paper,
+  Stack,
+  Text,
+  Textarea,
+  Tooltip,
+} from '@mantine/core';
 import { useState, type ReactNode } from 'react';
 import {
   useCompose,
@@ -157,12 +168,12 @@ const OUTAGE_NOTICES: Readonly<Record<string, string>> = {
   refused:
     "Slack refused 10db's token, so replies can't be read. Reconnect it in Settings › Integrations, or answer this yourself.",
   none: "Slack's token was removed, so replies can't be read. Add it again in Settings › Integrations, or answer this yourself.",
-  off: 'Slack is off on this daemon, so replies can’t be read here. Answer this yourself or take it back.',
+  off: 'Slack is off on this daemon, so replies can’t be read here. Answer this yourself or withdraw the question.',
   unreachable:
     "Slack can't be reached right now. Replies are read again when it is; you can answer this yourself meanwhile.",
 };
 
-const DECLINED_REASONS: Readonly<Record<NonNullable<AskedQuestion['declined']>, string>> = {
+const DECLINED_REASONS: Readonly<Record<string, string>> = {
   not_answerable: "10db couldn't answer this from what it holds.",
   held: "10db's answer was held by the outbound check.",
   too_long: "10db's answer was too long to send.",
@@ -188,6 +199,7 @@ function AskedQuestionBox({
   const reply = useStakeholderReply();
   const [text, setText] = useState('');
   const first = asked.name.split(' ')[0] ?? asked.name;
+  const disabled = text.trim() === '' || !slackReady;
   return (
     <Alert color="yellow" variant="light" title={`${asked.name} asked`}>
       <Stack gap="sm">
@@ -196,7 +208,7 @@ function AskedQuestionBox({
         </Text>
         {asked.declined === null ? null : (
           <Text size="xs" c="dimmed">
-            {DECLINED_REASONS[asked.declined]}
+            {DECLINED_REASONS[asked.declined] ?? "10db didn't answer it itself."}
           </Text>
         )}
         <Textarea
@@ -213,7 +225,18 @@ function AskedQuestionBox({
         <Group gap="xs">
           <Button
             size="xs"
-            disabled={text.trim() === '' || !slackReady}
+            variant="filled"
+            // The theme draws a disabled button in the card's own colour; a primary stays blue, dimmed.
+            style={
+              disabled
+                ? {
+                    backgroundColor: 'var(--mantine-primary-color-filled)',
+                    color: 'var(--mantine-color-white)',
+                    opacity: 0.4,
+                  }
+                : undefined
+            }
+            disabled={disabled}
             loading={reply.isPending}
             onClick={() => {
               reply.mutate(
@@ -230,6 +253,9 @@ function AskedQuestionBox({
           </Button>
           {actions}
         </Group>
+        <Text size="xs" c="dimmed">
+          {`Or answer it yourself below; ${first} sees that you answered.`}
+        </Text>
         {reply.isError ? (
           <Text size="xs" c="red">
             {reply.error.message}
@@ -266,18 +292,13 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
   const state =
     status.data === undefined ? undefined : status.data.off ? 'off' : (workspace?.state ?? 'none');
   const notice = state === undefined ? undefined : OUTAGE_NOTICES[state];
-  const actions = (
-    <>
-      <Button
-        size="xs"
-        variant="default"
-        loading={keepWaiting.isPending}
-        onClick={() => {
-          keepWaiting.mutate(item.id);
-        }}
-      >
-        Keep Waiting
-      </Button>
+  const first = (send.asked?.name ?? names[0] ?? 'them').split(' ')[0] ?? 'them';
+  const withdraw = (
+    <Tooltip
+      label={`Tells ${first} in Slack that you've withdrawn it, and the card is yours to answer.`}
+      multiline
+      maw={280}
+    >
       <Button
         size="xs"
         variant="default"
@@ -285,8 +306,25 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
           setTakingBack(true);
         }}
       >
-        Take Back
+        Withdraw Question
       </Button>
+    </Tooltip>
+  );
+  const actions = (
+    <>
+      {send.asked === null ? (
+        <Button
+          size="xs"
+          variant="default"
+          loading={keepWaiting.isPending}
+          onClick={() => {
+            keepWaiting.mutate(item.id);
+          }}
+        >
+          {`Give ${first} More Time`}
+        </Button>
+      ) : null}
+      {withdraw}
     </>
   );
   if (send.returnedAt !== null) {
@@ -304,11 +342,6 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
               {notice}
             </Alert>
           )}
-          {keepWaiting.isError ? (
-            <Text size="xs" c="red">
-              {keepWaiting.error.message}
-            </Text>
-          ) : null}
           <TakeBackModal
             item={item}
             opened={takingBack}
@@ -347,17 +380,7 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
     <Alert color="yellow" variant="light">
       <Stack gap="xs">
         {notice}
-        <Group>
-          <Button
-            size="xs"
-            variant="default"
-            onClick={() => {
-              setTakingBack(true);
-            }}
-          >
-            Take Back
-          </Button>
-        </Group>
+        <Group>{withdraw}</Group>
       </Stack>
       <TakeBackModal
         item={item}
