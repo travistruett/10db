@@ -4403,8 +4403,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // runs it in place of the gate. Otherwise a project with a changed-packages check has each step
     // checked by it, and the ship gate runs the full gate command before the push. Without a gate
     // command the builder checks, as ever.
-    // A Commit Directly task has no ship, so once its last step's check passed it runs the full gate
-    // (`final`) before it is Done.
+    // `final`: the full gate a Commit Directly task runs after its last implement step's check.
     const gateCommand =
       (final ? finalCheck(project) : null)?.command ?? stepCheck(project)?.command ?? null;
     if (gateCommand === null) {
@@ -4638,6 +4637,28 @@ export function createRunner(opts: RunnerOptions): Runner {
       });
     if (result.exitCode === 0) {
       const step = currentStep(row);
+      // A Commit Directly task has no ship: once its last implement step's own check passed, the full
+      // gate runs before any review or Done, and the diff reads wait for that gate's pass.
+      if (!final && batchId === null && finalCheck(project) !== null) {
+        if (stopRequested(ctl) === 'cancelled') {
+          cancelNow(id, ctl.fence);
+          return;
+        }
+        if (stopRequested(ctl) === 'shutdown') return;
+        const deferred = opts.state.write((ctx) => {
+          const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
+          const implementLeft = current.steps
+            .slice(current.stepIndex + 1)
+            .some((s) => s.role === StepRole.Implement);
+          if (implementLeft) return false;
+          insertEvidence(ctx, evidence);
+          return true;
+        });
+        if (deferred) {
+          await verify(id, ctl, true);
+          return;
+        }
+      }
       // The diff is read before the write, which then adds the review it forces.
       const forced = await reviewForcedAfter(id, ctl, row, checkout);
       // With no Review after this step, the judge's flags on the new tests become follow-up tasks.
@@ -4649,7 +4670,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       }
       // Shutdown stopped it: record nothing, and recovery runs the gate again.
       if (stopRequested(ctl) === 'shutdown') return;
-      const needsFinalGate = opts.state.write((ctx) => {
+      opts.state.write((ctx) => {
         insertEvidence(ctx, evidence);
         // Planned again first, and the move chosen from those steps: a rigor changed while the gate ran
         // decides whether a Review follows or the work is done.
@@ -4657,9 +4678,6 @@ export function createRunner(opts: RunnerOptions): Runner {
         const net = withSafetyNet(ctx.tx, ctl.accountId, current, forced);
         const steps = net.steps;
         const after = moveAfter(steps, current.stepIndex);
-        // The last step's own check passed: the full gate runs next, and the move waits for it.
-        if (!final && batchId === null && after.kind === 'done' && finalCheck(project) !== null)
-          return true;
         countFinished(ctx, step);
         if (!reviewFollows(net.steps, current.stepIndex))
           fileTestValueFollowUps(ctx, row.taskId, testValue);
@@ -4681,16 +4699,14 @@ export function createRunner(opts: RunnerOptions): Runner {
                 : `gate passed; review added: ${net.added}; next: ${next.role}`,
           });
           clearLease(ctx, id);
-          return false;
+          return;
         }
         if (steps.length > 0)
           patchWorkstream(ctx, id, ctl.fence, {
             steps: advanceSteps(steps, current.stepIndex, -1, entryFor(ctx, id)),
           });
         markDone(ctx, id, ctl.fence, current, 'gate passed');
-        return false;
       });
-      if (needsFinalGate) await verify(id, ctl, true);
       return;
     }
     const attempt = row.attempt + 1;

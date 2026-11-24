@@ -583,22 +583,33 @@ describe('runner', () => {
     expect(check).toMatchObject({ kind: 'gate', command: 'true', exitCode: 0 });
   });
 
-  it('runs the full gate once before a Commit Directly task is Done, and a failing gate sends it back as a fix', async () => {
+  it('runs the full gate once after the last implement step of a Commit Directly task, before its review or Done, and a failing gate sends it back as a fix', async () => {
     const gate = 'test -f src/api/fixed.txt || { echo FULL-GATE-MISSING; exit 2; }';
     engine = await createTestEngine(
       {
         Alpha: [
           [write('src/api/a.txt'), commit('op-full-1', ['src/api/a.txt']), turn],
           [write('src/api/fixed.txt'), commit('op-full-2', ['src/api/fixed.txt']), turn],
+          [
+            {
+              do: 'mcp' as const,
+              tool: 'complete_step',
+              args: { opId: 'op-full-3', summary: 'Looks right.', verdict: 'approve' },
+            },
+            turn,
+          ],
         ],
       },
       { delivery: 'local', gateCommand: gate, changedCheckCommand: 'true' },
     );
-    const { workstream } = engine.addTask('Alpha');
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'fix' } });
 
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', stepIndex: 1 });
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
