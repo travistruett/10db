@@ -3,6 +3,7 @@ import {
   findOpenByFoldKey,
   getBatch,
   getProject,
+  isLocalCopy,
   getWorkstreamRow,
   listWorkstreams,
   patchBatch,
@@ -1221,7 +1222,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const forPullRequest = options.forPullRequest === true;
     const holding = (held: BaseHeld) =>
       migrationsFor === undefined && !forPullRequest ? {} : { held };
-    const origin = `origin/${batch.baseBranch}`;
+    const origin = isLocalCopy(db, batch.id) ? batch.baseBranch : `origin/${batch.baseBranch}`;
     // An earlier gate merged the base and left markers: the merge stands, and what is left is whether
     // a session has resolved them.
     const pending = await pendingOf(batch, path);
@@ -1607,12 +1608,16 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     if (batch.branch === null)
       return notMerged(batch, 'no branch', 'The batch has no branch yet, so nothing was merged.');
     const project = getProject(db, batch.projectId);
-    const from = `refs/remotes/origin/${batch.baseBranch}`;
+    // A separate copy of a local project has no origin: its base is the local branch, and nothing is fetched.
+    const local = isLocalCopy(db, batchId);
+    const from = local
+      ? `refs/heads/${batch.baseBranch}`
+      : `refs/remotes/origin/${batch.baseBranch}`;
     let merging: Merging | null = null;
     // Once per gate, in the project's checkout, whose pin holds the origin the builder trusted; a
     // worktree shares its refs.
     try {
-      await ctx.git.fetch(project.repoPath, batch.baseBranch, networkCall(ctx, signal));
+      if (!local) await ctx.git.fetch(project.repoPath, batch.baseBranch, networkCall(ctx, signal));
     } catch (error) {
       if (stopped()) return { kind: 'aborted' };
       if (options.atLaunch)
