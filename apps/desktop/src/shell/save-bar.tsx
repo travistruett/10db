@@ -39,6 +39,8 @@ export function SaveBar({
           justify="space-between"
           wrap="nowrap"
           pos="sticky"
+          // In a page that fills its column, the bar keeps to the bottom edge rather than following the content.
+          mt="auto"
           // The surface pads its content, and a sticky edge is measured inside that padding: reach over it.
           bottom="calc(var(--shell-content-padding-block) * -1)"
           py="sm"
