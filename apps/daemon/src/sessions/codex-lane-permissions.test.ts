@@ -1,5 +1,5 @@
 import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
 import type { LaneSandboxSpec } from '../sandbox';
@@ -104,6 +104,22 @@ describe('lanePermissions and the setup reads', () => {
     mkdirSync(join(checkout, '.git'));
     mkdirSync(join(checkout, '.agents'));
     expect(filesystem([], denyWrite())).toMatchObject(expected());
+  });
+});
+
+describe('lanePermissions and the checkout .agents', () => {
+  it('gives a read-only lane no write on .agents', () => {
+    mkdirSync(join(checkout, '.agents'));
+    expect(filesystem([], [checkout])[join(checkout, '.agents')]).toBeUndefined();
+  });
+
+  it('gives a symlinked .agents no write', () => {
+    const outside = join(dirname(checkout), 'outside');
+    mkdirSync(outside);
+    symlinkSync(outside, join(checkout, '.agents'));
+    const fs = filesystem([]);
+    expect(fs[join(checkout, '.agents')]).toBeUndefined();
+    expect(fs[realpathSync(outside)]).toBeUndefined();
   });
 });
 

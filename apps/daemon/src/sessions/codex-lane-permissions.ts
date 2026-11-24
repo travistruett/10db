@@ -114,8 +114,18 @@ function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
   for (const path of writable) grant(path, 'write');
   // Codex makes an existing `.agents` read-only inside a writable root unless an entry names it; a
   // Claude lane writes it, so the checkout's own `.agents` is granted (`.git`, `.codex`, `.aws` stay protected).
+  // A link, a target outside the checkout, or a denyWrite over it (a read-only lane) gets nothing.
   const agentsDir = join(sandbox.checkout, '.agents');
-  if (isDirectory(agentsDir)) grant(agentsDir, 'write');
+  const realAgents = realOrSelf(agentsDir);
+  if (
+    isDirectory(agentsDir) &&
+    !isLink(agentsDir) &&
+    isEqualOrUnder(realAgents, realOrSelf(sandbox.checkout)) &&
+    !denyWrite.some(
+      (path) => isEqualOrUnder(agentsDir, path) || isEqualOrUnder(realAgents, realOrSelf(path)),
+    )
+  )
+    grant(agentsDir, 'write');
   for (const path of denyRead) if (path !== '/') grant(path, 'deny');
   const listed = new Set(
     allowRead.flatMap((pattern) => {
