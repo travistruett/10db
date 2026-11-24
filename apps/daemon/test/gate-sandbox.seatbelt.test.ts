@@ -185,6 +185,9 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
     writeFileSync(join(checkout, '.env'), `SECRET=${token}\n`);
     // A link to it, as a copy of the checkout's tree holds, must not close the target it leads to.
     symlinkSync(join(checkout, '.env'), join(checkout, '.env.linked'));
+    // A nested one, whose folder and name a command could move or hard-link to read it elsewhere.
+    mkdirSync(join(checkout, 'nested'));
+    writeFileSync(join(checkout, 'nested', '.env'), `SECRET=${token}\n`);
     try {
       const seen = await probe({
         stat: 'stat .env',
@@ -193,6 +196,13 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
         'read-link': 'cat .env.linked',
         move: 'mv .env moved.env',
         remove: 'rm .env',
+        append: 'echo x >> .env',
+        truncate: ': > .env',
+        'move-folder': 'mv nested moved-nested && cat moved-nested/.env',
+        'move-nested-file': 'mv nested/.env nested/renamed && cat nested/renamed',
+        'hard-link': 'ln .env linked.env && cat linked.env',
+        'hard-link-nested': 'ln nested/.env linked-nested.env && cat linked-nested.env',
+        'move-checkout-file': 'mv .env moved.env && cat moved.env',
         // A command that must run, as `make` does, when its prerequisite exists.
         'make-prerequisite': `printf 'all: .env\\n\\t@true\\n' > Makefile.probe && make -f Makefile.probe`,
       });
@@ -203,11 +213,20 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
         'read-link': 'denied',
         move: 'denied',
         remove: 'denied',
+        append: 'denied',
+        truncate: 'denied',
+        'move-folder': 'denied',
+        'move-nested-file': 'denied',
+        'hard-link': 'denied',
+        'hard-link-nested': 'denied',
+        'move-checkout-file': 'denied',
         'make-prerequisite': 'ok',
       });
     } finally {
       rmSync(join(checkout, '.env'), { force: true });
       rmSync(join(checkout, '.env.linked'), { force: true });
+      for (const name of ['nested', 'moved-nested', 'linked.env', 'linked-nested.env'])
+        rmSync(join(checkout, name), { recursive: true, force: true });
       rmSync(join(checkout, 'Makefile.probe'), { force: true });
     }
   }, 60_000);

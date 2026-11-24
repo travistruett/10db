@@ -296,9 +296,9 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       expect(filesystem['denyRead']).toEqual(
         expect.arrayContaining(['/', dataDir, join(home, '.claude'), join(home, '.claude-work')]),
       );
-      // A checkout's .env file answers a stat but not a read: srt's data-only list, not denyRead.
-      expect(filesystem['denyRead']).not.toContain(envFile);
-      expect(filesystem['denyReadData']).toEqual([envFile]);
+      // A runtime that doesn't enforce a data-only deny keeps the file closed whole.
+      expect(filesystem['denyRead']).toContain(envFile);
+      expect(filesystem['denyReadData']).toBeUndefined();
       // A built-in read that holds a sandbox root is left out (on Linux the roots lie under `/tmp`).
       const builtIn = SYSTEM_READS.filter(
         (path) => ![tmpRoot, lanesRoot, filesRoot].some((held) => isEqualOrUnder(held, path)),

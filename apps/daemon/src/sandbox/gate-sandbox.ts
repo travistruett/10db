@@ -28,7 +28,7 @@ import {
   type SweepLog,
 } from './pnpm-lock-dir';
 import { createSealedFile, removeSealedFile, type SealedFileKind } from './sealed-file';
-import { splitSecrets } from './secret-stat';
+import { dataDenyEnforced, splitSecrets } from './secret-stat';
 import {
   allowlisted,
   checkRuntime,
@@ -290,7 +290,11 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           ...prepareCommandEnv(tmpDir, deps.home, input.env),
           PATH: [binDir, ...(input.env['PATH'] ? [input.env['PATH']] : [])].join(':'),
         };
-        const secrets = splitSecrets(checkout, access.checkoutSecrets);
+        const secrets = splitSecrets(
+          checkout,
+          access.checkoutSecrets,
+          dataDenyEnforced(deps.runtime),
+        );
         const profile = buildLaneProfile({
           checkout,
           tmpDir,
@@ -328,6 +332,8 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
             ...access.otherCheckouts,
             ...SRT_SHARED_TEMP,
             ...access.pinnedTools,
+            // An existing .env is untracked and can't be recovered, so it is never appended or truncated.
+            ...secrets.statVisible,
           ],
           // srt reads the settings file before the sandbox starts; the command reads no file here.
           sandboxRoots: access.sandboxRoots,

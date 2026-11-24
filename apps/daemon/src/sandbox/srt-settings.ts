@@ -21,8 +21,9 @@ export interface SrtSettings {
     readonly allowWrite: readonly string[];
     readonly denyWrite: readonly string[];
     /**
-     * Files whose contents, writes and moves are closed while a stat still answers: a field of
-     * the srt that 10db runs (`patches/`), which Claude Code's bundled one doesn't have.
+     * Files whose contents are closed to a read and that can't be moved while a stat still answers:
+     * a field of the srt that 10db runs (`patches/`), which Claude Code's bundled one doesn't have.
+     * Writes are closed through `denyWrite`.
      */
     readonly denyReadData?: readonly string[];
   };
