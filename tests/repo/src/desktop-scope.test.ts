@@ -187,6 +187,10 @@ describe('scripts/desktop-scope.mjs', () => {
       ['a rewind', compare('behind', 'docs/a.md')],
       ['a failing lookup', [{ args: compareCall, status: 1, stderr: 'HTTP 404' }]],
       ['no files listed', compare('ahead')],
+      [
+        'a list as long as the compare API may cut it',
+        compare('ahead', ...Array.from({ length: 300 }, (_, i) => `docs/${String(i)}.md`)),
+      ],
     ] satisfies [string, GhReply[]][])('runs the desktop job after %s', (_name, replies) => {
       expect(decide(push, replies).output).toBe('desktop=true\n');
     });

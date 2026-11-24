@@ -16,6 +16,8 @@ import { appendFileSync } from 'node:fs';
 
 // The pull request files API returns at most 3000 files; a list that long may be cut short.
 const FILES_API_LIMIT = 3000;
+// The compare API's file list may stop at 300 however it is paged; a list that long may be cut short.
+const COMPARE_FILES_LIMIT = 300;
 const MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
 
 // Everything under these is what the job builds or tests on macOS.
@@ -128,7 +130,7 @@ function pushedFiles(repository, before, after) {
   const lines = result.stdout.split('\n').filter((line) => line !== '');
   if (lines.some((line) => line.startsWith('status:') && line !== 'status:ahead')) return undefined;
   const files = lines.filter((line) => line.startsWith('file:')).map((line) => line.slice(5));
-  return files.length === 0 || files.length >= FILES_API_LIMIT ? undefined : files;
+  return files.length === 0 || files.length >= COMPARE_FILES_LIMIT ? undefined : files;
 }
 
 function decide() {
