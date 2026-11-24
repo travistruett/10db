@@ -2074,6 +2074,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ? { afterSession: (id: WorkstreamId) => watcher.stepEnd(id).then(() => undefined) }
       : {}),
     identifyProcess: (pid) => processes.identify(pid),
+    // The reporter is made after the runner; a lane starts only once both exist.
+    linearSnapshot: (taskId) => linearReporter.snapshot(taskId),
     ...(opts.laneBrief === undefined ? {} : { laneBrief: opts.laneBrief }),
   });
   runner = createdRunner;
