@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, type Dirent } from 'node:fs';
+import { lstatSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { isEqualOrUnder, listingDir, realOrSelf, type LaneSandboxSpec } from '../sandbox';
 
@@ -112,6 +112,10 @@ function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
   const writable = [sandbox.checkout, ...allowWrite];
   const realWritable = writable.map(realOrSelf);
   for (const path of writable) grant(path, 'write');
+  // Codex makes an existing `.agents` read-only inside a writable root unless an entry names it; a
+  // Claude lane writes it, so the checkout's own `.agents` is granted (`.git`, `.codex`, `.aws` stay protected).
+  const agentsDir = join(sandbox.checkout, '.agents');
+  if (isDirectory(agentsDir)) grant(agentsDir, 'write');
   for (const path of denyRead) if (path !== '/') grant(path, 'deny');
   const listed = new Set(
     allowRead.flatMap((pattern) => {
@@ -201,4 +205,12 @@ export function readOnlyPermissions(
       },
     },
   };
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }

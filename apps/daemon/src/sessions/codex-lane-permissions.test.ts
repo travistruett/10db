@@ -89,7 +89,11 @@ describe('lanePermissions and the setup reads', () => {
     {
       name: 'a writing chat: the checkout writes and its git state only reads',
       denyWrite: () => [join(checkout, '.git')],
-      expected: () => ({ [checkout]: 'write', [join(checkout, '.git')]: 'read' }),
+      expected: () => ({
+        [checkout]: 'write',
+        [join(checkout, '.git')]: 'read',
+        [join(checkout, '.agents')]: 'write',
+      }),
     },
     {
       name: 'a reading chat: the whole checkout only reads',
@@ -98,6 +102,7 @@ describe('lanePermissions and the setup reads', () => {
     },
   ])('maps $name', ({ denyWrite, expected }) => {
     mkdirSync(join(checkout, '.git'));
+    mkdirSync(join(checkout, '.agents'));
     expect(filesystem([], denyWrite())).toMatchObject(expected());
   });
 });
