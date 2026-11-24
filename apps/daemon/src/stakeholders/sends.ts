@@ -23,7 +23,6 @@ import {
   SEED_BUILDER_NAME,
   closeSend,
   dropDraft,
-  everSent,
   getInboxItem,
   getPerson,
   insertDraft,
@@ -265,7 +264,6 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
           return {
             sendMode: contact?.sendMode ?? 'review',
             dailyLimit: contact?.dailyLimit ?? null,
-            everSent: contact !== null && everSent(ctx.tx, p.id, teamId),
             newThreads: contact === null ? 0 : newThreadsSince(ctx.tx, p.id, teamId, since),
           };
         }),

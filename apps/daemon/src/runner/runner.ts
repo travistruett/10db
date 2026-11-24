@@ -2523,6 +2523,37 @@ export function createRunner(opts: RunnerOptions): Runner {
         checkout,
         worktreeRoot: opts.worktreeRoot,
       });
+    // A review step is told what the run skipped and what its check left out, so it can tell
+    // "could not" from "did not". The coverage note is recomputed from the gate's command, never read
+    // back out of the gate's output, which the lane writes.
+    const gateRun = REVIEW_ROLES.includes(step.role)
+      ? listEvidence(db, id)
+          .filter((e) => e.kind === 'gate')
+          .at(-1)
+      : undefined;
+    const reviewFacts = !REVIEW_ROLES.includes(step.role)
+      ? undefined
+      : {
+          skipped: listSkipsForWorkstream(db, id).map((k) => ({
+            tool: k.toolName,
+            what: `${k.kind}, by ${k.source}`,
+            kind: k.kind,
+            limit: k.limit,
+            judged:
+              k.kind === SkipKind.Classifier ||
+              k.kind === SkipKind.SafetyCheck ||
+              k.source === SkipSource.AutoMode ||
+              k.source === SkipSource.SafetyCheck ||
+              k.source === SkipSource.HostJudge ||
+              k.source === SkipSource.TendbJudge,
+            reason: k.reason,
+            command: k.summary,
+          })),
+          checkNote:
+            gateRun?.command == null
+              ? null
+              : coverageNote(await coverageOf(row, checkout, null, gateRun.command)),
+        };
     const batchNotices = row.batchId === null ? [] : getBatch(db, row.batchId).notices;
     const noticeBody = (key: string): string | null =>
       batchNotices.find((n) => n.key === key)?.body ?? null;
@@ -2997,6 +3028,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           }
         : null,
       evidence,
+      ...(reviewFacts ? { reviewFacts } : {}),
       recovery:
         action.kind === 'resume'
           ? { reason: action.reason, lastOp: latestToolOp(db, id)?.opId ?? null }
@@ -4332,11 +4364,12 @@ export function createRunner(opts: RunnerOptions): Runner {
   async function coverageOf(
     row: WorkstreamRow,
     checkout: string,
-    head: string,
+    knownHead: string | null,
     command: string,
   ): Promise<CheckCoverage | null> {
     if (checkCoverage(command, [], checkout) === null) return null;
     try {
+      const head = knownHead ?? (await opts.git.head(checkout));
       let own: string[];
       if (checkout !== getProject(db, row.projectId).repoPath) {
         // Read again: the gate's base update moves the task's base.
