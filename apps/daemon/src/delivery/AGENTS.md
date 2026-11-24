@@ -20,5 +20,3 @@
 - A `Card` needs `tier`, `urgency` and `closesWhen` (`decisions/2026-11-17-every-card-has-a-tier.md`); a notice
   goes through `post` or `postIn`.
 - `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`).
-
-- A failing required check that also fails on the base branch is the base's: no CI fix or card per pull request, one base-red Inbox item, and the pull request's checks start again when the base passes (`ci-failure-class.ts`, `decisions/2026-11-24-a-red-base-is-one-fix-not-a-fix-per-pull-request.md`). Runner shortages are rerun with a backoff; a check that passes on a rerun of the same commit raises one flaky-check item. A red base is fixed in code, never retried in a test.
