@@ -94,10 +94,12 @@ The builder's request fixes S2, S3 and S5. The rest are this spec's **(call)**, 
   plan, Bedrock or an API key, and Codex lanes, whose questions arrive through `ask_human` too (Claude Code's
   `AskUserQuestion` exists only on Claude). A conversation that can't be resumed days later falls back to the
   handoff, as any parked lane does.
-- **S8. The message is a fixed template, not an LLM rewrite (call).** 10db builds the message from the card's
+- **S8. The message is a fixed template, not an LLM rewrite (call; amended by §8.8 for replies in the thread, which
+  10db may write).** 10db builds the message from the card's
   fields. The lane is told who will read its questions (§7.1), so it writes them for that person. A model
   rewrite comes later if previews keep needing edits.
-- **S9. A lone recipient's own reply is read by rule (call).** When one recipient alone has replied, a
+- **S9. A lone recipient's own reply is read by rule (call; amended by §8.8, which sorts replies into answers,
+  questions and chatter).** When one recipient alone has replied, a
   reply that names an option (`B`, `b)`, the option's label) chooses it, and is recorded as Mark's decision.
   Anything else goes straight to the lane as Mark's own words, quoted, and the lane records the decision it
   takes from them; nothing is recorded in Mark's name that he didn't pick or approve. A conversation with more
@@ -687,6 +689,44 @@ A reply is untrusted input to a session with tools. It answers one question and 
 - Only a recipient's own pick or approval writes a decision. Anyone else's words reach the lane as attributed
   data and steer only its next step, which the builder accepted (S13).
 
+### 8.8 Replies that ask
+
+A reply in the thread is read as one of four kinds by the judge's `reply_kind` (a rule fallback when no judge runs):
+
+- **An answer**: a pick, or own words that answer. It answers the card, as in §8.3.
+- **A simple question**: 10db writes the reply (below) in the thread.
+- **A deeper question**: the card returns to the Inbox's Open tab as "{Name} asked", reason `asked`, with the
+  words quoted and a reply box. A stakeholder's reply is never read as an answer just because it is not a letter.
+- **Chatter**: nothing happens.
+
+Every question goes to the writer first; only a judge `builder_question` at or above its floor skips it. With no
+judge, a lone recipient's questions still go to the writer, so a Claude-plan-only setup gets automated answers.
+When the writer declines (or cannot run: no account, provider, a held or oversized answer), the card goes to the
+builder, and 10db says so once per question in the thread ("I've passed this to {builder}; they'll reply here").
+Groups are sorted only by the judge; with none, a group's questions go to the builder.
+
+**The automated line.** The writer leans toward answering: it may explain the question, the options and their
+trade-offs, the recommendation and why the lane asks, and declines only for a call only the builder can make or
+facts it lacks. It sees the card's title, body and options; the task's title, description and acceptance
+criteria; the goal's title and description; and the lane agent's last six messages on the card (never the
+builder's own messages to the lane). The answer is at most 700 characters, passes the outbound secret scan, and is
+posted as "10db (automated reply)" with a line saying the builder has not reviewed it. There is no cap on the
+number of automated answers; the runaway guard is that only a human participant's message is sorted or answered
+(never a bot's, 10db's included), and each question message gets at most one answer. Only 10db's own bot's tagged
+lines count as 10db's or the builder's; forged metadata is ignored.
+
+**The builder's reply.** From the asked card the builder's words are posted in the thread from 10db as
+"{Builder} (via 10db): ...", held only for a secret, and the card goes back to waiting on the recipient. The
+builder can also answer the card directly. With Slack off, refused or unreachable, the reply box is disabled and
+says why.
+
+| Project account | Sorting (`reply_kind`) | Writing an answer |
+|---|---|---|
+| Claude plan | The Decisions account if one is set; otherwise the rule fallback | `complete()` through the Claude adapter, project's plan, Efficient tier |
+| Claude via API key or Bedrock | Same | `complete()` through the Claude adapter, on that account |
+| ChatGPT/Codex plan (and OpenRouter) | Same | `completeWithCodex`: a tool-locked, network-off one-shot turn; `CodexAdapter.complete` still refuses for other callers. If the lock cannot be proven the writer declines (`provider`) and the question comes to the builder |
+| Account paused, over cap or signed out | Same | The writer declines (`no_account`); the question comes to the builder |
+
 ## 9. Slack
 
 **Designed.** Research notes with sources: `docs/architecture/research/slack-stakeholder-questions.md`.
@@ -1057,3 +1097,6 @@ test row). The sections above now say what was built; the changes, in short:
   the conversation to the settle (§8.6).
 - **The builder picks their own Slack member** (§10.1), which gives every message its name.
 - **Migrations** 0063–0065 and protocol 8 (`0062` was taken first by another change).
+- **Replies that ask** (§8.8, amended S8 and S9): a stakeholder's question is answered by 10db when it can and
+  passes to the builder's Open card when it cannot; the question message ends with an invitation to ask. Protocol 15
+  (`returnedReason` gained `asked`).
