@@ -27,6 +27,7 @@ const ALLOWED_NAMES: ReadonlySet<string> = new Set([
   'GIT_CONFIG_GLOBAL',
   'GIT_OPTIONAL_LOCKS',
   'TENDB_SANDBOX',
+  'TENDB_COPY_ID',
   'npm_config_cache',
   'npm_config_devdir',
   'UV_CACHE_DIR',

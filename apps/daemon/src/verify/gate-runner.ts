@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
+import type { CopyId, PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import type { Logger } from '../log';
 import { atPriority } from '../priority';
 import { BlockedRun, blockedHostsNote, createBlockedHostFilter } from './blocked-hosts';
@@ -9,6 +9,7 @@ import {
   DOCKER_REFUSAL,
   SandboxProfileError,
   SandboxTempDirError,
+  withCopyId,
   type GateRun,
   type GateSandbox,
 } from '../sandbox';
@@ -63,6 +64,8 @@ export interface GateRequest {
    * directory for it, and its output calls it the install, not the gate, when a host was blocked.
    */
   readonly packageInstall?: boolean;
+  /** The copy the gate's batch runs in (`copyIdForBatch`); absent or null for any other gate. */
+  readonly copyId?: CopyId | null;
   /**
    * Runs once the gate may start, after its slot and before its sandbox or command: work that must
    * not change the checkout under another running gate, such as bringing a batch's base in. A false
@@ -107,7 +110,7 @@ function unsandboxed(request: GateRequest): Spawnable {
   return {
     file: '/bin/sh',
     args: ['-c', request.command],
-    env: request.env,
+    env: withCopyId(request.env, request.copyId ?? null),
     cwd: request.project.repoPath,
   };
 }
@@ -279,6 +282,7 @@ export function createGateRunner(options: GateRunnerOptions): GateRunner {
           checkouts: request.checkouts,
           command: request.command,
           ...(request.packageInstall === true ? { packageInstall: true } : {}),
+          copyId: request.copyId ?? null,
         });
       } catch (error) {
         if (error instanceof SandboxProfileError || error instanceof SandboxTempDirError)

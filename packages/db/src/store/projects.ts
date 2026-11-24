@@ -31,6 +31,7 @@ import * as schema from '../schema';
 import { defaultAccountId, getAccountRow, refuseAccountWithoutHarness } from './accounts';
 import { currentBatch, findUnfinishedBatch, listUnfinishedBatches } from './batches';
 import { insertBoardColumn } from './board-columns';
+import { unfinishedCopyOf } from './local-copies';
 import type { DbReader, WriteContext } from './store';
 
 /** The account a new project binds to: the one it names, else the default; never an archived one. */
@@ -222,6 +223,11 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
   const handoffPct = changes.handoffPct ?? current.handoffPct;
   if (nudgePct <= handoffPct) throw new InvalidError('nudgePct must be above handoffPct');
   if (changes.delivery !== undefined && changes.delivery !== current.delivery) {
+    // A copy's landing reads the project's delivery from the journal's pinned facts, so the change waits.
+    if (unfinishedCopyOf(ctx.tx, id) !== null)
+      throw new ConflictError(
+        `${current.name} is in a separate copy; let it ship or abandon it first`,
+      );
     // A QUEUED pull-request workstream needs a batch to launch, so delivery can't change under work.
     const busy = ctx.tx
       .select({ id: schema.workstreams.id })

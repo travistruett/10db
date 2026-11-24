@@ -67,6 +67,7 @@ import {
   JudgeKind,
   Provider,
   TakeOutStep,
+  type CopyId,
   type PassId,
   type TaskId,
   type TaskDto,
@@ -217,6 +218,8 @@ import {
   MIGRATIONS_HAZARD,
   projectAtCheckout,
   rerunFlaky,
+  copyIdForBatch,
+  CopyJournalMissingError,
   finalCheck,
   stepCheck,
   uncarriedSaid,
@@ -2767,6 +2770,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     if (opts.laneSandbox) {
       try {
         laneSession = await opts.laneSandbox.forSession({
+          copyId: copyIdForBatch(db, row.batchId),
           setup: setupPlan.input,
           project: projectAtCheckout(project, checkout),
           env: launch.env,
@@ -2785,6 +2789,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       } catch (error) {
         releaseStart();
         // A profile or temp dir the sandbox refuses would be refused the same way on a retry.
+        if (error instanceof CopyJournalMissingError) {
+          return { kind: 'refused', message: error.message, providerSessionId: savedResumeId };
+        }
         if (error instanceof SandboxProfileError || error instanceof SandboxTempDirError) {
           return {
             kind: 'refused',
@@ -4609,7 +4616,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     // command the builder checks, as ever.
     // `final`: the full gate a Commit Directly task runs after its last implement step's check.
     const gateCommand =
-      (final ? finalCheck(project) : null)?.command ?? stepCheck(project)?.command ?? null;
+      (final && row.batchId === null ? finalCheck(project) : null)?.command ??
+      stepCheck(project)?.command ??
+      null;
     if (gateCommand === null) {
       await finishWithoutGate(id, ctl, row, checkout);
       return;
@@ -4623,6 +4632,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     // merge changes the tree under a running gate. Work outside a batch has no base to take.
     const before: { update: BaseUpdate | null } = { update: null };
     const batchId = row.batchId;
+    let copyId: CopyId | null;
+    try {
+      copyId = copyIdForBatch(db, batchId);
+    } catch (error) {
+      if (!(error instanceof CopyJournalMissingError)) throw error;
+      fail(id, ctl.fence, { kind: WorkstreamFailure.SessionFailed, reason: error.message });
+      return;
+    }
     let recording: Promise<void> = Promise.resolve();
     // Set once the gate holds its slot and starts; only a started gate records gate.finished.
     let gateStarted = false;
@@ -4659,6 +4676,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       },
       project: projectAtCheckout(project, checkout),
       command: gateCommand,
+      copyId,
       logPath,
       timeoutMs: opts.limits.gateTimeoutMs,
       // The project env: the login shell without billing switches, and never the account's credentials.

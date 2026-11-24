@@ -67,6 +67,7 @@ import { BlockedRun, type GateResult, type GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 import { BATCH_CARD_DETAIL, type KeptRevert } from './batch-card';
 import { settleBranch } from './branch-cleanup';
+import { copyIdForBatch } from './copy-id';
 import {
   autoMergeOffKey,
   autoMergeRefusedKey,
@@ -387,6 +388,7 @@ export async function runGate(
   const result = await deps.gate.run({
     project,
     command: gateCommand,
+    copyId: copyIdForBatch(deps.state.db, batch.id),
     logPath,
     timeoutMs: deps.limits.gateTimeoutMs,
     env: deps.sessionEnv(project),
