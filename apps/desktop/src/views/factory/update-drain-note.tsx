@@ -1,5 +1,5 @@
 import type { SelfUpdateStatusDto } from '@10db/contracts';
-import { Anchor, Group, Text } from '@mantine/core';
+import { Anchor, Badge, HoverCard, Stack, Text } from '@mantine/core';
 import { IconDownload } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { useSelfUpdate } from '../../daemon/self-update-queries';
@@ -9,7 +9,7 @@ import { updateWaitsFor } from '../settings/update-waits-for';
 
 const SHORT = 7;
 
-/** What the note says, the name it is announced by, and its icon's colour. */
+/** What the pill says, the name it is announced by, the longer text behind it, and its colour. */
 interface Note {
   readonly label: string;
   readonly text: string;
@@ -24,45 +24,63 @@ function noteFor(status: SelfUpdateStatusDto): Note | null {
   const waitsFor = updateWaitsFor(status);
   if (status.draining && status.drainingSince !== null)
     return {
-      label: 'Update Draining the Factory',
+      label: 'Lanes Paused for Update',
       text: `Lanes are paused since ${absoluteTime(status.drainingSince)} for an update to ${build}: what is running finishes, then 10db installs and restarts, and lanes resume. ${waitsFor}`,
-      color: 'var(--mantine-color-yellow-6)',
+      color: 'yellow',
     };
   if (status.waitingSince !== null)
     return {
       label: 'Update Waiting',
       text: `An update to ${build} is waiting since ${absoluteTime(status.waitingSince)} for a moment when nothing is mid-session. If none comes within ${String(status.waitMinutes)} minutes, lanes pause until it has installed. ${waitsFor}`.trimEnd(),
-      color: 'var(--mantine-color-dimmed)',
+      color: 'gray',
     };
   return null;
 }
 
 /**
- * Says why lanes paused, or are about to: an update waits for an idle moment, and past its limit 10db
- * starts no new steps until what runs has finished and the app has installed and restarted.
+ * A pill in Factory's title row saying an update waits for an idle moment, or has paused lanes until it
+ * installs; hovering it says why, what it waits for, and links to Update Settings.
  */
 export function UpdateDrainNote() {
   const status = useSelfUpdate().data;
   const note = status === undefined ? null : noteFor(status);
   if (note === null) return null;
   return (
-    <Group gap={6} wrap="nowrap" role="status" aria-label={note.label}>
-      <IconDownload size={16} stroke={1.5} color={note.color} aria-hidden />
-      <Text size="xs" c="dimmed">
-        {note.text}{' '}
-        <Anchor
-          size="xs"
-          renderRoot={(props) => (
-            <Link
-              {...props}
-              to="/settings/$section"
-              params={{ section: SettingsSectionKey.Updates }}
-            />
-          )}
+    <HoverCard width={340} position="bottom-end" withArrow shadow="md" openDelay={150}>
+      <HoverCard.Target>
+        <Badge
+          component="button"
+          type="button"
+          role="status"
+          aria-label={note.label}
+          variant="light"
+          color={note.color}
+          size="lg"
+          tt="none"
+          fw={500}
+          leftSection={<IconDownload size={14} stroke={1.5} aria-hidden />}
+          style={{ cursor: 'default' }}
         >
-          Update Settings
-        </Anchor>
-      </Text>
-    </Group>
+          {note.label}
+        </Badge>
+      </HoverCard.Target>
+      <HoverCard.Dropdown>
+        <Stack gap={6}>
+          <Text size="xs">{note.text}</Text>
+          <Anchor
+            size="xs"
+            renderRoot={(props) => (
+              <Link
+                {...props}
+                to="/settings/$section"
+                params={{ section: SettingsSectionKey.Updates }}
+              />
+            )}
+          >
+            Update Settings
+          </Anchor>
+        </Stack>
+      </HoverCard.Dropdown>
+    </HoverCard>
   );
 }
