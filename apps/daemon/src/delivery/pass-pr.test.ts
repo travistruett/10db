@@ -13,6 +13,7 @@ import {
 import { AbandonStep } from '@10db/contracts';
 import {
   abandonPassAndBatch,
+  getAppSetting,
   setAbandonStep,
   getBatch,
   getBatchRow,
@@ -659,7 +660,14 @@ describe('Pictures to Slack', () => {
     expect(slack.uploads[0]?.comment).toContain('Polish pages');
     expect(h.cards().filter((c) => c.title.includes('did not reach Slack'))).toHaveLength(0);
 
-    // Marked posted: another push to the same pull request posts nothing.
+    // Marked posted for the pass (the post runs detached, so the mark is what keeps the next push from posting
+    // again): another push to the same pull request posts nothing.
+    await waitFor(
+      () => getAppSetting(h.state.db, `slack-pictures-posted.${h.project.id}`) ?? undefined,
+    );
+    expect(getAppSetting(h.state.db, `slack-pictures-posted.${h.project.id}`)).toEqual({
+      [passId]: off?.url,
+    });
     await push();
     await h.jobs.idle();
     expect(slack.uploads).toHaveLength(1);

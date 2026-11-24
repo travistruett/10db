@@ -108,7 +108,13 @@ function SlackPictures({ project }: { readonly project: ProjectDto }) {
           disabled={lack !== null || channels.data?.state === 'missing_scope'}
           value={current.channelId}
           nothingFoundMessage="No channel found. A private channel shows once @10db is invited to it."
-          error={channels.isError ? channels.error.message : undefined}
+          error={
+            channels.isError
+              ? channels.error.message
+              : current.enabled && lack === null && current.channelId === null
+                ? 'Pick a channel, or nothing is posted.'
+                : undefined
+          }
           onChange={(id) => {
             mutate({ channel: list.find((c) => c.id === id) ?? null });
           }}

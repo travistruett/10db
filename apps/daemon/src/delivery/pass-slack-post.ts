@@ -158,7 +158,14 @@ export function createPassSlackPost(deps: PassSlackPostDeps): PassSlackPost {
   return {
     announce(passId, url) {
       if (posting.has(passId)) return;
-      if (marksOf(deps.state.db, getPass(deps.state.db, passId).projectId)[passId] === url) return;
+      // Reading the pass and its marks can throw too; the pull request is open either way, so it never fails.
+      try {
+        if (marksOf(deps.state.db, getPass(deps.state.db, passId).projectId)[passId] === url)
+          return;
+      } catch (error) {
+        deps.logger.warn({ passId, error: String(error) }, 'pass pictures not checked for Slack');
+        return;
+      }
       posting.add(passId);
       void post(passId, url)
         .catch((error: unknown) => {
