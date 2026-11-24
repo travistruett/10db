@@ -10,6 +10,20 @@ Per card: 1, 2, 4 and 5 are Core; 3 is Core because it is the Codex writer's too
 
 ## Brief
 
+**Builder's steer (during the build).** The point is less mediation: 10db answers every question it can and
+routes only the rest. So, overriding the text below where they differ:
+- Every question goes to the writer first; it reaches the builder only when the writer can't answer from what
+  10db holds (or the cap, binding or re-check stops it). Only a judge `builder_question` at or above its floor
+  skips the writer. This holds without a judge too (lone replies), so a Claude-plan-only setup gets automated
+  answers.
+- The writer leans toward answering: it may explain the question, the options and their trade-offs, the
+  recommendation and why the lane asks; it declines only for a call only the builder can make or facts it lacks.
+  Its context adds the goal's description and the lane agent's last six messages.
+- At most five automated answers per card.
+- When a question does go to the builder, 10db says so in the thread ("I've passed this to Travis; they'll reply
+  here"), once per question.
+
+
 **What changes for you.**
 - A stakeholder can talk to 10db in the question's thread.
 - Today any reply that isn't a letter answers the card as "In Mark's words". That includes "what is this for?",
