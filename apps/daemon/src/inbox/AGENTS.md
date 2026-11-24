@@ -25,7 +25,7 @@
     is one `CASE` built from `CARD_RESOLUTION`, so change it and `inboxOutcome` together.
   - `person` keeps cards with a send to that person as a recipient; in Waiting, the send that is out now.
   - With no `sort`, Resolved is newest updated first, Waiting the longest out first (a card with no send
-    last), and Open most urgent then oldest. Ties go by id. A page past the last answers the last, with its
+    last), and Open most urgent then newest. Ties go by id. A page past the last answers the last, with its
     own number in `page`.
 - `GET /inbox/:id/context` answers an `InboxCardContextDto`: the last three `message` and `agent_message`
   items, oldest first, of the card's conversation (`inboxCardContext` in

@@ -34,6 +34,7 @@ import {
 import type { StateStore } from '../events';
 import { checkShotsOf, missingLines, type Pictures } from '../pictures';
 import { approvedMockupsOf } from '../plan-record';
+import type { ShapeImage } from '../sessions';
 import { ToolImages } from './tool-images';
 
 // Plan-in-sessions spec §4, "Design review": a lane whose task has an approved mock-up is offered
@@ -206,7 +207,7 @@ export function checkDesignTool(
         spent,
         limits,
       );
-      const images: { mediaType: string; data: string }[] = [];
+      const images: ShapeImage[] = [];
       for (const index of fits) {
         const c = candidates[index];
         if (c === undefined) continue;

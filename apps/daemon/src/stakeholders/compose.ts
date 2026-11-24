@@ -53,7 +53,9 @@ export function composeSlackQuestion(input: ComposeInput): { text: string; block
   const options = stakeholderOptions(card).slice(0, OPTION_LETTERS.length);
   const to = input.recipientNames.length <= 1 ? 'you' : joinNames(input.recipientNames);
   const subject = escapeMrkdwn(input.goalTitle ?? input.projectName);
-  const header = `${escapeMrkdwn(input.builderName)}'s 10db build of *${subject}* has a question for ${to}.`;
+  // The builder by first name, as a teammate would write it: "Travis has a quick question for you about *ampsio*."
+  const asker = escapeMrkdwn(input.builderName.trim().split(/\s+/)[0] ?? input.builderName);
+  const header = `${asker} has a quick question for ${to} about *${subject}*.`;
 
   const title = clipEscaped(card.title, TITLE_LIMIT, SECTION_LIMIT);
   const body = clipEscaped(card.body, BODY_LIMIT, Math.max(SECTION_LIMIT - title.length - 3, 0));
