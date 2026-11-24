@@ -15,7 +15,7 @@ export interface CopyTeardown {
   run(input: {
     readonly project: ProjectDto;
     readonly batchId: BatchId;
-    readonly copyId: CopyId | null;
+    readonly copyId: CopyId;
     readonly command: string;
     readonly signal: AbortSignal;
   }): Promise<GateResult>;

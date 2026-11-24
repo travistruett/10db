@@ -1066,6 +1066,12 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       // A revert a stopped Ship without it left on the branch is known only to the batch's left-out
       // card, so the run's session is told of it from there when the revert covers the run.
       const run = getWorkstream(db, id);
+      // A waiting landing the retry resets leaves its wait cards behind unless they are withdrawn.
+      const waitingBatch = ((): BatchDto | null => {
+        if (run.batchId === null) return null;
+        const b = getBatch(db, run.batchId);
+        return b.state === BatchState.Shipping && getLocalCopy(db, b.id)?.wait != null ? b : null;
+      })();
       const kept = run.batchId === null ? null : keptRevertOf(db, getBatch(db, run.batchId));
       const retried = retryWorkstream(
         ctx.state,
@@ -1073,6 +1079,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         note,
         kept?.covers.includes(id) ? kept.revert : null,
       );
+      if (waitingBatch !== null) withdrawWaitCards(ctx, waitingBatch.projectId, waitingBatch.id);
       if (retried.batchId !== null) reopen(retried.batchId);
       return retried;
     },
