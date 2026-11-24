@@ -121,24 +121,10 @@ export function useProjectFields(project: ProjectDto, shown: readonly (keyof Gen
   const dirty = checked.ok
     ? checked.patch !== null
     : JSON.stringify(values) !== JSON.stringify(generalValues(project));
-  console.log(
-    'DBG fields render',
-    JSON.stringify(values.previewCommand),
-    project.previewCommand,
-    checked.ok,
-    dirty,
-  );
 
   useJoinSaveBar({
     dirty,
     save: async () => {
-      console.log(
-        'DBG fields save',
-        checked.ok,
-        JSON.stringify(checked.ok ? checked.patch : null),
-        JSON.stringify(values.previewCommand),
-        project.previewCommand,
-      );
       if (!checked.ok) {
         setErrors(checked.errors);
         return 'Fix the fields marked in red.';

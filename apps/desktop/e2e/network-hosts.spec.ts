@@ -145,23 +145,7 @@ test('a builder allows two hosts, is refused localhost and removes them', async 
   await expect(page.getByText('Slack is turned off in this copy of 10db.')).toBeVisible();
   await expectAccessible(page, 'sharing');
 
-  // DEBUG (not for merge): repeat the Sharing -> App Preview -> clear -> Save step to catch the flake.
-  page.on('console', (m) => {
-    if (m.text().startsWith('DBG')) console.log(Date.now() % 100000, m.text());
-  });
-  for (let round = 0; round < 10; round += 1) {
-    console.log(Date.now() % 100000, 'TEST round', round);
-    await page.getByRole('link', { name: 'App Preview' }).click();
-    await preview.fill('');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(unsaved).toHaveCount(0);
-    await preview.fill('pnpm dev ');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(unsaved).toHaveCount(0);
-    await page.getByRole('link', { name: 'Sharing' }).click();
-    await pictures.click({ force: true });
-    await expect(page.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
-  }
+  // Put the preview command back for the specs that share this project.
   await page.getByRole('link', { name: 'App Preview' }).click();
   await preview.fill('');
   await page.getByRole('button', { name: 'Save', exact: true }).click();

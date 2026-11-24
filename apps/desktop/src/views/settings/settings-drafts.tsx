@@ -63,11 +63,9 @@ export function SettingsDrafts({ children }: { readonly children: ReactNode }) {
 
   const [registry] = useState<DraftRegistry>(() => ({
     attach: (id, draft) => {
-      console.log('DBG attach', id);
       drafts.current.set(id, draft);
     },
     detach: (id) => {
-      console.log('DBG detach', id);
       drafts.current.delete(id);
       setDirtyIds((ids) => {
         if (!ids.has(id)) return ids;
@@ -121,11 +119,6 @@ export function SettingsDrafts({ children }: { readonly children: ReactNode }) {
     setError(null);
     // The drafts are read as they are now, not as of the render this handler came from, so a Save pressed
     // as the bar appears still saves what the page holds.
-    console.log(
-      'DBG save',
-      JSON.stringify([...drafts.current.entries()].map(([k, d]) => [k, d.current.dirty])),
-      JSON.stringify([...dirtyIds]),
-    );
     const pending = [...drafts.current.values()].flatMap((draft) =>
       draft.current.dirty ? [draft.current.save()] : [],
     );
@@ -176,7 +169,6 @@ export function useJoinSaveBar(draft: Draft): void {
     };
   }, [registry, id]);
   useEffect(() => {
-    console.log('DBG setDirty', id, draft.dirty);
     registry?.setDirty(id, draft.dirty);
   }, [registry, id, draft.dirty]);
 }

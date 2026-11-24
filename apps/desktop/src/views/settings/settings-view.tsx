@@ -20,7 +20,9 @@ export function SettingsView() {
       <Panel section="settings" title="Settings">
         <SettingsNav />
       </Panel>
-      <Stack ref={ref}>
+      {/* The page fills the content area, so its save bar sits at the bottom edge and content that loads
+          in above it never moves the bar under a pointer. */}
+      <Stack ref={ref} flex="1 0 auto">
         {/* A page's edits are its own: another page starts with none. A page is keyed by its project, so
             its fields leave the bar when the project changes. */}
         <SettingsDrafts key={key}>
