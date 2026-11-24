@@ -32,6 +32,11 @@ export function replyWithLine(letters: readonly string[]): string {
     : `Reply with ${letters.join(', ')}, or your own words.`;
 }
 
+/** The invitation to ask questions in the thread, last in every question message. */
+export function questionsInviteLine(builderName: string): string {
+  return `Questions? Ask here: 10db answers what it can and passes the rest to ${escapeMrkdwn(builderName)}.`;
+}
+
 export function broughtInLine(broughtBy: string, names: readonly string[]): string {
   return `${escapeMrkdwn(broughtBy)} brought in ${joinNames(names)}. Here's the question:`;
 }

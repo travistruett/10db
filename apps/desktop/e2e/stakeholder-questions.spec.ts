@@ -73,8 +73,8 @@ function seedQuestion(project: string): void {
   );
 }
 
-/** Writes a task whose run waits on a question already sent to Mark; nothing reaches Slack. */
-function seedWaiting(project: string): void {
+/** Writes a task whose run waits on a question already sent to Mark, who has asked a question back; nothing reaches Slack. */
+function seedWaiting(project: string, asked: string): void {
   execFileSync(
     'pnpm',
     [
@@ -82,7 +82,12 @@ function seedWaiting(project: string): void {
       'tsx',
       'scripts/seed-waiting-question.ts',
       resolve(E2E_DATA, '10db.sqlite'),
-      JSON.stringify({ projectId: project, taskTitle: WAITING_TASK, area: 'greeting' }),
+      JSON.stringify({
+        projectId: project,
+        taskTitle: WAITING_TASK,
+        area: 'greeting',
+        asked: { text: asked },
+      }),
     ],
     { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
   );
@@ -215,19 +220,32 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expectAccessible(page, 'who answers, dark');
 });
 
-test('the Board says a task waits on Mark in Slack, without a yellow border', async ({
+test('a question Mark asked back reaches the Inbox, and the Board says the task waits on the builder', async ({
   page,
   request,
 }) => {
-  seedWaiting(await projectId(request));
+  seedWaiting(await projectId(request), 'what is this for?');
   await claudeIsInstalled(page);
   await page.goto('/board');
   const card = page.getByTestId('task-card').filter({ hasText: WAITING_TASK });
-  await expect(card).toContainText('Waiting on Mark Ellis in Slack · 3h');
-  // The builder is not asked for anything, so the card keeps its plain border.
-  await expect(card).not.toHaveAttribute('data-state-color', 'yellow');
-  await expect(card.getByTestId('state-dot')).toHaveAttribute('data-color', 'yellow');
+  // Mark has asked a question back, so the task waits on the builder and says where to answer.
+  await expect(card).toContainText('Waiting on you: answer in Inbox');
+  await expect(card).toHaveAttribute('data-state-color', 'yellow');
   await expectAccessible(page, 'board, waiting on someone, dark');
+
+  // Mark's question came back to the Inbox: the words are quoted, and with Slack off the reply box is disabled
+  // and says why. Answering the card with an option resolves it and it leaves the list.
+  await page.goto('/inbox?q=Which%20retry%20window');
+  const row = page.getByRole('option', { name: /Which retry window/ });
+  await expect(row).toBeVisible();
+  await row.click();
+  await expect(page.getByText('Mark Ellis asked', { exact: true })).toBeVisible();
+  await expect(page.getByText('what is this for?', { exact: false })).toBeVisible();
+  await expect(page.getByLabel('Reply To Mark')).toBeDisabled();
+  await expect(page.getByText('Slack is off on this daemon', { exact: false })).toBeVisible();
+  await page.getByRole('radio', { name: /Seven days/ }).check();
+  await page.getByRole('button', { name: 'Send Answer' }).click();
+  await expect(page.getByRole('option', { name: /Which retry window/ })).toHaveCount(0);
 
   // The run is a seeded one with no session behind it; cancel it so later specs see no stray lane.
   const runs = z
