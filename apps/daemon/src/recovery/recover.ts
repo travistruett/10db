@@ -47,6 +47,7 @@ import {
   raisePlanApproval,
   untakenMessages,
   withUndelivered,
+  yieldClaimsWhileWaiting,
 } from '../runner';
 import { recoverPage } from './pass-pages';
 import { failStep } from '../team';
@@ -207,6 +208,8 @@ export async function recoverOnStartup(opts: {
       opts.state.write((ctx) => {
         patchWorkstream(ctx, ws.id, null, { nextAction });
       });
+      // A task waiting on a person does not hold its claims across the restart either.
+      await yieldClaimsWhileWaiting(opts, ws.id, open.id).catch(() => false);
       report.parked.push(ws.id);
       continue;
     }

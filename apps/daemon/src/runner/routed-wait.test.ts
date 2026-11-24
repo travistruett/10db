@@ -1,5 +1,7 @@
-import { RoutedBy, type WorkstreamId } from '@10db/contracts';
+import { ClaimKind, RoutedBy, type WorkstreamId } from '@10db/contracts';
 import {
+  activeClaims,
+  claimConflict,
   getWorkstream,
   insertPerson,
   listInbox,
@@ -376,5 +378,34 @@ describe('a task cancelled while its question waits for triage', () => {
     });
     const after = listInbox(engine.store.db, {}).find((c) => c.id === card.id);
     expect(after).toMatchObject({ state: 'CANCELLED', routedBy: 'builder', assignees: ['me'] });
+  });
+});
+
+describe('a task waiting on a person', () => {
+  it('lets go of its claims so another task can take the area, and asks for them again on the answer', async () => {
+    engine = await createTestEngine(oneAsk(askHuman('product', 'op-yield-ask-1')));
+    routeTo('product', ['mark']);
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    await engine.runner.idle();
+
+    await waitFor(() => (activeClaims(engine.store.db, workstream.id).length === 0 ? true : false));
+    const other = engine.addTask('Beta');
+    const ask = {
+      projectId: engine.project.id,
+      workstreamId: other.workstream.id,
+      requests: [{ kind: ClaimKind.Area, name: 'api' }],
+    };
+    expect(claimConflict(engine.store.db, ask)).toBeNull();
+
+    // Beta takes the area; the answer queues Alpha, which then waits for it like any queued task.
+    engine.launch(other.workstream.id);
+    engine.inbox.answer(card.id, { choice: 'Yes' });
+    expect(ws(workstream.id).state).toBe('QUEUED');
+    expect(claimConflict(engine.store.db, { ...ask, workstreamId: workstream.id })).toMatchObject({
+      name: 'api',
+      heldBy: other.workstream.id,
+    });
   });
 });
