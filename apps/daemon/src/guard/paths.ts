@@ -129,12 +129,21 @@ const fold = foldPathCase;
 
 const SECRET_FILE_PREFIX = foldPathCase('.env');
 
+/** The endings that mark a `.env*` name as a template: placeholders, committed to be shared. */
+const TEMPLATE_ENDINGS = ['.example', '.sample', '.template'].map(foldPathCase);
+
 /**
  * Whether a file name is one the sandbox treats as secret: `.env` and every name after it, folded the way
- * the file system folds names, so `.ENV` is caught where it is the same file.
+ * the file system folds names, so `.ENV` is caught where it is the same file. A template (`.env.example`,
+ * `.env.local.sample`, `.env.template`) is not one: a project's tools read it where `.env` is closed
+ * (`decisions/2026-11-24-an-env-template-is-not-a-secret.md`).
  */
 export function isSecretFileName(name: string): boolean {
-  return foldPathCase(name).startsWith(SECRET_FILE_PREFIX);
+  const folded = foldPathCase(name);
+  return (
+    folded.startsWith(SECRET_FILE_PREFIX) &&
+    !TEMPLATE_ENDINGS.some((ending) => folded.endsWith(ending))
+  );
 }
 
 /**

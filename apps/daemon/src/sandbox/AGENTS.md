@@ -6,7 +6,7 @@
   a pass's `10db-read-<hex>` dir (`secret-reads.ts`), where the broker writes a copy of a checkout secret the
   builder allowed a Read of, since Claude Code's deny rule on the secret stays;
   `plugin-wrapper.ts`: a wrapper per plugin linking `skills`, `agents` and `commands` by folded name and
-  re-emitting `hooks/hooks.json` with each command started in the wrapper, never MCP or LSP servers). Every `.env*` file and folder in an opened read, and what a link in a `.env*` folder
+  re-emitting `hooks/hooks.json` with each command started in the wrapper, never MCP or LSP servers). Every `.env*` file and folder in an opened read but a template (`.env.example`, `.sample`, `.template`: `decisions/2026-11-24-an-env-template-is-not-a-secret.md`), and what a link in a `.env*` folder
   leads to, is denied to the kernel, Claude Code's rules and the file-access judge. In the gate (srt) a `.env*` regular file in the checkout, or a link to one, answers a stat but not a read, rename or removal (`secret-stat.ts`, `denyReadData` of the patched srt, `patches/`: `decisions/2026-11-24-a-checkouts-env-file-answers-a-stat-but-not-a-read.md`), so a Makefile that lists `.env` as a prerequisite runs; lanes (Claude Code's bundled srt, Codex's `deny`) still close it down to a stat. Only the lane profile gets
   setup reads, never a gate's or a repo MCP server's. `test/setup-reads.seatbelt.test.ts` holds it against the
   kernel.

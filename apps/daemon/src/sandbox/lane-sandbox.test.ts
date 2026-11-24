@@ -1979,6 +1979,18 @@ describe.skipIf(SANDBOXED)('secretFilesIn', () => {
     },
   );
 
+  it('leaves a .env template readable and keeps every other .env* name closed', async () => {
+    const closed = [
+      writeIn(checkout, '.env'),
+      writeIn(checkout, '.env.example.local'),
+      writeIn(checkout, 'apps/a/.env.local'),
+    ];
+    for (const template of ['.env.example', 'apps/a/.env.local.sample', 'apps/a/.env.template']) {
+      writeIn(checkout, template);
+    }
+    expect(await secretFilesIn(checkout)).toEqual(closed.sort());
+  });
+
   it('lets the event loop run while it walks', async () => {
     const deepest = writeIn(checkout, 'a/b/c/d/e/.env');
     const order: string[] = [];
