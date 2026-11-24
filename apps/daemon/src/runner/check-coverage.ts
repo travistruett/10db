@@ -1,5 +1,10 @@
-/** Flags that move a package manager or make into a folder before it runs. */
-const DIR_FLAGS = ['--dir', '--prefix', '--cwd', '-C'];
+import { posix } from 'node:path';
+
+/** Flags that move a package manager or make into a folder before it runs, whatever the tool. */
+const DIR_FLAGS = ['--dir', '--prefix', '--cwd'];
+
+/** Tools whose `-C` moves them into a folder (grep's and rg's `-C` is a count of context lines). */
+const SHORT_DIR_TOOLS = new Set(['git', 'make', 'pnpm']);
 
 /** What a step's check covers of a change, and what it left out. */
 export interface CheckCoverage {
@@ -7,43 +12,68 @@ export interface CheckCoverage {
   readonly unchecked: readonly string[];
 }
 
-function normalized(dir: string): string {
-  return dir.replace(/^(\.\/)+/, '').replace(/\/+$/, '');
+/** The word without its quotes; null when the shell would expand it into something unknown. */
+function plainWord(word: string): string | null {
+  const quoted = /^(["'])(.*)\1$/.exec(word);
+  const text = quoted?.[2] ?? word;
+  return /[$`*?[\]{}~]/.test(text) ? null : text;
 }
 
-/** The folder one command segment runs in, or null when it names none (it runs from the root). */
-function folderOf(tokens: readonly string[], inherited: string | null): string | null {
+/** `dir` taken from `cwd` (checkout-relative, '' for the root), or null when it leaves the checkout. */
+function resolved(cwd: string, dir: string, root: string | null): string | null {
+  let relative = dir;
+  if (posix.isAbsolute(dir)) {
+    if (root === null) return null;
+    relative = posix.relative(root, dir);
+  }
+  const joined = posix.normalize(posix.join(cwd, relative));
+  const clean = joined === '.' ? '' : joined.replace(/\/+$/, '');
+  return clean === '..' || clean.startsWith('../') ? null : clean;
+}
+
+/** The folder one command segment runs in ('' for the root), or null when it can't be told. */
+function folderOf(tokens: readonly string[], cwd: string, root: string | null): string | null {
+  const shortFlag = SHORT_DIR_TOOLS.has(tokens[0] ?? '');
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i] ?? '';
-    for (const flag of DIR_FLAGS) {
-      if (token === flag) return normalized(tokens[i + 1] ?? '');
-      if (token.startsWith(`${flag}=`)) return normalized(token.slice(flag.length + 1));
-    }
+    const flag = [...DIR_FLAGS, ...(shortFlag ? ['-C'] : [])].find(
+      (f) => token === f || token.startsWith(`${f}=`),
+    );
+    if (flag === undefined) continue;
+    const value = plainWord(token === flag ? (tokens[i + 1] ?? '') : token.slice(flag.length + 1));
+    return value === null || value === '' ? null : resolved(cwd, value, root);
   }
-  return inherited;
+  return cwd;
 }
 
 /**
  * The folders a check command covers, and the changed paths outside them. Null when the command
  * makes no claim to a folder: a segment that runs from the root (`make lint`, an unknown tool) covers
- * the whole repository, so nothing is left out. A `cd <dir> &&` or a `--dir`, `--prefix`, `--cwd` or
- * `-C` flag scopes a segment to that folder.
+ * the whole repository, so nothing is left out, and a folder the command names in a form that can't
+ * be read (a variable, a glob, a place outside the checkout) is no claim either. A `cd <dir> &&`
+ * moves the segments after it, and a `--dir`, `--prefix`, `--cwd` or (for git, make and pnpm) `-C`
+ * flag moves its own segment, from wherever the cds left it. `root` is the checkout, which makes an
+ * absolute folder checkout-relative.
  */
 export function checkCoverage(
   command: string,
   changedPaths: readonly string[],
+  root: string | null = null,
 ): CheckCoverage | null {
   const folders = new Set<string>();
-  let cwd: string | null = null;
+  let cwd = '';
   for (const segment of command.split(/&&|\|\||;|\n/)) {
     const tokens = segment.trim().split(/\s+/).filter(Boolean);
     if (tokens.length === 0) continue;
-    if (tokens[0] === 'cd' && tokens[1] !== undefined) {
-      cwd = normalized(tokens[1]);
+    if (tokens[0] === 'cd') {
+      const target = plainWord(tokens[1] ?? '');
+      const next = target === null || target === '' ? null : resolved(cwd, target, root);
+      if (next === null) return null;
+      cwd = next;
       continue;
     }
-    const folder = folderOf(tokens, cwd);
-    if (folder === null || folder === '' || folder === '.' || folder.startsWith('..')) return null;
+    const folder = folderOf(tokens, cwd, root);
+    if (folder === null || folder === '') return null;
     folders.add(folder);
   }
   if (folders.size === 0) return null;
