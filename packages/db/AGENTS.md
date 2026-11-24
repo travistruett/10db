@@ -50,3 +50,4 @@ only process that writes the database.
   project's notices for a key. No index was added: medians of 20 on 250,000 events, in ms, dense (10,000 notices) and
   sparse (20): first page 2.21 and 24.76, middle page 1.13 and 4.16, one project 4.01 and 0.17, one task 0.19 and
   0.07. A read past 50 ms would need an index, which is a migration.
+- Separate copies (`schema.ts` `local_copies`, `store/local-copies.ts`): a batch is a local copy exactly when it has a journal row (`isLocalCopy`), written in the cut's transaction with the pinned teardown command. `copyIdOf` is the one place the id is derived and is stored, never recomputed. `unfinishedCopyOf` is the one-copy-at-a-time rule (CUTTING, OPEN, SHIPPING or FAILED), `isLivePromoting` and a wait's `retryAt` keep a parked landing out of the in-flight count, and `patchProject` refuses a `delivery` change while a copy is unfinished.
