@@ -12,7 +12,9 @@ import {
   getBatch,
   getProject,
   getTask,
+  isLocalCopy,
   patchBatch,
+  patchLocalCopy,
   transitionBatch,
 } from '@10db/db';
 import { existsAsEntry, WORKTREE_LOCK_PREFIX } from '../git';
@@ -21,6 +23,7 @@ import { batchBranchName } from './branch-name';
 import { forTasks, startCards, worktreeCards, type CardText } from './cards';
 import { stopCiFixing } from './ci-stop';
 import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
+import { teardownRef } from './copy-teardown-ref';
 import { unmergedDependencies } from './deps';
 import { noticeUnbuilt, recordInstall } from './installed-lockfile';
 import { landingWarnings, missingLandingBranch, type SameStart } from './landing';
@@ -67,9 +70,11 @@ export async function cutWorktree(
   if (batch.ciFixOf !== null && fix === null)
     throw new InvalidError(`Fix batch "${batch.title}" has no branch or failing head to cut on`);
   const branch = fix?.branch ?? batchBranchName(batch.title, batch.id);
-  const made: { worktree: boolean; branch: boolean; base: string | null } = {
+  const local = isLocalCopy(db, batchId);
+  const made: { worktree: boolean; branch: boolean; teardownRef: boolean; base: string | null } = {
     worktree: false,
     branch: false,
+    teardownRef: false,
     base: null,
   };
   const log = (error: unknown): void => {
@@ -83,6 +88,7 @@ export async function cutWorktree(
   const refuse = async (card: CardText): Promise<void> => {
     progress.refused = true;
     if (made.worktree) await ctx.git.removeWorktree(main, path).catch(log);
+    if (made.teardownRef) await ctx.git.deleteKeptRef(main, teardownRef(batchId)).catch(log);
     if (made.branch && made.base)
       await ctx.git.deleteBranchIfAt(main, branch, made.base).catch(log);
     ctx.state.write((w) => {
@@ -99,67 +105,80 @@ export async function cutWorktree(
   const stopped = (): boolean => signal.aborted;
   if (stopped()) return;
   try {
-    if ((await ctx.git.remoteUrl(main, 'origin')) === null) {
-      await refuse(startCards.noOrigin(project));
-      return;
-    }
-    // The repository gh is told about comes from origin's pinned push URL; one added or changed
-    // since the pin is refused with a card that offers it for trust.
-    const repo = githubRepoOf(await ctx.git.pinnedPushUrl(main));
-    if (repo === null) {
-      await refuse(startCards.repoUnknown(project));
-      return;
-    }
-    try {
-      const missing = await missingLandingBranch(ctx, project, batch, signal);
-      if (missing) {
-        await refuse(missing);
-        return;
+    /** The pull-request-only checks; the repository gh is told about, or null when the cut stops here. */
+    const pullRequestChecks = async (): Promise<{ repo: string } | null> => {
+      if ((await ctx.git.remoteUrl(main, 'origin')) === null) {
+        await refuse(startCards.noOrigin(project));
+        return null;
       }
-      await ctx.git.fetch(main, batch.baseBranch, networkCall(ctx, signal));
-    } catch (error) {
-      if (!stopped()) await refuse(startCards.fetchFailed(batch.baseBranch, error));
-      return;
-    }
-    // Not a refusal: a notice on the batch's tasks names a landing branch that is behind the base
-    // or that nothing else uses.
-    for (const notice of await landingWarnings(
-      ctx,
-      project,
-      batch,
-      plans.keys(),
-      signal,
-      sameStart,
-    )) {
-      if (stopped()) break;
+      // The repository gh is told about comes from origin's pinned push URL; one added or changed
+      // since the pin is refused with a card that offers it for trust.
+      const repo = githubRepoOf(await ctx.git.pinnedPushUrl(main));
+      if (repo === null) {
+        await refuse(startCards.repoUnknown(project));
+        return null;
+      }
       try {
-        showNotice(ctx.state, batchId, notice);
+        const missing = await missingLandingBranch(ctx, project, batch, signal);
+        if (missing) {
+          await refuse(missing);
+          return null;
+        }
+        await ctx.git.fetch(main, batch.baseBranch, networkCall(ctx, signal));
       } catch (error) {
-        ctx.logger.warn({ batchId, err: error }, 'landing notice not written');
+        if (!stopped()) await refuse(startCards.fetchFailed(batch.baseBranch, error));
+        return null;
       }
+      // Not a refusal: a notice on the batch's tasks names a landing branch that is behind the base
+      // or that nothing else uses.
+      for (const notice of await landingWarnings(
+        ctx,
+        project,
+        batch,
+        plans.keys(),
+        signal,
+        sameStart,
+      )) {
+        if (stopped()) break;
+        try {
+          showNotice(ctx.state, batchId, notice);
+        } catch (error) {
+          ctx.logger.warn({ batchId, err: error }, 'landing notice not written');
+        }
+      }
+      const call = ghCall(ctx, signal);
+      try {
+        await ctx.gh.authStatus(call);
+      } catch (error) {
+        if (!stopped()) await refuse(startCards.ghUnavailable(error));
+        return null;
+      }
+      const tasks = [...plans.keys()].map((id) => getTask(db, id));
+      const unmerged = await unmergedDependencies({
+        db,
+        gh: ctx.gh,
+        call,
+        tasks,
+        inBatch: new Set(plans.keys()),
+        batchId,
+      });
+      if (stopped()) return null;
+      if (unmerged.length > 0) {
+        await refuse(startCards.unmergedDependencies(unmerged));
+        return null;
+      }
+      return { repo };
+    };
+    // A local copy is cut from the local base branch: it has no origin, fetch or gh to check, and no repository.
+    let repo: string | null = null;
+    if (!local) {
+      const checked = await pullRequestChecks();
+      if (checked === null) return;
+      repo = checked.repo;
     }
-    const call = ghCall(ctx, signal);
-    try {
-      await ctx.gh.authStatus(call);
-    } catch (error) {
-      if (!stopped()) await refuse(startCards.ghUnavailable(error));
-      return;
-    }
-    const tasks = [...plans.keys()].map((id) => getTask(db, id));
-    const unmerged = await unmergedDependencies({
-      db,
-      gh: ctx.gh,
-      call,
-      tasks,
-      inBatch: new Set(plans.keys()),
-      batchId,
-    });
-    if (stopped()) return;
-    if (unmerged.length > 0) {
-      await refuse(startCards.unmergedDependencies(unmerged));
-      return;
-    }
-    const base = `refs/remotes/origin/${batch.baseBranch}`;
+    const base = local
+      ? `refs/heads/${batch.baseBranch}`
+      : `refs/remotes/origin/${batch.baseBranch}`;
     const filters = await ctx.git.filtersIn(main, base);
     if (filters.length > 0) {
       await refuse(startCards.usesFilters(project, filters));
@@ -207,6 +226,17 @@ export async function cutWorktree(
       return;
     }
     made.worktree = true;
+    if (local) {
+      // Keeps the commit the copy's databases are made by reachable until the copy is retired; a
+      // cut made again overwrites it.
+      try {
+        await ctx.git.keepRef(main, teardownRef(batchId), baseSha);
+        made.teardownRef = true;
+      } catch (error) {
+        if (!stopped()) await refuse(startCards.notStarted(error));
+        return;
+      }
+    }
     // Never a fix batch's: its branch is the pull request's and outlives a refused cut.
     made.branch = fix === null;
     made.base = baseSha;
@@ -259,7 +289,8 @@ export async function cutWorktree(
     if (installed.kind === 'installed' && !installed.startedOver && (!seed || installMakes))
       noticeUnbuilt(ctx, batchId, path, seed ? 'made_by_install' : 'seed_skipped');
     ctx.state.write((w) => {
-      patchBatch(w, batchId, { branch, baseSha, repo });
+      patchBatch(w, batchId, { branch, baseSha, ...(repo === null ? {} : { repo }) });
+      if (local) patchLocalCopy(w, batchId, { teardownSha: baseSha });
       transitionBatch(w, batchId, { to: BatchState.Open, reason: 'worktree cut' });
       forgetStartSiblings(w, batchId);
     });

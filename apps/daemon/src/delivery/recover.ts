@@ -5,6 +5,7 @@ import {
   getBatch,
   getBatchRow,
   getProject,
+  isLocalCopy,
   listBatches,
   listCheckoutReturns,
   listLiveWorktrees,
@@ -137,8 +138,11 @@ export async function recoverBatches(deps: {
       if (tip === null) return true;
       if ((await deps.git.branchInUse(repo, branch)) !== null) return false;
       // Only a branch with nothing of its own on it goes: the cut made it and never opened the batch.
-      if (!(await deps.git.isAncestor(repo, tip, `refs/remotes/origin/${batch.baseBranch}`)))
-        return false;
+      // A local copy is cut from the local base branch; a pull request's from origin's.
+      const base = isLocalCopy(db, batch.id)
+        ? `refs/heads/${batch.baseBranch}`
+        : `refs/remotes/origin/${batch.baseBranch}`;
+      if (!(await deps.git.isAncestor(repo, tip, base))) return false;
       return await deps.git.deleteBranchIfAt(repo, branch, tip);
     } catch (error) {
       deps.logger.warn({ batchId: batch.id, err: message(error) }, 'cut left in git not cleared');

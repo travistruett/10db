@@ -33,6 +33,7 @@ import {
 import { realPathOf } from '../guard';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
+import { COPY_REFS_PREFIX, batchOfTeardownRef } from './copy-teardown-ref';
 import { looseWork } from './build-output';
 import { keptWorktreeKey, worktreeCards } from './cards';
 import type { ChatMergedCheck } from './chat-worktree-merged';
@@ -271,12 +272,25 @@ async function sweepChatEntry(
   return true;
 }
 
+/** Deletes the teardown refs of local copies whose batch is gone (a cut that never opened, a start deleted). */
+async function dropOrphanedTeardownRefs(deps: SweepDeps, project: ProjectDto): Promise<void> {
+  try {
+    for (const ref of await deps.git.keptRefs(project.repoPath, COPY_REFS_PREFIX)) {
+      const batchId = batchOfTeardownRef(ref);
+      if (batchId !== null && findBatch(deps.state, batchId) === undefined)
+        await deps.git.deleteKeptRef(project.repoPath, ref);
+    }
+  } catch (error) {
+    deps.logger.warn({ projectId: project.id, err: message(error) }, 'copy refs not swept');
+  }
+}
+
 /** Sweeps one project's main checkout; resolves with the paths removed. */
 async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<string[]> {
   const main = project.repoPath;
   const swept: string[] = [];
-  // A local project has no batch worktrees, only a chat's.
-  const batches = project.delivery === Delivery.PullRequest;
+  // A local project has batch worktrees only while it allows separate copies, and a chat's always.
+  const batches = project.delivery === Delivery.PullRequest || project.localCopies;
   for (const entry of await deps.git.listWorktrees(main)) {
     if (lockedOwner(entry)?.kind === 'chat') {
       try {
@@ -341,6 +355,7 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
     ).catch((error: unknown) => {
       deps.logger.warn({ projectId: project.id, err: message(error) }, 'task starts not swept');
     });
+  if (batches) await dropOrphanedTeardownRefs(deps, project);
   await deps.git.pruneWorktrees(main);
   return swept;
 }
