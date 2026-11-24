@@ -52,8 +52,13 @@ export function SettingsDrafts({ children }: { readonly children: ReactNode }) {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const dirty = dirtyIds.size > 0;
   useReportUnsaved(dirty);
-  // An edit ends the last save's Saved, and edits undone by hand end its refusal.
-  if (dirty && saved) setSaved(false);
+  // A new edit ends the last save's Saved, and edits undone by hand end its refusal. Only a new one:
+  // the page reads as changed for a moment after its own Save, until the saved values arrive.
+  const [wasDirty, setWasDirty] = useState(dirty);
+  if (wasDirty !== dirty) {
+    setWasDirty(dirty);
+    if (dirty && saved && !saving) setSaved(false);
+  }
   if (!dirty && !saving && error !== null) setError(null);
 
   const [registry] = useState<DraftRegistry>(() => ({

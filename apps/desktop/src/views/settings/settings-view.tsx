@@ -21,8 +21,9 @@ export function SettingsView() {
         <SettingsNav />
       </Panel>
       <Stack ref={ref}>
-        {/* A page's edits are its own: another page or project starts with none. */}
-        <SettingsDrafts key={`${key}:${project?.id ?? ''}`}>
+        {/* A page's edits are its own: another page starts with none. A page is keyed by its project, so
+            its fields leave the bar when the project changes. */}
+        <SettingsDrafts key={key}>
           <SectionBody sectionKey={key} project={project} />
         </SettingsDrafts>
       </Stack>
