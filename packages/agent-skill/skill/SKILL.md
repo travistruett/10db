@@ -83,8 +83,9 @@ Several tasks from one conversation: create each, then report them together.
 ## Edit, remove, start
 
 - **Edit** an open task's title, why, description, criteria, rigor or kinds with a patch file holding only
-  the fields that change. Areas and dependencies can't be edited: remove the task and create it again
-  while it hasn't started.
+  the fields that change. Areas can be edited too (`"areas": [...]`, the project's names) while none of
+  the task's runs holds a claim: not while it runs. Dependencies can't be edited: remove the task and
+  create it again while it hasn't started.
 - **Remove** works only on a task that has never started and that no open task depends on. A task
   that has run is cancelled from its batch on the Board (Abandon) instead; the daemon's refusal says so.
 - **Start** only when the user asks. It starts work and spends usage, as the card menu's Start does.

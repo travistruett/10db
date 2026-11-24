@@ -5,6 +5,7 @@ import {
   NEW_TASK_NO_CRITERIA,
   PASS_FOLDER_WAIT_NOTICE_KEY,
   reviewRounds,
+  BoardStatus,
   SYSTEM_COLUMN_LABEL,
   TaskStatus,
   WorkstreamState,
@@ -142,8 +143,8 @@ export interface TaskDrawerProps {
    */
   readonly pullRequestBase?: string;
   /**
-   * The project's area names. With them, a task that has never started can have its areas changed
-   * here; without them, or once it has started, they show as they are.
+   * The project's area names. With them, an open task that isn't running can have its areas changed
+   * here; without them, or while it runs, they show as they are.
    */
   readonly areaNames?: readonly string[];
   /**
@@ -205,9 +206,12 @@ export function TaskDrawer({
       kindsEdit.some((k) => !task.kinds.some((t) => t.key === k.key && t.source === k.source)));
   const [modelSetting, setModelSetting] = useState<ModelSetting | null>(task.modelSetting);
   const modelSettingChanged = !sameSetting(modelSetting, task.modelSetting);
-  // Areas are the claims the lane takes when it starts, so they change only before then.
+  // Areas are the claims each launch takes, so they change between lanes; the daemon refuses while a
+  // run still holds them.
   const areasEditable =
-    areaNames !== undefined && task.workstreamId === null && task.status === TaskStatus.Open;
+    areaNames !== undefined &&
+    task.status === TaskStatus.Open &&
+    task.boardStatus !== BoardStatus.InProgress;
   const [areas, setAreas] = useState<string[]>([...task.areas]);
   const areasChanged =
     areasEditable &&

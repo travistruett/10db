@@ -13,7 +13,7 @@ import {
 import { findToolOp, insertToolOp, replaceToolOp } from './tool-ops';
 import { getSession, getSessionByProviderId, insertSession, markSessionStarted } from './sessions';
 import type { Store } from './store';
-import { insertTask } from './tasks';
+import { insertTask, patchTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import {
   acquireLease,
@@ -235,6 +235,23 @@ describe('sessions', () => {
 });
 
 describe('claims', () => {
+  it("changes a started task's areas only while none of its runs holds a claim", () => {
+    const { project, task, ws } = seedWorkstream('A', ['api']);
+    store.write((ctx) =>
+      acquireClaims(ctx, {
+        projectId: project.id,
+        workstreamId: ws.id,
+        requests: claimRequestsForTask(task, project),
+        leaseExpiresAt: '2026-10-13T12:01:00.000Z',
+      }),
+    );
+    const retag = () => store.write((ctx) => patchTask(ctx, task.id, { areas: ['ui'] })).value;
+    expect(retag).toThrow(ConflictError);
+
+    store.write((ctx) => releaseClaims(ctx, ws.id));
+    expect(retag().areas).toEqual(['ui']);
+  });
+
   it('is all-or-nothing and reports who holds a conflicting claim', () => {
     const a = seedWorkstream('A', ['api']);
     const b = seedWorkstream('B', ['api', 'ui'], a.project);
