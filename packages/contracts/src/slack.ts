@@ -232,7 +232,7 @@ export const ProjectSlackSharingDto = z.strictObject({
   channelId: z.string().min(1).nullable(),
   channelName: z.string().nullable(),
   /** When the switch was turned on, which tasks' pictures are posted from; absent on a setting saved before it. */
-  enabledAt: z.string().nullable().optional(),
+  enabledAt: z.iso.datetime().nullable().optional(),
 });
 export type ProjectSlackSharingDto = z.infer<typeof ProjectSlackSharingDto>;
 

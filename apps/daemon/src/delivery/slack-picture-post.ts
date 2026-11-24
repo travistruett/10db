@@ -245,11 +245,14 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
       (s) => s.kind === ScreenKind.After,
     );
     const newest = newestScreen?.id ?? null;
+    // Only what finished after sharing was turned on goes out; an unreadable or missing time posts nothing.
+    const since = target.enabledAt === null ? Number.NaN : Date.parse(target.enabledAt);
     if (
       task.status !== TaskStatus.Done ||
       newestScreen === undefined ||
-      target.enabledAt === null ||
-      Date.parse(newestScreen.createdAt) < Date.parse(target.enabledAt) ||
+      !Number.isFinite(since) ||
+      !(Date.parse(newestScreen.createdAt) >= since) ||
+      !(Date.parse(task.updatedAt) >= since) ||
       marksOf(deps.state.db, project.id)[taskId] === newest
     )
       return settle(project);
@@ -302,22 +305,23 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
     });
   }
 
-  type Attempt = 'posted' | 'nothing' | 'busy' | 'failed';
+  const Attempt = { Posted: 'posted', Nothing: 'nothing', Busy: 'busy', Failed: 'failed' } as const;
+  type Attempt = (typeof Attempt)[keyof typeof Attempt];
 
   async function attemptTask(
     taskId: TaskId,
     itemId: InboxItemId | null,
     repeat: boolean,
   ): Promise<Attempt> {
-    if (postingTasks.has(taskId)) return 'busy';
+    if (postingTasks.has(taskId)) return Attempt.Busy;
     postingTasks.add(taskId);
     let marked: string | null = null;
-    let outcome: Attempt = 'nothing';
+    let outcome: Attempt = Attempt.Nothing;
     try {
       marked = await postTask(taskId, itemId);
-      if (marked !== null) outcome = 'posted';
+      if (marked !== null) outcome = Attempt.Posted;
     } catch (error) {
-      outcome = 'failed';
+      outcome = Attempt.Failed;
       try {
         failTask(taskId, error, repeat);
       } catch (inner) {
@@ -335,6 +339,27 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
       }
     }
     return outcome;
+  }
+
+  /** The retry run under way, if any. */
+  let retrying: Promise<void> | null = null;
+
+  async function runRetries(): Promise<void> {
+    let items;
+    try {
+      items = listOpenByFoldKeyPrefix(deps.state.db, `${FOLD_PREFIX}tsk`);
+    } catch (error) {
+      deps.logger.warn({ error: String(error) }, 'task pictures retries not listed');
+      return;
+    }
+    const stopped = new Set<ProjectId>();
+    for (const item of items) {
+      if (stopped.has(item.projectId)) continue;
+      const taskId = TaskId.safeParse(item.foldKey.slice(FOLD_PREFIX.length));
+      if (!taskId.success) continue;
+      if ((await attemptTask(taskId.data, item.id, true)) === Attempt.Failed)
+        stopped.add(item.projectId);
+    }
   }
 
   return {
@@ -366,39 +391,38 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
       void attemptTask(taskId, null, false);
     },
 
-    async retryTasks() {
-      let items;
-      try {
-        items = listOpenByFoldKeyPrefix(deps.state.db, `${FOLD_PREFIX}tsk`);
-      } catch (error) {
-        deps.logger.warn({ error: String(error) }, 'task pictures retries not listed');
-        return;
-      }
-      const stopped = new Set<ProjectId>();
-      for (const item of items) {
-        if (stopped.has(item.projectId)) continue;
-        const taskId = TaskId.safeParse(item.foldKey.slice(FOLD_PREFIX.length));
-        if (!taskId.success) continue;
-        if ((await attemptTask(taskId.data, item.id, true)) === 'failed')
-          stopped.add(item.projectId);
-      }
+    retryTasks() {
+      // A tick or a save during a run waits for that run.
+      retrying ??= runRetries().finally(() => {
+        retrying = null;
+      });
+      return retrying;
     },
 
     catchUp(sinceMs) {
-      try {
-        for (const project of listProjects(deps.state.db))
-          for (const task of listTasks(deps.state.db, project.id))
-            if (
-              task.status === TaskStatus.Done &&
-              task.passId == null &&
-              Date.parse(task.updatedAt) >= sinceMs &&
-              newestAfterOf(task.id) !== null &&
-              marksOf(deps.state.db, project.id)[task.id] !== newestAfterOf(task.id)
-            )
-              void attemptTask(task.id, null, false);
-      } catch (error) {
-        deps.logger.warn({ error: String(error) }, 'task pictures not caught up for Slack');
-      }
+      void (async () => {
+        try {
+          // Tasks with an open failure item belong to `retryTasks`.
+          const held = new Set(
+            listOpenByFoldKeyPrefix(deps.state.db, `${FOLD_PREFIX}tsk`).map((i) => i.foldKey),
+          );
+          for (const project of listProjects(deps.state.db))
+            for (const task of listTasks(deps.state.db, project.id)) {
+              const newest = newestAfterOf(task.id);
+              if (
+                task.status === TaskStatus.Done &&
+                task.passId == null &&
+                Date.parse(task.updatedAt) >= sinceMs &&
+                newest !== null &&
+                marksOf(deps.state.db, project.id)[task.id] !== newest &&
+                !held.has(foldKeyOf(task.id))
+              )
+                await attemptTask(task.id, null, false);
+            }
+        } catch (error) {
+          deps.logger.warn({ error: String(error) }, 'task pictures not caught up for Slack');
+        }
+      })();
     },
   };
 }

@@ -702,25 +702,48 @@ describe('Pictures to Slack', () => {
     if (post === null) throw new Error('no poster');
     const { people } = await openedPass();
     picture(people, 'after', '/people', 'people after');
+    const done = (task: TaskDto) => {
+      h.state.write((w) => {
+        setTaskStatus(w, task.id, 'done');
+      });
+    };
+    done(people);
     const task = h.addTask('Billing page', { areas: ['settings'] });
     picture(task, 'before', '/settings', 'billing before');
     picture(task, 'after', '/settings', 'billing after');
-    h.state.write((w) => {
-      setTaskStatus(w, task.id, 'done');
-    });
+    done(task);
+    // A refused join turns any wrong post into an Inbox item, so each gate below fails loudly.
+    slack.joinError = 'method_not_supported_for_channel_type';
+    const settled = () => new Promise<void>((resolve) => setImmediate(resolve));
+    const doneTask = (title: string): TaskDto => {
+      const t = h.addTask(title, { areas: ['settings'] });
+      picture(t, 'after', '/settings', `${title} after`);
+      done(t);
+      return t;
+    };
+    const off = doneTask('Off page');
+    const unset = doneTask('Unset page');
+    const early = doneTask('Early page');
+    const lateOn = { teamId: 'T1', channelId: 'C1', enabledAt: '2999-01-01T00:00:00.000Z' };
 
-    const other = h.addTask('Other page', { areas: ['settings'] });
-    picture(other, 'after', '/settings', 'other after');
-
-    // Sharing off, and a task that belongs to a pass: nothing goes out.
-    post.announceTask(other.id);
+    // Sharing off, a task that belongs to a pass, sharing with no time it was turned on, and one turned on
+    // after the task finished: nothing goes out.
+    post.announceTask(off.id);
     channel = { teamId: 'T1', channelId: 'C1', enabledAt: '2000-01-01T00:00:00.000Z' };
     post.announceTask(people.id);
+    channel = { teamId: 'T1', channelId: 'C1', enabledAt: null };
+    post.announceTask(unset.id);
+    channel = lateOn;
+    post.announceTask(early.id);
 
-    // Refused: one Inbox item says why, and nothing was uploaded.
-    slack.joinError = 'method_not_supported_for_channel_type';
+    // On since long ago and refused: one Inbox item says why, and nothing was uploaded.
+    channel = { teamId: 'T1', channelId: 'C1', enabledAt: '2000-01-01T00:00:00.000Z' };
     post.announceTask(task.id);
     await waitFor(() => h.cards().some((c) => c.title.includes('did not reach Slack')));
+    await settled();
+    expect(h.cards().map((c) => c.title)).toEqual([
+      'The pictures of "Billing page" did not reach Slack',
+    ]);
     expect(slack.uploads).toHaveLength(0);
 
     // The retry posts one message with both pictures, the project and the task, and withdraws the item.

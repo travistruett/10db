@@ -53,7 +53,9 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   pass or task (`pictures-to-slack:<id>`). A pass retries at its next push; a task's `retryTasks` runs at start-up,
   when Settings › Sharing is saved and every 15 minutes, and `catchUp` posts tasks done within `MISSED_AFTER_MS`. The
   setting (`slack-sharing.<projectId>`, `stakeholders/slack-sharing.ts`) is cleared of its channel by
-  `rebindProjectSlack`; the posted marks are written by no one else.
+  `rebindProjectSlack`; the posted marks are written by no one else. A task posts only when it is Done and its
+  after (and its Done time) is at or after the setting's `enabledAt`, set when the switch goes on and cleared when it
+  goes off; a setting with none posts no tasks until saved again.
 - `src/api/` is typechecked by the desktop app too (it imports `AppType`). Code there must not import
   `node:*` modules or `@10db/db`; receive services through the `ApiServices` interface (passed in `ApiDeps`).
 - The package entry (`src/index.ts`) exports types only.

@@ -30,7 +30,7 @@ and after of each page it pictured (at most 10 files; the text says how many mor
 since a local-delivery task has no pull request. The mark is the newest after's id under the task's id in the
 same record, so a task reopened and finished again posts again. A refused post leaves one Inbox item per task and
 is tried again at start-up, when the Sharing page is saved, and every 15 minutes while the item is open; a
-start-up catch-up posts tasks finished within the last hour that were not posted, never a backlog. A task in a
+start-up catch-up posts tasks finished within the last hour that were not posted, never a backlog. The setting records `enabledAt`, when the switch went from off to on; a task posts only when it is Done and its after picture was taken at or after `enabledAt`, and turning the switch off clears it. A setting saved before `enabledAt` existed posts no tasks until it is saved again. A task in a
 pass is posted only through its pass.
 
 A pass's pull request is opened at close even under local delivery when the project has an origin, so it posts
