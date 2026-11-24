@@ -41,7 +41,7 @@ const isRigor = (value: string): value is Rigor => RIGORS.some((r) => r === valu
 const roleLabel = (role: StepRole): string => ROLES.find((r) => r.role === role)?.label ?? role;
 
 /**
- * Models › Agent Models: Intelligence against cost per task on one account with the picks of one rigor drawn
+ * Models › Language Models: Intelligence against cost per task on one account with the picks of one rigor drawn
  * on it, then every model the account runs. A model's detail is in the drawer.
  */
 export function AgentModelsView({ account }: { readonly account: AccountDto }) {
@@ -159,7 +159,7 @@ export function AgentModelsView({ account }: { readonly account: AccountDto }) {
         </RaisedPanel>
       </Stack>
       <Stack gap="sm">
-        <SectionHeading title="Agent Models" line={`Every model ${account.label} runs.`} />
+        <SectionHeading title="Language Models" line={`Every model ${account.label} runs.`} />
         {everyModel.length === 0 ? (
           <Text c="dimmed">
             No models yet. They appear once an account has been read; the refresh button reads every

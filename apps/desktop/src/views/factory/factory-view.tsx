@@ -61,6 +61,7 @@ export function FactoryView() {
         meta={<BenchmarkSyncNote />}
         actions={
           <Group gap="xs" wrap="nowrap">
+            <UpdateDrainNote />
             <ActivityButton project={filter ?? null} />
             <SegmentedControl
               size="xs"
@@ -98,7 +99,6 @@ export function FactoryView() {
           </Group>
         }
       />
-      <UpdateDrainNote />
       <AdmissionNote />
       {projects.isError ? (
         <Alert color="red" title="Couldn't load the projects">

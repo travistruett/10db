@@ -126,7 +126,7 @@ function DrawerBody({
         </Text>
       ) : null}
       <Section title="Model">
-        <DecisionModelPicker decision={decision} status={status} disabled={disabled} />
+        <DecisionModelPicker decisions={[decision]} status={status} disabled={disabled} />
       </Section>
       <Section title="Sure Enough">
         <SureEnough
