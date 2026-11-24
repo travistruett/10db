@@ -14,6 +14,7 @@ const link: ExternalLink = {
 
 function run(over: Partial<ReporterRun> = {}): ReporterRun {
   return {
+    readOnly: false,
     linearPrefixes: [L],
     link,
     prUrl: PR,
@@ -101,6 +102,31 @@ describe('judgeReporterCall', () => {
     ['a read', run(), call(`${L}get_issue`, { id: 'iss-119' }), 'allow'],
     ['report tool', run(), call('mcp__10db__report_linear_post', {}), 'allow'],
     ['another 10db tool', run(), call('mcp__10db__commit', {}), 'deny'],
+    [
+      'snapshot reads the issue',
+      run({ readOnly: true }),
+      call(`${L}get_issue`, { id: 'x' }),
+      'allow',
+    ],
+    [
+      'snapshot reads comments',
+      run({ readOnly: true }),
+      call(`${L}list_comments`, { issueId: 'x' }),
+      'allow',
+    ],
+    [
+      'snapshot writes nothing',
+      run({ readOnly: true }),
+      call(`${L}save_comment`, { issueId: 'iss-119', body: 'hi' }),
+      'deny',
+    ],
+    ['snapshot lists teams', run({ readOnly: true }), call(`${L}list_teams`, {}), 'deny'],
+    [
+      'snapshot has no 10db tool',
+      run({ readOnly: true }),
+      call('mcp__10db__report_linear_post', {}),
+      'deny',
+    ],
   ];
   it.each(rows)('%s', (_name, r, c, expected) => {
     expect(decision(r, c)).toBe(expected);

@@ -1,5 +1,5 @@
 import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
 import type { LaneSandboxSpec } from '../sandbox';
@@ -89,7 +89,11 @@ describe('lanePermissions and the setup reads', () => {
     {
       name: 'a writing chat: the checkout writes and its git state only reads',
       denyWrite: () => [join(checkout, '.git')],
-      expected: () => ({ [checkout]: 'write', [join(checkout, '.git')]: 'read' }),
+      expected: () => ({
+        [checkout]: 'write',
+        [join(checkout, '.git')]: 'read',
+        [join(checkout, '.agents')]: 'write',
+      }),
     },
     {
       name: 'a reading chat: the whole checkout only reads',
@@ -98,7 +102,24 @@ describe('lanePermissions and the setup reads', () => {
     },
   ])('maps $name', ({ denyWrite, expected }) => {
     mkdirSync(join(checkout, '.git'));
+    mkdirSync(join(checkout, '.agents'));
     expect(filesystem([], denyWrite())).toMatchObject(expected());
+  });
+});
+
+describe('lanePermissions and the checkout .agents', () => {
+  it('gives a read-only lane no write on .agents', () => {
+    mkdirSync(join(checkout, '.agents'));
+    expect(filesystem([], [checkout])[join(checkout, '.agents')]).toBeUndefined();
+  });
+
+  it('gives a symlinked .agents no write', () => {
+    const outside = join(dirname(checkout), 'outside');
+    mkdirSync(outside);
+    symlinkSync(outside, join(checkout, '.agents'));
+    const fs = filesystem([]);
+    expect(fs[join(checkout, '.agents')]).toBeUndefined();
+    expect(fs[realpathSync(outside)]).toBeUndefined();
   });
 });
 

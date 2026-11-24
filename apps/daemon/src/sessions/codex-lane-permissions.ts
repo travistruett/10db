@@ -52,6 +52,14 @@ function listedDirEntries(
   return [[dir, 'read'], ...walk(dir, true)];
 }
 
+function isRealDirectory(path: string): boolean {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 function isLink(path: string): boolean {
   try {
     return lstatSync(path).isSymbolicLink();
@@ -112,6 +120,19 @@ function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
   const writable = [sandbox.checkout, ...allowWrite];
   const realWritable = writable.map(realOrSelf);
   for (const path of writable) grant(path, 'write');
+  // Codex makes an existing `.agents` read-only inside a writable root unless an entry names it; a
+  // Claude lane writes it, so the checkout's own `.agents` is granted (`.git`, `.codex`, `.aws` stay
+  // protected). A link or a denyWrite over it (a read-only lane) gets nothing.
+  const agentsDir = join(sandbox.checkout, '.agents');
+  if (
+    isRealDirectory(agentsDir) &&
+    !denyWrite.some(
+      (path) =>
+        isEqualOrUnder(agentsDir, path) ||
+        isEqualOrUnder(join(realOrSelf(sandbox.checkout), '.agents'), realOrSelf(path)),
+    )
+  )
+    grant(agentsDir, 'write');
   for (const path of denyRead) if (path !== '/') grant(path, 'deny');
   const listed = new Set(
     allowRead.flatMap((pattern) => {

@@ -89,6 +89,8 @@ export interface PromptInput {
     /** The rejection's findings, told to a resumed session, which never saw the review. */
     readonly notes?: string;
   } | null;
+  /** The task's linked Linear issue as 10db read it for this attempt, or why it could not; null for no link. */
+  readonly linearIssue?: string | null;
   /** The session runs in the lane sandbox, which loads no repo settings and blocks paths outside its profile. */
   readonly sandboxed?: boolean;
   /** Calls the builder denied for this workstream, in any of its sessions; every session is told. */
@@ -1017,6 +1019,7 @@ export function buildSessionPrompt(input: PromptInput): string {
     '',
     'Acceptance criteria:',
     bullets(input.task.acceptanceCriteria),
+    ...(input.linearIssue ? ['', input.linearIssue] : []),
     ...planBlock(input.contextPack.plan, brief),
     ...renderMockups(input.contextPack.mockups),
     '',
