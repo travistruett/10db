@@ -38,7 +38,7 @@ export interface SkipRecorder {
 }
 
 const CANT_RUN_REASON =
-  "This program is outside what a lane may read, so it can't run in this lane's sandbox.";
+  "This program is outside what a lane's sandbox reads, so it can't run in this lane's sandbox.";
 
 export function createSkipRecorder(
   deps: {
@@ -63,7 +63,7 @@ export function createSkipRecorder(
     (approvalOf(skip.kind, false) === Approval.Intent ||
       approvalOf(skip.kind, false) === Approval.Exact) &&
     !deps.runnable(skip.summary)
-      ? { ...skip, kind: SkipKind.CantRunInLane, reason: CANT_RUN_REASON }
+      ? { ...skip, kind: SkipKind.CantRunInLane, reason: `${CANT_RUN_REASON} (${skip.reason})` }
       : skip;
   return {
     record(recorded) {

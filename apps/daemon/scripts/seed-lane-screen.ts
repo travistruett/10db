@@ -4,13 +4,12 @@ import { EvidenceKind, ScreenKind, ScreenTheme, WorkstreamId } from '@10db/contr
 import { createStore, getWorkstream, insertEvidence, openDatabase } from '@10db/db';
 import { z } from 'zod';
 import { createEventBus, createStateStore } from '../src/events';
-// The file itself, not the pictures entry: that entry's graph reaches the lane browser, which imports it back.
-import { keepScreen } from '../src/pictures/picture-files';
+import { keepScreen } from '../src/pictures';
 
 /**
  * Seeds one lane screenshot and its browser evidence on a workstream's task, for the end-to-end loop check.
  * A lane writes the same two rows through `browser_screenshot`; the e2e daemon runs no browser, so the rows
- * are written straight into the database of a daemon that is idle. Usage: seed-lane-screen.ts <data dir> <json>
+ * are written straight into the database of a daemon that runs no browser. Usage: seed-lane-screen.ts <data dir> <json>
  */
 const Seed = z.object({
   workstreamId: WorkstreamId,
@@ -60,7 +59,7 @@ const screen = keepScreen(state, dataDir, {
   taskId,
   turnId: null,
   kind: ScreenKind.Lane,
-  route: '/',
+  route: '/greeting',
   viewport: { width: WIDTH, height: HEIGHT },
   theme: ScreenTheme.Default,
   keptSha: null,

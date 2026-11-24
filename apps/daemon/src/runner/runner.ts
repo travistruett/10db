@@ -3239,7 +3239,8 @@ export function createRunner(opts: RunnerOptions): Runner {
                           laneSession.commandEnv['PATH'] ??
                           launch.env['PATH'] ??
                           '',
-                        laneSession.fileAccess,
+                        laneSession.spec.settings.filesystem.allowRead,
+                        laneSession.spec.checkout,
                       ),
                   }),
             },

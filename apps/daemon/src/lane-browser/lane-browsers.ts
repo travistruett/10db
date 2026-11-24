@@ -23,9 +23,6 @@ import type { LaneBrowserSession } from './session';
 
 /** How long any one call may take, counted from its arrival, a wait behind another call included. */
 export const CALL_DEADLINE_MS = 60_000;
-/** How long the browser stays open after a session's last call. */
-export const LANE_BROWSER_IDLE_MS = BROWSER_IDLE_MS;
-
 /** How long a call waits for the pinned build to be found before it answers "fetching". */
 const BUILD_CHECK_MS = 1_000;
 const FETCHING = '10db is fetching its browser; try again in a minute';
@@ -264,7 +261,7 @@ export function createLaneBrowsers(deps: {
         entry.carry.push(IDLE_CLOSED);
         await shutBrowser(entry, sessionId, 'idle');
       });
-    }, LANE_BROWSER_IDLE_MS);
+    }, BROWSER_IDLE_MS);
   }
 
   async function work<T>(

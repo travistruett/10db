@@ -470,7 +470,7 @@ const PASS_RULES = [
 
 /** Told to every lane step that has 10db's browser, read-only steps included. */
 const BROWSER_RULE =
-  "10db gives you a browser: browser_open, browser_snapshot, browser_click, browser_type and browser_screenshot. They reach only servers this lane started: a process of its own, or a Docker Compose stack started from its copy or temp dir, on localhost, 127.0.0.1 or [::1]. Start the app first, sign in through its own pages as a test user you created, and say what you saw. A screenshot is kept on the task as evidence; its PNG's path is in every answer. Start a stack that later steps should reuse from the copy, with an archive in an ignored folder under it, not the temp dir. This is the only browser a lane has: the builder's browser tools and skills (Aside, Chrome) don't run in a lane, so don't try them.";
+  "10db gives you a browser: browser_open, browser_snapshot, browser_act, browser_upload and browser_screenshot. They reach only servers this lane started: a process of its own, or a Docker Compose stack started from its copy or temp dir, on localhost, 127.0.0.1 or [::1]. Start the app first, sign in through its own pages as a test user you created, and say what you saw. A screenshot is kept on the task as evidence; its PNG's path is in every answer. Start a stack that later steps should reuse from the copy, with an archive in an ignored folder under it, not the temp dir. This is the only browser a lane has: the builder's browser tools and skills (Aside, Chrome) don't run in a lane, so don't try them.";
 /** Codex's MCP tool results may drop an image, so it is told where the file is. */
 const CODEX_IMAGE_SENTENCE =
   " If a screenshot's image doesn't show, open its path with view_image.";

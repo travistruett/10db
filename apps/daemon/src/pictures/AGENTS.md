@@ -46,7 +46,8 @@
 /screens/:screenId` (a PNG, private and immutable; 404 once pruned) and `GET /projects/:projectId/pictures`
   are refused to screens. `DaemonOptions.pictures` is `{ kind: 'pinned' }` from the entry point; tests give a
   camera (`test/fake-camera.ts`); absent, the daemon takes no pictures and fetches nothing. No picture is
-  uploaded or sent to a model, except a `lane` screen taken by a lane's own browser, which goes to that
+  uploaded or sent to a model, except a design review's and `check_design`'s (to the session's model), a PR's (uploaded
+  with `prPictures`) and a `lane` screen taken by a lane's own browser, which goes to that
   session's model as an image block when it fits the account's limits
   (`decisions/2026-11-24-lane-screenshots-go-to-the-lanes-model.md`).
 - The broken preview (Workbench spec §8.2, §8.4,

@@ -7,7 +7,7 @@
 
 A `lane` screen, taken by a lane's own browser through `browser_screenshot`, is sent to that session's model as
 an image block when it fits the account's limits (`mcp/picture-spend.ts`); otherwise the lane gets the file's
-path only. Every other picture (before, turn, after, design checks) stays on the Mac and goes to no model.
+path only. Every other picture stays on the Mac, except a design review's and `check_design`'s, which go to the session's model as before, and a PR's, which upload with `prPictures`.
 Lane screens are pruned as turn pictures are.
 
 ## Why

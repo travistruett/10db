@@ -5,7 +5,6 @@ import {
   LinearPostState,
   parseFindings,
   reviewRounds,
-  ScreenKind,
   Verdict,
   type ExternalLink,
   type LinearPostDto,
@@ -90,7 +89,7 @@ export interface ReporterFacts {
   readonly recorded: readonly RecordedRow[];
   readonly workstreams: readonly WorkstreamFacts[];
   readonly prUrl: string | null;
-  readonly screens: readonly { readonly id: string; readonly shows: string }[];
+  readonly screens: readonly { readonly id: string }[];
 }
 
 function cap(text: string): Capped {
@@ -184,13 +183,7 @@ export function readReporterFacts(
       })),
     workstreams,
     prUrl: taskPrUrl(db, taskId),
-    screens: listTaskScreens(db, taskId).map((s) => ({
-      id: s.id,
-      shows:
-        s.kind === ScreenKind.Lane
-          ? [s.kind, s.url, ...(s.note === null ? [] : [JSON.stringify(s.note)])].join(', ')
-          : `${s.kind}, ${s.route}, ${String(s.viewport.width)}x${String(s.viewport.height)}, ${s.theme} theme`,
-    })),
+    screens: listTaskScreens(db, taskId).map((s) => ({ id: s.id })),
   };
 }
 

@@ -1,6 +1,6 @@
-import { statSync } from 'node:fs';
-import { delimiter, isAbsolute, join, resolve, sep } from 'node:path';
-import { readAccess, type FileAccessContext } from './file-access';
+import { realpathSync, statSync } from 'node:fs';
+import { delimiter, isAbsolute, join, resolve } from 'node:path';
+import { isEqualOrUnder } from './protected-reads';
 
 // Whether a lane's shell can run a call's program at all. A program outside what the lane may read (the
 // builder's own browser CLI under their home, say) fails in the sandbox however it is approved, so a skip
@@ -9,8 +9,6 @@ import { readAccess, type FileAccessContext } from './file-access';
 /** A word with no quoting, expansion or shell syntax: the only kind read as a program name. */
 const PLAIN_WORD = /^[A-Za-z0-9_.+@%:,/~-]+$/;
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=\S*$/;
-/** Where a program's real path is the system's own, which the lane's profile always reads. */
-const SYSTEM_ROOTS = ['/usr', '/bin', '/sbin', '/opt', '/System', '/Library', '/nix'];
 
 const isFile = (path: string): boolean => {
   try {
@@ -31,22 +29,32 @@ function programWord(command: string): string | null {
 
 /**
  * False only when the command's program, found as written (relative to the checkout) or on the lane's PATH,
- * lies outside what the lane may read: its real path's `readAccess` is neither `inside` nor `allowed`. A
- * system path (`/usr/bin/git`) the lane's profile always opens is runnable, and so is a program that isn't
- * found, which the shell reports itself, and a command whose program can't be read as a plain word.
+ * lies outside what the lane's kernel profile reads (`reads`, its `filesystem.allowRead`, which holds the
+ * system roots, the checkout, the toolchain and the lane's own reads): its real path is under none of them.
+ * A program that isn't found is runnable, since the shell reports it itself, and so is a command whose
+ * program can't be read as a plain word.
  */
-export function programRunnable(command: string, path: string, ctx: FileAccessContext): boolean {
+export function programRunnable(
+  command: string,
+  path: string,
+  reads: readonly string[],
+  checkout: string,
+): boolean {
   const word = programWord(command);
   if (word === null) return true;
   const candidates = word.includes('/')
-    ? [isAbsolute(word) ? word : resolve(ctx.checkout, word)]
+    ? [isAbsolute(word) ? word : resolve(checkout, word)]
     : path
         .split(delimiter)
         .filter((dir) => dir !== '' && isAbsolute(dir))
         .map((dir) => join(dir, word));
   const found = candidates.find(isFile);
   if (found === undefined) return true;
-  const { access, realPath } = readAccess(found, ctx);
-  if (access === 'inside' || access === 'allowed') return true;
-  return SYSTEM_ROOTS.some((root) => realPath === root || realPath.startsWith(root + sep));
+  let real: string;
+  try {
+    real = realpathSync(found);
+  } catch {
+    return true;
+  }
+  return reads.some((root) => isEqualOrUnder(real, root));
 }

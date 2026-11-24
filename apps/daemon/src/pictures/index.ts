@@ -23,6 +23,6 @@ export { launchChromium } from './playwright';
 export { createPlaywrightCamera } from './playwright-camera';
 export { pageRouteLoads, takesPictures } from './picture-routes';
 export { startPruning } from './prune';
-export { pngSize, removeUnnamed, writePicture } from './picture-files';
+export { keepScreen, pngSize, removeUnnamed, writePicture } from './picture-files';
 export { keptRoute, pageAreaRoutes } from './kept-route';
 export { checkShotsOf, missingLines } from './design-shots';

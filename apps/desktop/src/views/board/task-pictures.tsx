@@ -90,7 +90,7 @@ export function TaskPictures({ taskId }: { readonly taskId: TaskId }) {
               <Stack key={screen.id} gap={2} w={180}>
                 <ScreenPicture screen={screen} name={screen.route} width={180} />
                 <Text size="xs">{screen.note ?? screen.url}</Text>
-                {screen.url !== null && (
+                {screen.note !== null && screen.url !== null && (
                   <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }}>
                     {screen.url}
                   </Text>

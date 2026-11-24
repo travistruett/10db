@@ -318,7 +318,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   expect(Changes.parse(await changes.json()).commits).toHaveLength(1);
 
   // A lane's browser_screenshot would leave one picture and its evidence on the task; the e2e daemon runs
-  // no browser, so they are seeded. The drawer shows the picture under its note, and a reload keeps it.
+  // no browser, so they are seeded. The drawer shows the picture under its note, with the page it came from.
   const LANE_NOTE = 'The greeting page after saving';
   execFileSync(
     'pnpm',
