@@ -20,4 +20,3 @@
 - A `Card` needs `tier`, `urgency` and `closesWhen` (`decisions/2026-11-17-every-card-has-a-tier.md`); a notice
   goes through `post` or `postIn`.
 - `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`).
-- `slack-picture-post.ts` posts to Slack a pass's pictures (`announce`) and a task's (`announceTask`, from `onAfterCapture`).

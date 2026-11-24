@@ -272,8 +272,16 @@ export function createStakeholderApiServices(deps: {
         throw new InvalidError(
           'Connect a Slack workspace to this project before picking a channel',
         );
+      const now = readSlackSharing(deps.state.db, projectId);
+      // Turned on now, or on before this was recorded: tasks finished earlier are never posted.
+      const enabledAt = !input.enabled
+        ? null
+        : now.enabled && now.enabledAt != null
+          ? now.enabledAt
+          : deps.clock.now().toISOString();
       const next = {
         enabled: input.enabled,
+        enabledAt,
         teamId: input.channelId === null ? null : teamId,
         channelId: input.channelId,
         channelName: input.channelId === null ? null : input.channelName,

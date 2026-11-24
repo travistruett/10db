@@ -42,6 +42,8 @@ const MAX_SLACK_PICTURES = 10;
 interface PictureChannel {
   readonly teamId: string;
   readonly channelId: string;
+  /** When sharing was turned on; a task's pictures are posted only from then, and never with none. */
+  readonly enabledAt: string | null;
 }
 
 export interface SlackPicturePostDeps extends Pick<DeliveryContext, 'state' | 'inbox' | 'logger'> {
@@ -239,8 +241,17 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
     const client = target === null ? null : deps.clientFor(target.teamId);
     if (target === null || client === null) return settle(project);
     // Read once, before the upload: the mark is this after, whatever lands while the files go.
-    const newest = newestAfterOf(taskId);
-    if (newest === null || marksOf(deps.state.db, project.id)[taskId] === newest)
+    const newestScreen = listTaskScreens(deps.state.db, taskId).findLast(
+      (s) => s.kind === ScreenKind.After,
+    );
+    const newest = newestScreen?.id ?? null;
+    if (
+      task.status !== TaskStatus.Done ||
+      newestScreen === undefined ||
+      target.enabledAt === null ||
+      Date.parse(newestScreen.createdAt) < Date.parse(target.enabledAt) ||
+      marksOf(deps.state.db, project.id)[taskId] === newest
+    )
       return settle(project);
     const planned = picturePlan([
       { title: task.title, screens: listTaskScreens(deps.state.db, taskId) },

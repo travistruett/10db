@@ -21,7 +21,7 @@
 - **Calls the builder might disagree with.** One post per task (the builder chose this). A Codex-plan task more
   often posts an after with no before (the before rule drops a before once a Codex session starts). No pull request link: a
   local-delivery task has none, and a Your-folder task's pull request may not exist yet when its after is taken.
-  Turning the switch on posts only tasks finished from then on, never a backlog. Batch pull requests still get no
+  Turning the switch on posts only tasks finished from then on, never a backlog (the sharing setting records `enabledAt`; a task posts only when its after was taken at or after it). Batch pull requests still get no
   Pictures section (cut from this plan; a later task if wanted).
 - **What is needed from the builder.** Nothing beyond #783's setup.
 
@@ -108,7 +108,5 @@ No model is involved: the picture store, Slack and the inbox only. Every account
 
 - Passes with no origin or repo never post, as in #783 (rare; a follow-up if seen).
 - No pull request link in a task's post (a link can be added once a batch's PR exists; cheap to add later).
-- The start-up catch-up can post a task finished up to an hour before sharing was turned on, if the daemon
-  restarts inside that hour; and a task done again whose new capture kept nothing can post an older unmarked after.
-  Both rare and harmless.
+- A task done again whose new capture kept nothing can post an older unmarked after (rare, harmless).
 - 15-minute retry tick rather than a Try Again button (a button is an Inbox action type: more code).

@@ -1478,7 +1478,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
               projectSlack(state.db, projectId).teamId !== sharing.teamId
             )
               return null;
-            return { teamId: sharing.teamId, channelId: sharing.channelId };
+            return {
+              teamId: sharing.teamId,
+              channelId: sharing.channelId,
+              enabledAt: sharing.enabledAt ?? null,
+            };
           },
           clientFor: (teamId) => slackClients.clientFor(teamId),
         });

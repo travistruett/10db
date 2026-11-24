@@ -26,6 +26,7 @@ import {
   getPassPullRequest,
   getTask,
   insertTaskScreen,
+  setTaskStatus,
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
@@ -640,7 +641,7 @@ describe('Pictures to Slack', () => {
       timeoutMs: 5_000,
     });
     // Setting off: the channel is null, so nothing is uploaded.
-    let channel: { teamId: string; channelId: string } | null = null;
+    let channel: { teamId: string; channelId: string; enabledAt: string | null } | null = null;
     setup({}, { slack: { channelOf: () => channel, clientFor: () => client } });
     const { passId, settings, people } = await openedPass();
     picture(settings, 'before', '/settings', 'settings before');
@@ -656,7 +657,7 @@ describe('Pictures to Slack', () => {
     expect(slack.uploads).toHaveLength(0);
 
     // On, with the join refused: nothing is uploaded and one Inbox item says why.
-    channel = { teamId: 'T1', channelId: 'C1' };
+    channel = { teamId: 'T1', channelId: 'C1', enabledAt: '2000-01-01T00:00:00.000Z' };
     slack.joinError = 'method_not_supported_for_channel_type';
     await push();
     await waitFor(() => h.cards().some((c) => c.title.includes('did not reach Slack')));
@@ -695,7 +696,7 @@ describe('Pictures to Slack', () => {
       clock: new ManualClock(),
       timeoutMs: 5_000,
     });
-    let channel: { teamId: string; channelId: string } | null = null;
+    let channel: { teamId: string; channelId: string; enabledAt: string | null } | null = null;
     setup({}, { slack: { channelOf: () => channel, clientFor: () => client } });
     const post = poster;
     if (post === null) throw new Error('no poster');
@@ -704,13 +705,16 @@ describe('Pictures to Slack', () => {
     const task = h.addTask('Billing page', { areas: ['settings'] });
     picture(task, 'before', '/settings', 'billing before');
     picture(task, 'after', '/settings', 'billing after');
+    h.state.write((w) => {
+      setTaskStatus(w, task.id, 'done');
+    });
 
     const other = h.addTask('Other page', { areas: ['settings'] });
     picture(other, 'after', '/settings', 'other after');
 
     // Sharing off, and a task that belongs to a pass: nothing goes out.
     post.announceTask(other.id);
-    channel = { teamId: 'T1', channelId: 'C1' };
+    channel = { teamId: 'T1', channelId: 'C1', enabledAt: '2000-01-01T00:00:00.000Z' };
     post.announceTask(people.id);
 
     // Refused: one Inbox item says why, and nothing was uploaded.
