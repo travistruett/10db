@@ -20,6 +20,12 @@ export interface SrtSettings {
     readonly allowRead: readonly string[];
     readonly allowWrite: readonly string[];
     readonly denyWrite: readonly string[];
+    /**
+     * Files whose contents are closed to a read and that can't be moved while a stat still answers:
+     * a field of the srt that 10db runs (`patches/`), which Claude Code's bundled one doesn't have.
+     * Writes are closed through `denyWrite`.
+     */
+    readonly denyReadData?: readonly string[];
   };
   readonly allowAppleEvents: false;
 }
@@ -28,7 +34,10 @@ export interface SrtSettings {
  * srt's settings for a validated profile. Its env list is left out: srt passes on the env it is
  * started with, and the caller builds that from the allowlist.
  */
-export function srtSettings(profile: LaneSandboxSettings): SrtSettings {
+export function srtSettings(
+  profile: LaneSandboxSettings,
+  statVisibleSecrets: readonly string[] = [],
+): SrtSettings {
   const { network, filesystem } = profile;
   return {
     network: {
@@ -44,6 +53,7 @@ export function srtSettings(profile: LaneSandboxSettings): SrtSettings {
       allowRead: filesystem.allowRead,
       allowWrite: filesystem.allowWrite,
       denyWrite: filesystem.denyWrite,
+      ...(statVisibleSecrets.length > 0 ? { denyReadData: statVisibleSecrets } : {}),
     },
     allowAppleEvents: false,
   };

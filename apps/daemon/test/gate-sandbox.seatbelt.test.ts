@@ -1,6 +1,14 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -172,6 +180,52 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
 
   const connect = (target: string): string =>
     `node -e "require('net').connect(${target}).on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"`;
+
+  it("shows a checkout's .env to stat but not to a read or a move", async () => {
+    writeFileSync(join(checkout, '.env'), `SECRET=${token}\n`);
+    // A link to it, as a copy of the checkout's tree holds, must not close the target it leads to.
+    symlinkSync(join(checkout, '.env'), join(checkout, '.env.linked'));
+    // A nested one, whose folder and name a command could move or hard-link to read it elsewhere.
+    mkdirSync(join(checkout, 'nested'));
+    writeFileSync(join(checkout, 'nested', '.env'), `SECRET=${token}\n`);
+    try {
+      const seen = await probe({
+        stat: 'stat .env',
+        'test-f': 'test -f .env',
+        read: 'cat .env',
+        'read-link': 'cat .env.linked',
+        move: 'mv .env moved.env',
+        remove: 'rm .env',
+        append: 'echo x >> .env',
+        truncate: ': > .env',
+        'move-folder': 'mv nested moved-nested && cat moved-nested/.env',
+        'move-nested-file': 'mv nested/.env nested/renamed && cat nested/renamed',
+        'hard-link': 'ln .env linked.env && cat linked.env',
+        'hard-link-nested': 'ln nested/.env linked-nested.env && cat linked-nested.env',
+        'move-checkout-file': 'mv .env moved.env && cat moved.env',
+      });
+      expect(seen).toEqual({
+        stat: 'ok',
+        'test-f': 'ok',
+        read: 'denied',
+        'read-link': 'denied',
+        move: 'denied',
+        remove: 'denied',
+        append: 'denied',
+        truncate: 'denied',
+        'move-folder': 'denied',
+        'move-nested-file': 'denied',
+        'hard-link': 'denied',
+        'hard-link-nested': 'denied',
+        'move-checkout-file': 'denied',
+      });
+    } finally {
+      rmSync(join(checkout, '.env'), { force: true });
+      rmSync(join(checkout, '.env.linked'), { force: true });
+      for (const name of ['nested', 'moved-nested', 'linked.env', 'linked-nested.env'])
+        rmSync(join(checkout, name), { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it('passes a normal test command that reads the checkout and writes its own output', async () => {
     const result = await run('node --test check.test.mjs && test -f out.txt && git status --short');
