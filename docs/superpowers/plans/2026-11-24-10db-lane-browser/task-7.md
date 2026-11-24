@@ -18,7 +18,8 @@ branch first if 10db-a2 has changed it.
   - The component returns null only when there are no pairs and no lane screens.
   - `ScreenPicture`'s alt comes from `screen-alt.ts`, which card 1 taught the `lane` kind.
 - **The reporter.** `apps/daemon/src/linear/reporter-brief.ts`, where it maps `listTaskScreens` to `shows`: a lane
-  screen reads `lane, <url>, "<note>"` (no note: just the URL). Evidence already lists `browser: <summary>` by
+  screen reads `lane, <url>, "<note>"` (no note: just the URL). `url` is kept without its query (card 5), so no
+  query reaches Linear. Evidence already lists `browser: <summary>` by
   kind.
 - **The e2e, flow 2.** `apps/desktop/e2e/loop.spec.ts`, first test (a task from the UI to done):
   - Once the task is Done, seed one lane screen and its browser evidence for that task's workstream with a new
@@ -57,8 +58,9 @@ From the index, word for word:
 // packages/contracts/src/task-screens.ts (card 1)
 export const ScreenKind = { Before: 'before', Turn: 'turn', After: 'after', Lane: 'lane' } as const;
 // TaskScreenDto gains, null on every kind but `lane`:
+  /** Origin and path only: the query and fragment are dropped before it is kept. */
   url: z.string().max(2048).nullable(),
-  title: z.string().nullable(),
+  title: z.string().max(512).nullable(),
   note: z.string().nullable(),
 
 // packages/contracts/src/states.ts, entities.ts (card 1)
@@ -68,7 +70,13 @@ export const ScreenKind = { Before: 'before', Turn: 'turn', After: 'after', Lane
 
 // packages/db/src/store/task-screens.ts (card 1)
 // NewTaskScreen gains, optional, so every caller outside a lane screen is unchanged:
-  readonly lane?: { readonly url: string; readonly title: string; readonly note: string | null };
+  readonly lane?: {
+    readonly url: string; readonly title: string; readonly note: string | null;
+    /** The session the picture went to as an image block; null when it went as a path only. */
+    readonly sentSessionId: SessionId | null;
+  };
+/** The summed size of unpruned lane screens sent as image blocks to any of these sessions. */
+export function laneScreenBytesSentTo(db: DbReader, sessionIds: readonly SessionId[]): number;
 // packages/db/src/store/evidence.ts (card 1): NewEvidence gains
   | (NewEvidenceBase & {
       readonly kind: typeof EvidenceKind.Browser;

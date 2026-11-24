@@ -23,20 +23,24 @@
       PNG's path is in every answer.
 - **Screens.** `packages/contracts/src/task-screens.ts`:
   - `ScreenKind` gains `Lane: 'lane'`.
-  - `TaskScreenDto` gains `url`, `title` and `note`, each nullable, null on every kind but `lane`.
+  - `TaskScreenDto` gains `url` (origin and path, at most 2,048 characters), `title` (at most 512) and `note`,
+    each nullable, null on every kind but `lane`.
   - The file's header comment says lane screens are taken by a lane's own browser and are sent to its model
     (`decisions/` file in card 7).
 - **Evidence.**
   - `packages/contracts/src/states.ts`: `EvidenceKind` gains `Browser: 'browser'`, with a one-line comment.
   - `packages/contracts/src/entities.ts`: `EvidenceDto` gains the browser variant, and its comment names it.
 - **Schema.** `packages/db/src/schema.ts`:
-  - `task_screens` gains `url`, `title` and `note`, all nullable text.
+  - `task_screens` gains `url`, `title`, `note` and `sent_session_id` (the session that got the picture as an
+    image block, which card 5's budget reads), all nullable text.
   - `evidence` gains `screen_id`, nullable, referencing `task_screens.id`.
   - The tables' comments say what each holds.
 - **Stores.**
   - `packages/db/src/store/task-screens.ts`:
-    - `NewTaskScreen` gains the optional `lane`; `insertTaskScreen` writes its three fields, nulls without it.
-    - `columns` reads them, so `listTaskScreens` and every other read return them.
+    - `NewTaskScreen` gains the optional `lane`; `insertTaskScreen` writes its four fields, nulls without it.
+    - `columns` reads `url`, `title` and `note`, so `listTaskScreens` and every other read return them.
+      `sent_session_id` stays in the store: add `laneScreenBytesSentTo(db, sessionIds)`, the summed `size` of
+      unpruned lane screens sent to any of those sessions.
     - A `lane` screen is never deduplicated: the turn rule stays turn-only.
   - `packages/db/src/store/evidence.ts`:
     - `NewEvidence` gains the browser variant; `insertEvidence` writes `screenId`, null for every other kind.
@@ -44,8 +48,10 @@
 - **Migration.** `pnpm --filter @10db/db generate` once, after the schema change, and commit the generated files.
   This is the branch's dev migration (Global Constraints): it is regenerated at each merge of `main` and after the
   last. Never edit it by hand.
+- **Generated contracts.** `pnpm --filter @10db/contracts generate`, and commit what it changes under
+  `packages/contracts/generated/` (`make gate`'s drift check fails otherwise).
 - **Catalogue.** `docs/architecture/db-storage.md`: the "Workbench pictures" entry gains the `lane` kind and the
-  three columns. The evidence entry gains `screen_id` and the `browser` kind.
+  four columns. The evidence entry gains `screen_id` and the `browser` kind.
 - **Callers.** Run the typechecks of `@10db/contracts`, `@10db/db`, `@10db/daemon` and `@10db/desktop`.
   - `apps/desktop/src/views/workbench/screen-alt.ts` `WHEN` gains `[ScreenKind.Lane]: 'from the lane's browser'`.
   - Any other exhaustive switch over `ScreenKind` or `EvidenceKind` the typecheck names gets its real answer. A
@@ -115,8 +121,9 @@ export type BrowserAnswer = z.infer<typeof BrowserAnswer>;
 // packages/contracts/src/task-screens.ts (card 1)
 export const ScreenKind = { Before: 'before', Turn: 'turn', After: 'after', Lane: 'lane' } as const;
 // TaskScreenDto gains, null on every kind but `lane`:
+  /** Origin and path only: the query and fragment are dropped before it is kept. */
   url: z.string().max(2048).nullable(),
-  title: z.string().nullable(),
+  title: z.string().max(512).nullable(),
   note: z.string().nullable(),
 
 // packages/contracts/src/states.ts, entities.ts (card 1)
@@ -125,12 +132,19 @@ export const ScreenKind = { Before: 'before', Turn: 'turn', After: 'after', Lane
     screenId: TaskScreenId }),
 
 // packages/db/src/schema.ts (card 1)
-// task_screens: url: text('url'), title: text('title'), note: text('note')            // nullable
+// task_screens: url: text('url'), title: text('title'), note: text('note'),
+//   sentSessionId: text('sent_session_id').$type<SessionId>()                         // all nullable
 // evidence: screenId: text('screen_id').$type<TaskScreenId>().references(() => taskScreens.id)   // nullable
 
 // packages/db/src/store/task-screens.ts (card 1)
 // NewTaskScreen gains, optional, so every caller outside a lane screen is unchanged:
-  readonly lane?: { readonly url: string; readonly title: string; readonly note: string | null };
+  readonly lane?: {
+    readonly url: string; readonly title: string; readonly note: string | null;
+    /** The session the picture went to as an image block; null when it went as a path only. */
+    readonly sentSessionId: SessionId | null;
+  };
+/** The summed size of unpruned lane screens sent as image blocks to any of these sessions. */
+export function laneScreenBytesSentTo(db: DbReader, sessionIds: readonly SessionId[]): number;
 // packages/db/src/store/evidence.ts (card 1): NewEvidence gains
   | (NewEvidenceBase & {
       readonly kind: typeof EvidenceKind.Browser;

@@ -27,14 +27,19 @@
        `${pid}:${startedAt}` in `members` and no pid in `browserPids`: owned. `connectTo` is `::1` when every
        listener is on `::1`; else `127.0.0.1` (a wildcard `*` or `[::]` listener included).
     5. **The compose rule.** With `compose` a non-empty list whose every entry has a `workingDir` (already a real
-       path) equal to or under `copy` or `tempDir`, and under no `registeredCheckouts` entry: owned on
-       `127.0.0.1`.
+       path) equal to or under `copy` or `tempDir`, and under no `registeredCheckouts` entry, and whose every
+       `hostIp` is either `127.0.0.1`, or `0.0.0.0` or `::` while no listener on P is bound to `127.0.0.1`: owned
+       on `127.0.0.1`. Docker publishing on all addresses beside another server bound to `127.0.0.1:P` would hand
+       the connection to that server, which is why the listeners are read here too. Any other `hostIp` is
+       refused.
     6. Otherwise refused, with the most useful reason first:
        - `compose: 'unanswered'`: "Docker did not answer in 5 s".
        - An entry with no `workingDir`: "P is published by a container not started with Compose; start it with
          `docker compose` from your copy".
        - A compose dir in a registered checkout or elsewhere: "P's stack was started outside this lane's copy".
-       - Some listeners are the session's and some not: "P is shared with a server that isn't this lane's".
+       - Some listeners are the session's and some not, or a stack on all addresses beside a `127.0.0.1`
+         listener: "P is shared with a server that isn't this lane's".
+       - A publication on another address: "P is published on <ip>, not loopback".
        - Otherwise "P is not a server this lane started".
   - The constants `PORT_CACHE_MS` and `PORT_CHECKS_PER_MINUTE`.
 - **The readers and the cache.** `apps/daemon/src/lane-browser/port-owner.ts` (new).
@@ -49,8 +54,8 @@
       - Its env is `HOME`, a `PATH` of docker's own directory plus `/usr/bin:/bin`, and the daemon env's
         `dockerEnvNames` with their values.
       - It has a 5 s deadline.
-      - It keeps only rows whose `.Ports` publish exactly that host port (`<ip>:<port>->`); the filter alone is not
-        trusted.
+      - It reads every mapping in `.Ports` that publishes exactly that host port (`<ip>:<port>->`,
+        `[::]:<port>->`), one entry per mapping with its `hostIp`; the filter alone is not trusted.
       - It resolves each working dir to its real path; one that doesn't resolve counts as no label.
       - With no docker found, `compose` is null.
   - `createPortOwner(deps, session)`:
@@ -82,8 +87,10 @@
 - **The session's shape.** `apps/daemon/src/lane-browser/session.ts` (new): `LaneBrowserSession`, as below. It is
   only a type here; card 3's runner builds it.
 - **Module notes.** `apps/daemon/src/lane-browser/AGENTS.md` (new): the module's job, the reach rule in four lines
-  (targets, fixed refusals, the ledger rule, the compose rule), the cache and rate, and that the proxy is what
-  holds (Playwright's routing is a first check). Cards 3-5 add their lines. `apps/daemon/src/lane-browser/index.ts`
+  (targets, fixed refusals, the ledger rule, the compose rule with its host addresses), the cache and rate, and
+  that the proxy is what holds (Playwright's routing is a first check). Also its known limit: `lsof` run as the
+  builder doesn't list another user's sockets (a root listener), so such a listener is invisible to the
+  `127.0.0.1` check of the compose rule. Cards 3-5 add their lines. `apps/daemon/src/lane-browser/index.ts`
   exports what the index lists for this card.
 
 ## Interfaces it implements
@@ -106,9 +113,10 @@ export interface PortReadings {
     readonly address: string;
     readonly chain: readonly { readonly pid: number; readonly startedAt: string }[];
   }[] | 'unread';
-  /** Running containers publishing the port, by compose working dir (null without the label); null when Docker
-   * is off for the project, 'unanswered' when `docker ps` failed or passed 5 s. */
-  readonly compose: readonly { readonly workingDir: string | null }[] | null | 'unanswered';
+  /** Each publication of the port by a running container: its compose working dir (null without the label)
+   * and the host address Docker bound (`127.0.0.1`, `0.0.0.0`, `::`, or another); null when Docker is off for
+   * the project, 'unanswered' when `docker ps` failed or passed 5 s. */
+  readonly compose: readonly { readonly workingDir: string | null; readonly hostIp: string }[] | null | 'unanswered';
 }
 export interface PortSession {
   /** `${pid}:${startedAt}` of every process the session's ledger holds. */
@@ -144,8 +152,8 @@ export interface PortReaders {
   listeners(port: number): Promise<readonly { readonly pid: number; readonly address: string }[]>;
   /** The process table, for each listener's chain and start times. */
   readonly table: ProcessTable;
-  /** `docker ps` for the port's publishers and their compose working dirs; null when no docker is found. */
-  readonly compose: ((port: number) => Promise<readonly { readonly workingDir: string | null }[]>) | null;
+  /** `docker ps` for the port's publications: compose working dir and host address; null when no docker is found. */
+  readonly compose: ((port: number) => Promise<readonly { readonly workingDir: string | null; readonly hostIp: string }[]>) | null;
 }
 export function systemPortReaders(
   home: string, env: Readonly<Record<string, string | undefined>>, table: ProcessTable,
@@ -220,7 +228,10 @@ ports directly; the reference is only for what "the daemon's port" means.
 | a connection to P | loopback on, and every listener on P has a chain that reaches a member of the session's ledger | owned; the proxy connects to the address the listeners reported (`::1` when all are on `::1`, else `127.0.0.1`) (card 2) |
 | a connection to P | one listener on P is the session's and another is not (one on `127.0.0.1`, one on `*`) | refused "P is shared with a server that isn't this lane's" (card 2) |
 | a connection to P | the listener belongs to another session, the builder, or a browser pid | refused "not this lane's server" (card 2) |
-| a connection to P | Docker on; a running container publishes P with a compose working dir in the session's copy or temp dir, not inside a registered checkout | owned, reached on `127.0.0.1` (card 2) |
+| a connection to P | Docker on; every publication of P is by a container whose compose working dir is in the session's copy or temp dir (not inside a registered checkout), bound to `127.0.0.1` | owned, reached on `127.0.0.1` (card 2) |
+| a connection to P | the same, bound to `0.0.0.0` or `::` | owned only when no listener on P is bound to `127.0.0.1`; else refused "P is shared with a server that isn't this lane's" (card 2) |
+| a connection to P | a publication bound to any other address | refused (card 2) |
+| two tasks batched in one worktree | one's Compose stack | the other owns it too (one copy); accepted, since they are one batch's work (card 2) |
 | a connection to P | the compose dir is inside a registered checkout (the builder's stack on 8800), elsewhere, or no label (`docker run -p`) | refused; a plain `docker run` refusal says to start it with Compose from the copy (card 2) |
 | a connection to P | `docker ps` fails or passes 5 s, or `lsof` fails | refused, saying which reading failed (card 2) |
 | P owned within the last 5 s | another connection | the cached verdict; after 5 s it is read again, so a port the lane's server gave up and another took is refused (card 2) |
@@ -249,6 +260,8 @@ One pure table, `apps/daemon/src/lane-browser/lane-reach.test.ts`, in `pictures/
   - a member listener beside a non-member one on another address.
 - **The compose rule:**
   - a dir in the copy, in the temp dir, in a registered checkout, elsewhere;
+  - `hostIp` `127.0.0.1`; `0.0.0.0` with no listener on `127.0.0.1`; `0.0.0.0` beside a `127.0.0.1` listener;
+    `::`; `192.168.1.5`;
   - no label;
   - `unanswered`;
   - Docker off (`null`).

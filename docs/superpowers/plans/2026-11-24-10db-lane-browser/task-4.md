@@ -46,8 +46,9 @@
     `press(value)`, with an action timeout of at most 15 s. A ref the snapshot no longer has answers "ref e12 is
     not in the latest snapshot; call browser_snapshot". Then wait for `domcontentloaded` (at most 5 s, never an
     error) and answer with a new snapshot.
-  - **`upload`:** `getByRef(ref).setInputFiles([...paths])`, then a new snapshot. The handler (card 5) has already
-    checked the paths.
+  - **`upload`:** `getByRef(ref).setInputFiles(files.map((f) => ({ name: f.name, mimeType: f.mimeType, buffer:
+    Buffer.from(f.buffer) })))`, then a new snapshot. The driver never takes a path: the handler (card 5) opened and
+    checked each file and passes its bytes.
   - **`screenshot`:** `page.screenshot({ type: 'png', fullPage, animations: 'disabled', timeout })`, the current
     URL and title, and `page.viewportSize()`.
   - **Every method** races its `signal`. A page that won't close when the signal aborts, or a Playwright call that
@@ -74,14 +75,16 @@ export const launchPlaywrightDriver: LaunchLaneDriver;
 From the index, word for word:
 
 ```ts
+// apps/daemon/src/lane-browser/driver.ts (card 3)
+export interface UploadFile { readonly name: string; readonly mimeType: string; readonly buffer: Uint8Array }
 // apps/daemon/src/lane-browser/driver.ts (card 3 declares, card 4 implements with Playwright)
 /** One launched browser, driven for one session; every method settles or throws, never hangs. */
 export interface LaneDriver {
   open(url: string, viewport: ScreenViewport | undefined, signal: AbortSignal): Promise<BrowserAnswer>;
   snapshot(signal: AbortSignal): Promise<BrowserAnswer>;
   act(input: z.output<(typeof BrowserToolInputs)['browser_act']>, signal: AbortSignal): Promise<BrowserAnswer>;
-  /** `paths` are real paths the handler already checked. */
-  upload(ref: string, paths: readonly string[], signal: AbortSignal): Promise<BrowserAnswer>;
+  /** The files' bytes, read and checked by the handler (`readUploads`); the driver never opens a path. */
+  upload(ref: string, files: readonly UploadFile[], signal: AbortSignal): Promise<BrowserAnswer>;
   screenshot(fullPage: boolean, signal: AbortSignal): Promise<{
     readonly png: Uint8Array; readonly url: string; readonly title: string; readonly viewport: ScreenViewport;
   }>;

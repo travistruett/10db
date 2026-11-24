@@ -36,13 +36,20 @@ with screenshots as evidence that review, QA and the reporter can cite.
 - **A screenshot ends a session.** An image over the account's size or side limit, or past its conversation
   budget, would fail every later turn. Lane screenshots draw on the same budget as `check_design`; one that doesn't
   fit goes as its PNG path only, and every answer names that path (card 5).
+- **A lane uploads, or overwrites, a file it may not touch** by swapping a link in after the check. The handler
+  opens each upload itself without following a link, checks the open file is the one the rule allowed, and hands
+  the browser bytes, never a path; the screenshot's copy in the temp dir is written the same way (card 5's test).
+- **A Compose stack on `0.0.0.0` sits beside your server on `127.0.0.1` on the same port.** A stack's port is the
+  lane's only when Docker bound it to `127.0.0.1`, or to all addresses with nothing else bound to `127.0.0.1` there
+  (card 2's table).
 - **Codex drops MCP images.** The PNG path is in every answer, and card 6's live check decides whether Codex lanes
   are told to open it with `view_image`.
 
 **Calls you might disagree with.**
 1. **Lane screens are pruned like turn pictures**, 14 days after their task is done or cancelled; the evidence row
    stays and says the picture was pruned. Cost if wrong: an old QA run's pictures are gone.
-2. **One migration** adds four nullable columns (a lane screen's URL, title and note; the evidence row's screen).
+2. **One migration** adds five nullable columns (a lane screen's URL, title, note and the session it was sent to;
+   the evidence row's screen).
    The spec asked for these fields but the tables have no place for them. Generated last, after the final merge of
    `main`.
 3. **The lane browser has its own process ledger**, as pictures' browser does, and is closed beside
@@ -53,7 +60,9 @@ with screenshots as evidence that review, QA and the reporter can cite.
    samples every second, so a server forked a moment ago would otherwise be refused until the next sample.
 5. **The e2e seeds a lane screen** into the core loop flow (`loop.spec.ts`) rather than drive a real browser: no
    e2e today shows the drawer's pictures, and the e2e daemon runs no browser.
-6. **HTTPS with a self-signed certificate fails** (no certificate is trusted beyond Chromium's defaults). A lane's
+6. **Batch-mates that share a worktree share their stacks**: the compose rule owns a stack by its copy, and they
+   have one copy. Their own processes stay apart (the ledger rule). Accepted: they are one batch's work.
+7. **HTTPS with a self-signed certificate fails** (no certificate is trusted beyond Chromium's defaults). A lane's
    dev server on plain `http` works.
 
 **What is needed from you.** Nothing. AMP-56 through a Codex lane is the acceptance run once it is installed.
@@ -362,8 +371,9 @@ export type BrowserAnswer = z.infer<typeof BrowserAnswer>;
 // packages/contracts/src/task-screens.ts (card 1)
 export const ScreenKind = { Before: 'before', Turn: 'turn', After: 'after', Lane: 'lane' } as const;
 // TaskScreenDto gains, null on every kind but `lane`:
+  /** Origin and path only: the query and fragment are dropped before it is kept. */
   url: z.string().max(2048).nullable(),
-  title: z.string().nullable(),
+  title: z.string().max(512).nullable(),
   note: z.string().nullable(),
 
 // packages/contracts/src/states.ts, entities.ts (card 1)
@@ -372,12 +382,19 @@ export const ScreenKind = { Before: 'before', Turn: 'turn', After: 'after', Lane
     screenId: TaskScreenId }),
 
 // packages/db/src/schema.ts (card 1)
-// task_screens: url: text('url'), title: text('title'), note: text('note')            // nullable
+// task_screens: url: text('url'), title: text('title'), note: text('note'),
+//   sentSessionId: text('sent_session_id').$type<SessionId>()                         // all nullable
 // evidence: screenId: text('screen_id').$type<TaskScreenId>().references(() => taskScreens.id)   // nullable
 
 // packages/db/src/store/task-screens.ts (card 1)
 // NewTaskScreen gains, optional, so every caller outside a lane screen is unchanged:
-  readonly lane?: { readonly url: string; readonly title: string; readonly note: string | null };
+  readonly lane?: {
+    readonly url: string; readonly title: string; readonly note: string | null;
+    /** The session the picture went to as an image block; null when it went as a path only. */
+    readonly sentSessionId: SessionId | null;
+  };
+/** The summed size of unpruned lane screens sent as image blocks to any of these sessions. */
+export function laneScreenBytesSentTo(db: DbReader, sessionIds: readonly SessionId[]): number;
 // packages/db/src/store/evidence.ts (card 1): NewEvidence gains
   | (NewEvidenceBase & {
       readonly kind: typeof EvidenceKind.Browser;
@@ -401,9 +418,10 @@ export interface PortReadings {
     readonly address: string;
     readonly chain: readonly { readonly pid: number; readonly startedAt: string }[];
   }[] | 'unread';
-  /** Running containers publishing the port, by compose working dir (null without the label); null when Docker
-   * is off for the project, 'unanswered' when `docker ps` failed or passed 5 s. */
-  readonly compose: readonly { readonly workingDir: string | null }[] | null | 'unanswered';
+  /** Each publication of the port by a running container: its compose working dir (null without the label)
+   * and the host address Docker bound (`127.0.0.1`, `0.0.0.0`, `::`, or another); null when Docker is off for
+   * the project, 'unanswered' when `docker ps` failed or passed 5 s. */
+  readonly compose: readonly { readonly workingDir: string | null; readonly hostIp: string }[] | null | 'unanswered';
 }
 export interface PortSession {
   /** `${pid}:${startedAt}` of every process the session's ledger holds. */
@@ -439,8 +457,8 @@ export interface PortReaders {
   listeners(port: number): Promise<readonly { readonly pid: number; readonly address: string }[]>;
   /** The process table, for each listener's chain and start times. */
   readonly table: ProcessTable;
-  /** `docker ps` for the port's publishers and their compose working dirs; null when no docker is found. */
-  readonly compose: ((port: number) => Promise<readonly { readonly workingDir: string | null }[]>) | null;
+  /** `docker ps` for the port's publications: compose working dir and host address; null when no docker is found. */
+  readonly compose: ((port: number) => Promise<readonly { readonly workingDir: string | null; readonly hostIp: string }[]>) | null;
 }
 export function systemPortReaders(
   home: string, env: Readonly<Record<string, string | undefined>>, table: ProcessTable,
@@ -508,16 +526,21 @@ export function createBrowserLaunches(): BrowserLaunches;
 // BrowserLedgerDeps gains: readonly launches?: BrowserLaunches   (absent: one of its own, as today)
 // BrowserHostDeps gains:   readonly launches?: BrowserLaunches   (passed to its ledger; launch + track run in one)
 // BrowserLedger gains:     pids(): ReadonlySet<number>            // what its watch remembers: never an owner
-// browserRoot gains a last parameter: held: ReadonlySet<number> = new Set()
+//                          mark(): Promise<void>                  // reads the daemon's children running the
+//                                                                 // executable just before a launch, inside `one`
+// browserRoot gains a last parameter: skip: ReadonlySet<number> = new Set()   // the marked and the held roots
+// A root stays held until its ledger's watch has stopped it (`pending()` false), not merely until `end` is called.
 
+// apps/daemon/src/lane-browser/driver.ts (card 3)
+export interface UploadFile { readonly name: string; readonly mimeType: string; readonly buffer: Uint8Array }
 // apps/daemon/src/lane-browser/driver.ts (card 3 declares, card 4 implements with Playwright)
 /** One launched browser, driven for one session; every method settles or throws, never hangs. */
 export interface LaneDriver {
   open(url: string, viewport: ScreenViewport | undefined, signal: AbortSignal): Promise<BrowserAnswer>;
   snapshot(signal: AbortSignal): Promise<BrowserAnswer>;
   act(input: z.output<(typeof BrowserToolInputs)['browser_act']>, signal: AbortSignal): Promise<BrowserAnswer>;
-  /** `paths` are real paths the handler already checked. */
-  upload(ref: string, paths: readonly string[], signal: AbortSignal): Promise<BrowserAnswer>;
+  /** The files' bytes, read and checked by the handler (`readUploads`); the driver never opens a path. */
+  upload(ref: string, files: readonly UploadFile[], signal: AbortSignal): Promise<BrowserAnswer>;
   screenshot(fullPage: boolean, signal: AbortSignal): Promise<{
     readonly png: Uint8Array; readonly url: string; readonly title: string; readonly viewport: ScreenViewport;
   }>;
@@ -546,7 +569,8 @@ export function createLaneBrowsers(deps: {
   readonly ledgers: { readonly sweep: LedgerSweep; readonly root: string } | null;
   readonly processes: LaneProcessSetup;
   readonly launches: BrowserLaunches;
-  readonly ensure: () => Promise<string>;
+  /** The pinned build, shared with pictures: one fetch, and whether it is fetching now. */
+  readonly build: { ready(): Promise<string>; fetching(): boolean };
   readonly launch: LaunchLaneDriver;
   readonly readers: PortReaders;
   readonly daemonPort: () => number | null;
@@ -584,13 +608,25 @@ export function browserTools(deps: {
   readonly signal: AbortSignal | undefined;
 }): { readonly name: BrowserToolName; readonly description: string; readonly schema: z.ZodType;
       run(input: unknown): Promise<BrowserAnswer | ToolImages | string> }[];
-/** Picture bytes the task's lane already sent as image blocks: its `check_design` shots and lane screens. */
-export function lanePicturesSpent(db: DbReader, bytesOf: (sha256: string) => number, taskId: TaskId): number;
+/** Picture bytes this session's conversation already carries as image blocks: the task's `check_design` shots, and
+ * the lane screens sent to this session or to an earlier one with the same provider session id (a resume). */
+export function lanePicturesSpent(
+  db: DbReader, bytesOf: (sha256: string) => number, taskId: TaskId, sessionId: SessionId,
+): number;
+// apps/daemon/src/mcp/browser-files.ts (card 5)
+export const UPLOAD_MAX_BYTES = 50 * 1024 * 1024;   // all files of one call together
+/** Opens each path itself (`O_NOFOLLOW`), checks the open file is the one a fresh `realpath` + `readAccess`
+ * names (same dev and inode, a regular file) and reads it; refuses the whole call otherwise. */
+export function readUploads(paths: readonly string[], session: LaneBrowserSession):
+  { readonly files: readonly UploadFile[] } | { readonly refused: string };
+/** Writes `<tempDir>/10db-screens/<screenId>.png` without following a link; null with why when it can't. */
+export function writeScreenCopy(tempDir: string, screenId: TaskScreenId, png: Uint8Array):
+  { readonly path: string } | { readonly path: null; readonly why: string };
 /** The picture limits of the session's account; the strictest when it can't be read (moved from
  * `design-check-tool.ts`'s private `limitsOf`, which `check_design` then calls). */
 export function sessionPictureLimits(db: DbReader, sessionId: SessionId): PictureLimits;
 // McpDeps gains: readonly dataDir?: string   (the browser tools are offered only with it)
-// pictures/index.ts exports keepScreen, pngSize (card 5) and BROWSER_PIN (card 3), unchanged
+// pictures/index.ts exports writePicture, removeUnnamed, keepScreen, pngSize (card 5) and BROWSER_PIN (card 3), unchanged
 
 // packages/contracts/src/skipped-actions.ts (card 6)
 // SkipKind gains CantRunInLane: 'cant_run_in_lane'; approvalOf maps it to Approval.None.
@@ -611,20 +647,27 @@ export function programRunnable(command: string, path: string, ctx: FileAccessCo
 | State | Event | Next |
 | --- | --- | --- |
 | no browser for the session | first tool call | the pinned build is ensured (shared with pictures), a proxy starts, Chromium launches at it and its ledger finds it under the launch lock; the call runs (card 3) |
-| no browser | the launch fails, or the build is still fetching or refused | the call answers why ("the browser is being fetched; try again in a minute"); the session goes on (card 3) |
+| no browser | the launch fails, or the build is still fetching or refused | the call answers why at once ("10db is fetching its browser; try again in a minute"), never waiting on a download; the session goes on (card 3) |
+| a browser whose Chromium crashed (driver disconnected) | the next call | on the entry's queue: the dead browser's ledger and proxy are closed, a fresh one launches, and the answer notes "the browser had stopped, so its cookies were cleared" (card 3) |
+| a launch under way | `end(sessionId)` | `end` runs on the entry's queue, after the launch: the browser it made is closed, never left without an owner (card 3) |
+| session ended | a later call naming it | refused "the session ended", by its id, with no launch (card 3) |
 | a call in flight | a second call of the same session | it waits for the first, within its own 60 s (card 3) |
 | any call | 60 s pass | the call answers "timed out"; a page that won't close closes the browser (`BrowserStuckError`), and the next call launches fresh (cards 3, 4) |
-| browser idle five minutes | the idle timer | browser, proxy and ledger closed; the next call launches fresh and notes "cookies were cleared" (card 3) |
+| browser idle five minutes | the idle timer | on the entry's queue: browser, proxy and ledger closed; the next call launches fresh and notes "cookies were cleared" (card 3) |
+| any | `close()` at shutdown | every entry's shut runs on its queue; later calls are refused (card 3) |
 | browser running | session ends, is stopped or taken over | the runner ends it beside `endProcesses`; a call in flight answers "the session ended" (card 3) |
-| browser running | daemon restart or crash | its ledger is swept at the next start; nothing was saved (card 3) |
-| two sessions launching, or pictures' browser running | a launch | launch and find run under one lock; a root another ledger holds is never taken (card 3) |
+| browser running | daemon restart or crash | its ledger is swept at the next start; nothing was saved; the next session's first call launches fresh, and every first launch of a session notes "a fresh browser: no cookies from earlier sessions" (card 3) |
+| two sessions launching, or pictures' browser running | a launch | inside one lock: the daemon's matching children are marked, Chromium launches, and the root taken is one not marked and not held; a root stays held until its watch has stopped it (card 3) |
 | any | `browser_open` of `file:`, `data:`, `javascript:` or a non-loopback host, `0.0.0.0`, `127.0.0.2`, `[::ffff:127.0.0.1]`, `*.localhost` | refused before `goto`, saying why (cards 2, 4) |
 | a page | navigates itself to a scheme other than http(s) | the navigation is aborted, reported in `refused`; its own `data:` and `blob:` subresources load (card 4) |
 | a connection to port P | P is the daemon's, or any lane proxy's | refused before any reading (card 2) |
 | a connection to P | loopback on, and every listener on P has a chain that reaches a member of the session's ledger | owned; the proxy connects to the address the listeners reported (`::1` when all are on `::1`, else `127.0.0.1`) (card 2) |
 | a connection to P | one listener on P is the session's and another is not (one on `127.0.0.1`, one on `*`) | refused "P is shared with a server that isn't this lane's" (card 2) |
 | a connection to P | the listener belongs to another session, the builder, or a browser pid | refused "not this lane's server" (card 2) |
-| a connection to P | Docker on; a running container publishes P with a compose working dir in the session's copy or temp dir, not inside a registered checkout | owned, reached on `127.0.0.1` (card 2) |
+| a connection to P | Docker on; every publication of P is by a container whose compose working dir is in the session's copy or temp dir (not inside a registered checkout), bound to `127.0.0.1` | owned, reached on `127.0.0.1` (card 2) |
+| a connection to P | the same, bound to `0.0.0.0` or `::` | owned only when no listener on P is bound to `127.0.0.1`; else refused "P is shared with a server that isn't this lane's" (card 2) |
+| a connection to P | a publication bound to any other address | refused (card 2) |
+| two tasks batched in one worktree | one's Compose stack | the other owns it too (one copy); accepted, since they are one batch's work (card 2) |
 | a connection to P | the compose dir is inside a registered checkout (the builder's stack on 8800), elsewhere, or no label (`docker run -p`) | refused; a plain `docker run` refusal says to start it with Compose from the copy (card 2) |
 | a connection to P | `docker ps` fails or passes 5 s, or `lsof` fails | refused, saying which reading failed (card 2) |
 | P owned within the last 5 s | another connection | the cached verdict; after 5 s it is read again, so a port the lane's server gave up and another took is refused (card 2) |
@@ -634,8 +677,12 @@ export function programRunnable(command: string, path: string, ctx: FileAccessCo
 | a page | `confirm`, `prompt` | dismissed, unless the `browser_act` that raised it named `dialog: "accept"`; reported (card 4) |
 | four pages open | a popup or new tab | the oldest closes, a note says so; the new page is current (card 4) |
 | any | `browser_upload` of a secret, or a path outside the copy, the temp dir and the setup reads | refused, naming the path; nothing uploaded (card 5) |
+| any | `browser_upload` of a link, or a file swapped after the check | refused: opened without following a link, its dev and inode checked against a fresh real path (card 5) |
+| any | `browser_upload` past 50 MB in one call | refused, naming the size (card 5) |
+| the temp dir's `10db-screens` is a link, or not a directory | `browser_screenshot` | the screen and evidence are kept; no copy is written, and the answer's `path` is null with why (card 5) |
 | any | a download | refused (`acceptDownloads: false`) (card 4) |
-| any | `browser_screenshot` | PNG kept as a `lane` screen with URL, title and note; browser evidence written; a copy in the temp dir; the image sent when it fits the account's limits and budget, else its path only (card 5) |
+| any | `browser_screenshot` | the PNG's file, then one write with the `lane` screen (URL without its query, title, note, the session it went to) and its browser evidence; a copy in the temp dir; the image sent when it fits the account's limits and this session's budget, else its path only (card 5) |
+| a screenshot | its write fails | nothing of it is kept: the file is removed when no row names it, and the answer says the screenshot was not kept (card 5) |
 | next session of the task (review, QA) | first call | a fresh browser; the stack the implement step left is the new session's only by the rule as read now (its compose dir is the shared copy) (cards 2, 3) |
 | Your-folder task | a stack the builder runs from the checkout | refused: the copy is a registered checkout, which owns nothing (card 2) |
 | a skipped shell call | its program's real path is outside the lane's reads | recorded `cant_run_in_lane`, no Run these now; the card says "use 10db's browser, or run it yourself" (card 6) |
@@ -655,9 +702,9 @@ run side by side once card 5 is merged.
   the session), the daemon's wiring. Core.
 - [Card 4](2026-11-24-10db-lane-browser/task-4.md): the Playwright driver: one context per browser, pages,
   dialogs, the `ai` snapshot, actions, uploads, screenshots, the scheme guard; the live browser test. Core.
-- [Card 5](2026-11-24-10db-lane-browser/task-5.md): the five tools: registration, the upload path check, the
-  screenshot's screen, evidence, temp copy and picture budget, pruning; the wiring test through the real pipeline.
-  Core. *Review group 1: cards 1-5.*
+- [Card 5](2026-11-24-10db-lane-browser/task-5.md): the five tools: registration, the upload check by open file,
+  the screenshot's screen, evidence, temp copy and picture budget, pruning; the wiring test through the real
+  pipeline; then a smoke against the real daemon. Core. *Review group 1: cards 1-5, once card 5's smoke has run.*
 - [Card 6](2026-11-24-10db-lane-browser/task-6.md): the lane prompt, the not-runnable skip, and Codex image
   parity (live check, fake Responses server). Core.
 - [Card 7](2026-11-24-10db-lane-browser/task-7.md): the drawer's lane group, the reporter brief, the e2e
@@ -667,4 +714,7 @@ run side by side once card 5 is merged.
 **Shared files:** `apps/daemon/src/daemon/start.ts` (cards 3, 5), `apps/daemon/src/mcp/server.ts` and
 `mcp/tools.ts` (cards 3, 5), `apps/daemon/src/runner/runner.ts` (cards 3, 6), `pictures/browser-ledger.ts` and
 `browser-host.ts` (card 3 only). The coordinator merges them.
+**Run before review.** Review group 1 starts only after card 5's `make dev` smoke (a real lane serves its own
+`python3 -m http.server`, opens it, takes a screenshot and is refused a port it doesn't own). Group 2 starts after
+card 7's click-through.
 **After the build:** install, then AMP-56's fresh import through a Codex lane is the acceptance run.
