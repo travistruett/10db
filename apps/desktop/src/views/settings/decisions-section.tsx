@@ -111,14 +111,14 @@ export function DecisionsSection() {
               <PaidBy status={status.data} disabled={disabled} />
               <Divider />
               <SettingRow
-                label="Model for Every Decision"
-                description="Tests the model once, then sets every decision below to it. Open one to change only that one."
+                label="Model"
+                description="Sets every decision below at once. Open one to change only that one."
               >
                 <DecisionModelPicker
                   decisions={EVERY_DECISION}
                   status={status.data}
                   disabled={disabled || !config.enabled}
-                  label="Model for Every Decision"
+                  label="Model for every decision"
                 />
               </SettingRow>
             </Paper>
