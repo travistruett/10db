@@ -177,7 +177,6 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           >
             <TextInput
               aria-label="Teardown Command"
-              placeholder="make copy-teardown"
               styles={MONO_INPUT}
               value={values.copyTeardownCommand}
               error={errors.copyTeardownCommand}
