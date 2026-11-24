@@ -1,8 +1,7 @@
-import { Urgency, type InboxItemDto, type ProjectId } from '@10db/contracts';
+import { Urgency, type InboxItemDto, type LinearPostDto, type ProjectId } from '@10db/contracts';
 import {
   dismissLinearPosts,
   findOpenByFoldKey,
-  latestLinearPostProblem,
   linearPostCounts,
   linearPostProblems,
   getTask,
@@ -26,8 +25,7 @@ export const linearReporterFoldKey = (projectId: ProjectId): string =>
 const LISTED_ROWS = 10;
 
 /** One line per row the card counts: the task, its issue, the event and the post id, so each can be found on the issue. */
-function problemLines(db: DbReader, projectId: ProjectId): string[] {
-  const rows = linearPostProblems(db, projectId, LISTED_ROWS + 1);
+function problemLines(db: DbReader, rows: readonly LinearPostDto[]): string[] {
   const lines = rows.slice(0, LISTED_ROWS).map((p) => {
     const task = getTask(db, p.taskId);
     const issue = linearLinkOf(db, p.taskId)?.link.id ?? 'no issue';
@@ -50,7 +48,8 @@ export function refreshReporterCard(
     if (open !== undefined) deps.inbox.withdraw(open.id);
     return;
   }
-  const latest = latestLinearPostProblem(deps.state.db, projectId);
+  const problems = linearPostProblems(deps.state.db, projectId, LISTED_ROWS + 1);
+  const latest = problems[0] ?? null;
   const reason =
     latest === null
       ? null
@@ -72,7 +71,7 @@ export function refreshReporterCard(
     title: 'Linear Updates Need You',
     body: [
       reason === null ? counts.join(', ') : `${counts.join(', ')}. Latest: ${reason}`,
-      ...problemLines(deps.state.db, projectId),
+      ...problemLines(deps.state.db, problems),
     ].join('\n'),
     detail: { [REPORTER_DETAIL]: projectId },
     options: [

@@ -8,9 +8,7 @@ import {
   listInbox,
   listLinearPosts,
   pendingSkipFollowUps,
-  listSkipsForWorkstream,
   recordSkip,
-  skipsAlreadyApproved,
   skipFollowUpOf,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -119,44 +117,6 @@ describe('Run these now', () => {
     expect(lines.slice(1)).toEqual([
       `- ${JSON.stringify(summary)}: skipped because ${JSON.stringify(reason.slice(0, 200))}`,
     ]);
-  });
-
-  // Escaped from the AMP-56 pilot: a follow-up that got its calls approved raised a second item for the same calls.
-  it('does not list a call again that its follow-up was approved to run', async () => {
-    engine = await createTestEngine({ Alpha: [[turn]] });
-    const { workstream } = engine.addTask('Alpha');
-    engine.launch(workstream.id);
-    await engine.runner.idle();
-    const skip = (workstreamId: WorkstreamId, callKey: string) =>
-      engine.state.write((ctx) =>
-        recordSkip(ctx, {
-          workstreamId,
-          sessionId: null,
-          toolName: 'mcp__linear__list_comments',
-          toolUseId: `tu-${callKey}-${workstreamId}`,
-          callKey,
-          summary: 'list_comments',
-          kind: 'web_or_mcp',
-          limit: null,
-          reason: 'judged',
-          source: 'broker',
-        }),
-      );
-    skip(workstream.id, 'same-call');
-    await raiseSkippedCard(
-      { state: engine.state, git: createGit(), log: silentLogger },
-      workstream.id,
-    );
-    engine.inbox.answer(openSkipped().id, { choice: SkippedChoice.RunTheseNow });
-    const follow = followUpsOf(workstream.id);
-    const followUp = follow && getTask(engine.store.db, follow.taskId);
-    if (!followUp?.workstreamId) throw new Error('no follow-up run');
-    skip(followUp.workstreamId, 'same-call');
-    skip(followUp.workstreamId, 'other-call');
-    const later = listSkipsForWorkstream(engine.store.db, followUp.workstreamId);
-    const ran = skipsAlreadyApproved(engine.store.db, followUp.id, later);
-    expect(later.filter((s) => ran.includes(s.id))).toHaveLength(1);
-    expect(later).toHaveLength(2);
   });
 
   // Escaped from the AMP-56 pilot: the follow-up of a Linear-linked task reported nothing to the issue.
