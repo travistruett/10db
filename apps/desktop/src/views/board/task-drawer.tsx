@@ -378,7 +378,9 @@ export function TaskDrawer({
             >
               Reviews
             </Tabs.Tab>
-            {linearLink === null ? null : <Tabs.Tab value="linear">Linear</Tabs.Tab>}
+            {task.external?.kind === 'linear' || linearLink !== null ? (
+              <Tabs.Tab value="linear">Linear</Tabs.Tab>
+            ) : null}
             <Tabs.Tab value="edit">Edit</Tabs.Tab>
           </Tabs.List>
           <Tabs.Panel value="overview" pt="lg">

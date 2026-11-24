@@ -88,6 +88,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
     skipKeys.all,
     rigorFiguresKeys.all,
     shapeKeys.startCountsAll,
+    // A follow-up's issue line follows its source, which a cancel releases.
+    linearPostKeys.all,
   ],
   // A goal's strip counts its tasks and takes its status from their runs, batches and cards.
   goal: [goalKeys.all],
