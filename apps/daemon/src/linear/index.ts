@@ -6,4 +6,4 @@ export { reporterHooks, type ReporterLaunch, type ReporterPrepared } from './rep
 export { reporterConversations } from './reporter-conversation';
 export { dismissReporterPosts } from './reporter-inbox';
 export { snapshotSection, type LinearSnapshot } from './snapshot';
-export { linearLinkOf, type LinearTaskLink } from './task-link';
+export { linearLinkOf } from './task-link';
