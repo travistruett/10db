@@ -1,9 +1,9 @@
 import { McpVerdict, type ProjectId, type RepoMcpServerDto } from '@10db/contracts';
-import { Alert, Badge, Group, Switch, Text } from '@mantine/core';
+import { Alert, Badge, Button, Group, Switch, Text } from '@mantine/core';
 import { useState } from 'react';
 import { useRepoMcpServers, useSetRepoMcpVerdict } from '../../../daemon/trust-queries';
-import { ConfirmModal } from '../../../shell/confirm-modal';
 import { SettingRow, SettingsCard } from '../setting-row';
+import { RepoMcpConfirm } from './repo-mcp-confirm';
 
 const STATE_COLORS = { On: 'green', Off: 'gray', Waiting: 'yellow' } as const;
 
@@ -47,6 +47,24 @@ export function RepoMcpServers({ projectId }: { readonly projectId: ProjectId })
               <Badge variant="light" color={STATE_COLORS[state]}>
                 {state}
               </Badge>
+              {state === 'Waiting' ? (
+                <Button
+                  variant="subtle"
+                  size="compact-xs"
+                  color="gray"
+                  aria-label={`Deny ${server.name}`}
+                  disabled={set.isPending}
+                  onClick={() => {
+                    set.mutate({
+                      name: server.name,
+                      configHash: server.configHash,
+                      verdict: McpVerdict.Denied,
+                    });
+                  }}
+                >
+                  Deny
+                </Button>
+              ) : null}
               <Switch
                 aria-label={server.name}
                 checked={state === 'On'}
@@ -71,10 +89,8 @@ export function RepoMcpServers({ projectId }: { readonly projectId: ProjectId })
         </Text>
       ) : null}
       {asking === null ? null : (
-        <ConfirmModal
-          opened
-          title={`Run ${asking.name} in This Project?`}
-          confirmLabel="Turn On"
+        <RepoMcpConfirm
+          server={asking}
           loading={set.isPending}
           error={set.isError ? set.error.message : null}
           onConfirm={() => {
@@ -95,11 +111,7 @@ export function RepoMcpServers({ projectId }: { readonly projectId: ProjectId })
             set.reset();
             setAsking(null);
           }}
-        >
-          <Text component="span" display="block" style={{ whiteSpace: 'pre-wrap' }}>
-            {asking.body}
-          </Text>
-        </ConfirmModal>
+        />
       )}
     </SettingsCard>
   );

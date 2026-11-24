@@ -8,6 +8,12 @@ type ProductionProposal = LiveSystemProposalsDto['proposals'][number];
 const MAX_FILE_BYTES = 128 * 1024;
 /** The most files read. */
 const MAX_FILES = 80;
+/** A line longer than this is not read: it is minified or generated, and scanning it costs more than it finds. */
+const MAX_LINE_CHARS = 4096;
+/** A path longer than this is not matched or read. */
+const MAX_PATH_CHARS = 512;
+/** Characters that can hide or reorder text the builder reads; a path holding one is not proposed from. */
+const UNSAFE_PATH = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 /** The most proposals returned. */
 const MAX_PROPOSALS = 30;
 
@@ -37,7 +43,7 @@ function hostOf(text: string): string | null {
   }
 }
 
-const URL_IN = /\b[a-z][a-z0-9+.-]*:\/\/[^\s'"`,)<>]+/gi;
+const URL_IN = /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s'"`,)<>]+/gi;
 
 interface Found {
   readonly entry: string;
@@ -156,17 +162,22 @@ function profileEntries(text: string): Found[] {
 /** What one file proposes, by kind of file; pure. */
 function proposalsFromFile(path: string, text: string): ProductionProposal[] {
   const found: Found[] = [];
+  // Over-long lines are blanked, not dropped, so line numbers still point into the file.
+  const lined = text
+    .split('\n')
+    .map((line) => (line.length > MAX_LINE_CHARS ? '' : line))
+    .join('\n');
   if (path === 'vercel.json' || path.endsWith('/vercel.json')) found.push(...vercelEntries(text));
-  if (ENV_EXAMPLE.test(path)) found.push(...envEntries(text));
-  if (COMPOSE_PROD.test(path)) found.push(...composeEntries(text));
-  if (WORKFLOW.test(path)) found.push(...workflowEntries(text));
+  if (ENV_EXAMPLE.test(path)) found.push(...envEntries(lined));
+  if (COMPOSE_PROD.test(path)) found.push(...composeEntries(lined));
+  if (WORKFLOW.test(path)) found.push(...workflowEntries(lined));
   if (
     PROFILE_FILES.test(path) ||
     ENV_EXAMPLE.test(path) ||
     WORKFLOW.test(path) ||
     COMPOSE_PROD.test(path)
   )
-    found.push(...profileEntries(text));
+    found.push(...profileEntries(lined));
   return found.flatMap(({ entry, line }) => {
     const parsed = LiveSystem.safeParse(entry);
     return parsed.success ? [{ entry: parsed.data, source: { path, line } }] : [];
@@ -192,6 +203,8 @@ export async function proposeProduction(
   const wanted = files
     .filter(
       (f) =>
+        f.length <= MAX_PATH_CHARS &&
+        !UNSAFE_PATH.test(f) &&
         f.split('/').length <= 4 &&
         (f === 'vercel.json' ||
           f.endsWith('/vercel.json') ||

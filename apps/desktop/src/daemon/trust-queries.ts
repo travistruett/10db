@@ -218,6 +218,8 @@ export function useLiveSystemProposals(projectId: ProjectId) {
   const { client } = useDaemon();
   return useQuery({
     queryKey: trustKeys.proposals(projectId),
+    // Each read spawns git; focus alone should not repeat it.
+    staleTime: 60_000,
     queryFn: async () =>
       readJson(
         await client.projects[':projectId']['live-systems'].proposals.$get({
@@ -257,6 +259,8 @@ export function useSetRepoMcpVerdict(projectId: ProjectId) {
         RepoMcpServersDto,
       );
     },
+    // A refused verdict (the config changed) leaves the row and its text stale until it is read again.
+    onError: () => queryClient.invalidateQueries({ queryKey: trustKeys.repoMcp(projectId) }),
     onSuccess: (saved) => {
       queryClient.setQueryData(trustKeys.repoMcp(projectId), saved);
     },

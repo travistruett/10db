@@ -175,6 +175,9 @@ export const RepoMcpServersDto = z.object({
 });
 export type RepoMcpServersDto = z.infer<typeof RepoMcpServersDto>;
 
+/** A server's name in `.mcp.json`, as the route reads it. */
+export const McpServerName = z.string().min(1).max(200);
+
 /** `PUT /projects/:projectId/repo-mcp-servers/:name`: the verdict on the config the builder saw. */
 export const SetRepoMcpVerdict = z.object({ configHash: ConfigHash, verdict: z.enum(McpVerdict) });
 export type SetRepoMcpVerdict = z.infer<typeof SetRepoMcpVerdict>;

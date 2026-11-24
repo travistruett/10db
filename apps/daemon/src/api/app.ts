@@ -57,6 +57,7 @@ import {
   PlaybookInput,
   LanePermissionsDto,
   LiveSystemsDto,
+  McpServerName,
   SetRepoMcpVerdict,
   TrustOverrides,
   TrustSwitches,
@@ -566,7 +567,7 @@ export function createApp(deps: ApiDeps) {
         c.json(
           deps.services.setRepoMcpVerdict(
             ProjectId.parse(c.req.param('projectId')),
-            c.req.param('name'),
+            McpServerName.parse(c.req.param('name')),
             c.req.valid('json'),
           ),
         ),

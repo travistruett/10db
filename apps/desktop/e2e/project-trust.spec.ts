@@ -45,8 +45,9 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await expect(row).toBeVisible();
   await expect(docs).not.toBeChecked();
   await docs.click({ force: true });
-  const confirm = page.getByRole('dialog', { name: 'Run docs in This Project?' });
-  await expect(confirm).toContainText('Connects to: https://docs.acme-tools.dev/mcp');
+  const confirm = page.getByRole('dialog', { name: 'Turn On docs?' });
+  await expect(confirm).toContainText('Connects to');
+  await expect(confirm).toContainText('https://docs.acme-tools.dev/mcp');
   await confirm.getByRole('button', { name: 'Turn On' }).click();
   await expect(confirm).toHaveCount(0);
   await expect(docs).toBeChecked();
