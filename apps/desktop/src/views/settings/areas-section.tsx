@@ -118,16 +118,25 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
     <Stack gap="sm" component="section" aria-label="Areas">
       <SectionHeading
         title="Areas"
-        line="The parts of the project that tasks claim."
+        line="Split the project into parts, so tasks in different parts run at the same time."
         help={
           <>
             <Text size="sm">
-              An area is a part of the project. Tasks in different areas can run at the same time,
-              and a task may change only the files of the areas it names.
+              Each task names the areas it changes. Two tasks in different areas run side by side;
+              two in the same area take turns, so they never write the same file at once.
             </Text>
             <Text size="sm">
-              Paths are folder patterns, one per line: <code>src/api/**</code> means everything
-              inside src/api/.
+              Smaller areas mean more work at once: with <code>backend</code> split into{' '}
+              <code>billing</code> and <code>search</code>, a billing task and a search task no
+              longer wait on each other.
+            </Text>
+            <Text size="sm">
+              A task changes only the files of its areas. Paths are folder patterns, one per line:{' '}
+              <code>src/api/**</code> means everything inside src/api/.
+            </Text>
+            <Text size="sm">
+              Not sure where to start? Add Area › Suggest from the repository proposes areas from
+              the code: a page per screen, the code pages share, and the rest.
             </Text>
           </>
         }

@@ -106,8 +106,29 @@ export function HazardsSection({ project }: { readonly project: ProjectDto }) {
     <Stack gap="sm" component="section" aria-label="Hazards">
       <SectionHeading
         title="Hazards"
-        line="Files and commands that tasks take turns on."
-        help="A hazard is a set of files only one task changes at a time, such as lockfiles or migrations. A task that touches one, or runs one of its commands, waits for the task that holds it. 10db reads the project's files (its Makefiles, compose files, package scripts, AGENTS.md and docs) to find the commands that change lockfiles and migrations, and adds them by itself; you are asked only before one is taken out."
+        line="Lockfiles, migrations and other files any task might change, kept to one task at a time."
+        help={
+          <>
+            <Text size="sm">
+              Some files cut across areas: a lockfile, a migrations folder, generated code. Two
+              tasks running <code>pnpm add</code> at once leave a broken lockfile; two new
+              migrations take the same number.
+            </Text>
+            <Text size="sm">
+              A hazard names those files and the commands that change them. A task that touches one,
+              or runs one of its commands, waits for the task holding it.
+            </Text>
+            <Text size="sm">
+              Project means one task at a time across the project. Per Copy lets tasks in separate
+              copies (worktrees) change it together, and their pull requests settle any clash.
+            </Text>
+            <Text size="sm">
+              10db finds them by reading the project&apos;s Makefiles, compose files, package
+              scripts and docs, and adds them by itself; it asks before taking one out. Add Hazard ›
+              Look again reads the repository again.
+            </Text>
+          </>
+        }
         action={
           <SplitButton
             label="Add Hazard"
