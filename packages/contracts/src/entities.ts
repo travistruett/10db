@@ -922,7 +922,7 @@ export const TaskPatchFields = z.object({
   /** Keys of kinds the builder took off the task. */
   kindsOff: z.array(HyphenatedKey),
   effortPin: z.enum(Effort).nullable(),
-  /** Replaces the task's areas; only while the task has never started, and only with the project's own. */
+  /** Replaces the task's areas; only while none of its runs holds a claim, and only with the project's own. */
   areas: z.array(Name).min(1),
 });
 
