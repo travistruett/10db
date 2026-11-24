@@ -166,6 +166,7 @@ export function createWorktreeGenerators(deps: WorktreeDependenciesDeps): Worktr
           sandboxDocker: project.sandboxDocker,
         },
         command: generateCommand(pnpm, dirs, migrations),
+        copyId: deps.copyIdOf(batch.id),
         logPath,
         timeoutMs: deps.timeoutMs,
         env,

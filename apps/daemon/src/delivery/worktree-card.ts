@@ -5,7 +5,7 @@ import {
   type InboxItemDto,
   type ProjectId,
 } from '@10db/contracts';
-import { getBatch, getBatchRow, getProject, patchBatch } from '@10db/db';
+import { getBatch, getBatchRow, getLocalCopy, getProject, patchBatch } from '@10db/db';
 import { z } from 'zod';
 import { returnCheckout } from './checkout-return';
 import { switchToBatchBranch } from './checkout-switch';
@@ -18,6 +18,7 @@ import {
   type WorktreeOffer,
 } from './cards';
 import { post, raise, withdraw, type DeliveryContext } from './context';
+import { finishCopyRetirement, retireCopy } from './copy-retire';
 import { handMadeCards } from './hand-made-cards';
 import { removeMergedHandMade } from './hand-made-worktrees';
 import { jobKey, JobQueue } from './jobs';
@@ -33,6 +34,7 @@ const Offer = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('batch'), batchId: BatchId }),
   z.object({ kind: z.literal('abandon'), batchId: BatchId }),
   z.object({ kind: z.literal('kept'), batchId: BatchId }),
+  z.object({ kind: z.literal('teardown'), batchId: BatchId }),
   z.object({ kind: z.literal('orphan'), path: z.string() }),
   z.object({ kind: z.literal('stray'), path: z.string() }),
   z.object({ kind: z.literal('merged-hand-made') }),
@@ -111,6 +113,14 @@ export function createWorktreeCardAnswers(
       case 'abandon':
         if (answer.choice === WorktreeChoice.Abandon) abandon(offer.batchId);
         return;
+      case 'teardown': {
+        if (answer.choice !== WorktreeChoice.Retry) return;
+        const batch = getBatch(ctx.state.db, offer.batchId);
+        ctx.jobs.run(jobKey(batch, JobQueue.Ship), (signal) =>
+          retireCopy(ctx, offer.batchId, signal).then(() => undefined),
+        );
+        return;
+      }
       case 'kept': {
         if (answer.choice !== WorktreeChoice.Remove) return;
         const path = getBatch(ctx.state.db, offer.batchId).worktreePath;
@@ -119,6 +129,9 @@ export function createWorktreeCardAnswers(
         ctx.jobs.run(jobKey(batch, JobQueue.Ship), async () => {
           try {
             await retireWorktree(ctx, offer.batchId, true);
+            // A copy's retirement ends with its ref and journal, which only `retireCopy` writes.
+            if (getLocalCopy(ctx.state.db, offer.batchId) !== null)
+              await finishCopyRetirement(ctx, offer.batchId);
           } catch (error) {
             ctx.logger.warn(
               { batchId: offer.batchId, err: message(error) },

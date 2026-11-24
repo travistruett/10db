@@ -15,9 +15,12 @@ import {
   type CatalogueStatusDto,
   type BatchId,
   ConflictError,
+  COPY_NEEDS_REVIEW,
   Delivery,
   TaskStatus,
   InvalidError,
+  StepRole,
+  WorkspaceMode,
   NotFoundError,
   requireHarness,
   isDaemonAddress,
@@ -546,8 +549,12 @@ export function createServices(deps: {
       const superseded: WorkstreamId | null =
         held?.state === WorkstreamState.Failed ? held.id : null;
       const project = getProject(db, getTask(db, taskId).projectId);
+      // A task placed in a separate copy of a local project is cut a batch, as a pull-request task is.
+      const inCopy =
+        project.delivery === Delivery.Local &&
+        getTask(db, taskId).workspaceMode === WorkspaceMode.Worktree;
       const started: TaskStarted =
-        project.delivery === Delivery.PullRequest
+        project.delivery === Delivery.PullRequest || inCopy
           ? { kind: 'batch', batch: deps.starter.startTask(taskId) }
           : { kind: 'workstream', workstream: startTaskWithPlan(deps.state, taskId) };
       // The batch it left no longer waits on the attempt it started over from.
@@ -1088,7 +1095,7 @@ export function createServices(deps: {
           byBuilder && patched !== undefined && patch.kindsOff === undefined
             ? kindsOffAfter(task, patched)
             : patch.kindsOff;
-        return patchTask(
+        const patchedTask = patchTask(
           ctx,
           id,
           {
@@ -1099,6 +1106,19 @@ export function createServices(deps: {
           proposed,
           rigorSource,
         );
+        // A copy lands only after a review, and the playbook (resolved here, not in the store) says
+        // whether the task's process runs one; the write rolls back when it doesn't.
+        if (
+          patchedTask.workspaceMode === WorkspaceMode.Worktree &&
+          (patch.workspaceMode !== undefined ||
+            patch.rigor !== undefined ||
+            patch.kinds !== undefined ||
+            patch.landing !== undefined) &&
+          getProject(ctx.tx, patchedTask.projectId).delivery === Delivery.Local &&
+          !resolveStepPlan(ctx.tx, id).steps.some((step) => step.role === StepRole.Review)
+        )
+          throw new InvalidError(COPY_NEEDS_REVIEW);
+        return patchedTask;
       });
     },
     moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),

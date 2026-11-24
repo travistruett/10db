@@ -52,6 +52,7 @@ export { createSlackPicturePost, type SlackPicturePost } from './slack-picture-p
 export { createKeptWorkGate, subscribeKeptWorkLanding } from './kept-work-start';
 export { answerPassMoveCard, resumePassSettles, subscribePassSettles } from './pass-settle';
 export { createFailedRestarts } from './restart';
+export { CopyJournalMissingError, copyIdForBatch } from './copy-id';
 export { finalCheck, stepCheck } from './local-check';
 export { fileFlakyTests, flakeNote, rerunFlaky, type FlakyTest } from './flaky-tests';
 export { prBody } from './pr-text';
@@ -89,6 +90,7 @@ export {
 export { createWorktreeDependencies } from './worktree-dependencies';
 export { createNodeModulesTemplates, templatesRoot } from './node-modules-template';
 export { createWorktreeGenerators } from './worktree-generated';
+export { createCopyTeardown } from './copy-teardown-run';
 export { readPnpmVersion, resolvePnpm } from './pnpm-binary';
 export {
   applySkippedChoice,

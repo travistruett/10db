@@ -1,6 +1,6 @@
 import { hazardScope, HazardScope, type ProjectDto } from '@10db/contracts';
-import { ActionIcon, Button, Group, Stack, Text, Tooltip } from '@mantine/core';
-import { IconWand } from '@tabler/icons-react';
+import { Menu, Stack, Text } from '@mantine/core';
+import { IconSparkles } from '@tabler/icons-react';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
 import { useLookAgainAtHazards } from '../../daemon/hazard-queries';
@@ -8,6 +8,7 @@ import { ConfirmModal } from '../../shell/confirm-modal';
 import { FoundByTendb, HazardLookStatus } from './hazard-additions';
 import { HazardDrawer } from './hazard-drawer';
 import { SectionHeading } from './section-heading';
+import { SplitButton } from './split-button';
 import { Pill, RowActions } from './table-cells';
 import { useListPatch } from './use-list-patch';
 
@@ -105,38 +106,47 @@ export function HazardsSection({ project }: { readonly project: ProjectDto }) {
     <Stack gap="sm" component="section" aria-label="Hazards">
       <SectionHeading
         title="Hazards"
-        line="Files and commands that tasks take turns on."
-        help="A hazard is a set of files only one task changes at a time, such as lockfiles or migrations. A task that touches one, or runs one of its commands, waits for the task that holds it. 10db reads the project's files (its Makefiles, compose files, package scripts, AGENTS.md and docs) to find the commands that change lockfiles and migrations, and adds them by itself; you are asked only before one is taken out."
+        line="Lockfiles, migrations and other files any task might change, kept to one task at a time."
+        help={
+          <>
+            <Text size="sm">
+              Some files cut across areas: a lockfile, a migrations folder, generated code. Two
+              tasks running <code>pnpm add</code> at once leave a broken lockfile; two new
+              migrations take the same number.
+            </Text>
+            <Text size="sm">
+              A hazard names those files and the commands that change them. A task that touches one,
+              or runs one of its commands, waits for the task holding it.
+            </Text>
+            <Text size="sm">
+              Project means one task at a time across the project. Per Copy lets tasks in separate
+              copies (worktrees) change it together, and their pull requests settle any clash.
+            </Text>
+            <Text size="sm">
+              10db finds them by reading the project&apos;s Makefiles, compose files, package
+              scripts and docs, and adds them by itself; it asks before taking one out. Add Hazard ›
+              Look again reads the repository again.
+            </Text>
+          </>
+        }
         action={
-          <Group gap="xs" wrap="nowrap">
-            <Button
-              data-keeps-drawer
+          <SplitButton
+            label="Add Hazard"
+            menuLabel="More ways to add hazards"
+            onClick={() => {
+              request(null);
+            }}
+          >
+            <Menu.Item
+              leftSection={<IconSparkles size={16} stroke={1.5} />}
+              disabled={look.isPending}
               onClick={() => {
-                request(null);
+                look.mutate();
               }}
             >
-              Add Hazard
-            </Button>
-            <Tooltip
-              position="left"
-              multiline
-              w={240}
-              label="Look Again: read the project's files for the commands and files that change lockfiles and migrations."
-            >
-              <ActionIcon
-                data-keeps-drawer
-                variant="default"
-                size="input-sm"
-                aria-label="Look Again"
-                loading={look.isPending}
-                onClick={() => {
-                  look.mutate();
-                }}
-              >
-                <IconWand size={18} stroke={1.5} />
-              </ActionIcon>
-            </Tooltip>
-          </Group>
+              {look.isPending ? 'Reading the repository…' : 'Look again at the repository'}
+            </Menu.Item>
+          </SplitButton>
         }
       />
       <HazardLookStatus project={project} look={look} />

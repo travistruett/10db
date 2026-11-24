@@ -1,7 +1,15 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { BatchState, InvalidError, type BatchDto, type BatchId, Urgency } from '@10db/contracts';
-import { getBatch, getProject, transitionBatch, type WriteContext } from '@10db/db';
+import {
+  getBatch,
+  getLocalCopy,
+  getProject,
+  isLivePromoting,
+  transitionBatch,
+  type WriteContext,
+} from '@10db/db';
+import { resetCopyJournal } from './copy-reset';
 import { existsAsEntry, GitTrustError, WorktreeNotOursError } from '../git';
 import { worktreeCards, worktreeOffer } from './cards';
 import { raise, type DeliveryContext } from './context';
@@ -170,6 +178,9 @@ export async function reopenWhenWhole(
   // A function, so the checks after an await are not narrowed away by the one before it.
   const stopped = (): boolean => signal.aborted;
   if (stopped()) return false;
+  // A landing that may have written the builder's folder takes no new run until a Retry settles it.
+  const copy = getLocalCopy(ctx.state.db, batchId);
+  if (copy !== null && isLivePromoting(copy)) return false;
   if (batch.state === BatchState.Failed) {
     let whole: Wholeness;
     try {
@@ -187,6 +198,7 @@ export async function reopenWhenWhole(
     if (now.state === BatchState.Failed)
       transitionBatch(w, batchId, { to: BatchState.Open, patch: { failure: null }, reason });
     else if (now.state !== BatchState.Open) return false;
+    resetCopyJournal(w, batchId);
     then?.(w);
     return true;
   });

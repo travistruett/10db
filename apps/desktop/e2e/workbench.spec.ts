@@ -34,6 +34,14 @@ const APP: Readonly<Record<string, string>> = {
   'src/views/people/people-view.tsx': "import { Button } from '../../ui/button';\n",
   'src/views/billing/billing-view.tsx': "import { Button } from '../../ui/button';\n",
   'src/ui/button.tsx': 'export const Button = () => null;\n',
+  // A folder of three packages one area holds: the setup offers to split it, one area per package.
+  ...Object.fromEntries(
+    ['auth', 'orders', 'search'].flatMap((pkg) => [
+      [`server/${pkg}/package.json`, `{ "name": "${pkg}" }\n`],
+      [`server/${pkg}/index.ts`, 'export {};\n'],
+    ]),
+  ),
+  'server/README.md': 'The server.\n',
 };
 
 const Live = z.array(
@@ -43,6 +51,7 @@ const Live = z.array(
   }),
 );
 const TaskIds = z.array(z.looseObject({ id: z.string() }));
+const TaskAreas = z.array(z.looseObject({ title: z.string(), areas: z.array(z.string()) }));
 
 /** Where the thread checks save a screenshot per width, when set. */
 const SHOTS = process.env['E2E_SCREENSHOT_DIR'];
@@ -236,9 +245,18 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   const projectId = await createProject(
     request,
     'workbench',
-    [{ name: 'repo', globs: ['**'], catchAll: true }],
+    [
+      { name: 'repo', globs: ['**'], catchAll: true },
+      { name: 'server', globs: ['server/**'] },
+    ],
     APP,
   );
+  // An open task names the server area, so its split is offered as a row and retags the task.
+  const serverTask = await request.post(`${daemonUrl}/projects/${projectId}/tasks`, {
+    headers: auth,
+    data: { title: 'Server work', acceptanceCriteria: ['it is done'], areas: ['server'] },
+  });
+  expect(serverTask.ok()).toBe(true);
   const patched = await request.patch(`${daemonUrl}/projects/${projectId}`, {
     headers: auth,
     data: { appUrl: `http://127.0.0.1:${String(await unusedPort())}` },
@@ -266,12 +284,20 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await scan(page, 480, 'dark', 'setup');
   await scan(page, 1280, 'dark', 'setup');
   await billing.uncheck();
+  await expect(
+    page.getByRole('checkbox', { name: 'Split server into 4 areas, one per package' }),
+  ).toBeChecked();
   await page.getByRole('button', { name: 'Apply' }).click();
 
   // The start page's list of pages, narrow and dark, then wide.
   await page.setViewportSize({ width: 480, height: 900 });
   await expect(page.getByRole('checkbox', { name: 'Settings', exact: true })).toBeVisible();
   await scan(page, 480, 'dark', 'picker');
+  // The one Apply split the server area and gave its open task every part, so it lost no file.
+  const tasks = await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth });
+  expect(
+    TaskAreas.parse(await tasks.json()).find((task) => task.title === 'Server work')?.areas,
+  ).toEqual(['server-shared', 'auth', 'orders', 'search']);
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole('checkbox', { name: 'Settings', exact: true }).check();

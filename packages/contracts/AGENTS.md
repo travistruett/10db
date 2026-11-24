@@ -15,3 +15,4 @@ never hand-write a parallel interface.
   imports `node:*` (the UI bundles it), and holds no I/O.
 - Pure domain rules shared by the daemon and the UI live here too: the workstream state machine
   (`workflow.ts`) and the vocabularies (`states.ts`).
+- Separate copies (`local-copy.ts`, spec `docs/superpowers/specs/2026-11-24-10db-local-copy-landing-design.md`): `ProjectDto`/`ProjectPatch` carry `localCopies` and `copyTeardownCommand` (the refine and `NAME_COPY_TEARDOWN` require a command while copies are on); `LocalCopyDto`, `CopyStep`, `CopyWait` and the branded `CopyId` describe a copy's journal row; `COPY_NEEDS_REVIEW` is the refusal for a task whose process runs no review.

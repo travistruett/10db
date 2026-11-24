@@ -607,14 +607,26 @@ export function countMidSession(
   return live.length + countBatchesInFlight(db);
 }
 
-/** The batches being cut or shipped: the part of `countMidSession` that is no lane or gate. */
+/**
+ * The batches being cut or shipped: the part of `countMidSession` that is no lane or gate. A separate
+ * copy whose landing waits on the builder's folder runs nothing and has no end date, so it is parked,
+ * not in flight: a drain must not wait on it.
+ */
 export function countBatchesInFlight(db: DbReader): number {
+  const parked = new Set(
+    db
+      .select({ batchId: schema.localCopies.batchId })
+      .from(schema.localCopies)
+      .where(isNotNull(schema.localCopies.wait))
+      .all()
+      .map((r) => r.batchId),
+  );
   const batches = db
-    .select({ n: count() })
+    .select({ id: schema.batches.id, state: schema.batches.state })
     .from(schema.batches)
     .where(inArray(schema.batches.state, [BatchState.Cutting, BatchState.Shipping]))
-    .get();
-  return batches?.n ?? 0;
+    .all();
+  return batches.filter((b) => !(b.state === BatchState.Shipping && parked.has(b.id))).length;
 }
 
 function isWaitingOnCard(r: {

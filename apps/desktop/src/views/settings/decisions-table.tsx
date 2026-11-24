@@ -165,6 +165,7 @@ export function DecisionsTable({
       columns={columns}
       idAccessor="id"
       withTableBorder
+      backgroundColor="var(--tendb-color-panel)"
       borderRadius="md"
       verticalSpacing="xs"
       horizontalSpacing="sm"
@@ -184,8 +185,9 @@ export function DecisionsTable({
               scope="rowgroup"
               colSpan={columns.length}
               py={8}
-              fz="sm"
-              fw={700}
+              fz="xs"
+              fw={600}
+              c="dimmed"
               bg="var(--mantine-color-default-hover)"
             >
               {record.label}

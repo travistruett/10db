@@ -1,16 +1,29 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { z } from 'zod';
-import { E2E_DATA, E2E_REPO, E2E_TOKEN } from './paths';
+import { E2E_DATA, E2E_DIR, E2E_REPO, E2E_TOKEN } from './paths';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
 
 const Runs = z.array(z.object({ id: z.string(), taskTitle: z.string() }));
 const Changes = z.object({ commits: z.array(z.string()) });
+const Batches = z.array(
+  z.object({
+    id: z.string(),
+    title: z.string(),
+    state: z.string(),
+    baseBranch: z.string(),
+    gateExitCode: z.number().nullable(),
+    gateLogPath: z.string().nullable(),
+    worktreePath: z.string().nullable(),
+  }),
+);
 
 const TASK = 'Write the greeting';
 const OTHER = 'Tidy the readme';
+const COPY_TASK = 'Add the farewell';
 const QUESTION = 'Which greeting?';
 type View = 'Board' | 'Factory' | 'Inbox' | 'Knowledge' | 'Settings';
 
@@ -148,6 +161,11 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // Each key waits for the drag to take the last one: an arrow before the pick-up lands is lost.
   await page.keyboard.press('Space');
   await expect(ready.getByRole('listitem').nth(1)).toHaveCSS('opacity', '0.3');
+  // The drop targets are measured after the pick-up renders; the card is announced over itself once
+  // they are. An arrow before that finds no target to move to and is lost.
+  await expect(
+    page.getByRole('status').filter({ hasText: `${TASK} is over ${TASK}.` }),
+  ).toHaveCount(1);
   await page.keyboard.press('ArrowUp');
   await expect(
     page.getByRole('status').filter({ hasText: `${TASK} is over ${OTHER}.` }),
@@ -376,6 +394,91 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(locked).toHaveAccessibleDescription(
     /Done cards stay where they finished; they can’t be dragged$/,
   );
+
+  // A separate copy: Settings turns Separate Copies on with a teardown command and a passing gate, the task is
+  // placed in a copy, runs on the fake adapter, and lands on the base only after review and a gate on its commit.
+  await open(page, 'Settings');
+  await chooseScope(page, 'This Project');
+  await page
+    .getByRole('textbox', { name: 'Gate Command' })
+    .fill('test -f src/greeting/farewell.txt');
+  await page.getByRole('switch', { name: 'Separate Copies' }).check({ force: true });
+  await page
+    .getByRole('textbox', { name: 'Teardown Command' })
+    .fill('echo torn-down-$TENDB_COPY_ID');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  const copyTask = await request.post(`${daemonUrl}/projects/${projectId}/tasks`, {
+    headers: { Authorization: `Bearer ${E2E_TOKEN}` },
+    data: {
+      title: COPY_TASK,
+      acceptanceCriteria: ['src/greeting/farewell.txt exists'],
+      areas: ['greeting'],
+    },
+  });
+  expect(copyTask.ok()).toBe(true);
+  await page.goto('/board');
+  await expectView(page, 'Board');
+  await page.getByRole('button', { name: COPY_TASK, exact: true }).click();
+  await page.getByRole('dialog', { name: 'Task' }).getByRole('tab', { name: 'Edit' }).click();
+  await page
+    .getByRole('radiogroup', { name: `Where ${COPY_TASK} runs` })
+    .getByText('Separate copy')
+    .click();
+  await expect(page.getByRole('radio', { name: 'Separate copy' })).toBeChecked();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'More board actions' }).click();
+  await page.getByRole('menuitem', { name: /Start Ready Tasks/ }).click();
+  const copySheet = page.getByRole('dialog', { name: 'Start a Batch' });
+  await copySheet.getByRole('checkbox', { name: OTHER }).uncheck();
+  await copySheet.getByRole('checkbox', { name: COPY_TASK }).check();
+  await copySheet.getByRole('button', { name: 'Start 1 task' }).click();
+  await expect(copySheet).toBeHidden();
+
+  const authHeader = { Authorization: `Bearer ${E2E_TOKEN}` };
+  const copyBatch = async () => {
+    const response = await request.get(`${daemonUrl}/projects/${projectId}/batches`, {
+      headers: authHeader,
+    });
+    return Batches.parse(await response.json()).find((b) => b.title.includes(COPY_TASK));
+  };
+  // SHIPPED is the landing's own write, made after the gate passed on the exact commit.
+  await expect.poll(async () => (await copyBatch())?.state, { timeout: 180_000 }).toBe('SHIPPED');
+  const landed = await copyBatch();
+  expect(landed?.gateExitCode).toBe(0);
+  const gateLog = landed?.gateLogPath ?? '';
+  expect(existsSync(gateLog)).toBe(true);
+  const gitEnv = {
+    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+  };
+  const git = (...args: string[]): string =>
+    execFileSync('git', args, { cwd: E2E_REPO, env: gitEnv, encoding: 'utf8' }).trim();
+  const base = landed?.baseBranch ?? '';
+  expect(git('log', base, '--format=%s')).toContain('Add the farewell');
+  // The base moved only after the gate's evidence was written, and the builder's folder shows the work.
+  const movedAt = Number(
+    /@\{(\d+)\}/.exec(git('reflog', 'show', base, '--date=unix', '--format=%gd', '-n', '1'))?.[1],
+  );
+  expect(Math.floor(statSync(gateLog).mtimeMs / 1000)).toBeLessThanOrEqual(movedAt);
+  expect(readFileSync(resolve(E2E_REPO, 'src/greeting/farewell.txt'), 'utf8')).toBe('goodbye\n');
+  expect(git('status', '--porcelain')).toBe('');
+  // Retiring runs the pinned teardown, then removes the copy's worktree.
+  const tornDown = (): string | undefined => {
+    const dir = resolve(E2E_DATA, 'logs', 'teardown');
+    if (!existsSync(dir)) return undefined;
+    const log = readdirSync(dir).find((f) => f.startsWith(`batch-${landed?.id ?? ''}-`));
+    return log === undefined ? undefined : readFileSync(resolve(dir, log), 'utf8');
+  };
+  await expect.poll(tornDown, { timeout: 60_000 }).toMatch(/torn-down-[0-9a-f]{12}/);
+  await expect.poll(async () => (await copyBatch())?.worktreePath, { timeout: 60_000 }).toBeNull();
+  expect(git('worktree', 'list', '--porcelain')).not.toContain(landed?.id ?? 'no-batch');
+  await page.reload();
+  await expect(
+    page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: COPY_TASK }),
+  ).toBeVisible();
+  await page.screenshot({ path: resolve(E2E_DIR, 'copy-landed.png') });
 
   // Settings: add a human column, and accounts work.
   await open(page, 'Settings');

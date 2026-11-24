@@ -19,6 +19,7 @@ import {
   Text,
   Tooltip,
   UnstyledButton,
+  Paper,
 } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
 import { useSearch } from '@tanstack/react-router';
@@ -47,6 +48,16 @@ const STATUS_TONE: Readonly<Record<AccountStatus, ConnectionTone>> = {
 };
 
 const NO_WRAP = { whiteSpace: 'nowrap' } as const;
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/** An identity as the table shows it: "email · id" without the id, which the drawer still shows whole. */
+function shownIdentity(identity: string): string {
+  return identity
+    .split(' · ')
+    .filter((part) => !UUID.test(part.trim()))
+    .join(' · ');
+}
 /** A badge is never cut to its first letters, as the Factory's state badges aren't. */
 const WHOLE_BADGE = {
   style: { minWidth: 'max-content' },
@@ -116,8 +127,15 @@ function AccountRow({
             ) : null}
           </Group>
           {harnessOf(account) !== null && account.kind !== AccountKind.OpenRouter ? (
-            <Text size="xs" c="dimmed" style={NO_WRAP}>
-              {account.expectedIdentity ?? 'No identity yet'}
+            <Text
+              size="xs"
+              c="dimmed"
+              style={NO_WRAP}
+              title={account.expectedIdentity ?? undefined}
+            >
+              {account.expectedIdentity === null
+                ? 'No identity yet'
+                : shownIdentity(account.expectedIdentity)}
             </Text>
           ) : null}
           {account.archived || harnessOf(account) === null ? null : (
@@ -241,36 +259,38 @@ export function AccountsSection() {
         </Button>
       </Group>
       {/* No column wraps: the table scrolls sideways before a name or status breaks. Usage sits right like any number. */}
-      <Table.ScrollContainer minWidth={860}>
-        <Table aria-label="Accounts" verticalSpacing="sm">
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Account</Table.Th>
-              <Table.Th>Kind</Table.Th>
-              <Table.Th>Used By</Table.Th>
-              <Table.Th>Decisions</Table.Th>
-              <Table.Th>Status</Table.Th>
-              <Table.Th w={200} ta="right">
-                This Month
-              </Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {live.map((a) => (
-              <AccountRow
-                key={a.id}
-                account={a}
-                usedBy={accountUsedBy(a, projects.data ?? [], judge.data)}
-                onOpen={(account) => {
-                  returnToAdd.current = false;
-                  setSelected(account.id);
-                  setOpened(true);
-                }}
-              />
-            ))}
-          </Table.Tbody>
-        </Table>
-      </Table.ScrollContainer>
+      <Paper withBorder radius="md" bg="var(--tendb-color-panel)" style={{ overflow: 'hidden' }}>
+        <Table.ScrollContainer minWidth={860}>
+          <Table aria-label="Accounts" verticalSpacing="sm">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Account</Table.Th>
+                <Table.Th>Kind</Table.Th>
+                <Table.Th>Used By</Table.Th>
+                <Table.Th>Decisions</Table.Th>
+                <Table.Th>Status</Table.Th>
+                <Table.Th w={200} ta="right">
+                  This Month
+                </Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {live.map((a) => (
+                <AccountRow
+                  key={a.id}
+                  account={a}
+                  usedBy={accountUsedBy(a, projects.data ?? [], judge.data)}
+                  onOpen={(account) => {
+                    returnToAdd.current = false;
+                    setSelected(account.id);
+                    setOpened(true);
+                  }}
+                />
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
+      </Paper>
       {archived.length > 0 ? <ArchivedList accounts={archived} /> : null}
       <AddAccountModal
         opened={adding}

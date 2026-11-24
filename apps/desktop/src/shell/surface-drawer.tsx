@@ -29,6 +29,8 @@ export function SurfaceDrawer({
   actions,
   closeOnClickOutside = false,
   showing,
+  title,
+  footer,
   children,
 }: {
   readonly opened: boolean;
@@ -45,6 +47,10 @@ export function SurfaceDrawer({
   readonly closeOnClickOutside?: boolean;
   /** What it shows, such as a record's id: when it changes while open, focus that was lost comes back in. */
   readonly showing?: string;
+  /** A heading on the top edge, at the left; absent, the top edge holds only the buttons. */
+  readonly title?: ReactNode;
+  /** The drawer's actions, in a bar pinned to its bottom edge below the scrolling body. */
+  readonly footer?: ReactNode;
   readonly children: ReactNode;
 }): ReactNode {
   const { drawerHost } = useFrameSlots();
@@ -117,6 +123,7 @@ export function SurfaceDrawer({
         onKeyDown={onKeyDown}
       >
         <div className={classes['head']}>
+          {title === undefined ? null : <div className={classes['title']}>{title}</div>}
           {actions === undefined ? null : (
             <Group gap={4} wrap="nowrap">
               {actions}
@@ -125,6 +132,7 @@ export function SurfaceDrawer({
           <CloseButton aria-label={closeLabel} onClick={onClose} />
         </div>
         <div className={classes['body']}>{children}</div>
+        {footer === undefined ? null : <div className={classes['footer']}>{footer}</div>}
       </aside>
     </div>
   );

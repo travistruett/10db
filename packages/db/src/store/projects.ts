@@ -9,6 +9,7 @@ import {
   InvalidError,
   isMetered,
   mintId,
+  NAME_COPY_TEARDOWN,
   NAME_LANDING_BRANCH,
   NotFoundError,
   PRECHECK_NEEDS_GATE,
@@ -17,8 +18,10 @@ import {
   ProjectPatch,
   Provider,
   SCREENS_MATRIX_DEFAULT,
+  TaskStatus,
   WorkspaceMode,
   type AccountId,
+  type AreaSplit,
   type HazardDef,
   type ProjectDto,
   type ProjectId,
@@ -30,6 +33,7 @@ import * as schema from '../schema';
 import { defaultAccountId, getAccountRow, refuseAccountWithoutHarness } from './accounts';
 import { currentBatch, findUnfinishedBatch, listUnfinishedBatches } from './batches';
 import { insertBoardColumn } from './board-columns';
+import { unfinishedCopyOf } from './local-copies';
 import type { DbReader, WriteContext } from './store';
 
 /** The account a new project binds to: the one it names, else the default; never an archived one. */
@@ -214,13 +218,86 @@ function checkClaimedNames(
   }
 }
 
+/**
+ * Refuses a split of an area the project lacks, or of one a run holds: a held claim keeps the files the
+ * area had when it was granted, so the run could write a part another lane then claims.
+ */
+function checkSplits(ctx: WriteContext, current: ProjectDto, splits: readonly AreaSplit[]): void {
+  for (const split of splits) {
+    if (!current.areas.some((a) => a.name === split.from))
+      throw new InvalidError(`There is no area "${split.from}" to split`);
+    const holder = ctx.tx
+      .select({ title: schema.tasks.title })
+      .from(schema.claims)
+      .innerJoin(schema.workstreams, eq(schema.workstreams.id, schema.claims.workstreamId))
+      .innerJoin(schema.tasks, eq(schema.tasks.id, schema.workstreams.taskId))
+      .where(
+        and(
+          eq(schema.claims.projectId, current.id),
+          eq(schema.claims.kind, ClaimKind.Area),
+          eq(schema.claims.name, split.from),
+          isNull(schema.claims.releasedAt),
+        ),
+      )
+      .get();
+    if (holder)
+      throw new ConflictError(
+        `Can't split area "${split.from}": the running task "${holder.title}" holds it. Try again once it lets go, or leave the split out.`,
+      );
+  }
+}
+
+/** `names` with each split's `from` replaced in place by its `into`, each name once. */
+const splitNames = (names: readonly string[], splits: readonly AreaSplit[]): string[] => [
+  ...new Set(names.flatMap((name) => splits.find((s) => s.from === name)?.into ?? [name])),
+];
+
+/**
+ * Every open task of the project that names a split area names all of its parts instead, in the same
+ * write as the project's new areas, so no task is left on a narrowed name. The column is written
+ * directly: the parts hold every file the area held, so no rule that guards a task's own edit applies.
+ */
+function retagSplitTasks(ctx: WriteContext, id: ProjectId, splits: readonly AreaSplit[]): void {
+  const from = new Set(splits.map((s) => s.from));
+  const open = ctx.tx
+    .select({ id: schema.tasks.id, areas: schema.tasks.areas })
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.projectId, id), eq(schema.tasks.status, TaskStatus.Open)))
+    .all();
+  for (const task of open) {
+    if (!task.areas.some((name) => from.has(name))) continue;
+    const areas = splitNames(task.areas, splits);
+    ctx.tx
+      .update(schema.tasks)
+      .set({ areas, updatedAt: ctx.now })
+      .where(eq(schema.tasks.id, task.id))
+      .run();
+    ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: task.id });
+  }
+}
+
 export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPatch): ProjectDto {
-  const changes = ProjectPatch.parse(patch);
+  const { areaSplits, ...changes } = ProjectPatch.parse(patch);
   const current = getProject(ctx.tx, id);
+  if (areaSplits !== undefined) checkSplits(ctx, current, areaSplits);
+  // A project that keeps a split area apart in its own copy keeps each of its parts apart too.
+  if (
+    areaSplits !== undefined &&
+    (changes.isolate ?? current.isolate).some((n) => areaSplits.some((s) => s.from === n))
+  )
+    changes.isolate = ProjectPatch.parse({
+      isolate: splitNames(changes.isolate ?? current.isolate, areaSplits),
+    }).isolate;
   const nudgePct = changes.nudgePct ?? current.nudgePct;
   const handoffPct = changes.handoffPct ?? current.handoffPct;
   if (nudgePct <= handoffPct) throw new InvalidError('nudgePct must be above handoffPct');
   if (changes.delivery !== undefined && changes.delivery !== current.delivery) {
+    // A copy's landing reads the project's delivery from the journal's pinned facts, so the change waits.
+    const copy = unfinishedCopyOf(ctx.tx, id);
+    if (copy !== null)
+      throw new ConflictError(
+        `${copy.title} is in a separate copy; let it ship or abandon it first`,
+      );
     // A QUEUED pull-request workstream needs a batch to launch, so delivery can't change under work.
     const busy = ctx.tx
       .select({ id: schema.workstreams.id })
@@ -237,6 +314,12 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
         `${current.name} has unfinished work; finish or cancel it before changing its delivery`,
       );
   }
+  // A copy lands only after the gate runs, so the command stays while a copy is unfinished.
+  const copyLanding = changes.gateCommand === null ? unfinishedCopyOf(ctx.tx, id) : null;
+  if (copyLanding !== null)
+    throw new ConflictError(
+      `${copyLanding.title} is in a separate copy, which lands through the gate command; let it ship or abandon it first`,
+    );
   if (changes.areas !== undefined || changes.hazards !== undefined) {
     const areas = changes.areas ?? current.areas;
     const hazards = changes.hazards ?? current.hazards;
@@ -265,6 +348,12 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
   const precheckCommand =
     changes.precheckCommand === undefined ? current.precheckCommand : changes.precheckCommand;
   if (precheckCommand !== null && gateCommand === null) throw new InvalidError(PRECHECK_NEEDS_GATE);
+  const localCopies = changes.localCopies ?? current.localCopies;
+  const copyTeardownCommand =
+    changes.copyTeardownCommand === undefined
+      ? current.copyTeardownCommand
+      : changes.copyTeardownCommand;
+  if (localCopies && copyTeardownCommand === null) throw new InvalidError(NAME_COPY_TEARDOWN);
   const moving = changes.accountId !== undefined && changes.accountId !== current.accountId;
   if (changes.accountId !== undefined && moving) {
     // Work in flight moves too: each lane's next session runs on the new account.
@@ -296,6 +385,7 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
       .set({ accountId: changes.accountId, updatedAt: ctx.now })
       .where(eq(schema.conversations.projectId, id))
       .run();
+  if (areaSplits !== undefined) retagSplitTasks(ctx, id, areaSplits);
   ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: id });
   return getProject(ctx.tx, id);
 }

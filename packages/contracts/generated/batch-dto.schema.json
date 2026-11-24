@@ -375,7 +375,11 @@
             "install_broken",
             "push_rejected",
             "gh_unavailable",
-            "network"
+            "network",
+            "interrupted_landing",
+            "lockfile_in_copy",
+            "gate_changed_copy",
+            "git_filters"
           ]
         },
         {

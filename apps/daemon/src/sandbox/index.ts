@@ -1,4 +1,5 @@
 export { deniedEnvNames } from './env-allowlist';
+export { withCopyId } from './command-env';
 export {
   buildLaneProfile,
   isSandboxDomain,

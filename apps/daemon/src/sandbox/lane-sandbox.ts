@@ -1,10 +1,10 @@
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { Provider, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
+import { Provider, type CopyId, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
 import type { Clock } from '../clock';
 import { foldPathCase } from '../guard';
 import { besideTheWays } from './beside-the-way';
-import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
+import { prepareCommandEnv, withCopyId, withoutTempDirPaths } from './command-env';
 import { dockerAccess, dockerEnvNames } from './docker-access';
 import { deniedEnvNames } from './env-allowlist';
 import { createLaneEnvFile, removeLaneEnvFile } from './env-file';
@@ -198,6 +198,8 @@ export interface LaneSessionInput {
    * commands, and every other file tool and search is refused as in a lane.
    */
   readonly attended?: boolean;
+  /** The copy the session's batch runs in (`copyIdForBatch`); absent or null for any other session. */
+  readonly copyId?: CopyId | null;
   /**
    * The pictures pasted into the lane's task's thread, which its file tools may read though the data
    * directory holds them (Workbench spec §13). Its commands read none. Plan has no task, so none.
@@ -231,6 +233,8 @@ export interface TakeoverSandboxInput {
   readonly configDir: string;
   readonly checkouts: readonly string[];
   readonly setup: SetupInput;
+  /** The copy the chat's batch runs in; absent or null for a chat with none. */
+  readonly copyId?: CopyId | null;
   readonly yourMcpServers: Readonly<Record<string, UnsandboxedStdioServer>>;
   /** The project's approved stdio servers, each launched under srt. */
   readonly projectStdio: Readonly<Record<string, StdioMcpServer>>;
@@ -483,7 +487,10 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             : null;
         const dockerNames: ReadonlySet<string> | undefined =
           docker === null ? undefined : new Set(dockerEnvNames(input.env));
-        const commandEnv = prepareCommandEnv(tmpDir, deps.home, input.env);
+        const commandEnv = withCopyId(
+          prepareCommandEnv(tmpDir, deps.home, input.env),
+          input.copyId ?? null,
+        );
         // Claude Code strips some of these from a sandboxed command's env; the shell sets every one
         // of them again from this file before each command.
         envFile = createLaneEnvFile(commandEnv, filesRoot);
@@ -550,6 +557,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           sandboxRoots,
           runtime: deps.runtime,
           env: input.env,
+          copyId: input.copyId ?? null,
           checkouts: input.checkouts,
           servers: input.mcpServers,
           ...(deps.log === undefined ? {} : { log: deps.log }),
@@ -571,7 +579,10 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           settings,
           checkout,
           env,
-          shellEnv: { ...allowlisted(input.env, dockerNames), TMPDIR: tmpDir, ...commandEnv },
+          shellEnv: withCopyId(
+            { ...allowlisted(input.env, dockerNames), TMPDIR: tmpDir, ...commandEnv },
+            input.copyId ?? null,
+          ),
           disallowedTools: [
             ...LANE_DISALLOWED_TOOLS,
             ...deniedToFileTools.flatMap((path) => [
@@ -752,6 +763,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           sandboxRoots,
           runtime: deps.runtime,
           env: input.env,
+          copyId: input.copyId ?? null,
           checkouts: input.checkouts,
           servers: input.projectStdio,
           ...(deps.log === undefined ? {} : { log: deps.log }),

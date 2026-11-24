@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { AppUrl, AreaDef, AreaName, PathPattern, ProjectPatch } from './entities';
-import { BranchName } from './git-names';
 import { globsOverlap } from './glob-overlap';
 import { AreaRole, AreaRoute, PageLabel } from './page-areas';
 
@@ -33,6 +32,18 @@ export type PageRow = z.infer<typeof PageRow>;
 
 const Named = z.object({ name: z.string(), reason: z.string() });
 
+/** An area open tasks name, split along its packages: one row the builder may untick. */
+export const SplitRow = z.object({
+  from: AreaName,
+  /** The new areas, the core first (`<from>-shared`); `from` itself is retired. */
+  into: z.array(SetupArea).min(2),
+  /** `from` as it is, which an unticked row keeps. */
+  was: AreaDef,
+  /** The open tasks that name `from`; Apply has each of them name every area of `into`. */
+  tasks: z.int().nonnegative(),
+});
+export type SplitRow = z.infer<typeof SplitRow>;
+
 /** The project's areas rebuilt: the whole new list, and what it keeps, adds as pages and leaves out. */
 export const WorkbenchSetupAreas = z.object({
   /** The new area list, every page ticked; Apply saves it (less any unticked page, `withoutPages`). */
@@ -43,6 +54,8 @@ export const WorkbenchSetupAreas = z.object({
   pages: z.array(PageRow),
   /** Pages and areas left out, each with why. */
   skipped: z.array(Named),
+  /** Areas open tasks name that split along their packages; `proposed` holds each whole. */
+  splits: z.array(SplitRow).default([]),
 });
 export type WorkbenchSetupAreas = z.infer<typeof WorkbenchSetupAreas>;
 
@@ -78,21 +91,35 @@ export const SettingSuggestion = z.discriminatedUnion('field', [
 ]);
 export type SettingSuggestion = z.infer<typeof SettingSuggestion>;
 
-/** The base branch's commits `origin` lacks, and the command that pushes them, for the builder to run. */
-export const BranchNote = z.object({
-  branch: BranchName,
-  ahead: z.int().positive(),
-  command: z.string().min(1),
-});
-export type BranchNote = z.infer<typeof BranchNote>;
-
 /** `POST /projects/:projectId/workbench-setup`. */
 export const WorkbenchSetupDto = z.object({
   areas: WorkbenchSetupAreas,
   settings: z.array(SettingSuggestion),
-  branch: BranchNote.nullable(),
 });
 export type WorkbenchSetupDto = z.infer<typeof WorkbenchSetupDto>;
+
+/** `areas` with each split of `rows` whose `from` is not in `unticked` applied in `from`'s place. Pure. */
+export function withSplits(
+  areas: readonly AreaDef[],
+  rows: readonly SplitRow[],
+  unticked: readonly string[],
+): AreaDef[] {
+  return areas.flatMap((area): AreaDef[] => {
+    const row = rows.find((r) => r.from === area.name && !unticked.includes(r.from));
+    return row === undefined
+      ? [{ ...area }]
+      : row.into.map((part) => ({ ...part, globs: [...part.globs] }));
+  });
+}
+
+/** The `ProjectPatch.areaSplits` for the rows of `rows` whose `from` is not in `unticked`. */
+export const splitsOf = (
+  rows: readonly SplitRow[],
+  unticked: readonly string[],
+): { from: string; into: string[] }[] =>
+  rows
+    .filter((r) => !unticked.includes(r.from))
+    .map((r) => ({ from: r.from, into: r.into.map((a) => a.name) }));
 
 /**
  * `proposed` with each page named in `unticked` dropped and its files folded back: a page whose row

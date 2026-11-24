@@ -37,6 +37,25 @@
   padding: 10px 16px 0 24px;
 }
 
+.title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--mantine-font-size-lg);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* The actions' bar: outside the body, so it stays on the bottom edge however far the body scrolls. */
+.footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--mantine-spacing-sm);
+  padding: var(--mantine-spacing-md) var(--surface-drawer-inset);
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
 /* Content that reaches the drawer's edges (a sticky footer) offsets itself by the inset. */
 .drawer {
   --surface-drawer-inset: 24px;

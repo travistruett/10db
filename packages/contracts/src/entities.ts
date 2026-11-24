@@ -520,6 +520,10 @@ export const NAME_LANDING_BRANCH = 'Name the branch new tasks land in';
  */
 export const PRECHECK_NEEDS_GATE = 'A pre-check needs a gate command: set a gate command first';
 
+/** A project with separate copies on says how a copy's databases are dropped when it goes. */
+export const NAME_COPY_TEARDOWN =
+  "Separate copies need a teardown command: set one that drops a copy's databases";
+
 export const ProjectInput = z
   .object({
     name: z.string().min(1),
@@ -600,6 +604,10 @@ export const ProjectInput = z
     worktreeSeed: WorktreeSeed.default(() => [...DEFAULT_WORKTREE_SEED]),
     /** Area and hazard names whose tasks are proposed a separate copy. */
     isolate: Isolate.default(() => [...DEFAULT_ISOLATE]),
+    /** Allows a separate copy for a task of a local-delivery project. */
+    localCopies: z.boolean().default(false),
+    /** Run when a copy is retired; required while `localCopies` is on. */
+    copyTeardownCommand: z.string().min(1).max(2000).nullable().default(null),
   })
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
@@ -623,7 +631,11 @@ export const ProjectInput = z
       message: 'A worktree per task needs pull request delivery',
       path: ['workspaceMode'],
     },
-  );
+  )
+  .refine((p) => !p.localCopies || p.copyTeardownCommand !== null, {
+    message: NAME_COPY_TEARDOWN,
+    path: ['copyTeardownCommand'],
+  });
 export type ProjectInput = z.input<typeof ProjectInput>;
 export type ProjectConfig = z.output<typeof ProjectInput>;
 
@@ -734,6 +746,10 @@ export const ProjectDto = z.object({
   worktreeSeed: z.array(z.string()),
   /** Area and hazard names whose tasks are proposed a separate copy. */
   isolate: z.array(z.string()),
+  /** Allows a separate copy for a task of a local-delivery project. */
+  localCopies: z.boolean(),
+  /** Run when a copy is retired; set whenever `localCopies` is on. */
+  copyTeardownCommand: z.string().nullable(),
   /** Where the builder's dev server answers; null when the project has not said. */
   appUrl: AppUrl.nullable(),
   /** Prints a URL or path on the app's address that signs a browser in; null when the app needs none. */
@@ -753,6 +769,13 @@ export const ProjectDto = z.object({
 export type ProjectDto = z.infer<typeof ProjectDto>;
 
 /** Fields the builder can change after creation; the nudge/handoff rule is checked against the merged values. */
+/**
+ * An area split into `into` in the same patch that replaces the project's areas: every open task that names
+ * `from` names every `into` area instead, so no task loses a file. `into` names areas of that patch's list.
+ */
+export const AreaSplit = z.object({ from: AreaName, into: z.array(AreaName).min(2) });
+export type AreaSplit = z.infer<typeof AreaSplit>;
+
 export const ProjectPatch = z
   .object({
     name: z.string().min(1),
@@ -790,6 +813,9 @@ export const ProjectPatch = z
     workspaceMode: z.enum(WorkspaceMode),
     worktreeSeed: WorktreeSeed,
     isolate: Isolate,
+    localCopies: z.boolean(),
+    /** Blank or null forgets it; a project with `localCopies` on must keep one. */
+    copyTeardownCommand: ProjectCommand.nullable(),
     /** Where Open Page goes; null forgets it. */
     appUrl: AppUrl.nullable(),
     /** Run under the gate's sandbox before pictures; blank or null forgets it. */
@@ -799,6 +825,8 @@ export const ProjectPatch = z
     screens: ScreensMatrix,
     /** Replaces the page names left out of a rebuild. */
     leftOutPages: z.array(AreaName).max(200),
+    /** Areas split by this patch's `areas`, whose open tasks are retagged in the same write. */
+    areaSplits: z.array(AreaSplit).min(1),
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' })
@@ -812,6 +840,15 @@ export const ProjectPatch = z
       return new Set(names).size === names.length;
     },
     { message: 'An area or hazard name is used twice', path: ['areas'] },
+  )
+  .refine(
+    (p) =>
+      p.areaSplits === undefined ||
+      (p.areas !== undefined &&
+        p.areaSplits.every((split) =>
+          split.into.every((name) => p.areas?.some((a) => a.name === name) === true),
+        )),
+    { message: 'A split names an area the new list lacks', path: ['areaSplits'] },
   );
 export type ProjectPatch = z.infer<typeof ProjectPatch>;
 
