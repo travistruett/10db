@@ -1,6 +1,6 @@
 import { Button, Group, Menu } from '@mantine/core';
 import { IconChevronDown } from '@tabler/icons-react';
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { CountBadge } from '../../shell/count-badge';
 
 /**
@@ -12,6 +12,7 @@ export function SplitButton({
   onClick,
   menuLabel,
   count = 0,
+  caretRef,
   children,
 }: {
   readonly label: string;
@@ -19,6 +20,8 @@ export function SplitButton({
   /** The caret's name for assistive tech ("More ways to add an area"). */
   readonly menuLabel: string;
   readonly count?: number;
+  /** The caret, for focus to come back to once what a menu item opened closes. */
+  readonly caretRef?: Ref<HTMLButtonElement>;
   /** The menu's `Menu.Item`s. */
   readonly children: ReactNode;
 }) {
@@ -30,7 +33,12 @@ export function SplitButton({
       <Menu position="bottom-end" withinPortal>
         <Menu.Target>
           <Button
-            aria-label={menuLabel}
+            ref={caretRef}
+            aria-label={
+              count > 0
+                ? `${menuLabel}, ${String(count)} ${count === 1 ? 'suggestion' : 'suggestions'}`
+                : menuLabel
+            }
             px={count > 0 ? 8 : 10}
             style={{
               borderTopLeftRadius: 0,
@@ -40,9 +48,7 @@ export function SplitButton({
             }}
           >
             <Group gap={6} wrap="nowrap">
-              {count > 0 ? (
-                <CountBadge count={count} phrase={`${String(count)} suggestions`} />
-              ) : null}
+              {count > 0 ? <CountBadge count={count} /> : null}
               <IconChevronDown size={16} stroke={1.75} />
             </Group>
           </Button>

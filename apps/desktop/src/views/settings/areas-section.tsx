@@ -2,7 +2,7 @@ import { AreaRole, type ProjectDto } from '@10db/contracts';
 import { Group, Menu, Stack, Text } from '@mantine/core';
 import { IconSparkles } from '@tabler/icons-react';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ConfirmModal } from '../../shell/confirm-modal';
 import { AreaDrawer } from './area-drawer';
 import { useWorkbenchSetup } from '../../daemon/pass-queries';
@@ -48,6 +48,7 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<Area | null>(null);
   const [suggesting, setSuggesting] = useState(false);
+  const caret = useRef<HTMLButtonElement>(null);
   const setup = useWorkbenchSetup(project.id);
   const suggestions = setup.data === undefined ? 0 : setUpCount(setup.data, project.leftOutPages);
   const remove = useListPatch(project);
@@ -145,6 +146,7 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
             label="Add Area"
             menuLabel="More ways to add areas"
             count={suggestions}
+            caretRef={caret}
             onClick={() => {
               request(null);
             }}
@@ -197,6 +199,8 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
         opened={suggesting}
         onClose={() => {
           setSuggesting(false);
+          // The menu item that opened it is gone, so focus comes back to the caret, not the page.
+          caret.current?.focus();
         }}
       />
       <ConfirmModal

@@ -1,6 +1,6 @@
 import type { ProjectDto } from '@10db/contracts';
 import { Alert, Button, Stack, Switch, Textarea, TextInput } from '@mantine/core';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { AreaKindField } from './area-kind-field';
 import { areaDraft, areaOf, EMPTY_AREA, lines, type AreaDraft } from './list-drafts';
@@ -44,6 +44,11 @@ export function AreaDrawer({
     },
     [onDirty],
   );
+  // Save is in the pinned footer: a refusal or a changed row comes into view, wherever the body scrolled.
+  const alerts = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (problem !== null || gone || changed) alerts.current?.scrollIntoView({ block: 'nearest' });
+  }, [problem, gone, changed]);
   const change = (next: Partial<AreaDraft>) => {
     clear();
     setDraft((d) => ({ ...d, ...next }));
@@ -144,6 +149,7 @@ export function AreaDrawer({
             change({ catchAll: e.currentTarget.checked });
           }}
         />
+        <div ref={alerts} />
         {changed ? <ChangedAlert noun="area" onShowLatest={showLatest} /> : null}
         {gone ? (
           <Alert color="yellow" title="This area changed">

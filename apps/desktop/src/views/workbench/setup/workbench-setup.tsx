@@ -166,7 +166,7 @@ export function WorkbenchSetup({ project, onCancel, onApplied }: WorkbenchSetupP
               }}
               label={`Rebuild areas: ${String(setup.areas.pages.length)} new ${
                 setup.areas.pages.length === 1 ? 'page' : 'pages'
-              }, ${String(project.areas.length)} → ${String(result.length)} areas`}
+              }, ${String(project.areas.length)} → ${String(result.length)} ${result.length === 1 ? 'area' : 'areas'}`}
             />
           ) : null}
           {areasOn ? (

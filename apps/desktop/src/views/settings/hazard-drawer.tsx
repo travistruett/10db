@@ -1,6 +1,6 @@
 import type { ProjectDto } from '@10db/contracts';
 import { Alert, Button, Input, SegmentedControl, Stack, Textarea, TextInput } from '@mantine/core';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { EMPTY_HAZARD, hazardDraft, hazardOf, lines, type HazardDraft } from './list-drafts';
 import { ChangedAlert, PathMeanings } from './table-cells';
@@ -43,6 +43,11 @@ export function HazardDrawer({
     },
     [onDirty],
   );
+  // Save is in the pinned footer: a refusal or a changed row comes into view, wherever the body scrolled.
+  const alerts = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (problem !== null || gone || changed) alerts.current?.scrollIntoView({ block: 'nearest' });
+  }, [problem, gone, changed]);
   const change = (next: Partial<HazardDraft>) => {
     clear();
     setDraft((d) => ({ ...d, ...next }));
@@ -103,7 +108,7 @@ export function HazardDrawer({
           label="Name"
           description="What tasks take turns on."
           aria-label="Hazard name"
-          placeholder="deps"
+          placeholder="schema"
           data-autofocus
           value={draft.name}
           onChange={(e) => {
@@ -160,6 +165,7 @@ export function HazardDrawer({
             }}
           />
         </Input.Wrapper>
+        <div ref={alerts} />
         {changed ? <ChangedAlert noun="hazard" onShowLatest={showLatest} /> : null}
         {gone ? (
           <Alert color="yellow" title="This hazard changed">
