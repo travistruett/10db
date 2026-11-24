@@ -2,7 +2,7 @@ import {
   AreaRole,
   setupAreasProblem,
   withoutPages,
-  type ProjectViewDto,
+  type ProjectDto,
   type SettingField,
 } from '@10db/contracts';
 import { TitleRow } from '../../../shell/title-row';
@@ -33,9 +33,9 @@ function SettingsLink() {
 }
 
 export interface WorkbenchSetupProps {
-  readonly project: ProjectViewDto;
-  /** Back to the picker, offered when the project has pages already. */
-  readonly onBack?: () => void;
+  readonly project: ProjectDto;
+  /** Closes the modal unsaved; given only in the modal, which holds the title. */
+  readonly onCancel?: () => void;
   /** Called once Apply has saved the project. */
   readonly onApplied?: () => void;
 }
@@ -45,7 +45,7 @@ export interface WorkbenchSetupProps {
  * with a page per route, and the settings a pass wants; the builder unticks what they don't want and
  * saves it all with one Apply, a single `PATCH /projects/:id`.
  */
-export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupProps) {
+export function WorkbenchSetup({ project, onCancel, onApplied }: WorkbenchSetupProps) {
   const read = useWorkbenchSetup(project.id);
   const queryClient = useQueryClient();
   const apply = usePatchProject(project.id);
@@ -60,20 +60,25 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
   const hasPages = project.areas.some((area) => area.role === AreaRole.Page);
   const [rebuildEdit, setRebuildEdit] = useState<boolean | null>(null);
   const back =
-    onBack === undefined ? null : (
-      <Button variant="default" onClick={onBack}>
-        Back to Pages
+    onCancel === undefined ? null : (
+      <Button variant="default" onClick={onCancel}>
+        Cancel
       </Button>
     );
-  const heading = (
-    <>
-      <TitleRow title={`Set up ${project.name} for the UI Workbench`} />
-      <Text>
-        Work through pages with the agents, live. 10db read the repository and suggests what
-        follows; untick anything you don&apos;t want.
+  const heading =
+    onCancel === undefined ? (
+      <>
+        <TitleRow title={`Set up ${project.name} for the UI Workbench`} />
+        <Text>
+          Work through pages with the agents, live. 10db read the repository and suggests what
+          follows; untick anything you don&apos;t want.
+        </Text>
+      </>
+    ) : (
+      <Text size="sm">
+        10db read the repository and suggests what follows; untick anything you don&apos;t want.
       </Text>
-    </>
-  );
+    );
 
   if (read.isPending)
     return (
@@ -174,6 +179,7 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
               onTick={(page, ticked) => {
                 setTickEdits((edits) => ({ ...edits, [page]: ticked }));
               }}
+              summarized={hasPages}
             />
           ) : (
             // Leaving a page out needs no rebuild: the rows stand on their own and Apply remembers them.

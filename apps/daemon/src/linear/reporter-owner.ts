@@ -24,6 +24,7 @@ import type { YourSessionServer } from '../sessions';
 import { buildTrustPolicy } from '../trust';
 import { readReporterFacts, reporterBrief } from './reporter-brief';
 import { linearToolPrefixes } from './reporter-guard';
+import { snapshotBrief } from './snapshot';
 import type { LinearReporter, LinearReporterRuns } from './reporter';
 
 // The Linear reporter as an owner of the explore engine. Its session is the
@@ -41,6 +42,7 @@ const SYSTEM_PROMPT = [
   "You are 10db's Linear reporter. You keep one Linear issue up to date from the facts you are given.",
   "You have Linear's tools and one of 10db's: report_linear_post. Nothing else works.",
   'Write only to the linked issue, named by its Linear id. When you have finished an update, record it with report_linear_post.',
+  'When your first message asks you to read the issue instead, you only read, and your reply is the answer.',
 ].join('\n');
 
 const NOTHING_TO_ASK = 'The reporter runs no tool but Linear and 10db’s report tool.';
@@ -117,7 +119,7 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
         launch.account.kind === AccountKind.ClaudeSubscription &&
         row !== undefined &&
         (row.via === LinearVia.Connector || (row.via === LinearVia.None && row.unchecked));
-      const { posts } = deps.runs.begin({
+      const { posts, run } = deps.runs.begin({
         conversationId: conv.id,
         sessionId: start.sessionId,
         linearPrefixes: linearToolPrefixes({
@@ -138,7 +140,9 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
         claudeConnectors: connector,
       });
       const prompt = [
-        reporterBrief(readReporterFacts(state.db, TaskId.parse(conv.ownerId), posts)),
+        run.readOnly
+          ? snapshotBrief(run.link)
+          : reporterBrief(readReporterFacts(state.db, TaskId.parse(conv.ownerId), posts)),
         start.first.text,
       ].join('\n\n');
       return {

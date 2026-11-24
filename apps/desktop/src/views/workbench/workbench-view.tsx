@@ -45,6 +45,7 @@ import { PrButton } from './pr-button';
 import { queueRows } from './queue-rows';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { WorkbenchSetup } from './setup/workbench-setup';
+import { WorkbenchSetupModal } from './setup/setup-modal';
 import { newPagesOf } from './setup/setup-rules';
 import { StartPass } from './start-pass';
 import type { WorkbenchSearch } from './workbench-search';
@@ -140,7 +141,7 @@ function closeFinished(before: PassDto | null, after: PassDto | null): PassDto |
 export function WorkbenchScreen(props: WorkbenchScreenProps) {
   const { project, live, start, tasks, inbox, search, goalPages, now, newPages } = props;
   const { onSelect, renderWorkspace, actions } = props;
-  const [dialog, setDialog] = useState<Dialog>(search.setup === true ? 'setup' : null);
+  const [dialog, setDialog] = useState<Dialog>(null);
   // The live pass last read, and the one whose close finished while it was on screen, which the picker
   // confirms in a line until another pass opens.
   const [lastPass, setLastPass] = useState<PassDto | null>(null);
@@ -171,12 +172,11 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
       </Stack>
     );
   // A pass that has closed and not settled is one line above the picker: the next pass may stack on it.
-  if ((live === null || !passHoldsTasks(live.pass.state)) && dialog === 'setup')
-    return <WorkbenchSetup project={project} onBack={closeDialog} onApplied={closeDialog} />;
   if (live === null || !passHoldsTasks(live.pass.state))
     return (
       <Stack gap="md">
         <StartPageHeader project={project.name} />
+        <WorkbenchSetupModal project={project} opened={dialog === 'setup'} onClose={closeDialog} />
         {closed === null ? null : (
           <Text size="sm" role="status">
             {`${closed.name} finished; its work is on ${closed.returnBranch}.`}

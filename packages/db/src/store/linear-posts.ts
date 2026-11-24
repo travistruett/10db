@@ -291,21 +291,23 @@ export function linearPostCounts(
   };
 }
 
-/** The newest row `linearPostCounts` counts, for the Inbox card's latest reason; null when none. */
-export function latestLinearPostProblem(db: DbReader, projectId: ProjectId): LinearPostDto | null {
-  const row = db
+/** The rows `linearPostCounts` counts, newest problem first, at most `limit` of them; the first is the latest reason. */
+export function linearPostProblems(
+  db: DbReader,
+  projectId: ProjectId,
+  limit: number,
+): LinearPostDto[] {
+  return db
     .select()
     .from(schema.linearPosts)
     .where(needsBuilder(projectId))
     .orderBy(
-      // No row keeps when it failed: a withheld row has its record time, a pending one the due time its
-      // last failure set, and a failed one only its creation.
       desc(
         sql`coalesce(${schema.linearPosts.recordedAt}, ${schema.linearPosts.dueAt}, ${schema.linearPosts.createdAt})`,
       ),
       desc(schema.linearPosts.id),
     )
-    .limit(1)
-    .get();
-  return row === undefined ? null : toDto(row);
+    .limit(limit)
+    .all()
+    .map(toDto);
 }
