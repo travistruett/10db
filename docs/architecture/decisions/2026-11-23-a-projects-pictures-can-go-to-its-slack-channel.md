@@ -25,8 +25,17 @@ is open and its URL is not yet marked as posted:
   the pull request.
 - Changing the project's workspace clears the channel.
 
-Projects that deliver locally, or have no origin, never open a pull request and so never post. Only git,
-Slack and the picture store are involved, so every account kind behaves the same.
+A finished task outside a pass posts too, once per after picture: its title, the project's name and its before
+and after of each page it pictured (at most 10 files; the text says how many more are in 10db), with no link,
+since a local-delivery task has no pull request. The mark is the newest after's id under the task's id in the
+same record, so a task reopened and finished again posts again. A refused post leaves one Inbox item per task and
+is tried again at start-up, when the Sharing page is saved, and every 15 minutes while the item is open; a
+start-up catch-up posts tasks finished within the last hour that were not posted, never a backlog. A task in a
+pass is posted only through its pass.
+
+A pass's pull request is opened at close even under local delivery when the project has an origin, so it posts
+too. Passes with no origin or repository never post. Only git, Slack and the picture store are involved, so
+every account kind behaves the same.
 
 ## Why
 

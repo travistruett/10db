@@ -48,6 +48,7 @@ export {
   passGateKind,
   type PassPullRequests,
 } from './pass-pr';
+export { createSlackPicturePost, type SlackPicturePost } from './slack-picture-post';
 export { createKeptWorkGate, subscribeKeptWorkLanding } from './kept-work-start';
 export { answerPassMoveCard, resumePassSettles, subscribePassSettles } from './pass-settle';
 export { createFailedRestarts } from './restart';

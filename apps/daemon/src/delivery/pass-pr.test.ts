@@ -41,6 +41,11 @@ import { alive, orphanGateGroup } from '../../test/orphan-gate';
 import { openPass, recoverBatches, type PutBackKeptWork } from './index';
 import { createPassChecks } from './pass-checks';
 import { createPassPullRequests, type PassPullRequests } from './pass-pr';
+import {
+  createSlackPicturePost,
+  type SlackPicturePost,
+  type SlackPicturePostDeps,
+} from './slack-picture-post';
 import type { PassReviewDeps } from './pass-review';
 import { scratchBranchName } from './scratch-gate';
 import { worktreeLockReason } from './worktree-cut';
@@ -63,6 +68,7 @@ const nothingKept: PutBackKeptWork = () => Promise.resolve({ applied: [], left: 
 
 let h: DeliveryHarness;
 let prs: PassPullRequests;
+let poster: SlackPicturePost | null;
 /** A second `createPassPullRequests` over the same deps, as a restarted daemon makes. */
 let restarted: () => PassPullRequests;
 afterEach(async () => {
@@ -76,13 +82,21 @@ function setup(
     holdShips?: () => boolean;
     review?: PassReviewDeps;
     wrapGit?: (git: Git) => Git;
-    slack?: NonNullable<Parameters<typeof createPassPullRequests>[0]['slack']>;
+    slack?: Pick<SlackPicturePostDeps, 'channelOf' | 'clientFor'>;
   } = {},
 ) {
   h = createDeliveryHarness(
     { ...PAGES, gateCommand: GATE, ...project },
     opts.wrapGit ? { wrapGit: opts.wrapGit } : {},
   );
+  poster = opts.slack
+    ? createSlackPicturePost({
+        state: h.ctx.state,
+        inbox: h.ctx.inbox,
+        logger: silentLogger,
+        ...opts.slack,
+      })
+    : null;
   const deps = {
     ...h.ctx,
     gate: createGateRunner({ sandbox: null, logger: silentLogger }),
@@ -90,7 +104,7 @@ function setup(
     sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
     identifyProcess: (pid: number) => systemProcesses.identify(pid),
     review: opts.review ?? null,
-    ...(opts.slack ? { slack: opts.slack } : {}),
+    ...(poster ? { slack: poster } : {}),
     ...(opts.holdShips ? { holdShips: opts.holdShips } : {}),
   };
   prs = createPassPullRequests(deps);
@@ -671,6 +685,51 @@ describe('Pictures to Slack', () => {
     await push();
     await h.jobs.idle();
     expect(slack.uploads).toHaveLength(1);
+  });
+
+  it('posts a finished task’s pictures to its Slack channel once, never a pass’s task, and tries a refused post again', async () => {
+    const slack = fakeSlack();
+    const client = createSlackClient({
+      fetch: slack.fetch,
+      token: () => Promise.resolve('xoxb-test'),
+      clock: new ManualClock(),
+      timeoutMs: 5_000,
+    });
+    let channel: { teamId: string; channelId: string } | null = null;
+    setup({}, { slack: { channelOf: () => channel, clientFor: () => client } });
+    const post = poster;
+    if (post === null) throw new Error('no poster');
+    const { people } = await openedPass();
+    picture(people, 'after', '/people', 'people after');
+    const task = h.addTask('Billing page', { areas: ['settings'] });
+    picture(task, 'before', '/settings', 'billing before');
+    picture(task, 'after', '/settings', 'billing after');
+
+    const other = h.addTask('Other page', { areas: ['settings'] });
+    picture(other, 'after', '/settings', 'other after');
+
+    // Sharing off, and a task that belongs to a pass: nothing goes out.
+    post.announceTask(other.id);
+    channel = { teamId: 'T1', channelId: 'C1' };
+    post.announceTask(people.id);
+
+    // Refused: one Inbox item says why, and nothing was uploaded.
+    slack.joinError = 'method_not_supported_for_channel_type';
+    post.announceTask(task.id);
+    await waitFor(() => h.cards().some((c) => c.title.includes('did not reach Slack')));
+    expect(slack.uploads).toHaveLength(0);
+
+    // The retry posts one message with both pictures, the project and the task, and withdraws the item.
+    slack.joinError = null;
+    await post.retryTasks();
+    expect(slack.uploads).toHaveLength(1);
+    expect(slack.uploads[0]).toMatchObject({ channel_id: 'C1', files: 2 });
+    expect(slack.uploads[0]?.comment).toContain(h.project.name);
+    expect(slack.uploads[0]?.comment).toContain('Billing page');
+    expect(h.cards().filter((c) => c.title.includes('did not reach Slack'))).toHaveLength(0);
+    expect(getAppSetting(h.state.db, `slack-pictures-posted.${h.project.id}`)).toHaveProperty(
+      task.id,
+    );
   });
 });
 

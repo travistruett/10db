@@ -258,6 +258,29 @@ export function findOpenByFoldKey(
   return row ? toInboxItemDto(db, row) : undefined;
 }
 
+/** Every open card whose fold key starts with `prefix`, oldest first. */
+export function listOpenByFoldKeyPrefix(
+  db: DbReader,
+  prefix: string,
+): { id: InboxItemId; projectId: ProjectId; foldKey: string }[] {
+  return db
+    .select({
+      id: schema.inboxItems.id,
+      projectId: schema.inboxItems.projectId,
+      foldKey: schema.inboxItems.foldKey,
+    })
+    .from(schema.inboxItems)
+    .where(
+      and(
+        sql`substr(${schema.inboxItems.foldKey}, 1, ${prefix.length}) = ${prefix}`,
+        eq(schema.inboxItems.state, InboxState.Open),
+      ),
+    )
+    .orderBy(asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
+    .all()
+    .flatMap((r) => (r.foldKey === null ? [] : [{ ...r, foldKey: r.foldKey }]));
+}
+
 /** The open card that asks the builder about a proposal, if it is still open. */
 export function findOpenProposalCard(
   db: DbReader,
