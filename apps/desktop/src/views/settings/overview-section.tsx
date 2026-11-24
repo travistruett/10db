@@ -1,6 +1,6 @@
 import type { AccountDto } from '@10db/contracts';
-import { Alert, Button, Divider, Group, Paper, Skeleton, Stack, Text, Title } from '@mantine/core';
-import { IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react';
+import { Alert, Button, Divider, Group, Paper, Stack, Title } from '@mantine/core';
+import { IconAlertTriangle } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { Fragment } from 'react';
@@ -16,7 +16,6 @@ import { useNow } from '../../shell/relative';
 import { accountUsedBy } from './accounts/used-by';
 import { ArchivedProjectsCard } from './archived-projects-card';
 import { OverviewRowView } from './overview-row';
-import { PlanMeasures } from './plan-measures';
 import {
   accountState,
   agentState,
@@ -195,21 +194,12 @@ const GROUPS: readonly OverviewGroup[] = [
   OverviewGroup.Data,
 ];
 
+/** Says only what needs the builder: each row already shows its own state. */
 function SummaryLine({ summary }: { readonly summary: Summary }) {
   switch (summary.kind) {
     case 'loading':
-      return <Skeleton height={20} width={260} />;
     case 'ok':
-      return (
-        <Group gap="xs">
-          <IconCircleCheck size={18} color="var(--mantine-color-teal-6)" aria-hidden />
-          <Text size="sm">
-            {summary.count === 1
-              ? 'The 1 connection works.'
-              : `All ${String(summary.count)} connections work.`}
-          </Text>
-        </Group>
-      );
+      return null;
     case 'needs':
       return (
         <Alert
@@ -271,7 +261,6 @@ export function OverviewSection() {
         );
       })}
       <ArchivedProjectsCard />
-      <PlanMeasures />
     </Stack>
   );
 }

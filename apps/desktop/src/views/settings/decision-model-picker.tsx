@@ -82,7 +82,7 @@ export function DecisionModelPicker({
         {status.off ? null : (
           <Text size="xs" c="dimmed">
             {status.account === null
-              ? 'Pick another model once an account answers decisions: choose one under Paid by.'
+              ? 'Pick another model once an account answers decisions: choose one under Account.'
               : 'Pick another model once the account decisions run on has its key set.'}
           </Text>
         )}

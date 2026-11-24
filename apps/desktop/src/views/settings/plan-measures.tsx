@@ -13,15 +13,16 @@ function SizingRow({ sizing }: { readonly sizing: SizingMeasureDto }) {
   return (
     <Stack gap={2}>
       <Text size="sm" fw={500}>
-        Sizing
+        Sizes
       </Text>
       <Text size="xs" c="dimmed">
-        Finished converted tasks sized within one bucket of their lane time.
+        How often the size Plan gave a task (S to XL) matched the time it took, give or take one
+        size.
       </Text>
       <Stack gap={2} role="group" aria-label="Sizing">
         {sizing.n === 0 ? (
           <Text size="sm" c="dimmed">
-            No converted task has finished yet
+            Nothing yet: no task from Plan has finished.
           </Text>
         ) : (
           <>
@@ -58,19 +59,19 @@ function QuestionsRow({ questions }: { readonly questions: QuestionMeasureDto })
         Questions
       </Text>
       <Text size="xs" c="dimmed">
-        Inbox question cards per started task, converted against other tasks.
+        How many questions a task from Plan sent to your Inbox, against tasks written by hand.
       </Text>
       <Stack gap={2} role="group" aria-label="Questions">
         {converted.tasks === 0 ? (
           <Text size="sm" c="dimmed">
-            No converted task has started yet
+            Nothing yet: no task from Plan has started.
           </Text>
         ) : (
-          <Text size="sm">{perTask(converted)} converted</Text>
+          <Text size="sm">{perTask(converted)} from Plan</Text>
         )}
         {other.tasks === 0 ? null : (
           <Text size="xs" c="dimmed">
-            {perTask(other)} for the project&apos;s other tasks
+            {perTask(other)} written by hand
           </Text>
         )}
       </Stack>
@@ -78,18 +79,18 @@ function QuestionsRow({ questions }: { readonly questions: QuestionMeasureDto })
   );
 }
 
-/** How Plan is doing across every project: the Sizing hit rate and the question cards per task. Nothing until read. */
+/** Whether tasks made in Plan turn out well, across every project: their sizes and the questions they send. */
 export function PlanMeasures() {
   const measures = useShapeMeasures();
   if (measures.data === undefined) return null;
   return (
-    <Stack component="section" aria-label="How Plan Is Doing" gap="sm">
+    <Stack component="section" aria-label="Plan's Track Record" gap="sm">
       <Group gap="xs" align="baseline">
-        <Title order={4}>How Plan Is Doing</Title>
-        <Text size="xs" c="dimmed">
-          All Projects
-        </Text>
+        <Title order={4}>Plan&apos;s Track Record</Title>
       </Group>
+      <Text size="xs" c="dimmed" mt={-8}>
+        How the tasks Plan made turned out, across every project.
+      </Text>
       <SizingRow sizing={measures.data.sizing} />
       <QuestionsRow questions={measures.data.questions} />
     </Stack>

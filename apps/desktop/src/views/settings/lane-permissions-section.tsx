@@ -3,7 +3,7 @@ import { useLanePermissions, useSetLanePermissions } from '../../daemon/queries'
 import { HelpText } from './help-hint';
 import { SettingRow, SettingsCard } from './setting-row';
 
-const LABEL = "Use Claude Code's Auto Mode";
+const LABEL = 'Approve Routine Calls Automatically';
 
 /** What still comes to the builder as a card with auto mode on: the consequences a lane never decides alone. */
 const STILL_ASKS: readonly string[] = [
@@ -29,12 +29,14 @@ export function LanePermissionsSection() {
           description={
             on
               ? 'Routine commands, reads and builds run without asking you.'
-              : "Off: lanes use Claude Code's default permission mode."
+              : "Off: 10db's fixed rules decide, and anything they can't settle comes to you."
           }
           help={
             <HelpText>
-              Claude Code's auto mode decides each routine call in a lane, so plain commands, reads
-              and builds run without a card. The calls listed under Still Asks You come to you.
+              Who approves: Claude Code's auto mode on a Claude plan, an API key, and Bedrock with a
+              recent Opus, Sonnet or Fable. For Codex, and models auto mode doesn't run on, 10db's
+              judge does (Settings › Decisions). The calls listed under Still Asks You come to you
+              either way.
             </HelpText>
           }
         >
@@ -54,7 +56,7 @@ export function LanePermissionsSection() {
         <Stack gap={2}>
           <Title order={4}>Still Asks You</Title>
           <Text size="xs" c="dimmed">
-            With auto mode on, these still come to your Inbox.
+            Even with this on, these come to your Inbox.
           </Text>
         </Stack>
         <Group gap="xs">

@@ -21,7 +21,7 @@ const CLASS_OPTIONS = [
 const isModelClass = (value: string): value is ModelClass =>
   value === ModelClass.Agent || value === ModelClass.Decision;
 
-/** Paid by <account> with a link to where it is picked: what bills the decision models. */
+/** The account the decision models run on, with a link to where it is picked. */
 function DecisionBilling() {
   const status = useJudgeStatus();
   const account = status.data?.account ?? null;
@@ -30,7 +30,7 @@ function DecisionBilling() {
   return (
     <Group gap="xs" wrap="nowrap">
       <Text size="sm" c="dimmed">
-        Paid by {account.label}
+        Account: {account.label}
       </Text>
       <Button
         size="xs"

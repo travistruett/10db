@@ -1,5 +1,16 @@
 import type { AskedDecision } from '@10db/contracts';
-import { Alert, Anchor, Divider, Paper, Stack, Switch, Tabs, Text, Title } from '@mantine/core';
+import {
+  Alert,
+  Anchor,
+  Divider,
+  Group,
+  Paper,
+  Stack,
+  Switch,
+  Tabs,
+  Text,
+  Title,
+} from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { DaemonRequestError } from '../../daemon/client';
@@ -11,13 +22,16 @@ import {
 } from '../../daemon/judge-queries';
 import { useShapeMeasures } from '../../daemon/shape-measures-queries';
 import { DecisionDrawer } from './decision-drawer';
-import { HintedRow } from './hinted-row';
 import { statsFor } from './decision-numbers';
 import { DecisionsTable } from './decisions-table';
+import { PlanMeasures } from './plan-measures';
 import { PaidBy } from './paid-by';
 import { RecentDecisions } from './recent-decisions';
 import { ModelClass } from './focus-target';
 import { SettingsSectionKey } from './sections';
+import { SettingRow } from './setting-row';
+
+const ASK_A_MODEL = 'Let a Model Make These Calls';
 
 const DecisionsTab = { Decisions: 'decisions', Recent: 'recent' } as const;
 type DecisionsTab = (typeof DecisionsTab)[keyof typeof DecisionsTab];
@@ -61,26 +75,33 @@ export function DecisionsSection() {
         <Stack gap="xl">
           <Stack gap="sm">
             <Text size="sm" c="dimmed">
-              Routine calls 10db makes with a fast model. Decisions you record are in{' '}
+              Small calls 10db makes many times a day, such as how much process a task needs or
+              whether a command is safe. Decisions you record yourself are in{' '}
               <Anchor component={Link} to="/knowledge" size="sm">
                 Knowledge
               </Anchor>
               .
             </Text>
             <Paper withBorder radius="md">
-              <HintedRow
-                label="Fast-Model Decisions"
-                hint="When off, 10db makes every decision the way it did before and never calls a model."
+              <SettingRow
+                label={ASK_A_MODEL}
+                description={
+                  config.enabled
+                    ? 'Each call goes to its model below, Jev unless you pick another.'
+                    : "Off: 10db's fixed rules make every call, and no model is asked."
+                }
               >
-                <Switch
-                  aria-label="Fast-Model Decisions"
-                  checked={config.enabled}
-                  disabled={disabled}
-                  onChange={(event) => {
-                    patch.mutate({ enabled: event.currentTarget.checked });
-                  }}
-                />
-              </HintedRow>
+                <Group justify="flex-end">
+                  <Switch
+                    aria-label={ASK_A_MODEL}
+                    checked={config.enabled}
+                    disabled={disabled}
+                    onChange={(event) => {
+                      patch.mutate({ enabled: event.currentTarget.checked });
+                    }}
+                  />
+                </Group>
+              </SettingRow>
               <Divider />
               <PaidBy status={status.data} disabled={disabled} />
             </Paper>
@@ -122,6 +143,7 @@ export function DecisionsSection() {
               Compare decision models in Models
             </Anchor>
           </Stack>
+          <PlanMeasures />
         </Stack>
       </Tabs.Panel>
       <Tabs.Panel value={DecisionsTab.Recent}>
