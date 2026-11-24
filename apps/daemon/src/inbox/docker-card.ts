@@ -55,7 +55,7 @@ export function raiseDockerOnNote(
     title: `Docker is on for ${input.project.name}'s gate and lanes`,
     body: [
       REASON[input.why],
-      'Docker can mount any host folder into a container, so a gate or lane with Docker can reach outside the sandbox.',
+      'A container can mount any folder on this Mac and reach every local port, so a gate or lane with Docker can reach outside the sandbox, past Allow localhost too.',
       'Settings › Sandbox has the switch; if you turn it off, 10db will not turn it on again.',
     ].join('\n'),
     options: [
