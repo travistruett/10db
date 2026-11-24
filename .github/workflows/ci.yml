@@ -24,9 +24,10 @@ permissions: {}
 
 concurrency:
   # By pull request number, not ref alone: an edit to a merged pull request runs with main's ref, and
-  # would otherwise cancel main's own run.
+  # would otherwise cancel main's own run. Only a pull request's newer push cancels its older run: every
+  # commit on main finishes its run, so a red main is seen on the commit that broke it.
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # The gate is split so that a pull request gets its first failure in minutes and each job can be
