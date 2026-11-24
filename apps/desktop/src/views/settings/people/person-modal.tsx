@@ -6,17 +6,22 @@ import {
   type SlackMemberDto,
 } from '@10db/contracts';
 import {
+  ActionIcon,
   Anchor,
   Button,
   Checkbox,
   Group,
+  Input,
   NumberInput,
   Paper,
   Radio,
+  SegmentedControl,
   Stack,
   Text,
   TextInput,
+  Tooltip,
 } from '@mantine/core';
+import { IconTrash } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useSavePerson, useSlackMember, useSlackStatus } from '../../../daemon/people';
 import { FormModal } from '../../../shell/form-modal';
@@ -132,6 +137,13 @@ function PersonForm({
   const askedInSlack = !form.byName && !isBuilder;
   const valid = form.name.trim() !== '' && reachable;
   const addable = workspaces.filter((w) => !form.contacts.some((c) => c.teamId === w.teamId));
+  const findInSlack = (): void => {
+    set({
+      byName: false,
+      contacts:
+        form.contacts.length > 0 ? form.contacts : [blankContact(connected[0]?.teamId ?? '')],
+    });
+  };
 
   const submit = (): void => {
     // The whole list goes: a contact in a workspace that isn't signed in stays unless removed.
@@ -157,7 +169,7 @@ function PersonForm({
       opened
       onClose={onClose}
       title={person ? `Edit ${person.name}` : 'Add Person'}
-      size="md"
+      size="lg"
       error={save.isError ? save.error.message : null}
       actions={
         <>
@@ -171,6 +183,21 @@ function PersonForm({
       }
     >
       <Stack gap="lg">
+        {person === null && slackReady ? (
+          <SegmentedControl
+            aria-label="How 10db reaches them"
+            fullWidth
+            value={form.byName ? 'name' : 'slack'}
+            data={[
+              { value: 'slack', label: 'Find in Slack' },
+              { value: 'name', label: 'Not on Slack' },
+            ]}
+            onChange={(value) => {
+              if (value === 'name') set({ byName: true });
+              else findInSlack();
+            }}
+          />
+        ) : null}
         <Stack gap="xs">
           {showName ? (
             <TextInput
@@ -187,35 +214,13 @@ function PersonForm({
               for them.
             </Text>
           ) : null}
-          {!form.byName && person === null && slackReady ? (
-            <Anchor
-              component="button"
-              type="button"
-              size="sm"
-              c="dimmed"
-              style={{ alignSelf: 'flex-start' }}
-              onClick={() => {
-                set({ byName: true });
-              }}
-            >
-              Not on Slack? Add Them by Name
-            </Anchor>
-          ) : null}
-          {form.byName && slackReady ? (
+          {form.byName && slackReady && person !== null ? (
             <Anchor
               component="button"
               type="button"
               size="sm"
               style={{ alignSelf: 'flex-start' }}
-              onClick={() => {
-                set({
-                  byName: false,
-                  contacts:
-                    form.contacts.length > 0
-                      ? form.contacts
-                      : [blankContact(connected[0]?.teamId ?? '')],
-                });
-              }}
+              onClick={findInSlack}
             >
               Find them in Slack instead
             </Anchor>
@@ -231,6 +236,7 @@ function PersonForm({
                 signedIn={workspaces.some((w) => w.teamId === contact.teamId)}
                 isBuilder={isBuilder}
                 askedInSlack={askedInSlack}
+                removable={existing || form.contacts.length > 1}
                 onChange={(next) => {
                   change(contact.teamId, next);
                   if (next.member !== undefined && next.member !== null && !form.nameEdited)
@@ -269,6 +275,7 @@ function ContactBlock({
   signedIn,
   isBuilder,
   askedInSlack,
+  removable,
   onChange,
   onRemove,
 }: {
@@ -277,6 +284,7 @@ function ContactBlock({
   readonly signedIn: boolean;
   readonly isBuilder: boolean;
   readonly askedInSlack: boolean;
+  readonly removable: boolean;
   readonly onChange: (next: Partial<ContactForm>) => void;
   readonly onRemove: () => void;
 }) {
@@ -293,20 +301,25 @@ function ContactBlock({
         </Group>
       </Paper>
     );
+  const remove = `Remove ${name} contact`;
   return (
-    <Paper withBorder p="sm" radius="md">
-      <Stack gap="sm">
-        <Group justify="space-between" wrap="nowrap">
+    <Paper withBorder p="md" radius="md">
+      <Stack gap="md">
+        <Group justify="space-between" wrap="nowrap" mih={28}>
           <Text size="sm" fw={600}>
             {name}
           </Text>
-          <Button size="xs" variant="subtle" color="red" onClick={onRemove}>
-            {`Remove ${name} contact`}
-          </Button>
+          {removable ? (
+            <Tooltip label={remove} position="left">
+              <ActionIcon variant="subtle" color="red" aria-label={remove} onClick={onRemove}>
+                <IconTrash size={16} />
+              </ActionIcon>
+            </Tooltip>
+          ) : null}
         </Group>
         <MemberSelect
           teamId={contact.teamId}
-          label={isBuilder ? 'Which one is you?' : `Find someone in ${name}`}
+          label={isBuilder ? 'Which one is you?' : 'Slack Member'}
           value={contact.member ?? current}
           onPick={(picked) => {
             onChange({ member: picked, userId: picked?.userId ?? null });
@@ -321,19 +334,21 @@ function ContactBlock({
               onChange({ sendMode: value === SendMode.Auto ? SendMode.Auto : SendMode.Review });
             }}
           >
-            <Stack gap="xs" mt="xs">
+            <Group gap="xl" mt="xs">
               <Radio value={SendMode.Review} label="Show Me Each Message First" />
               <Radio value={SendMode.Auto} label="Send on Its Own" />
-            </Stack>
+            </Group>
           </Radio.Group>
         ) : null}
         {askedInSlack ? (
-          <Stack gap={4}>
-            <Group gap="xs" wrap="nowrap">
-              <Text size="sm">Up to</Text>
+          <Input.Wrapper
+            label="New Questions a Day"
+            description="Replies in an existing thread don't count."
+          >
+            <Group gap="lg" mt="xs" wrap="nowrap">
               <NumberInput
                 aria-label={`New questions a day in ${name}`}
-                w={80}
+                w={100}
                 min={1}
                 max={100}
                 allowDecimal={false}
@@ -343,9 +358,7 @@ function ContactBlock({
                   if (typeof value === 'number') onChange({ dailyLimit: value });
                 }}
               />
-              <Text size="sm">new questions a day</Text>
               <Checkbox
-                ml="md"
                 label="No Limit"
                 checked={contact.dailyLimit === null}
                 onChange={(event) => {
@@ -355,10 +368,7 @@ function ContactBlock({
                 }}
               />
             </Group>
-            <Text size="xs" c="dimmed">
-              Replies in an existing thread don't count.
-            </Text>
-          </Stack>
+          </Input.Wrapper>
         ) : null}
       </Stack>
     </Paper>

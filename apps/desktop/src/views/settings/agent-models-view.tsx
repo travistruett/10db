@@ -30,7 +30,7 @@ const NO_FILTER: ModelFilter = { query: '', tiers: [], accountId: null };
 
 const DOTS_LABELS = [
   { value: DotsMode.Every, label: 'Every Effort' },
-  { value: DotsMode.Frontier, label: 'Frontier Only' },
+  { value: DotsMode.Frontier, label: 'Best Value Only' },
 ] as const;
 
 const isDotsMode = (value: string): value is DotsMode =>
@@ -113,7 +113,7 @@ export function AgentModelsView({ account }: { readonly account: AccountDto }) {
         <Group justify="space-between" align="flex-start" wrap="nowrap">
           <SectionHeading
             title="Intelligence and Cost"
-            line="Blue is the most intelligence for its cost."
+            line={`Blue is the most intelligence for its cost. Rings mark what ${rigorLabel(rigor)} runs on.`}
             help={`Blue: the most Intelligence for its cost. Rings: each role's pick on this account at the rigor chosen.${
               result.omitted > 0
                 ? ` ${String(result.omitted)} ${result.omitted === 1 ? 'effort' : 'efforts'} with no score yet ${result.omitted === 1 ? 'is' : 'are'} not drawn.`
@@ -127,10 +127,10 @@ export function AgentModelsView({ account }: { readonly account: AccountDto }) {
               w={190}
               leftSection={
                 <Text size="xs" c="dimmed">
-                  Rings
+                  Rigor
                 </Text>
               }
-              leftSectionWidth={56}
+              leftSectionWidth={52}
               leftSectionPointerEvents="none"
               allowDeselect={false}
               data={RIGORS.map((r) => ({ value: r, label: rigorLabel(r) }))}

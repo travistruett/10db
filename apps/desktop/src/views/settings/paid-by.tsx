@@ -93,8 +93,8 @@ export function PaidBy({
   return (
     <div ref={ref}>
       <HintedRow
-        label="Paid By"
-        hint="The account whose API answers 10db’s decisions: OpenRouter, an Anthropic API key or Bedrock. A plan login has no API for quick decisions."
+        label="Account"
+        hint="The account these calls run on and are billed to: OpenRouter, an Anthropic API key or Bedrock. A Claude plan sign-in can’t make quick calls like these."
       >
         {accounts.isPending ? (
           <Loader size="sm" aria-label="Loading accounts" />
@@ -106,7 +106,7 @@ export function PaidBy({
           <Group gap="md" wrap="nowrap" align="center">
             <AccountSelect
               w={240}
-              aria-label="Paid By"
+              aria-label="Account"
               placeholder="Pick an account"
               accounts={live}
               isDisabled={cantRunDecisions}

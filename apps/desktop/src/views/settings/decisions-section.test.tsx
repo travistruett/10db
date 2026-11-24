@@ -10,7 +10,7 @@ describe('Settings › Decisions', () => {
     serveJudge({});
     server.use(http.get(daemonUrl('/accounts'), () => HttpResponse.json([DEFAULT_ACCOUNT])));
     renderApp('/settings/decisions');
-    expect(await screen.findByText(/Routine calls 10db makes with a fast model/)).toBeTruthy();
+    expect(await screen.findByText(/Small calls 10db makes many times a day/)).toBeTruthy();
     const link = within(screen.getByRole('main')).getByRole('link', { name: 'Knowledge' });
     expect(link.getAttribute('href')).toBe('/knowledge');
   });

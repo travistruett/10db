@@ -64,7 +64,7 @@ export function OpenRouterStatusLine() {
               />
             )}
           >
-            Paid By
+            Pick It in Decisions
           </Anchor>
         </>
       ) : null}
