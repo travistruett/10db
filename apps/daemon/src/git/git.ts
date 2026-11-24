@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -194,6 +195,48 @@ export interface ResolvedConflict {
   readonly path: string;
   readonly how: 'kept_both' | 'regenerated';
 }
+
+/** What a local copy's landing asks of the builder's folder: land `candidate` on `branch`, which is at `expected`. */
+export interface PromotionInput {
+  readonly repo: string;
+  readonly branch: string;
+  /** T, the base the landing expects. */
+  readonly expected: string;
+  /** C, the commit that lands. */
+  readonly candidate: string;
+}
+
+/** What `promoteFastForward` did. Only `promoted` wrote anything that stays. */
+export type Promotion =
+  | { readonly kind: 'promoted' }
+  /** The base is not T any more (`now`, null when it is gone or a symbolic ref), or C is not on T. */
+  | { readonly kind: 'base_moved'; readonly now: string | null }
+  /** The folder is on another branch (`head`, null on a detached HEAD). */
+  | { readonly kind: 'off_base'; readonly head: string | null }
+  /** The builder's edits (`changed`) or untracked files (`kept`) sit at paths C writes. */
+  | { readonly kind: 'in_the_way'; readonly changed: string[]; readonly kept: string[] }
+  | { readonly kind: 'index_locked' }
+  /** C's tree asks for git filters, which 10db never runs. */
+  | { readonly kind: 'filters'; readonly paths: string[] }
+  /** Files may be written without the branch moving; the folder classifier decides. */
+  | { readonly kind: 'unclear'; readonly reason: string };
+
+/** The state `classifyFolder` found in the folder, as a row of the recovery table. */
+export type FolderRead =
+  /** HEAD is not the base branch. */
+  | { readonly row: 'A'; readonly head: string | null }
+  /** The base is C or descends from C: landed. */
+  | { readonly row: 'B' }
+  /** The base is T and nothing of C is written. */
+  | { readonly row: 'C' }
+  /** The base is T and C's files and index are written: only the swap is left. */
+  | { readonly row: 'D' }
+  /** The base moved on, nothing of 10db's written. */
+  | { readonly row: 'E'; readonly now: string }
+  /** The builder's edits sit at paths C writes; nothing of 10db's written. */
+  | { readonly row: 'F'; readonly paths: string[] }
+  /** Mixed index or files, or the base moved under files 10db wrote. */
+  | { readonly row: 'G'; readonly paths: string[]; readonly ref: string | null };
 
 /** What `mergeIntoBranch` did; `from` is the commit it was asked to bring in. */
 export type BranchMerge =
@@ -711,6 +754,20 @@ export interface Git extends ChatGit {
    * tree asks for a filter is refused, as a push of it would be.
    */
   mergeIntoBranch(input: MergeIntoBranchInput): Promise<BranchMerge>;
+  /**
+   * Lands `candidate` (C) on `branch`, which `repo` has checked out at `expected` (T), by a fast
+   * forward only: the files through `read-tree -m -u T C`, then the compare-and-swap of the branch.
+   * Edits of the builder at a path C writes stop it before anything is written. Takes the repo's lock
+   * once and calls nothing else that takes it.
+   */
+  promoteFastForward(input: PromotionInput): Promise<Promotion>;
+  /**
+   * Reads the folder after an unclear or interrupted promotion and names the row of the recovery
+   * table it is in. Read-only; same lock as `promoteFastForward`.
+   */
+  classifyFolder(input: PromotionInput): Promise<FolderRead>;
+  /** Row D's compare-and-swap T to C, under the repo lock; writes no file. */
+  finishPromotion(input: PromotionInput): Promise<'promoted' | 'raced'>;
   /**
    * Undoes `shas`, commits on `branch`, in one commit on it with `message`: each is reverted with a
    * three-way merge of its parent, newest first, so a later commit that built on one conflicts instead
@@ -3486,6 +3543,219 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  /** The paths a fast forward from `from` to `to` writes, sorted. */
+  async function writtenBy(c: Pinned, from: string, to: string): Promise<string[]> {
+    return (await git(c, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', from, to]))
+      .split('\0')
+      .filter(Boolean)
+      .sort();
+  }
+
+  async function promoteFastForward(input: PromotionInput): Promise<Promotion> {
+    // The one lock of the folder; nothing called inside takes it again.
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      const { expected: from, candidate: to } = input;
+      const symbolic = await isSymbolic(c, ref);
+      const now = symbolic ? null : await revParse(c, `${ref}^{commit}`);
+      if (now !== from) return { kind: 'base_moved', now };
+      const current = await currentBranch(c);
+      if (current !== input.branch) return { kind: 'off_base', head: current };
+      if (!(await isAncestor(c, from, to))) return { kind: 'base_moved', now };
+      const needed = await filters(c, to);
+      if (needed.length > 0)
+        return { kind: 'filters', paths: [...new Set(needed.map((found) => found.path))].sort() };
+      const paths = await writtenBy(c, from, to);
+      const written = new Set(paths);
+      // Fresh stat data first, so a file that was only touched doesn't read as an edit.
+      await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
+        () => undefined,
+      );
+      // Staged changes too: `changes` compares files to HEAD, so a staged file that matches HEAD
+      // would pass it and then stop read-tree.
+      const staged =
+        paths.length === 0
+          ? ''
+          : await git(
+              c,
+              ['diff-index', '--cached', '--name-only', '--no-renames', '-z', from, '--', ...paths],
+              {
+                env: { GIT_LITERAL_PATHSPECS: '1' },
+              },
+            );
+      const changed = [
+        ...new Set([
+          ...(await changes(c)).filter((path) => written.has(path)),
+          ...staged.split('\0').filter(Boolean),
+        ]),
+      ].sort();
+      const reported = new Set(changed);
+      const kept = (await untrackedInTheWay(c, from, to, written)).filter(
+        (path) => !reported.has(path),
+      );
+      if (changed.length > 0 || kept.length > 0) return { kind: 'in_the_way', changed, kept };
+      try {
+        await git(c, ['read-tree', '-m', '-u', from, to]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        return error.message.includes('index.lock')
+          ? { kind: 'index_locked' }
+          : { kind: 'unclear', reason: error.message };
+      }
+      try {
+        // Compare and swap on the branch itself, never through HEAD or a symbolic ref.
+        await git(c, ['update-ref', '--no-deref', '-m', '10db: land local copy', ref, to, from]);
+        return { kind: 'promoted' };
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        const swapped = error.message;
+        // The files go back only when nothing but the swap failed: the branch is still T, HEAD is
+        // on it and the index is exactly C's. Anything else is a commit or a switch under files
+        // 10db wrote, which only the classifier and the builder may settle.
+        const still =
+          (await revParse(c, `${ref}^{commit}`)) === from &&
+          (await currentBranch(c)) === input.branch &&
+          (await git(c, ['write-tree'])).trim() === (await revParse(c, `${to}^{tree}`));
+        if (!still)
+          return { kind: 'unclear', reason: `the branch moved under C's files: ${swapped}` };
+        try {
+          await git(c, ['read-tree', '-m', '-u', to, from]);
+        } catch (undo) {
+          if (!(undo instanceof GitError)) throw undo;
+          return { kind: 'unclear', reason: `the files could not be put back: ${undo.message}` };
+        }
+        return { kind: 'base_moved', now: from };
+      }
+    });
+  }
+
+  /** One path of the classifier: what the index and the file hold, and what a commit's tree does. */
+  type Entry = { readonly mode: string; readonly oid: string } | null;
+
+  /**
+   * Reads what `paths` hold in the folder (index entry and file content hash) and in commits' trees,
+   * for comparing. Read-only. A file is its blob's hash, null when absent, 'unreadable' when a
+   * directory is in its place; a symlink is the hash of its target text, as git stores it.
+   */
+  async function readWritten(c: Pinned, paths: readonly string[]) {
+    const literal = { env: { GIT_LITERAL_PATHSPECS: '1' } };
+    const treeOf = async (rev: string): Promise<Map<string, Entry>> => {
+      const found = new Map<string, Entry>(paths.map((path) => [path, null]));
+      if (paths.length === 0) return found;
+      const out = await git(
+        c,
+        ['ls-tree', '-r', '-z', '--full-tree', rev, '--', ...paths],
+        literal,
+      );
+      for (const entry of parseTree(out))
+        found.set(entry.path, { mode: entry.mode, oid: entry.oid });
+      return found;
+    };
+    // Index: stage 0 only; a path in conflict reads as 'conflict', which matches no tree.
+    const index = new Map<string, Entry | 'conflict'>(paths.map((path) => [path, null]));
+    if (paths.length > 0) {
+      const out = await git(c, ['ls-files', '-s', '-z', '--', ...paths], literal);
+      for (const record of out.split('\0').filter(Boolean)) {
+        const tab = record.indexOf('\t');
+        const [mode = '', oid = '', stage = ''] = record.slice(0, tab).split(' ');
+        const path = record.slice(tab + 1);
+        index.set(path, stage === '0' ? { mode, oid } : 'conflict');
+      }
+    }
+    const files = new Map<string, string | null>();
+    for (const path of paths) {
+      const kind = entryAt(c.real, path);
+      if (kind === 'missing') files.set(path, null);
+      else if (kind === 'directory') files.set(path, 'unreadable');
+      else if (lstatSync(join(c.real, path)).isSymbolicLink())
+        // hash-object would follow the link; git stores its text.
+        files.set(
+          path,
+          (
+            await git(c, ['hash-object', '--no-filters', '--stdin'], {
+              input: readlinkSync(join(c.real, path)),
+            })
+          ).trim(),
+        );
+      else files.set(path, (await git(c, ['hash-object', '--no-filters', '--', path])).trim());
+    }
+    const indexIs = (path: string, tree: Map<string, Entry>): boolean => {
+      const held = index.get(path) ?? null;
+      const want = tree.get(path) ?? null;
+      if (held === 'conflict') return false;
+      return held === null || want === null
+        ? held === want
+        : held.mode === want.mode && held.oid === want.oid;
+    };
+    const fileIs = (path: string, tree: Map<string, Entry>): boolean =>
+      (files.get(path) ?? null) === (tree.get(path)?.oid ?? null);
+    const matches = (tree: Map<string, Entry>): boolean =>
+      paths.every((path) => indexIs(path, tree) && fileIs(path, tree));
+    return { treeOf, indexIs, fileIs, matches };
+  }
+
+  async function classifyFolder(input: PromotionInput): Promise<FolderRead> {
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      const { expected: from, candidate: to } = input;
+      const current = await currentBranch(c);
+      if (current !== input.branch) return { row: 'A', head: current };
+      const symbolic = await isSymbolic(c, ref);
+      const base = symbolic ? null : await revParse(c, `${ref}^{commit}`);
+      if (base !== null && (await isAncestor(c, to, base))) return { row: 'B' };
+      const paths = await writtenBy(c, from, to);
+      const { treeOf, indexIs, fileIs, matches } = await readWritten(c, paths);
+      const atT = await treeOf(from);
+      const atC = await treeOf(to);
+      const atR = base === null ? null : await treeOf(base);
+      if (base === from) {
+        if (matches(atT)) return { row: 'C' };
+        if (matches(atC)) return { row: 'D' };
+      }
+      const onT = base !== null && (await isAncestor(c, from, base));
+      if (atR !== null && base !== null && onT) {
+        if (base !== from && matches(atR)) return { row: 'E', now: base };
+        if (paths.every((path) => indexIs(path, atR))) {
+          const edited = paths.filter((path) => !fileIs(path, atR) && !fileIs(path, atC));
+          // A file already at C that the base lacks is 10db's own write, half done.
+          const written = paths.some((path) => fileIs(path, atC) && !fileIs(path, atR));
+          if (edited.length > 0 && !written) return { row: 'F', paths: edited };
+        }
+      }
+      const odd =
+        atR === null ? paths : paths.filter((path) => !(indexIs(path, atR) && fileIs(path, atR)));
+      return { row: 'G', paths: odd.length > 0 ? odd : paths, ref: base };
+    });
+  }
+
+  async function finishPromotion(input: PromotionInput): Promise<'promoted' | 'raced'> {
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      // The folder may have changed since the classifier read it: C's files must still be all there.
+      if ((await currentBranch(c)) !== input.branch) return 'raced';
+      const paths = await writtenBy(c, input.expected, input.candidate);
+      const { treeOf, matches } = await readWritten(c, paths);
+      if (!matches(await treeOf(input.candidate))) return 'raced';
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: land local copy',
+          `refs/heads/${input.branch}`,
+          input.candidate,
+          input.expected,
+        ]);
+        return 'promoted';
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        return 'raced';
+      }
+    });
+  }
+
   async function revertCommits(input: {
     readonly repo: string;
     readonly branch: string;
@@ -4614,6 +4884,9 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     commit,
     mergeIntoBranch,
+    promoteFastForward,
+    classifyFolder,
+    finishPromotion,
     revertCommits,
     mergedCommit,
     openPassBranch,

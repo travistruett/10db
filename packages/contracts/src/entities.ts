@@ -520,6 +520,10 @@ export const NAME_LANDING_BRANCH = 'Name the branch new tasks land in';
  */
 export const PRECHECK_NEEDS_GATE = 'A pre-check needs a gate command: set a gate command first';
 
+/** A project with separate copies on says how a copy's databases are dropped when it goes. */
+export const NAME_COPY_TEARDOWN =
+  "Separate copies need a teardown command: set one that drops a copy's databases";
+
 export const ProjectInput = z
   .object({
     name: z.string().min(1),
@@ -600,6 +604,10 @@ export const ProjectInput = z
     worktreeSeed: WorktreeSeed.default(() => [...DEFAULT_WORKTREE_SEED]),
     /** Area and hazard names whose tasks are proposed a separate copy. */
     isolate: Isolate.default(() => [...DEFAULT_ISOLATE]),
+    /** Allows a separate copy for a task of a local-delivery project. */
+    localCopies: z.boolean().default(false),
+    /** Run when a copy is retired; required while `localCopies` is on. */
+    copyTeardownCommand: z.string().min(1).max(2000).nullable().default(null),
   })
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
@@ -623,7 +631,11 @@ export const ProjectInput = z
       message: 'A worktree per task needs pull request delivery',
       path: ['workspaceMode'],
     },
-  );
+  )
+  .refine((p) => !p.localCopies || p.copyTeardownCommand !== null, {
+    message: NAME_COPY_TEARDOWN,
+    path: ['copyTeardownCommand'],
+  });
 export type ProjectInput = z.input<typeof ProjectInput>;
 export type ProjectConfig = z.output<typeof ProjectInput>;
 
@@ -734,6 +746,10 @@ export const ProjectDto = z.object({
   worktreeSeed: z.array(z.string()),
   /** Area and hazard names whose tasks are proposed a separate copy. */
   isolate: z.array(z.string()),
+  /** Allows a separate copy for a task of a local-delivery project. */
+  localCopies: z.boolean(),
+  /** Run when a copy is retired; set whenever `localCopies` is on. */
+  copyTeardownCommand: z.string().nullable(),
   /** Where the builder's dev server answers; null when the project has not said. */
   appUrl: AppUrl.nullable(),
   /** Prints a URL or path on the app's address that signs a browser in; null when the app needs none. */
@@ -797,6 +813,9 @@ export const ProjectPatch = z
     workspaceMode: z.enum(WorkspaceMode),
     worktreeSeed: WorktreeSeed,
     isolate: Isolate,
+    localCopies: z.boolean(),
+    /** Blank or null forgets it; a project with `localCopies` on must keep one. */
+    copyTeardownCommand: ProjectCommand.nullable(),
     /** Where Open Page goes; null forgets it. */
     appUrl: AppUrl.nullable(),
     /** Run under the gate's sandbox before pictures; blank or null forgets it. */

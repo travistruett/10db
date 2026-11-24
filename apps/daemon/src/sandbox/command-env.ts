@@ -1,8 +1,27 @@
+import type { CopyId } from '@10db/contracts';
 import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { laneMiseConfig } from './mise-config';
 import { packageCacheEnv } from './package-cache';
 import { isEqualOrUnder } from './protected-reads';
+
+/** Names the separate copy whose databases a command may reach; each copy's command gets its own. */
+export const COPY_ID_VARIABLE = 'TENDB_COPY_ID';
+
+/**
+ * `env` with the copy id set to `copyId`, or with none when it is null: a value the project's env or a
+ * server's own `env` set never survives, so one command never reads another copy's or the folder's
+ * database. Apply it last.
+ */
+export function withCopyId(
+  env: Readonly<Record<string, string>>,
+  copyId: CopyId | null,
+): Record<string, string> {
+  const rest = Object.fromEntries(
+    Object.entries(env).filter(([name]) => name !== COPY_ID_VARIABLE),
+  );
+  return copyId === null ? rest : { ...rest, [COPY_ID_VARIABLE]: copyId };
+}
 
 /** Set for every sandboxed command, so a test that can't run in a sandbox can skip. */
 const SANDBOX_MARKER = 'TENDB_SANDBOX';

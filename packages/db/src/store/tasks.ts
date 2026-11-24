@@ -50,6 +50,7 @@ import { and, asc, desc, eq, inArray, isNull, max, ne, or } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn, listBoardColumns } from './board-columns';
 import { checkTaskKinds, listKinds } from './kinds';
+import { isLocalCopy } from './local-copies';
 import { getProposal } from './knowledge';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -362,16 +363,41 @@ export function insertWholeProjectTask(
 const NO_COPY_WITHOUT_PULL_REQUESTS =
   'A separate copy needs pull request delivery; in this project every task works in your folder';
 
+const NO_COPY_AT_CREATION =
+  "A separate copy is chosen from the task's placement control once the task exists; it starts in your folder";
+
 /**
- * Where a new task works: the placement it names, else the project's default. Only a project that
- * delivers by pull request has separate copies, so a local one refuses a copy (task placement spec, P1).
+ * Where a new task works: the placement it names, else the project's default. A project that delivers
+ * by pull request has separate copies; a local one has them only for a task the builder moves into
+ * one (`copyRefusal`), so a new task there always starts in the folder (task placement spec, P1).
  */
 function placementFor(project: ProjectDto, named: WorkspaceMode | undefined): WorkspaceMode {
   if (project.delivery !== Delivery.PullRequest) {
-    if (named === WorkspaceMode.Worktree) throw new InvalidError(NO_COPY_WITHOUT_PULL_REQUESTS);
+    if (named === WorkspaceMode.Worktree)
+      throw new InvalidError(
+        project.localCopies ? NO_COPY_AT_CREATION : NO_COPY_WITHOUT_PULL_REQUESTS,
+      );
     return WorkspaceMode.Shared;
   }
   return named ?? project.workspaceMode;
+}
+
+/**
+ * Why a task of a local project can't work in a separate copy, or null: the project allows copies and
+ * has a gate command (a copy lands only after one), and the task lands on the base. That its process
+ * runs a review is the playbook's to say, so the daemon checks it where it reads the playbook.
+ */
+function copyRefusal(project: ProjectDto, landing: TaskLanding): InvalidError | null {
+  if (!project.localCopies) return new InvalidError(NO_COPY_WITHOUT_PULL_REQUESTS);
+  if (project.gateCommand === null)
+    return new InvalidError(
+      'A separate copy lands only after the gate runs: set a gate command first',
+    );
+  if (landing.kind !== 'base')
+    return new InvalidError(
+      'A separate copy lands on the base branch, and this task lands elsewhere',
+    );
+  return null;
 }
 
 /**
@@ -672,16 +698,36 @@ export function setTaskStatus(ctx: WriteContext, id: TaskId, status: TaskStatus)
 
 /**
  * Whether every dependency is done: finished, or an open task whose failed run shipped anyway and
- * whose pull request has merged.
+ * whose pull request has merged. A finished task whose work is in a separate copy that has not landed
+ * is not done: its dependents wait for the landing.
  */
 export function dependenciesDone(db: DbReader, taskId: TaskId): boolean {
-  const pending = db
-    .select({ id: schema.tasks.id })
+  const deps = db
+    .select({ id: schema.tasks.id, status: schema.tasks.status })
     .from(schema.taskDeps)
     .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.dependsOnId))
-    .where(and(eq(schema.taskDeps.taskId, taskId), ne(schema.tasks.status, TaskStatus.Done)))
+    .where(eq(schema.taskDeps.taskId, taskId))
     .all();
-  return pending.every(({ id }) => mergedDespiteFailure(db, id));
+  return deps.every(({ id, status }) =>
+    status === TaskStatus.Done ? !waitsForLanding(db, id) : mergedDespiteFailure(db, id),
+  );
+}
+
+/** Whether the task's latest run is in a separate copy whose batch has not shipped. */
+function waitsForLanding(db: DbReader, taskId: TaskId): boolean {
+  const latest = db
+    .select({ batchId: schema.workstreams.batchId, batchState: schema.batches.state })
+    .from(schema.workstreams)
+    .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
+    .where(eq(schema.workstreams.taskId, taskId))
+    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+    .limit(1)
+    .get();
+  return (
+    latest?.batchId != null &&
+    latest.batchState !== BatchState.Shipped &&
+    isLocalCopy(db, latest.batchId)
+  );
 }
 
 /** Whether the task's latest run failed but shipped anyway, and its pull request has merged. */
@@ -1253,6 +1299,19 @@ export function patchTask(
   }
   if (fields.areas !== undefined) checkAreasCanChange(ctx.tx, getTask(ctx.tx, id), fields.areas);
   if (fields.workspaceMode !== undefined) checkPlacementCanChange(ctx.tx, getTask(ctx.tx, id));
+  // A task that is in a copy of a local project, or is moving into one, meets the copy's rules again
+  // whenever its landing or placement changes, so an edit can't leave a copy that never lands.
+  if (fields.workspaceMode !== undefined || landing !== undefined) {
+    const task = getTask(ctx.tx, id);
+    const project = getProject(ctx.tx, task.projectId);
+    if (
+      (fields.workspaceMode ?? task.workspaceMode) === WorkspaceMode.Worktree &&
+      project.delivery !== Delivery.PullRequest
+    ) {
+      const refusal = copyRefusal(project, landing ?? task.landing);
+      if (refusal) throw refusal;
+    }
+  }
   const moved =
     fields.workspaceMode === undefined && proposed !== undefined
       ? movedByProposal(ctx.tx, getTask(ctx.tx, id), proposed)
@@ -1368,7 +1427,13 @@ function checkPlacementCanChange(db: DbReader, task: TaskDto): void {
 }
 
 function placementRefusal(db: DbReader, task: TaskDto): InvalidError | ConflictError | null {
-  if (getProject(db, task.projectId).delivery !== Delivery.PullRequest)
+  const project = getProject(db, task.projectId);
+  // A task already in a copy may always move back to the folder; one in the folder needs copies on.
+  if (
+    project.delivery !== Delivery.PullRequest &&
+    !project.localCopies &&
+    task.workspaceMode !== WorkspaceMode.Worktree
+  )
     return new InvalidError(NO_COPY_WITHOUT_PULL_REQUESTS);
   if (task.status !== TaskStatus.Open)
     return new ConflictError(`${task.title} is finished, so where it worked can't change`);

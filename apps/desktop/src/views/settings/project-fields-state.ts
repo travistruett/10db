@@ -57,6 +57,11 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       ? next.worktreeSeed
       : current.worktreeSeed,
     isolate: sameList(current.isolate, seed.isolate) ? next.isolate : current.isolate,
+    localCopies: current.localCopies === seed.localCopies ? next.localCopies : current.localCopies,
+    copyTeardownCommand:
+      current.copyTeardownCommand === seed.copyTeardownCommand
+        ? next.copyTeardownCommand
+        : current.copyTeardownCommand,
     appUrl: current.appUrl === seed.appUrl ? next.appUrl : current.appUrl,
     devLoginCommand:
       current.devLoginCommand === seed.devLoginCommand

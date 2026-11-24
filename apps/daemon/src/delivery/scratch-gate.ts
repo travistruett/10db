@@ -14,7 +14,7 @@ import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 // and the builder keeps working there.
 
 /** Where a pass's scratch gates are made: a branch of their own, named after the pass. */
-const SCRATCH_PREFIX = `${BRANCH_PREFIX}gate-`;
+export const SCRATCH_PREFIX = `${BRANCH_PREFIX}gate-`;
 
 /** The branch a pass's scratch worktree is on: `10db/gate-<6 hex of the pass id>`. */
 export const scratchBranchName = (passId: PassId): string => `${SCRATCH_PREFIX}${passId.slice(-6)}`;
@@ -95,7 +95,7 @@ export async function gateInScratch(
 }
 
 /** Removes a scratch worktree and its branch, each only when it is there. */
-async function removeScratch(
+export async function removeScratch(
   deps: Pick<DeliveryContext, 'git'>,
   main: string,
   branch: string,

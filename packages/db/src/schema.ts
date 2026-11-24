@@ -101,6 +101,9 @@ import type {
   ProjectId,
   ProjectLanding,
   ProposalId,
+  CopyId,
+  CopyStep,
+  CopyWait,
   PullRequestChecks,
   PullRequestMergeBlocked,
   PullRequestState,
@@ -303,6 +306,10 @@ export const projects = sqliteTable('projects', {
     .$type<string[]>()
     .notNull()
     .default(sql`'["migrations","deps"]'`),
+  /** Allows a separate copy for a task of a local-delivery project. */
+  localCopies: integer('local_copies', { mode: 'boolean' }).notNull().default(false),
+  /** Run when a copy is retired; required while `local_copies` is on. */
+  copyTeardownCommand: text('copy_teardown_command'),
   /** Where the builder's dev server answers, a loopback origin; null when the project has not said. */
   appUrl: text('app_url').$type<AppUrl>(),
   /** Prints the address that signs the browser for pictures in; null when the app needs no sign-in. */
@@ -413,6 +420,34 @@ export const batches = sqliteTable(
       .where(sql`pass_id IS NOT NULL`),
   ],
 );
+
+/**
+ * A separate copy's landing journal, one row per copy batch. A batch is a local copy exactly when it has
+ * a row, written in the cut's own insert; a step's row is written before it acts.
+ */
+export const localCopies = sqliteTable('local_copies', {
+  batchId: text('batch_id')
+    .$type<BatchId>()
+    .primaryKey()
+    .references(() => batches.id, { onDelete: 'cascade' }),
+  copyId: text('copy_id').$type<CopyId>().notNull(),
+  step: text('step').$type<CopyStep>().notNull(),
+  baseTip: text('base_tip'),
+  candidate: text('candidate'),
+  attempt: integer('attempt').notNull().default(0),
+  wait: text('wait').$type<CopyWait>(),
+  /** The paths or branch the wait's card names. */
+  waitDetail: text('wait_detail', { mode: 'json' })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'`),
+  retryAt: text('retry_at'),
+  /** The teardown command, pinned at the cut. */
+  teardownCommand: text('teardown_command').notNull(),
+  /** The commit the teardown runs from, set when the batch opens. */
+  teardownSha: text('teardown_sha'),
+  updatedAt: updatedAt(),
+});
 
 /** Columns the builder names and orders; a task in one is parked: never picked, never launched. */
 export const boardColumns = sqliteTable(

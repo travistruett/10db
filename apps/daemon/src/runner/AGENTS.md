@@ -17,3 +17,4 @@
 - A lane's guard (`laneVerdict` in `runner.ts`) reads the project's areas and hazards on every call, not the copy
   its session started with (the permission broker's own hazard checks still read the session's copy): an area narrowed or split while a session runs is judged as it is now, so a claim the
   session takes later never covers files another area now holds.
+- A session of a separate copy's batch (builder, reviewer, takeover, on every start and resume) gets `TENDB_COPY_ID` from the batch's journal row through `copyIdForBatch` and `withCopyId`, never from the ambient environment. A copy batch whose row can't be read doesn't launch and fails with the error's reason. A copy's step checks run in the copy, and a batch's final check is the landing's gate, not the runner's.

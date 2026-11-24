@@ -1,5 +1,6 @@
+import type { CopyId } from '@10db/contracts';
 import type { Clock } from '../clock';
-import { prepareCommandEnv } from './command-env';
+import { prepareCommandEnv, withCopyId } from './command-env';
 import { shellAssignments } from './env-file';
 import {
   createRefusalLog,
@@ -109,6 +110,8 @@ export interface McpSandboxInput {
   readonly env: Readonly<Record<string, string>>;
   readonly checkouts: readonly string[];
   readonly servers: Readonly<Record<string, StdioMcpServer>>;
+  /** The copy the session's batch runs in: every server's env carries it, whatever its own `env` says. */
+  readonly copyId?: CopyId | null;
   /** Told, with the server's name and the host, each time srt's proxy refuses a host. */
   readonly log?: RefusalLog;
   /** Paces the reading of each server's refusal log. */
@@ -160,14 +163,17 @@ function sandboxOne(
   removals.push(() => {
     removeLaneTempDir(tmpDir, tmpRoot);
   });
-  const commandEnv = {
-    ...allowlisted(input.env),
-    TMPDIR: tmpDir,
-    ...prepareCommandEnv(tmpDir, input.home, input.env),
-    // Node's own fetch takes srt's proxy only when told to; other clients read the proxy variables.
-    NODE_USE_ENV_PROXY: '1',
-    ...server.env,
-  };
+  const commandEnv = withCopyId(
+    {
+      ...allowlisted(input.env),
+      TMPDIR: tmpDir,
+      ...prepareCommandEnv(tmpDir, input.home, input.env),
+      // Node's own fetch takes srt's proxy only when told to; other clients read the proxy variables.
+      NODE_USE_ENV_PROXY: '1',
+      ...server.env,
+    },
+    input.copyId ?? null,
+  );
   const envFile = createSealedFile(
     filesRoot,
     ENV_FILE,

@@ -32,6 +32,8 @@ export const FIELD_HOMES: Readonly<Record<keyof GeneralValues, FieldHome>> = {
   workspaceMode: { label: 'Default for New Tasks', section: General },
   worktreeSeed: { label: "Copy Into Each Task's Copy", section: General },
   isolate: { label: 'Separate Copy for These Areas', section: General },
+  localCopies: { label: 'Separate Copies', section: General },
+  copyTeardownCommand: { label: 'Teardown Command', section: General },
   appUrl: { label: 'App Address', section: PagesAndPictures },
   devLoginCommand: { label: 'Dev Login Command', section: PagesAndPictures },
   previewCommand: { label: 'Preview Command', section: PagesAndPictures },

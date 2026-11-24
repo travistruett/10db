@@ -29,6 +29,7 @@ import {
   type AccountId,
   type Effort,
   type ConnectableService,
+  type BatchId,
   type ProjectId,
   type ShapeId,
   type SystemCheckDto,
@@ -177,6 +178,7 @@ import {
   createNodeModulesTemplates,
   createWorktreeDependencies,
   createWorktreeGenerators,
+  createCopyTeardown,
   DEFAULT_DELIVERY_LIMITS,
   flagWorktreeMissing,
   flagWrongBranch,
@@ -192,6 +194,7 @@ import {
   removeMergedBranches,
   resolvePnpm,
   resumePassSettles,
+  copyIdForBatch,
   subscribeKeptWorkLanding,
   subscribePassSettles,
   subscribePrWatch,
@@ -1505,6 +1508,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     rules: (project: ProjectDto) => listPermissionRules(state.db, project.id, null),
     checkouts: () => allCheckouts(state.db),
     timeoutMs: limits.gateTimeoutMs,
+    copyIdOf: (batchId: BatchId) => copyIdForBatch(state.db, batchId),
     resolvePnpm,
     pnpmVersion: readPnpmVersion,
     templates: createNodeModulesTemplates({
@@ -1539,6 +1543,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // empty), so several such cuts at once are several downloads.
     dependencies: createWorktreeDependencies(worktreeTools),
     generators: createWorktreeGenerators(worktreeTools),
+    copyTeardown: createCopyTeardown({
+      gate: gateRunner,
+      clock,
+      dataDir: opts.dataDir,
+      logger: logger.child({ component: 'copy-teardown' }),
+      timeoutMs: limits.gateTimeoutMs,
+      sessionEnv: () => launcher.projectEnv(),
+      rules: (project) => listPermissionRules(state.db, project.id, null),
+      checkouts: () => allCheckouts(state.db),
+    }),
   };
   answerBranchCard = createBranchCardAnswers(delivery);
   answerCiStopCard = createCiStopAnswers(delivery);
@@ -2541,6 +2555,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     void picturePost?.retryTasks();
   }, SLACK_PICTURE_RETRY_MS);
   pictureRetries.unref();
+  // A separate copy's landing that waits is looked at every minute on the injected clock: the folder
+  // watcher reports writes, not HEAD or ref moves, so the timer is the one contract.
+  const COPY_RECHECK_MS = 60_000;
+  let copyRecheck = clock.setTimeout(function recheckCopies() {
+    try {
+      shipper.recheckCopies();
+    } catch (error) {
+      logger.warn({ err: error }, 'separate copy landings not rechecked');
+    } finally {
+      copyRecheck = clock.setTimeout(recheckCopies, COPY_RECHECK_MS);
+    }
+  }, COPY_RECHECK_MS);
   // Turn pictures go 14 days after their task is done: swept now and once a day.
   const picturePruning = startPruning({
     planFilesDir: (shapeId) => join(shapesDir, shapeId),
@@ -3398,6 +3424,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A pass's gate and review on its pushed tip run outside the delivery jobs, as its turn checks do.
       // A capture in flight is dropped; its browser closes with it.
       clearInterval(pictureRetries);
+      copyRecheck.cancel();
       await pictures?.stop();
       // The dev server 10db started ends with it; a builder's own is never 10db's to stop.
       await preview?.stop();

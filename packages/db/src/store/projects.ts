@@ -9,6 +9,7 @@ import {
   InvalidError,
   isMetered,
   mintId,
+  NAME_COPY_TEARDOWN,
   NAME_LANDING_BRANCH,
   NotFoundError,
   PRECHECK_NEEDS_GATE,
@@ -32,6 +33,7 @@ import * as schema from '../schema';
 import { defaultAccountId, getAccountRow, refuseAccountWithoutHarness } from './accounts';
 import { currentBatch, findUnfinishedBatch, listUnfinishedBatches } from './batches';
 import { insertBoardColumn } from './board-columns';
+import { unfinishedCopyOf } from './local-copies';
 import type { DbReader, WriteContext } from './store';
 
 /** The account a new project binds to: the one it names, else the default; never an archived one. */
@@ -290,6 +292,12 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
   const handoffPct = changes.handoffPct ?? current.handoffPct;
   if (nudgePct <= handoffPct) throw new InvalidError('nudgePct must be above handoffPct');
   if (changes.delivery !== undefined && changes.delivery !== current.delivery) {
+    // A copy's landing reads the project's delivery from the journal's pinned facts, so the change waits.
+    const copy = unfinishedCopyOf(ctx.tx, id);
+    if (copy !== null)
+      throw new ConflictError(
+        `${copy.title} is in a separate copy; let it ship or abandon it first`,
+      );
     // A QUEUED pull-request workstream needs a batch to launch, so delivery can't change under work.
     const busy = ctx.tx
       .select({ id: schema.workstreams.id })
@@ -306,6 +314,12 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
         `${current.name} has unfinished work; finish or cancel it before changing its delivery`,
       );
   }
+  // A copy lands only after the gate runs, so the command stays while a copy is unfinished.
+  const copyLanding = changes.gateCommand === null ? unfinishedCopyOf(ctx.tx, id) : null;
+  if (copyLanding !== null)
+    throw new ConflictError(
+      `${copyLanding.title} is in a separate copy, which lands through the gate command; let it ship or abandon it first`,
+    );
   if (changes.areas !== undefined || changes.hazards !== undefined) {
     const areas = changes.areas ?? current.areas;
     const hazards = changes.hazards ?? current.hazards;
@@ -334,6 +348,12 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
   const precheckCommand =
     changes.precheckCommand === undefined ? current.precheckCommand : changes.precheckCommand;
   if (precheckCommand !== null && gateCommand === null) throw new InvalidError(PRECHECK_NEEDS_GATE);
+  const localCopies = changes.localCopies ?? current.localCopies;
+  const copyTeardownCommand =
+    changes.copyTeardownCommand === undefined
+      ? current.copyTeardownCommand
+      : changes.copyTeardownCommand;
+  if (localCopies && copyTeardownCommand === null) throw new InvalidError(NAME_COPY_TEARDOWN);
   const moving = changes.accountId !== undefined && changes.accountId !== current.accountId;
   if (changes.accountId !== undefined && moving) {
     // Work in flight moves too: each lane's next session runs on the new account.
