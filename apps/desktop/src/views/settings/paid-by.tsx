@@ -10,7 +10,8 @@ import { cantRunDecisions } from './accounts/used-by';
 import { ConnectionStatus, ConnectionTone } from './connection-status';
 import { useFocusTarget } from './focus-target';
 import { SettingsSectionKey } from './sections';
-import { HintedRow } from './hinted-row';
+import { HelpText } from './help-hint';
+import { SettingRow } from './setting-row';
 
 function AccountLink({
   account,
@@ -92,9 +93,14 @@ export function PaidBy({
   const canDecide = live.some((a) => powersDecisions(a.kind));
   return (
     <div ref={ref}>
-      <HintedRow
+      <SettingRow
         label="Account"
-        hint="The account these calls run on and are billed to: OpenRouter, an Anthropic API key or Bedrock. A Claude plan sign-in can’t make quick calls like these."
+        help={
+          <HelpText>
+            The account these calls run on and are billed to: OpenRouter, an Anthropic API key or
+            Bedrock. A Claude plan sign-in can’t make quick calls like these.
+          </HelpText>
+        }
       >
         {accounts.isPending ? (
           <Loader size="sm" aria-label="Loading accounts" />
@@ -103,9 +109,8 @@ export function PaidBy({
             Accounts could not be loaded. Check that the daemon is running.
           </Text>
         ) : canDecide ? (
-          <Group gap="md" wrap="nowrap" align="center">
+          <Stack gap={6}>
             <AccountSelect
-              w={240}
               aria-label="Account"
               placeholder="Pick an account"
               accounts={live}
@@ -121,7 +126,7 @@ export function PaidBy({
             {status.account === null ? null : (
               <PaidByState account={status.account} off={status.off} />
             )}
-          </Group>
+          </Stack>
         ) : (
           <Stack gap="xs" align="flex-end">
             <Text size="sm">No account can run decisions yet.</Text>
@@ -134,7 +139,7 @@ export function PaidBy({
             </Button>
           </Stack>
         )}
-      </HintedRow>
+      </SettingRow>
       <AddAccountModal
         opened={adding}
         initialKind={AccountKind.OpenRouter}
