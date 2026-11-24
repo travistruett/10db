@@ -70,7 +70,8 @@ describe('rulesets', () => {
       require_code_owner_review: false,
       require_last_push_approval: false,
       required_approving_review_count: 0,
-      required_review_thread_resolution: true,
+      // Review threads are advisory: an automated reviewer's open thread never holds a merge.
+      required_review_thread_resolution: false,
     });
   });
 
