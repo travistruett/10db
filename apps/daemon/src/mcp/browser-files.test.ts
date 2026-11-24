@@ -1,4 +1,5 @@
 import {
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -75,6 +76,11 @@ describe('readUploads', () => {
     symlinkSync(outside, join(copy, 'dir-link'));
     expect(refusal(['fixtures/link.txt'])).toContain('a link is never uploaded');
     expect(refusal(['dir-link/private.txt'])).toContain('dir-link/private.txt');
+  });
+
+  it('refuses a hard link in the copy to a file outside, which a real path cannot tell from the file', () => {
+    linkSync(join(outside, 'private.txt'), join(copy, 'fixtures', 'hard.txt'));
+    expect(refusal(['fixtures/hard.txt'])).toContain('hard link');
   });
 
   it('refuses a FIFO at once, without blocking', () => {

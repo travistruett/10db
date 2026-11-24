@@ -5,7 +5,8 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
-  readFileSync,
+  readSync,
+  unlinkSync,
   realpathSync,
   statSync,
   writeSync,
@@ -101,6 +102,9 @@ export function readUploads(
     try {
       const stat = fstatSync(fd);
       if (!stat.isFile()) return { refused: `${spelled}: not a regular file` };
+      // A hard link names a file the lane may not read under a path inside its copy.
+      if (stat.nlink > 1)
+        return { refused: `${spelled}: a file with more than one hard link is never uploaded` };
       total += stat.size;
       if (total > UPLOAD_MAX_BYTES)
         return {
@@ -110,10 +114,12 @@ export function readUploads(
       if ('refused' in checked) return checked;
       if (!openedFileIs(stat, checked.realPath))
         return { refused: `${spelled}: the file changed while it was checked` };
+      const bytes = readExactly(fd, stat.size);
+      if (bytes === null) return { refused: `${spelled}: the file changed size while it was read` };
       files.push({
         name: basename(resolved),
         mimeType: MIME_TYPES[extname(resolved).toLowerCase()] ?? 'application/octet-stream',
-        buffer: readFileSync(fd),
+        buffer: bytes,
       });
     } finally {
       closeSync(fd);
@@ -122,11 +128,25 @@ export function readUploads(
   return { files };
 }
 
+/** Reads exactly `size` bytes; null when the file holds more or fewer, so its size changed. */
+function readExactly(fd: number, size: number): Buffer | null {
+  const buffer = Buffer.alloc(size);
+  let read = 0;
+  while (read < size) {
+    const n = readSync(fd, buffer, read, size - read, read);
+    if (n === 0) return null;
+    read += n;
+  }
+  return readSync(fd, Buffer.alloc(1), 0, 1, size) === 0 ? buffer : null;
+}
+
 const SCREENS_DIR = '10db-screens';
 
 /**
  * Writes `<tempDir>/10db-screens/<screenId>.png` without following a link; null with why when it can't.
- * The directory must be a real one directly under the temp dir's real path; the file is new (`O_EXCL`).
+ * The directory is a real one directly under the temp dir's real path, held by descriptor; the file is new
+ * (`O_EXCL`). A swap of the directory between its check and the file's creation is detected and undone; the
+ * file still lands wherever the path led for that instant, which the lane could read anyway.
  */
 export function writeScreenCopy(
   tempDir: string,
@@ -145,18 +165,36 @@ export function writeScreenCopy(
       return { path: null, why: `${dir} is not a plain directory` };
     if (realpathSync(dir) !== join(realTemp, SCREENS_DIR))
       return { path: null, why: `${dir} does not lie directly in the temp dir` };
-    const path = join(dir, `${screenId}.png`);
-    const fd = openSync(
-      path,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-      0o600,
-    );
+    // The directory is held by descriptor: a swap of it after the check changes its dev or inode.
+    const dirFd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     try {
-      writeSync(fd, png);
+      const held = fstatSync(dirFd);
+      const path = join(dir, `${screenId}.png`);
+      const fd = openSync(
+        path,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        0o600,
+      );
+      try {
+        const now = lstatSync(dir);
+        const made = fstatSync(fd);
+        if (now.dev !== held.dev || now.ino !== held.ino || made.dev !== held.dev) {
+          closeSync(fd);
+          unlinkSync(path);
+          return { path: null, why: `${dir} changed while the copy was written` };
+        }
+        writeSync(fd, png);
+      } finally {
+        try {
+          closeSync(fd);
+        } catch {
+          // Already closed above.
+        }
+      }
+      return { path };
     } finally {
-      closeSync(fd);
+      closeSync(dirFd);
     }
-    return { path };
   } catch (error) {
     return { path: null, why: error instanceof Error ? error.message : 'the copy was not written' };
   }
