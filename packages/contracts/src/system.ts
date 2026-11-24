@@ -165,7 +165,11 @@ export type McpServerStatusDto = z.infer<typeof McpServerStatusDto>;
  * One repo server on Settings › Trust: its review, the verdict stored for this exact config, the open
  * approval card when one waits, and the card's own text, which the builder confirms before turning it On.
  */
-export const RepoMcpServerDto = McpServerStatusDto.extend({ body: z.string() });
+export const RepoMcpServerDto = McpServerStatusDto.extend({
+  body: z.string(),
+  /** The hosts of the builder's latest approval of this server under another config; null when never approved. */
+  earlierHosts: z.array(McpHost).nullable(),
+});
 export type RepoMcpServerDto = z.infer<typeof RepoMcpServerDto>;
 
 /** `GET /projects/:projectId/repo-mcp-servers`: the checkout's servers, or why its `.mcp.json` can't be read. */
@@ -175,8 +179,10 @@ export const RepoMcpServersDto = z.object({
 });
 export type RepoMcpServersDto = z.infer<typeof RepoMcpServersDto>;
 
-/** A server's name in `.mcp.json`, as the route reads it. */
-export const McpServerName = z.string().min(1).max(200);
+/** A repo MCP server's name: it ends up in tool names (`mcp__<name>__*`), on cards and in flags. */
+export const McpServerName = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{1,64}$/, 'must be 1 to 64 letters, digits, "_" or "-"');
 
 /** `PUT /projects/:projectId/repo-mcp-servers/:name`: the verdict on the config the builder saw. */
 export const SetRepoMcpVerdict = z.object({ configHash: ConfigHash, verdict: z.enum(McpVerdict) });

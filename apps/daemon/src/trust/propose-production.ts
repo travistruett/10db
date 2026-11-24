@@ -66,17 +66,22 @@ function vercelEntries(text: string): Found[] {
     return [];
   }
   if (typeof json !== 'object' || json === null) return [];
-  const lines = text.split('\n');
-  const found: Found[] = [];
+  const names: string[] = [];
   for (const key of ['alias', 'domains']) {
     const value = (json as Record<string, unknown>)[key];
-    const names = typeof value === 'string' ? [value] : Array.isArray(value) ? value : [];
-    for (const name of names) {
-      if (typeof name !== 'string' || name.includes('*') || PLACEHOLDER_HOST.test(name)) continue;
-      const at = lines.findIndex((l) => l.includes(`"${name}"`));
-      found.push({ entry: name, line: at < 0 ? 1 : at + 1 });
+    for (const name of typeof value === 'string' ? [value] : Array.isArray(value) ? value : []) {
+      if (names.length >= MAX_PROPOSALS) break;
+      if (typeof name !== 'string' || name.length > 200) continue;
+      if (!name.includes('*') && !PLACEHOLDER_HOST.test(name)) names.push(name);
     }
   }
+  // One pass over the lines, looking only for the capped names.
+  const lineOf = new Map<string, number>();
+  text.split('\n').forEach((line, i) => {
+    for (const name of names)
+      if (!lineOf.has(name) && line.includes(`"${name}"`)) lineOf.set(name, i + 1);
+  });
+  const found: Found[] = names.map((entry) => ({ entry, line: lineOf.get(entry) ?? 1 }));
   return found;
 }
 

@@ -44,11 +44,14 @@ export function createRepoMcpServers(deps: {
     const read = readReview(project.repoPath);
     if ('error' in read) return { servers: [], error: read.error };
     const servers = read.repo.servers.map(({ review }): RepoMcpServerDto => {
-      const body = approvalBody(review, earlierMcpApproval(db, projectId, review.name));
+      const earlier = earlierMcpApproval(db, projectId, review.name);
+      const body = approvalBody(review, earlier);
+      const earlierHosts = earlier === undefined ? null : [...earlier.hosts];
       const approval = getMcpApproval(db, projectId, review.name, review.configHash);
-      if (approval) return { ...review, verdict: approval.verdict, inboxId: null, body };
+      if (approval)
+        return { ...review, verdict: approval.verdict, inboxId: null, body, earlierHosts };
       const card = findOpenByFoldKey(db, projectId, mcpApprovalFoldKey(projectId, review));
-      return { ...review, verdict: 'pending', inboxId: card?.id ?? null, body };
+      return { ...review, verdict: 'pending', inboxId: card?.id ?? null, body, earlierHosts };
     });
     return { servers, error: null };
   };
