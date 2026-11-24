@@ -2522,6 +2522,18 @@ export function createRunner(opts: RunnerOptions): Runner {
         checkout,
         worktreeRoot: opts.worktreeRoot,
       });
+    // A review step is told what the run skipped and what its check left out, so it can tell
+    // "could not" from "did not".
+    const reviewFacts = REVIEW_ROLES.includes(step.role)
+      ? {
+          skipped: listSkipsForWorkstream(db, id).map((k) => `${k.summary} (${k.reason})`),
+          checkNote:
+            listEvidence(db, id)
+              .filter((e) => e.kind === 'gate')
+              .map((e) => /^check covers [^\n]*/.exec(e.summary)?.[0] ?? null)
+              .at(-1) ?? null,
+        }
+      : undefined;
     const batchNotices = row.batchId === null ? [] : getBatch(db, row.batchId).notices;
     const noticeBody = (key: string): string | null =>
       batchNotices.find((n) => n.key === key)?.body ?? null;
@@ -2988,6 +3000,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           }
         : null,
       evidence,
+      ...(reviewFacts ? { reviewFacts } : {}),
       recovery:
         action.kind === 'resume'
           ? { reason: action.reason, lastOp: latestToolOp(db, id)?.opId ?? null }
