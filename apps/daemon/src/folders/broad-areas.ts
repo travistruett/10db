@@ -105,7 +105,7 @@ function partName(area: string, pkg: string, used: Set<string>): string {
  * `apps.py` or `package.json`, outside any fixtures or examples folder) that hold at least half of
  * its files; of those folders, the one with the most packages. Each package becomes an area
  * of its own, named by its folder, or prefixed with the area's name where `taken` (every area and
- * hazard name) has it. The core keeps the area's name and every other file: the root's own files, its
+ * hazard name) has it. The core, `<area>-shared`, holds every other file: the root's own files, its
  * other folders, the packages folder's own files, and the packages every other leans on (`core`,
  * `common`, `shared`…). Every file of the area lands in exactly one of them. Pure.
  */
@@ -159,7 +159,11 @@ export function broadAreaSplit(
   keep(root);
   // A root of packages alone still keeps its name, for the files that land beside them later.
   if (coreGlobs.size === 0) coreGlobs.add(`${literalGlob(root)}/*`);
-  const core: AreaDef = { ...area, globs: [...coreGlobs] };
+  // The core is named for what it is, so no one takes the old name for the whole folder it no longer holds.
+  let coreName = `${area.name}-shared`;
+  for (let n = 2; used.has(coreName); n += 1) coreName = `${area.name}-shared-${String(n)}`;
+  used.add(coreName);
+  const core: AreaDef = { ...area, name: coreName, globs: [...coreGlobs] };
 
   const all = [core, ...parts];
   const exactlyOne = mine.every(

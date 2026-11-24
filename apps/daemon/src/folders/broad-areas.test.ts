@@ -39,7 +39,7 @@ describe('broadAreaSplit', () => {
       area: whole('be', DJANGO),
       files: DJANGO,
       taken: ['people'],
-      split: ['backend', 'billing', 'backend-people', 'search'],
+      split: ['backend-shared', 'billing', 'backend-people', 'search'],
     },
     {
       why: "one app's subpackages, each with an __init__.py, are no units",

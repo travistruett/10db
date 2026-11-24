@@ -295,6 +295,16 @@ describe('claims', () => {
       }),
     );
     expect(split).toThrow(ConflictError);
+    // A claim on the same name in another project is that project's, and holds nothing here.
+    const elsewhere = seedWorkstream('Elsewhere', ['api']);
+    store.write((ctx) =>
+      acquireClaims(ctx, {
+        projectId: elsewhere.project.id,
+        workstreamId: elsewhere.ws.id,
+        requests: claimRequestsForTask(elsewhere.task, elsewhere.project),
+        leaseExpiresAt: '2026-10-13T12:01:00.000Z',
+      }),
+    );
     expect(getTask(store.db, open.id).areas).toEqual(['ui', 'api']);
     expect(getProject(store.db, project.id).areas.map((a) => a.name)).toEqual(['api', 'ui']);
 
@@ -303,6 +313,7 @@ describe('claims', () => {
     expect(getTask(store.db, open.id).areas).toEqual(['ui', 'api', 'api-billing']);
     expect(getTask(store.db, held.task.id).areas).toEqual(['api', 'api-billing']);
     expect(getTask(store.db, done.id).areas).toEqual(['api']);
+    expect(getTask(store.db, elsewhere.task.id).areas).toEqual(['api']);
   });
 
   it('is all-or-nothing and reports who holds a conflicting claim', () => {

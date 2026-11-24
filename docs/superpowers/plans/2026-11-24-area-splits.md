@@ -9,8 +9,8 @@ before it as Feature work.
 
 **What changes for you.** The Suggestions modal can propose splitting a broad area that open tasks name, such as
 Ampsio's `backend` (`amps/backend/**`): one area per package in a folder of sibling packages
-(`amps/backend/apps/<app>`), with the rest staying in `backend` as its core. The row reads "Split backend into 26
-areas: backend (core), methods, ingest and 23 more · 15 open tasks get all of them". Apply saves the new areas, and in the
+(`amps/backend/apps/<app>`), with the rest in `backend-shared`, its core; the name `backend` is retired. The row reads "Split backend into 26
+areas: backend-shared (core), access, backend-accounts and 23 more · 15 open tasks get all of them". Apply saves the new areas, and in the
 same database write every open task that names `backend` names all of the new areas instead.
 
 A new project's first proposal applies the same rule, so a broad area is never proposed in the first place.
@@ -34,6 +34,12 @@ Before, one area serialized every backend task.
 **Calls you might disagree with.**
 - The retag gives each task every part (a superset), never a guessed subset. A wrong guess would block a task's
   writes mid-run. Narrowing is yours, per task.
+- The core is renamed `<area>-shared` and the old name retired: an area called `backend` that holds only config
+  and tests would read as the whole backend to you, to an agent tagging a task and to the sizing judge. A
+  routing rule, a kind's "implied by" or a knowledge record that names `backend` no longer matches; rename it by
+  hand if it should follow.
+- A folder added later under the split root (a new app) belongs to no part: it falls to the catch-all, and a
+  task that writes there asks for the catch-all's claim, where before `backend` held it.
 - Packages named `core`, `common`, `shared`, `base`, `lib` or `utils` stay in the core, as does everything outside
   the packages folder.
 - The split waits while a run holds the area. Apply is then refused with the task's name and the modal keeps your
@@ -68,7 +74,7 @@ export const AreaSplit = z.object({ from: AreaName, into: z.array(AreaName).min(
 // packages/contracts/src/workbench-setup.ts
 export const SplitRow = z.object({
   from: AreaName,
-  /** The new areas, the core first (it keeps `from`'s name). */
+  /** The new areas, the core first (`<from>-shared`); `from` itself is retired. */
   into: z.array(AreaDef).min(2),
   /** `from` as it is, which unticking puts back. */
   was: AreaDef,

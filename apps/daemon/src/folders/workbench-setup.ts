@@ -430,10 +430,11 @@ export async function proposeSetupAreas(
 
   for (const reason of refusals) skipped.push({ name: 'page code', reason });
   const counts = taskCounts(openTasks);
+  // The structural areas are left out of a kept split's names: `rebuildAreas` makes each one that stays
+  // unique against the parts, and one inside the split area is dropped there.
   const taken = new Set([
     ...project.areas.map((a) => a.name),
     ...project.hazards.map((h) => h.name),
-    ...others.map((a) => a.name),
     ...planned.map((p) => p.name),
   ]);
   // A kept area open tasks name splits only by the builder's tick, with its tasks retagged; an area
@@ -447,6 +448,7 @@ export async function proposeSetupAreas(
     for (const part of split.parts) taken.add(part.name);
     splits.set(area.name, { ...split, tasks });
   }
+  for (const area of others) taken.add(area.name);
   const splitOthers = others.flatMap((area): AreaDef[] => {
     const split = broadAreaSplit(area, files, taken);
     if (split === null) return [area];

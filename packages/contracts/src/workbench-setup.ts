@@ -35,7 +35,7 @@ const Named = z.object({ name: z.string(), reason: z.string() });
 /** An area open tasks name, split along its packages: one row the builder may untick. */
 export const SplitRow = z.object({
   from: AreaName,
-  /** The new areas, the core first: it keeps `from`'s name. */
+  /** The new areas, the core first (`<from>-shared`); `from` itself is retired. */
   into: z.array(SetupArea).min(2),
   /** `from` as it is, which an unticked row keeps. */
   was: AreaDef,

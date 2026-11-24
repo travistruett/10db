@@ -283,7 +283,9 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
     areaSplits !== undefined &&
     (changes.isolate ?? current.isolate).some((n) => areaSplits.some((s) => s.from === n))
   )
-    changes.isolate = splitNames(changes.isolate ?? current.isolate, areaSplits);
+    changes.isolate = ProjectPatch.parse({
+      isolate: splitNames(changes.isolate ?? current.isolate, areaSplits),
+    }).isolate;
   const nudgePct = changes.nudgePct ?? current.nudgePct;
   const handoffPct = changes.handoffPct ?? current.handoffPct;
   if (nudgePct <= handoffPct) throw new InvalidError('nudgePct must be above handoffPct');

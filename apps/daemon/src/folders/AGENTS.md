@@ -5,8 +5,8 @@
   folder whole and has a folder of at least three sibling packages (a child folder with `apps.py`,
   `pyproject.toml`, `setup.py`, `package.json`, `Cargo.toml`, `go.mod` or another manifest directly in it; never
   `__init__.py`, which every Python subpackage has; never under a fixtures, examples or templates folder) that
-  hold at least half its files splits into its core, which keeps its name and every other file, and one area per
-  package (`core`, `common`, `shared`, `lib`, `utils` and the like stay in the core). A new project's proposal
+  hold at least half its files splits into its core, `<area>-shared`, which holds every other file, and one area
+  per package (the old name is retired, so no one reads it as the whole folder) (`core`, `common`, `shared`, `lib`, `utils` and the like stay in the core). A new project's proposal
   (`propose-areas.ts`) and the setup's structural areas no task names are split in place; a kept area open tasks
   name is offered as a `SplitRow` the builder ticks, and Apply's `areaSplits` retags its open tasks in the same
   write (`packages/db/AGENTS.md`). New folders under a split root fall to the catch-all.
