@@ -10,6 +10,7 @@ fixes, `71362b9b`). Cards name its sections by number and heading.
 ## Brief
 
 **What changes for you.**
+
 - In a local-delivery project with **Separate copies** on (Settings › Delivery), a task's placement control offers
   **Separate copy**. That task works in its own branch and folder, and Ampsio's make targets give it its own
   databases through `TENDB_COPY_ID`.
@@ -23,6 +24,7 @@ fixes, `71362b9b`). Cards name its sections by number and heading.
 decide parallel copies, the broker and the presets.
 
 **What could go wrong, and how we'd know.**
+
 - **Your folder is written wrongly.** Only `Git.promoteFastForward` writes it: one lock, fast-forward only, bound to
   T and C (card 2). Its real-repository tests and the classifier's table test (card 2) cover every outcome.
 - **A crash leaves a landing half done.** The journal (card 1) and the classifier (card 2) decide; recovery
@@ -33,15 +35,28 @@ decide parallel copies, the broker and the presets.
   (card 4). The e2e (card 8) runs the whole path through the real daemon.
 
 **Calls you might disagree with.**
+
 1. **The journal row is the pin.** Batches don't record their delivery. A batch is a local copy exactly when it has
    a `local_copies` row, written in the cut's own insert. Cost if wrong: none found; a batch can't gain or lose the
    row later.
 2. **One dev migration** adds the `local_copies` table and two project columns, regenerated after the final merge
    of `main` (`packages/db/AGENTS.md`).
-3. **Waits recheck every minute and on the folder watcher's events**, never in a loop of their own. Cost if wrong: a
-   landing starts up to a minute late.
+3. **Waits recheck on a one-minute timer only.** The spec also names folder-watcher events; the watcher reports
+   writes, not HEAD or ref moves, so the timer is the one contract. Cost if wrong: a landing starts up to a minute
+   late.
 4. **The Ampsio side is filed as an Ampsio task** once this plan's PR is open, not built here. The pilot can't run
    until both are in.
+5. **A second copy task is refused at start, not queued** (spec §2 says queued): "Another task is in a separate
+   copy (<title>); start this one when that one ships or is abandoned." A queued task with no batch would launch
+   in your folder. Cost if wrong: you start the second task again by hand.
+6. **A copy task skips the full gate before Done** (`finalCheck`); its step checks still run, and the landing's gate,
+   bound to C, is the one. Otherwise Ampsio's 18-minute gate runs twice per task. Cost if wrong: review reads work
+   the gate hasn't passed yet; a gate failure at landing goes to today's fix loop.
+
+**Deviations from the spec**, all recorded here so review doesn't reopen them: calls 3, 5 and 6; `CopyWait` has no
+`conflict` (a conflict returns the batch to OPEN with today's merge-fix notice, spec §5 step 2); card 2's race test
+holds a ref lock instead of injecting a commit (the daemon runs git with no hooks), and the hand-commit case is
+the classifier's row G.
 
 **What is needed from you.** Nothing.
 
@@ -61,8 +76,14 @@ decide parallel copies, the broker and the presets.
   `.sql`, its `drizzle/meta` snapshot and its `_journal.json` entry), takes `main`'s files, runs
   `pnpm --filter @10db/db generate`, and commits the result in the merge. After the final merge of `main` it
   regenerates once more. Only one open PR adds migrations at a time.
-- **The journal row is the pin.** `isLocalCopy` is true exactly when the batch has a `local_copies` row. Every path
-  this plan changes routes on it, never on the project's current `delivery` or `localCopies`.
+- **The journal row is the pin.** `isLocalCopy` is true exactly when the batch has a `local_copies` row, written in
+  the CUTTING insert (`delivery/start.ts:578-591`). Every path this plan changes routes on it, never on the
+  project's current `delivery` or `localCopies`.
+- **Live at promoting.** A journal at `step: promoting` with `wait: null` may have written your folder. While it
+  is, `resetLocalCopy` is a no-op, any failure of the batch (the ship catch-all `ship.ts:1296`, `failWith`,
+  recovery's `recover.ts:219-227`) is `interrupted_landing` with the journal kept, Abandon is refused, and a new run
+  of the task (a builder message, a fix) is refused with "a landing is settling in your folder". A promoting
+  journal with a wait set had an outcome that wrote nothing, so none of this applies to it.
 - **Your folder is written only by `promoteFastForward` and `finishPromotion`** (card 2). No other card runs
   `read-tree`, `checkout`, `reset`, `update-ref` or `mergeIntoBranch` on the project's checkout for a local copy.
   Neither function is called from inside another `withRepoLock` on the same checkout.
@@ -86,11 +107,11 @@ decide parallel copies, the broker and the presets.
 The copy, its id, the gate, the landing and recovery are the daemon's, so they behave the same on every account
 (spec §10). Only how the id reaches a command differs, and one function sets it for all of them:
 
-| Account | How the lane's commands get `TENDB_COPY_ID` | Card |
-|---|---|---|
-| Claude plan, Anthropic API key, Bedrock | the env file the sandboxed shell sources; on `ALLOWED_NAMES`, so not a profile deny | 3 |
-| ChatGPT/Codex plan, OpenAI API key | `shellEnv` → `shell_environment_policy.set` | 3 |
-| Any (gate, teardown, MCP servers) | `gate-sandbox.ts` and `mcp-sandbox.ts` command env | 3 |
+| Account                                 | How the lane's commands get `TENDB_COPY_ID`                                         | Card |
+| --------------------------------------- | ----------------------------------------------------------------------------------- | ---- |
+| Claude plan, Anthropic API key, Bedrock | the env file the sandboxed shell sources; on `ALLOWED_NAMES`, so not a profile deny | 3    |
+| ChatGPT/Codex plan, OpenAI API key      | `shellEnv` → `shell_environment_policy.set`                                         | 3    |
+| Any (gate, teardown, MCP servers)       | `gate-sandbox.ts` and `mcp-sandbox.ts` command env                                  | 3    |
 
 The pilot's acceptance runs one task on a Claude plan lane and one on a Codex lane (spec §10). API-key and
 Bedrock lanes need no different code; they are checked before any preset ships.
@@ -108,13 +129,11 @@ export const CopyStep = {
 export type CopyStep = (typeof CopyStep)[keyof typeof CopyStep];
 export const CopyWait = {
   FolderOffBase: 'folder_off_base', EditsInTheWay: 'edits_in_the_way', IndexLocked: 'index_locked',
-  BaseMoving: 'base_moving', Conflict: 'conflict',
+  BaseMoving: 'base_moving',
 } as const;
 export type CopyWait = (typeof CopyWait)[keyof typeof CopyWait];
 export const CopyId = z.string().regex(/^[0-9a-f]{12}$/).brand<'CopyId'>();
 export type CopyId = z.infer<typeof CopyId>;
-/** The first 12 hex digits of the SHA-256 of the batch id. */
-export function copyIdOf(batchId: BatchId): CopyId;
 export interface LocalCopyDto {
   readonly batchId: BatchId;
   readonly copyId: CopyId;
@@ -126,7 +145,7 @@ export interface LocalCopyDto {
   readonly waitDetail: readonly string[];
   readonly retryAt: string | null;
   readonly teardownCommand: string;
-  readonly teardownSha: string;
+  readonly teardownSha: string | null; // set at the OPEN write
   readonly updatedAt: string;
 }
 // ProjectInput / ProjectDto gain:
@@ -136,18 +155,25 @@ export interface LocalCopyDto {
 //   GateChangedCopy: 'gate_changed_copy', GitFilters: 'git_filters'
 
 // packages/db/src/store/local-copies.ts (card 1)
+/** The first 12 hex digits of the SHA-256 of the batch id (node:crypto, so it lives in db, not contracts). */
+export function copyIdOf(batchId: BatchId): CopyId;
 export function insertLocalCopy(
-  w: WriteCtx,
-  row: { batchId: BatchId; teardownCommand: string; teardownSha: string },
+  w: WriteContext,
+  row: { batchId: BatchId; teardownCommand: string },
 ): LocalCopyDto;
 export function getLocalCopy(db: DbReader, batchId: BatchId): LocalCopyDto | null;
 export function isLocalCopy(db: DbReader, batchId: BatchId): boolean;
 export type LocalCopyPatch = Partial<
-  Pick<LocalCopyDto, 'step' | 'baseTip' | 'candidate' | 'attempt' | 'wait' | 'waitDetail' | 'retryAt'>
+  Pick<
+    LocalCopyDto,
+    'step' | 'baseTip' | 'candidate' | 'attempt' | 'wait' | 'waitDetail' | 'retryAt' | 'teardownSha'
+  >
 >;
-export function patchLocalCopy(w: WriteCtx, batchId: BatchId, patch: LocalCopyPatch): LocalCopyDto;
-/** step open, candidate and wait cleared, attempt 0. Throws ConflictError at `promoting`: row G keeps it. */
-export function resetLocalCopy(w: WriteCtx, batchId: BatchId): LocalCopyDto;
+export function patchLocalCopy(w: WriteContext, batchId: BatchId, patch: LocalCopyPatch): LocalCopyDto;
+/** step open, candidate and wait cleared, attempt 0; a no-op while live at promoting (Global Constraints). */
+export function resetLocalCopy(w: WriteContext, batchId: BatchId): LocalCopyDto;
+/** step promoting and wait null. */
+export function isLivePromoting(copy: LocalCopyDto): boolean;
 export function listOpenLocalCopies(db: DbReader): LocalCopyDto[]; // step not 'retired'
 /** The project's copy batch in CUTTING, OPEN, SHIPPING or FAILED, if any. */
 export function unfinishedCopyOf(db: DbReader, projectId: ProjectId): BatchDto | null;
@@ -187,7 +213,8 @@ export function withCopyId(
   env: Readonly<Record<string, string>>,
   copyId: CopyId | null,
 ): Record<string, string>;
-// LaneSandboxInput, GateSandboxInput and McpSandboxInput gain: readonly copyId: CopyId | null
+// LaneSessionInput (lane-sandbox.ts:156), TakeoverSandboxInput (:223), GateRunInput (gate-sandbox.ts:58) and
+// McpSandboxInput gain: readonly copyId: CopyId | null
 
 // apps/daemon/src/delivery/copy-id.ts (card 3)
 export class CopyJournalMissingError extends Error { override readonly name = 'CopyJournalMissingError'; }
@@ -213,35 +240,42 @@ export function teardownRef(batchId: BatchId): string; // refs/10db/copies/<batc
 
 The journal's step × what happens. "Reset" is `resetLocalCopy`.
 
-| Step | Event | Next | Card |
-|---|---|---|---|
-| (cut) | CUTTING insert | `open` | 4 |
-| `open` | review accepted, nothing in hand, batch → SHIPPING | preconditions, then `merging` | 5 |
-| `open` | diff touches a `deps` hazard path | batch FAILED (`lockfile_in_copy`), reset | 5 |
-| `merging` | copy head contains T | `gating` with T, C | 5 |
-| `merging` | merge clean or 10db-settled | `gating` with T, C = merge | 5 |
-| `merging` | conflict | `wait: conflict`, merge fix; batch → OPEN; reset | 5 |
-| `gating` | last passing gate ran on C | `gated` | 5 |
-| `gating` | gate passes, head is C and clean before and after | `gated` | 5 |
-| `gating` | head or tree changed across the gate | FAILED (`gate_changed_copy`), reset | 5 |
-| `gating` | gate fails | today's gate-failure card and fix loop, reset | 5 |
-| `gated`, `gating`, `promoting` | entered and copy head isn't C | `merging` | 5 |
-| `promoting` | `promoted` | `landed` (one transaction with SHIPPED) | 5 |
-| `promoting` | `base_moved`, attempt ≤ 3 | `merging`, attempt + 1 | 5 |
-| `promoting` | `base_moved`, fourth time | `wait: base_moving`, `retry_at` = last base change + 10 min | 5 |
-| `promoting` | `off_base` | `wait: folder_off_base` | 5 |
-| `promoting` | `in_the_way` | `wait: edits_in_the_way` | 5 |
-| `promoting` | `index_locked` | `wait: index_locked`, every 30 s; card after 10 min | 5 |
-| `promoting` | `filters` | FAILED (`git_filters`), reset | 5 |
-| `promoting` | `unclear`, or recovery | classifier row → A wait / B `landed` / C retry / D `finishPromotion` / E `merging` / F `wait: edits_in_the_way` / G FAILED (`interrupted_landing`), journal kept | 5, 6 |
-| `promoting` (FAILED, row G) | Retry | SHIPPING, resume at `promoting` → classifier | 5 |
-| `promoting` | Abandon | refused | 5 |
-| any wait | watcher event or minute timer | the waiting step again | 5 |
-| `landed` | — | migrations card if T..C touches a `migrations` path; `retiring` | 5 |
-| `retiring` | teardown exits 0 | worktree, branch, ref go; `retired` | 6 |
-| `retiring` | teardown fails | card with log and Retry; stays `retiring` | 6 |
-| `open` (ABANDONED) | Abandon | `retiring` | 6 |
-| any | daemon restart | spec §8's step table | 6 |
+| Step                                | Event                                              | Next                                                                                                                                                             | Card |
+| ----------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| (cut)                               | CUTTING insert                                     | `open`                                                                                                                                                           | 4    |
+| `open`                              | review accepted, nothing in hand, batch → SHIPPING | preconditions, then `merging`                                                                                                                                    | 5    |
+| `open`                              | diff touches a `deps` hazard path                  | batch FAILED (`lockfile_in_copy`), reset                                                                                                                         | 5    |
+| `merging`                           | copy head contains T                               | `gating` with T, C                                                                                                                                               | 5    |
+| `merging`                           | merge clean or 10db-settled                        | `gating` with T, C = merge                                                                                                                                       | 5    |
+| `merging`                           | conflict                                           | merge fix as `sendToMerge`; batch → OPEN; reset                                                                                                                  | 5    |
+| `gating`                            | gate passes, head is C and clean before and after  | `gated`                                                                                                                                                          | 5    |
+| `gating`                            | head or tree changed across the gate               | FAILED (`gate_changed_copy`), reset                                                                                                                              | 5    |
+| `gating`                            | gate fails                                         | today's gate-failure card and fix loop, reset                                                                                                                    | 5    |
+| `gated`, `gating`, `promoting`      | entered and copy head isn't C                      | `merging`                                                                                                                                                        | 5    |
+| `promoting`                         | `promoted`                                         | `landed` (one transaction with SHIPPED)                                                                                                                          | 5    |
+| `promoting`                         | `base_moved`, attempt ≤ 3                          | `merging`, attempt + 1                                                                                                                                           | 5    |
+| `promoting`                         | `base_moved`, fourth time                          | `wait: base_moving`, `retry_at` = last base change + 10 min                                                                                                      | 5    |
+| `promoting`                         | `off_base`                                         | `wait: folder_off_base`                                                                                                                                          | 5    |
+| `promoting`                         | `in_the_way`                                       | `wait: edits_in_the_way`                                                                                                                                         | 5    |
+| `promoting`                         | `index_locked`                                     | `wait: index_locked`, every 30 s; card after 10 min                                                                                                              | 5    |
+| `promoting`                         | `filters`                                          | FAILED (`git_filters`), reset                                                                                                                                    | 5    |
+| `promoting`                         | `unclear`, or recovery                             | classifier row → A wait / B `landed` / C retry / D `finishPromotion` / E `merging` / F `wait: edits_in_the_way` / G FAILED (`interrupted_landing`), journal kept | 5, 6 |
+| `promoting` (FAILED, row G)         | Retry                                              | SHIPPING, resume at `promoting` → classifier                                                                                                                     | 5    |
+| `promoting`, live                   | Abandon, a new run of the task, or any failure     | Abandon and the run refused; a failure is `interrupted_landing`, journal kept                                                                                    | 5    |
+| `gated`                             | entered with C equal to the copy's head (a resume) | skip the gate: the only skip                                                                                                                                     | 5    |
+| any step, SHIPPING                  | stop or shutdown signal                            | the job returns, the batch stays SHIPPING, recovery resumes at the step; `promoteFastForward` once called runs to its end                                        | 5    |
+| any wait                            | minute timer, ships not held (`holdShips`)         | one ship job for the batch, unless one is queued or running                                                                                                      | 5    |
+| any wait                            | the job ends with a wait set                       | the job returns; the batch stays SHIPPING; nothing holds the ship queue                                                                                          | 5    |
+| any wait (not live)                 | Abandon                                            | allowed: batch ABANDONED, `retiring`                                                                                                                             | 5, 6 |
+| any wait (not live)                 | a new run of the task                              | batch → OPEN, reset                                                                                                                                              | 5    |
+| FAILED, row G                       | a new run of the task                              | refused until Retry settles it                                                                                                                                   | 5    |
+| `landed`                            | —                                                  | migrations card if T..C touches a `migrations` path; `retiring`                                                                                                  | 5    |
+| `retiring`                          | teardown exits 0                                   | worktree, branch, ref go; `retired`                                                                                                                              | 6    |
+| `retiring`                          | teardown fails                                     | card with log and Retry; stays `retiring`                                                                                                                        | 6    |
+| `open` (ABANDONED)                  | Abandon                                            | `retiring`                                                                                                                                                       | 6    |
+| `open` (CLOSED)                     | ship step 1 finds no commits                       | `retiring`                                                                                                                                                       | 6    |
+| `open` (CUTTING refused or deleted) | the cut fails before OPEN                          | row deleted with the batch; no ref, no teardown (no lane ran)                                                                                                    | 4    |
+| any                                 | daemon restart                                     | spec §8's step table                                                                                                                                             | 6    |
 
 ## Tracks
 

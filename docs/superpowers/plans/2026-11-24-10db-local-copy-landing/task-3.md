@@ -7,9 +7,10 @@ and Global Constraints; spec §4 "The copy id", §10 "Provider parity".
 
 - `apps/daemon/src/sandbox/command-env.ts`: `COPY_ID_VARIABLE`, `withCopyId`.
 - `apps/daemon/src/sandbox/env-allowlist.ts`: `TENDB_COPY_ID` in `ALLOWED_NAMES`.
-- `apps/daemon/src/sandbox/lane-sandbox.ts`: `LaneSandboxInput.copyId`; `withCopyId` applied last to the command
+- `apps/daemon/src/sandbox/lane-sandbox.ts`: `LaneSessionInput.copyId` (`:156`) and `TakeoverSandboxInput.copyId` (`:223`);
+  `withCopyId` applied last to the command
   env (before `createLaneEnvFile`, `:486-490`) and to `shellEnv` (`:571`).
-- `apps/daemon/src/sandbox/gate-sandbox.ts`: `GateSandboxInput.copyId`; applied last to `commandEnv`
+- `apps/daemon/src/sandbox/gate-sandbox.ts`: `GateRunInput.copyId` (`:58`); applied last to `commandEnv`
   (`:284-291`).
 - `apps/daemon/src/sandbox/mcp-sandbox.ts`: `McpSandboxInput.copyId`; applied after `...server.env` (`:163-170`).
 - `apps/daemon/src/delivery/copy-id.ts` (new): `CopyJournalMissingError`, `copyIdForBatch`.
@@ -22,7 +23,10 @@ and Global Constraints; spec §4 "The copy id", §10 "Provider parity".
 
 ```ts
 export const COPY_ID_VARIABLE = 'TENDB_COPY_ID';
-export function withCopyId(env: Readonly<Record<string, string>>, copyId: CopyId | null): Record<string, string>;
+export function withCopyId(
+  env: Readonly<Record<string, string>>,
+  copyId: CopyId | null,
+): Record<string, string>;
 export function copyIdForBatch(db: DbReader, batchId: BatchId | null): CopyId | null;
 // calls: getLocalCopy, isLocalCopy (card 1)
 ```
@@ -30,9 +34,12 @@ export function copyIdForBatch(db: DbReader, batchId: BatchId | null): CopyId | 
 ## Behavior
 
 - `withCopyId` copies `env`, deletes the name, and sets it when `copyId` isn't null.
-- `copyIdForBatch`: null for a null batch or a batch without a row. Reading the row is one SELECT; it can't fail
-  apart from the database itself, so `CopyJournalMissingError` is thrown when the row's `copyId` doesn't parse,
-  and the session start, gate or teardown that asked raises one card and doesn't run.
+- `copyIdForBatch`: null for a null batch, or for a batch that isn't a worktree batch of a local project. For a
+  worktree batch of a local project it reads the journal row and returns its `copyId`; with no row, or one whose
+  `copyId` doesn't parse, it throws `CopyJournalMissingError`. The session start, gate or teardown that asked then
+  raises one card and doesn't run, so a copy's command never runs without its id.
+- The final check (`local-check.ts` `finalCheck`) is skipped for a copy batch (index call 6); its step checks run
+  with the id.
 
 ## Tests (core: sandbox)
 

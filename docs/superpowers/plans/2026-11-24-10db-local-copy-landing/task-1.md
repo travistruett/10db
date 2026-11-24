@@ -6,8 +6,8 @@ Constraints; spec §2 "Settings and admission", §4 "The copy id" (Value, Stored
 
 ## Files
 
-- `packages/contracts/src/local-copy.ts` (new): `CopyStep`, `CopyWait`, `CopyId`, `copyIdOf`, `LocalCopyDto`.
-  Export through the package entry.
+- `packages/contracts/src/local-copy.ts` (new): `CopyStep`, `CopyWait`, `CopyId`, `LocalCopyDto`.
+  Export through the package entry. No `node:` import: the desktop imports contracts.
 - `packages/contracts/src/entities.ts`: `localCopies`, `copyTeardownCommand` on `ProjectInput` and `ProjectDto`;
   the refine at `:620` accepts `delivery: local` only for task placement (the project default `worktree` stays
   pull-request only); a refine that `copyTeardownCommand` is set when `localCopies` is on.
@@ -22,20 +22,20 @@ Constraints; spec §2 "Settings and admission", §4 "The copy id" (Value, Stored
 
 ## Interfaces it implements (quoted from the index)
 
-`CopyStep`, `CopyWait`, `CopyId`, `copyIdOf(batchId: BatchId): CopyId`, `LocalCopyDto`; `insertLocalCopy`,
-`getLocalCopy`, `isLocalCopy`, `LocalCopyPatch`, `patchLocalCopy`, `resetLocalCopy`, `listOpenLocalCopies`,
-`unfinishedCopyOf`, exactly as the index's Interfaces block gives them.
+`CopyStep`, `CopyWait`, `CopyId`, `LocalCopyDto` (contracts); `copyIdOf(batchId: BatchId): CopyId`,
+`insertLocalCopy`, `getLocalCopy`, `isLocalCopy`, `LocalCopyPatch`, `patchLocalCopy`, `resetLocalCopy`,
+`isLivePromoting`, `listOpenLocalCopies`, `unfinishedCopyOf` (db), exactly as the index's Interfaces block gives them.
 
 ## Behavior
 
-- `copyIdOf`: `createHash('sha256').update(batchId).digest('hex').slice(0, 12)`, parsed through `CopyId`.
-- `insertLocalCopy` sets `copyId` from `copyIdOf`, `step: open`, `attempt: 0`, the rest null or empty. Card 4 calls
-  it in the CUTTING insert's transaction.
-- `resetLocalCopy` throws `ConflictError` at `promoting`.
+- `copyIdOf` (in `packages/db/src/store/local-copies.ts`): `createHash('sha256').update(batchId).digest('hex').slice(0, 12)`, parsed through `CopyId`.
+- `insertLocalCopy` sets `copyId` from `copyIdOf`, `step: open`, `attempt: 0`, `teardownSha: null`, the rest null or
+  empty. Card 4 calls it in the CUTTING insert (`delivery/start.ts:578-591`) and sets `teardownSha` in the OPEN write.
+- `resetLocalCopy` is a no-op while `isLivePromoting` (index Global Constraints, "Live at promoting").
 - **Admission** (a copy placement is refused with its reason as `InvalidError`, or waits, per spec §2):
   the project has a gate command; the task's effective process runs a review (read it where the process cell
-  decides the review step); the task's landing is `base`. A second copy task is not refused: placement succeeds,
-  and card 4's start keeps it queued while `unfinishedCopyOf` answers a batch.
+  decides the review step); the task's landing is `base`. A second copy task is not refused at placement; card 4's
+  start refuses it while `unfinishedCopyOf` answers a batch (index call 5).
 - `dependenciesDone`: a Done dependency whose latest run's batch `isLocalCopy` and isn't SHIPPED counts as pending.
 
 ## State-table rows
@@ -45,8 +45,7 @@ Constraints; spec §2 "Settings and admission", §4 "The copy id" (Value, Stored
 ## Tests
 
 None. The store is plain persistence and the admission checks are guards; the e2e (card 8) runs placement through
-the real daemon. `dependenciesDone`'s change is one condition, covered by the e2e's dependency-free path and the
-pilot.
+the real daemon. `dependenciesDone`'s change is untested: one condition, not core, and the pilot exercises it.
 
 ## Done when
 
