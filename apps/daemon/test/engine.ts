@@ -84,6 +84,7 @@ import { createGit, resolveGit } from '../src/git';
 import { resolveGh } from '../src/github';
 import { startSignOff } from '../src/pass';
 import { createJudge, type Judge } from '../src/judge';
+import type { AnswerWriter } from '../src/stakeholders';
 import {
   createReplyWatches,
   createSlackConnections,
@@ -259,6 +260,10 @@ function fullFlowSteps(riskTags: readonly string[], criteria: number): StepRole[
 const FAKE_TEAM = 'T1';
 
 /** A judge that is off: every decision keeps today's rule. */
+/** An answer writer that always declines: the reply watch sends every question to the builder. */
+export const decliningWriter: AnswerWriter = () =>
+  Promise.resolve({ kind: 'declined', reason: 'no_account' });
+
 export const offJudge: Judge = {
   off: true,
   ready: () => Promise.resolve(false),
@@ -472,6 +477,7 @@ export async function createTestEngine(
     clock,
     log: silentLogger,
     connections: slackConnections,
+    answerWriter: decliningWriter,
   });
   const timerWatch = createTimerWatch({ state, clock, log: silentLogger });
   const pauses = createAccountPauses({

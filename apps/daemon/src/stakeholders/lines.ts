@@ -69,3 +69,12 @@ export function whichWayLine(
 export function reminderLine(): string {
   return 'Bumping this: the work is still waiting on your answer.';
 }
+
+/** 10db's own answer to a simple question, marked as unreviewed by the builder. */
+export function automatedAnswerLine(
+  answer: string,
+  letters: readonly string[],
+  builderName: string,
+): string {
+  return `🤖 *10db (automated reply):* ${escapeMrkdwn(answer)}\n\n_${escapeMrkdwn(builderName)} hasn't reviewed this. ${replyWithLine(letters)}_`;
+}
