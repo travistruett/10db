@@ -199,12 +199,22 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
     writeFileSync(join(top, 'SKILL.md'), '---\nname: top\ndescription: top\n---\n');
     symlinkSync(top, join(home, '.claude/skills/top'));
     const { preview } = await projectTrust(one.id, 'GET');
-    expect(preview.skills).toEqual(['s']);
+    expect(preview.skills).toEqual([{ what: 's', from: 'yourSkills' }]);
     expect(preview.plugins).toEqual([]);
     expect(preview.leftOut).toEqual(
       expect.arrayContaining([
-        { what: '~/.claude/skills/lane', why: 'it lies in, or holds, a folder a lane can write' },
-        { what: '~/.claude/skills/top', why: 'it lies directly in your home folder' },
+        {
+          what: '~/.claude/skills/lane',
+          why: 'it lies in, or holds, a folder a lane can write',
+          from: 'yourSkills',
+          expected: false,
+        },
+        {
+          what: '~/.claude/skills/top',
+          why: 'it lies directly in your home folder',
+          from: 'yourSkills',
+          expected: false,
+        },
       ]),
     );
   });

@@ -113,13 +113,69 @@
         "skills": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "object",
+            "properties": {
+              "what": {
+                "type": "string"
+              },
+              "from": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "projectInstructions",
+                      "yourInstructions",
+                      "yourSkills",
+                      "yourPlugins",
+                      "yourMcpServers",
+                      "projectSkills"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "what",
+              "from"
+            ]
           }
         },
         "plugins": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "object",
+            "properties": {
+              "what": {
+                "type": "string"
+              },
+              "from": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "projectInstructions",
+                      "yourInstructions",
+                      "yourSkills",
+                      "yourPlugins",
+                      "yourMcpServers",
+                      "projectSkills"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "what",
+              "from"
+            ]
           }
         },
         "leftOut": {
@@ -132,11 +188,35 @@
               },
               "why": {
                 "type": "string"
+              },
+              "from": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "projectInstructions",
+                      "yourInstructions",
+                      "yourSkills",
+                      "yourPlugins",
+                      "yourMcpServers",
+                      "projectSkills"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "expected": {
+                "type": "boolean"
               }
             },
             "required": [
               "what",
-              "why"
+              "why",
+              "from",
+              "expected"
             ]
           }
         }

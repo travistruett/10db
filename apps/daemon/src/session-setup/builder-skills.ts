@@ -2,7 +2,7 @@ import { lstatSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { installedSkillDir } from '../agent-skill';
 import { foldPathCase } from '../guard';
-import type { LeftOut } from './left-out';
+import { OWN_SKILL_REASON, type LeftOut } from './left-out';
 
 /** One of the builder's skill folders. */
 export interface SkillFolder {
@@ -49,9 +49,6 @@ function judgeEntry(path: string): Found {
     return { refused: 'its SKILL.md leads nowhere' };
   }
 }
-
-const OWN_SKILL_REASON =
-  "10db's own skill acts for you with the app's token, so it never comes along";
 
 function realPathOrNull(path: string): string | null {
   try {

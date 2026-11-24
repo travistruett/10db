@@ -74,5 +74,9 @@
   carries `repoMcpHash` of `.mcp.json` and the hosts file at the project's own checkout, never a worktree's). Each goes through `resolveStaleCards`.
 - A card that says where its fix is made carries `detail.opens` (`CARD_OPENS`, a `CardOpens`: a Settings section or a
   path on this Mac); the desktop draws it as a link beside the answers (`views/inbox/card-opens-link.tsx`).
+- `repo-mcp-servers.ts` (`createRepoMcpServers`) is Settings › Trust's view of the repo's `.mcp.json` servers: `list`
+  raises no card, and `set` answers the server's open approval card through `InboxService` (so `applyMcpApproval`
+  writes and the card closes) or, with none open, records the same verdict itself. A hash that is no longer current is
+  a `ConflictError`.
 - A skipped-calls card (`closeFinishedSkippedCards`) closes when its task is abandoned. A Done task's card closes only once it lists no calls or its follow-up exists, since a run that succeeded still has calls the builder meant to approve. It keeps Dismiss, also when it rides on a failed run's card.
 - A stray-write card could still be owned by a Failed run whose task is open (Retry), so it stays until the task finishes or is abandoned.

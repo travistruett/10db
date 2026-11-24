@@ -41,6 +41,12 @@ function serve(initialGrants: readonly TrustGrantDto[]) {
     http.get(daemonUrl('/projects/:projectId/live-systems'), () =>
       HttpResponse.json({ liveSystems: [] }),
     ),
+    http.get(daemonUrl('/projects/:projectId/live-systems/proposals'), () =>
+      HttpResponse.json({ proposals: [] }),
+    ),
+    http.get(daemonUrl('/projects/:projectId/repo-mcp-servers'), () =>
+      HttpResponse.json({ servers: [], error: null }),
+    ),
     http.get(daemonUrl('/projects/:projectId/trust-grants'), () => HttpResponse.json(grants)),
     http.delete(daemonUrl('/projects/:projectId/trust-grants/:grantId'), ({ params }) => {
       const id = String(params['grantId']);
