@@ -242,11 +242,6 @@ export function SlackPreview({
             {`${names} ${recipientCount > 1 ? 'have' : 'has'} had ${limit === null ? 'their limit of' : String(limit)} new questions today.`}
           </Alert>
         ) : null}
-        {send.heldBy === 'first_send' ? (
-          <Text size="sm" c="yellow">
-            {`First message to ${names}: check it before it goes`}
-          </Text>
-        ) : null}
         {sendInbox.isError ? (
           <Alert color="red" variant="light">
             {sendInbox.error.message}
