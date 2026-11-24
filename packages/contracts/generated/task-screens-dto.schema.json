@@ -47,7 +47,8 @@
             "enum": [
               "before",
               "turn",
-              "after"
+              "after",
+              "lane"
             ]
           },
           "route": {
@@ -112,6 +113,34 @@
               }
             ]
           },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -132,6 +161,9 @@
           "size",
           "sha256",
           "keptSha",
+          "url",
+          "title",
+          "note",
           "createdAt"
         ]
       }
@@ -177,7 +209,8 @@
             "enum": [
               "before",
               "turn",
-              "after"
+              "after",
+              "lane"
             ]
           },
           "route": {
@@ -242,6 +275,34 @@
               }
             ]
           },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2048
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 512
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -262,6 +323,9 @@
           "size",
           "sha256",
           "keptSha",
+          "url",
+          "title",
+          "note",
           "createdAt"
         ]
       }

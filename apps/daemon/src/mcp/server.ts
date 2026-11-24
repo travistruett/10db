@@ -32,6 +32,7 @@ import { hashToken } from './tokens';
 import { ClaimWaits } from './claim-wait';
 import { CHAT_TOOL_DESCRIPTIONS } from './chat-tools';
 import { SHAPE_TOOL_DESCRIPTIONS } from './shape-tools';
+import { browserTools } from './browser-tools';
 import { checkDesignTool, offersDesignCheck } from './design-check-tool';
 import { ToolImages } from './tool-images';
 import { createToolHandlers, TOOL_DESCRIPTIONS, type McpDeps } from './tools';
@@ -88,6 +89,18 @@ function laneTools(
       schema: check.schema,
       run: (input) => check.run(CheckDesignInput.parse(input)),
     });
+  }
+  // A lane with a sandbox is offered its own browser, held to the servers the lane started.
+  if (deps.laneBrowser !== undefined && deps.dataDir !== undefined) {
+    for (const tool of browserTools({
+      state: deps.state,
+      dataDir: deps.dataDir,
+      laneBrowser: deps.laneBrowser,
+      pictures: deps.pictures,
+      sessionId,
+      signal: deps.sessionSignal(sessionId),
+    }))
+      tools.push(tool);
   }
   return tools;
 }

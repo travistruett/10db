@@ -43,3 +43,7 @@
   no token (`docs/architecture/decisions/2026-11-14-mcp-sign-ins-stay-in-each-agents-own-store.md`). A session that
   finds a server signed out says where to sign in (`mcpSignInWhere`).
 - `takeoverCommand` and `takeoverNotes` on `AgentAdapter` are pure: Claude's (`claude-takeover.ts`, `--setting-sources ''`, `apiKeyHelper` or the scrubbed Bedrock key, `markOnboarded` for the account's first-run marks) and Codex's (`codex-takeover.ts`, Codex's own defaults except the billing line, the sign-in store and the `untrusted` pin; header tokens through `env_http_headers` from a sealed file). `takeover-servers.ts` maps the servers each agent takes and names what it leaves out. A change to a row is a change to a test table, never a flag only a test reads.
+- A lane's Codex reaches 10db's MCP tools only through code mode, which hands the script the tool's content as data, so
+  an MCP tool result's image never reaches the model as a picture (`test/codex.live.test.ts`, "reports whether an MCP tool
+  result image reaches the model", on the Mac): the lane browser's prompt tells a Codex session to open a screenshot's
+  path with `view_image` (`briefing/prompts.ts`).

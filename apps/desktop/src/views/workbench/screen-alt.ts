@@ -6,6 +6,7 @@ const WHEN = {
   [ScreenKind.Before]: 'before',
   [ScreenKind.Turn]: 'after',
   [ScreenKind.After]: 'after sign-off',
+  [ScreenKind.Lane]: "from the lane's browser",
 } as const satisfies Record<ScreenKind, string>;
 
 /**

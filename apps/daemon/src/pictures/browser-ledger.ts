@@ -74,14 +74,55 @@ const procExecutables: CommandReader = async (pids) => {
 export const systemCommands: CommandReader =
   process.platform === 'linux' ? procExecutables : psExecutables;
 
-/** The browser's own process in a reading of the machine: the daemon's child running `exe`. */
+/**
+ * The browser's own process in a reading of the machine: the daemon's child running `exe`, other
+ * than the ones in `skip` (browsers already running, which are another ledger's).
+ */
 export function browserRoot(
   rows: readonly ProcessRow[],
   commands: ReadonlyMap<number, string>,
   exe: string,
   ownPid: number,
+  skip: ReadonlySet<number> = new Set(),
 ): ProcessRow | null {
-  return rows.find((row) => row.ppid === ownPid && commands.get(row.pid) === exe) ?? null;
+  return (
+    rows.find(
+      (row) => row.ppid === ownPid && !skip.has(row.pid) && commands.get(row.pid) === exe,
+    ) ?? null
+  );
+}
+
+/**
+ * One per daemon: a browser is launched and found with no other launch between, and a root one
+ * ledger holds is never another's.
+ */
+export interface BrowserLaunches {
+  one<T>(fn: () => Promise<T>): Promise<T>;
+  /** The roots every open ledger holds; `track` skips them. */
+  held(): ReadonlySet<number>;
+  /** A ledger takes a root. */
+  hold(pid: number): void;
+  /** A ledger lets a root go, once its watch has stopped it. */
+  release(pid: number): void;
+}
+
+export function createBrowserLaunches(): BrowserLaunches {
+  let queue: Promise<unknown> = Promise.resolve();
+  const roots = new Set<number>();
+  return {
+    one(fn) {
+      const run = queue.then(fn, fn);
+      queue = run.catch(() => undefined);
+      return run;
+    },
+    held: () => new Set(roots),
+    hold(pid) {
+      roots.add(pid);
+    },
+    release(pid) {
+      roots.delete(pid);
+    },
+  };
 }
 
 /** The browser's process could not be found, so it is not kept running. */
@@ -96,6 +137,8 @@ export interface BrowserLedgerDeps {
   readonly processes: LaneProcessSetup;
   readonly commands?: CommandReader;
   readonly onError?: (failure: LaneProcessFailure, error: unknown) => void;
+  /** Shared by every browser's ledger; absent, the ledger has one of its own. */
+  readonly launches?: BrowserLaunches;
 }
 
 /**
@@ -103,6 +146,10 @@ export interface BrowserLedgerDeps {
  * while the browser runs, and a daemon that dies leaves it for the next start to reap.
  */
 export interface BrowserLedger {
+  /** The processes its watch remembers: never an owner of a root another ledger finds. */
+  pids(): ReadonlySet<number>;
+  /** Reads the daemon's children now, just before a launch and inside `BrowserLaunches.one`. */
+  mark(): Promise<void>;
   /** Finds the browser started from `exe` and watches it and what it starts. */
   track(exe: string): Promise<void>;
   /** Stops whatever of the browser still runs and lets the ledger go. */
@@ -120,20 +167,37 @@ export function openBrowserLedger(deps: BrowserLedgerDeps): BrowserLedger {
     ...(deps.onError === undefined ? {} : { onError: deps.onError }),
   });
   const commands = deps.commands ?? systemCommands;
+  const launches = deps.launches ?? createBrowserLaunches();
   let ended = false;
+  let marked: ReadonlySet<number> = new Set();
+  let root: number | null = null;
   return {
+    pids: () => new Set(watch.members().map((member) => member.pid)),
+    async mark() {
+      const rows = await deps.processes.table();
+      marked = new Set(rows.filter((row) => row.ppid === ownPid).map((row) => row.pid));
+    },
     async track(exe) {
       const rows = await deps.processes.table();
       const children = rows.filter((row) => row.ppid === ownPid);
       // The readers resolve what each process runs, so the path asked for is resolved too.
       const real = await realpath(exe).catch(() => exe);
-      const root = browserRoot(rows, await commands(children.map((row) => row.pid)), real, ownPid);
-      if (root === null) {
+      const skip = new Set([...marked, ...launches.held()]);
+      const found = browserRoot(
+        rows,
+        await commands(children.map((row) => row.pid)),
+        real,
+        ownPid,
+        skip,
+      );
+      if (found === null) {
         throw new BrowserLedgerError(
           `no process of ${exe} was found among the daemon's children, so the browser was not kept running`,
         );
       }
-      await watch.track({ pid: root.pid, startedAt: root.startedAt });
+      root = found.pid;
+      launches.hold(found.pid);
+      await watch.track({ pid: found.pid, startedAt: found.startedAt });
     },
     async end() {
       if (ended) return;
@@ -145,6 +209,8 @@ export function openBrowserLedger(deps: BrowserLedgerDeps): BrowserLedger {
       }
       // What could not be stopped stays named: the sweep tries again, and the next start if it never can.
       const kept = watch.pending();
+      // A root stays held while the watch still remembers it, so no later launch takes it.
+      if (root !== null && !kept) launches.release(root);
       deps.sweep.release(file);
       if (kept) deps.sweep.later();
       else removeProcessLedger(file, deps.root);

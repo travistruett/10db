@@ -44,6 +44,8 @@ export const SkipKind = {
   Classifier: 'classifier',
   SafetyCheck: 'safety_check',
   Host: 'host',
+  /** A shell call whose program sits outside what the lane may read, so the lane's profile can't run it. */
+  CantRunInLane: 'cant_run_in_lane',
   Question: 'question',
 } as const;
 export type SkipKind = ValueOf<typeof SkipKind>;
@@ -111,6 +113,7 @@ export function approvalOf(kind: SkipKind, summaryCut: boolean): Approval {
     case SkipKind.MonitorNoCommand:
     case SkipKind.UnreadEditPath:
     case SkipKind.SafetyCheck:
+    case SkipKind.CantRunInLane:
     case SkipKind.Question:
       return Approval.None;
   }

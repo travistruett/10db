@@ -1,10 +1,10 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createSocket, type Socket as UdpSocket } from 'node:dgram';
 import { mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import type { AppUrl } from '@10db/contracts';
+import { mintId, type AppUrl } from '@10db/contracts';
 import type { Browser } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
@@ -14,8 +14,10 @@ import { loadEnv } from '../env';
 import { downloadFile, ensurePinned, extractZipWithTar } from '../environment';
 import { defaultDataDir } from '../runtime-files';
 import type { Logger } from '../log';
+import { createLaneBrowsers, launchPlaywrightDriver, systemPortReaders } from '../lane-browser';
 import { createLedgerSweep, systemProcessTable, type LedgerSweep } from '../sandbox';
 import { BROWSER_PIN } from './browser-pin';
+import { createBrowserLaunches } from './browser-ledger';
 import { createBrowserHost, type BrowserHost } from './browser-host';
 import { ShotOutcome, type PageCamera } from './camera';
 import { launchChromium } from './playwright';
@@ -291,6 +293,46 @@ function filesUnder(dir: string): string[] {
     else if (info.isFile()) found.push(path);
   }
   return found;
+}
+
+/** A loopback HTTP server in a child of its own: its port, its pid, and a way to stop it. */
+async function serverChild(env: Record<string, string>): Promise<{
+  port: number;
+  pid: number;
+  child: ChildProcess;
+}> {
+  const code = `
+    const http = require('node:http');
+    let hits = 0;
+    const server = http.createServer((req, res) => {
+      if (req.url === '/count') { res.end(String(hits)); return; }
+      hits += 1;
+      res.setHeader('content-type', 'text/html');
+      if (req.url === '/fetch-other') {
+        res.end('<title>fetcher</title><script>fetch("http://127.0.0.1:' + process.env.OTHER_PORT + '/x").then(() => { document.title = "reached"; }, () => { document.title = "blocked"; });</script>');
+        return;
+      }
+      res.end('<title>' + process.env.TITLE + '</title><h1>ok</h1>');
+    });
+    server.listen(0, '127.0.0.1', () => console.log(server.address().port));
+  `;
+  const child = spawn(process.execPath, ['-e', code], {
+    env: { ...env, PATH: process.env['PATH'] ?? '' },
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  const port = await new Promise<number>((resolve, reject) => {
+    child.once('error', reject);
+    child.stdout.once('data', (chunk: Buffer) => {
+      resolve(Number(chunk.toString().trim()));
+    });
+  });
+  if (child.pid === undefined) throw new Error('no pid');
+  return { port, pid: child.pid, child };
+}
+
+async function hits(port: number): Promise<number> {
+  const response = await fetch(`http://127.0.0.1:${String(port)}/count`);
+  return Number(await response.text());
 }
 
 describe.skipIf(!live)('the pinned browser, live', () => {
@@ -681,6 +723,82 @@ describe.skipIf(!live)('the pinned browser, live', () => {
       beacon.close();
     }
   }, 60_000);
+
+  it('lets a lane browser reach only its own server, below the routing', async () => {
+    const other = await serverChild({ TITLE: 'B page' });
+    const own = await serverChild({ TITLE: 'A page', OTHER_PORT: String(other.port) });
+    const sessionId = mintId('Session');
+    const ownRow = (await systemProcessTable()).find((row) => row.pid === own.pid);
+    if (ownRow === undefined) throw new Error('the server child is not in the process table');
+    const copy = join(dir.path, 'lane-copy');
+    const tempDirOfLane = join(dir.path, 'lane-temp');
+    mkdirSync(copy);
+    mkdirSync(tempDirOfLane);
+    const laneLogs: string[] = [];
+    const browsers = createLaneBrowsers({
+      dataDir: join(dir.path, 'lane-data'),
+      ledgers: { sweep, root: join(dir.path, 'files') },
+      processes: { table: systemProcessTable },
+      launches: createBrowserLaunches(),
+      build: { ready: () => Promise.resolve(exe), fetching: () => false },
+      launch: launchPlaywrightDriver,
+      readers: systemPortReaders(
+        process.env['HOME'] ?? '',
+        process.env,
+        systemProcessTable,
+        systemClock,
+      ),
+      daemonPort: () => daemon.port,
+      clock: systemClock,
+      logger: recordingLogger(laneLogs),
+    });
+    const session = {
+      sessionId,
+      projectId: mintId('Project'),
+      taskId: mintId('Task'),
+      workstreamId: mintId('Workstream'),
+      copy,
+      tempDir: tempDirOfLane,
+      fileAccess: {
+        checkout: copy,
+        home: process.env['HOME'] ?? '',
+        protectedReads: [],
+        readList: [],
+        configDir: copy,
+        providerSessionId: null,
+        sandboxTemp: { roots: [], own: tempDirOfLane },
+      },
+      registeredCheckouts: [],
+      loopback: true,
+      docker: false,
+      members: () => [{ pid: own.pid, startedAt: ownRow.startedAt, pgid: ownRow.pgid }],
+    };
+    const call = <T>(fn: Parameters<typeof browsers.use<T>>[2]) =>
+      browsers.use(session, AbortSignal.timeout(55_000), fn);
+    try {
+      const titleOf = async (url: string) =>
+        call((driver) => driver.open(url, undefined, new AbortController().signal));
+      const ownPage = await titleOf(`http://127.0.0.1:${String(own.port)}/`);
+      expect(ownPage.page?.title).toBe('A page');
+      const otherPage = await titleOf(`http://127.0.0.1:${String(other.port)}/`);
+      expect(otherPage.page?.title).not.toBe('B page');
+      expect(await hits(other.port)).toBe(0);
+      const fetcher = await titleOf(`http://127.0.0.1:${String(own.port)}/fetch-other`);
+      const settled = await call((driver) => driver.snapshot(new AbortController().signal));
+      expect(fetcher.page?.title === 'blocked' || settled.page?.title === 'blocked').toBe(true);
+      expect(await hits(other.port)).toBe(0);
+      expect([...fetcher.refused, ...settled.refused].join('\n')).toContain(
+        `127.0.0.1:${String(other.port)}`,
+      );
+      const spoof = await titleOf(`http://127.0.0.2:${String(own.port)}/`);
+      expect(spoof.refused.join('\n')).toContain('127.0.0.2');
+      expect(spoof.page?.url).not.toContain('127.0.0.2');
+    } finally {
+      await browsers.close();
+      own.child.kill();
+      other.child.kill();
+    }
+  }, 120_000);
 
   it('leaves no browser process once closed', async () => {
     await shoot('/clean');

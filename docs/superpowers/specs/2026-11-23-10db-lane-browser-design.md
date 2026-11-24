@@ -1,6 +1,6 @@
 # 10db lane browser design
 
-Designed, not built. November 23, 2026. Core: it widens what a sandboxed lane can reach.
+Built, November 2026 (plan: `docs/superpowers/plans/2026-11-24-10db-lane-browser.md`). Designed November 23, 2026. Core: it widens what a sandboxed lane can reach.
 
 ## Brief
 

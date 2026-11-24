@@ -327,6 +327,7 @@ import {
 } from './your-mcp';
 import { SkippedActionDto } from './skipped-actions';
 import { ToolCallView } from './tool-call-view';
+import { BrowserAnswer, BrowserToolInputs, BrowserToolName } from './lane-browser';
 
 const shapeMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
   Object.values(ShapeToolName).map((tool): [string, z.ZodType] => [
@@ -348,6 +349,16 @@ const builderMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
     AdvertisedBuilderToolInputs[tool],
   ]),
 );
+
+const laneBrowserSchemas: Record<string, z.ZodType> = {
+  'lane-browser-answer': BrowserAnswer,
+  ...Object.fromEntries(
+    Object.values(BrowserToolName).map((tool): [string, z.ZodType] => [
+      `lane-browser-${tool.replaceAll('_', '-')}-input`,
+      BrowserToolInputs[tool],
+    ]),
+  ),
+};
 
 /** Every schema visible outside the daemon, keyed by the file stem of its generated JSON Schema. */
 export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
@@ -648,6 +659,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-preview-mended-data': PassPreviewMendedData,
   ...mcpSchemas,
   ...builderMcpSchemas,
+  ...laneBrowserSchemas,
   ...shapeMcpSchemas,
 };
 

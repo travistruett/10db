@@ -5,14 +5,18 @@ import { PassTurnId, TaskId, TaskScreenId } from './ids';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §10, §11, §13: pictures of the
 // builder's app, taken by the daemon's own browser before, during and after a task, kept by their hash
-// on the Mac and never sent to a model.
+// on the Mac and never sent to a model. A `lane` picture is the exception: a lane's own browser takes it
+// and sends it to that lane's model.
 
 const Timestamp = z.iso.datetime();
 
 type ValueOf<T> = T[keyof T];
 
-/** When a picture was taken: before the task's first edit, after a turn of a pass task, or once done. */
-export const ScreenKind = { Before: 'before', Turn: 'turn', After: 'after' } as const;
+/**
+ * When a picture was taken: before the task's first edit, after a turn of a pass task, once done, or
+ * by a lane's own browser while it worked.
+ */
+export const ScreenKind = { Before: 'before', Turn: 'turn', After: 'after', Lane: 'lane' } as const;
 export type ScreenKind = ValueOf<typeof ScreenKind>;
 
 /** The color scheme the page is shown in; `default` emulates none, so the app's own default shows. */
@@ -100,6 +104,12 @@ export const TaskScreenDto = z.object({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   /** The kept commit (a pass turn's) or the folder's HEAD the picture was taken at. */
   keptSha: GitObjectName.nullable(),
+  /** Origin and path only: the query and fragment are dropped before it is kept. Null unless `lane`. */
+  url: z.string().max(2048).nullable(),
+  /** The page's title when a lane's browser took the picture. Null unless `lane`. */
+  title: z.string().max(512).nullable(),
+  /** What the lane said the picture shows. Null unless `lane`. */
+  note: z.string().nullable(),
   createdAt: Timestamp,
 });
 export type TaskScreenDto = z.infer<typeof TaskScreenDto>;
