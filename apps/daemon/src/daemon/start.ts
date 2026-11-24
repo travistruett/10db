@@ -55,6 +55,7 @@ import {
   getAppSetting,
   getJudgeConfig,
   getProject,
+  getSession,
   listPermissionRules,
   listActiveProjects,
   listProjects,
@@ -3063,7 +3064,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
-      showImages: (id, images) => live.get(id)?.showImages?.(images),
+      showImages: (id, images) => {
+        const lane = live.get(id);
+        if (lane !== undefined) {
+          lane.showImages?.(images);
+          return;
+        }
+        // A chat's or plan's session is no lane: it is found by its conversation.
+        const conversationId = getSession(db, id).conversationId;
+        if (conversationId !== null) chatLive.get(conversationId, id)?.showImages?.(images);
+      },
       awayFor: (id) => live.get(id)?.away,
       claimWaits,
       deliverMessage: (taskId, messageId) =>

@@ -257,7 +257,7 @@ import {
 } from '../inbox';
 import type { Judge } from '../judge';
 import type { Logger } from '../log';
-import { mintSessionToken, type ToolImages } from '../mcp';
+import { mintSessionToken, TOOL_PICTURES_CAPTION, type ToolImages } from '../mcp';
 import {
   closeHoldsOf,
   foldHandEdits,
@@ -395,10 +395,6 @@ const HANDOFF_BASELINE_MARGIN_PCT = 5;
 
 /** A hook call's input, as the agent sent it: read as a record where a skip keys it. */
 const ToolInputRecord = z.record(z.string(), z.unknown());
-
-/** The words sent with a tool's pictures to a Codex session; 10db's own, so no tool output speaks as the builder. */
-const TOOL_PICTURES_CAPTION =
-  'The pictures your last tool call returned. Its text came back as the tool result.';
 
 /** Why a lane is stopped; `closed` is the runner closing a pass task's session itself. */
 export type StopReason = 'cancelled' | 'paused' | 'shutdown' | 'closed';
@@ -3224,7 +3220,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       ...(provider === Provider.Codex
         ? {
             showImages: (shown: ToolImages) => {
-              if (shown.images.length > 0) handle?.send(TOOL_PICTURES_CAPTION, shown.images);
+              if (shown.images.length > 0)
+                handle?.send(TOOL_PICTURES_CAPTION, shown.images, undefined, { steerOnly: true });
             },
           }
         : {}),
