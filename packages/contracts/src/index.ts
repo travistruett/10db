@@ -33,6 +33,7 @@ export * from './handoff';
 export * from './hazard-assessment';
 export * from './human-touch';
 export * from './inbox-card-types';
+export * from './lane-browser';
 export * from './inbox-page';
 export * from './inbox-rows';
 export { DevUiConnectionDto, HealthResponse } from './health';
