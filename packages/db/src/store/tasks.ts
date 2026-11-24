@@ -46,7 +46,7 @@ import {
   type TaskKind,
   type TaskLanding,
 } from '@10db/contracts';
-import { and, asc, desc, eq, inArray, max, ne, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, max, ne, or } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn, listBoardColumns } from './board-columns';
 import { checkTaskKinds, listKinds } from './kinds';
@@ -1321,17 +1321,39 @@ export function resetTaskLanding(ctx: WriteContext, id: TaskId, landing: TaskLan
 }
 
 /**
- * A task's areas change only while it has never started: its lane takes the areas as claims when it
- * starts, and a finished task's are history. Every area must be one the project has.
+ * A task's areas change while it is open, none of its runs holds a claim, it has no saved work and no
+ * pass holds it: each launch claims the task's areas as they are then, so a run between lanes (queued,
+ * failed, waiting with its claims let go) takes the new ones at its next launch. A held claim keeps the
+ * areas it was granted; saved work goes back into the folder under the areas it was made in; a pass
+ * reads its pages' areas for its life. A finished task's areas are history. Every area must be one the
+ * project has.
  */
 function checkAreasCanChange(db: DbReader, task: TaskDto, areas: readonly string[]): void {
   if (task.status !== TaskStatus.Open)
     throw new ConflictError(`${task.title} is finished, so its areas are fixed`);
-  if (latestRun(db, task.id))
+  if (holdsClaims(db, task.id))
     throw new ConflictError(
-      `${task.title} has already started, so its areas are fixed: the lane took them when it started`,
+      `${task.title} holds its areas now, so they can't change until its run lets them go`,
+    );
+  if (getTaskKeptWork(db, task.id) !== null)
+    throw new ConflictError(
+      `${task.title} has saved work from an earlier run, which goes back under the areas it was made in, so they can't change`,
+    );
+  if (passHolds(db, task.passId ?? null))
+    throw new ConflictError(
+      `${task.title} is a page of a pass, which keeps its areas until the pass ends`,
     );
   refuseUnknownAreas(getProject(db, task.projectId), areas);
+}
+
+function holdsClaims(db: DbReader, id: TaskId): boolean {
+  const held = db
+    .select({ id: schema.claims.id })
+    .from(schema.claims)
+    .innerJoin(schema.workstreams, eq(schema.workstreams.id, schema.claims.workstreamId))
+    .where(and(eq(schema.workstreams.taskId, id), isNull(schema.claims.releasedAt)))
+    .get();
+  return held !== undefined;
 }
 
 /**
