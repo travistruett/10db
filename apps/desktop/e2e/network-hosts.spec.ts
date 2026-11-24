@@ -37,6 +37,35 @@ async function expectAccessible(page: Page, label: string): Promise<void> {
   expect(found).toEqual([]);
 }
 
+const SAVED_SEEN = '__savedSeen';
+
+/**
+ * Starts recording whether the save bar says Saved. The bar says it for a couple of seconds, and a poll
+ * on a slow machine can miss that; the recorder cannot. Call it before the action that saves.
+ */
+async function recordSaved(page: Page): Promise<() => Promise<void>> {
+  await page.evaluate((key) => {
+    const mark = () => {
+      const said = [...document.querySelectorAll('[role="status"]')].some(
+        (el) => el.textContent.trim() === 'Saved',
+      );
+      if (said) Reflect.set(window, key, true);
+    };
+    Reflect.set(window, key, false);
+    new MutationObserver(mark).observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+    mark();
+  }, SAVED_SEEN);
+  return async () => {
+    await expect
+      .poll(() => page.evaluate((key) => Reflect.get(window, key) === true, SAVED_SEEN))
+      .toBe(true);
+  };
+}
+
 // Core flow 10, with process-per-rigor.spec.ts: a setting the builder changes in Settings that changes
 // what an agent may do, here which hosts a project's sandbox lets it reach.
 test('a builder allows two hosts, is refused localhost and removes them', async ({
@@ -91,8 +120,9 @@ test('a builder allows two hosts, is refused localhost and removes them', async 
   await expect(unsaved).toHaveCount(0);
   // A value saved with a trailing space leaves nothing unsaved, so leaving does not ask.
   await preview.fill('pnpm dev ');
+  const savedPreview = await recordSaved(page);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
+  await savedPreview();
   await expect(unsaved).toHaveCount(0);
   await page.getByRole('link', { name: 'Sharing' }).click();
   await expect(page).toHaveURL(/\/settings\/sharing$/);
@@ -103,8 +133,9 @@ test('a builder allows two hosts, is refused localhost and removes them', async 
   const pictures = page.getByRole('switch', { name: 'Pictures in Pull Requests' });
   await expect(pictures).toBeVisible();
   const picturesOn = await pictures.isChecked();
+  const savedPictures = await recordSaved(page);
   await pictures.click({ force: true });
-  await expect(page.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
+  await savedPictures();
   await expect(unsaved).toHaveCount(0);
   await page.reload();
   await expect(pictures).toBeChecked({ checked: !picturesOn });

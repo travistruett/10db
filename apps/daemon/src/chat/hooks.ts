@@ -20,6 +20,7 @@ import {
   TrustSurface,
   AccountKind,
   type Effort,
+  type ProjectDto,
   type ProjectId,
   type ChatId,
   WorkPlace,
@@ -54,6 +55,7 @@ import type { AccountAgent } from '../environment';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import { holderWords, type FolderBlocker, type FolderHold } from '../folder-hold';
+import type { ComposeServices } from '../folders';
 import { createHookJudge, createLimitNotes } from '../inbox';
 import type { Judge } from '../judge';
 import { principlesBrief } from '../knowledge';
@@ -80,6 +82,7 @@ import {
   judgeForCall,
   projectGrantLines,
   projectLiveSystems,
+  sessionDevAccess,
   startingJudge,
 } from '../trust';
 import { digestText } from './brief';
@@ -210,6 +213,10 @@ export interface ChatHooksDeps {
   /** 10db's judge, asked whether it is ready as each session starts; absent, a `tendb` chat is on the rules. */
   readonly judge?: Judge;
   readonly clock: Clock;
+  /** The project's compose services at its committed base, for a session Docker is open to. */
+  readonly composeServices: (
+    project: Pick<ProjectDto, 'repoPath' | 'baseBranch'>,
+  ) => Promise<ComposeServices | null>;
   /** Where the chat's tools find the session that calls them. */
   readonly live: ChatLiveSessions;
   /** A reading session's first change: asks the builder where the work happens. */
@@ -627,6 +634,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       const claudeConnectors =
         (ready?.claudeConnectors ?? false) &&
         launch.account.kind === AccountKind.ClaudeSubscription;
+      // As the session's sandbox is built: Docker for a session that writes, loopback by the project's switch.
+      const open = sessionDevAccess(project, {
+        sandboxed: (ready?.sandbox ?? null) !== null,
+        writes: writable,
+      });
       const policy = buildTrustPolicy({
         surface: TrustSurface.Chat,
         projectName: project.name,
@@ -642,6 +654,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         grants: projectGrantLines(state.db, project.id),
         yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
         claudeConnectors,
+        devAccess: {
+          ...open,
+          compose: open.docker ? await deps.composeServices(project) : null,
+        },
       });
       // The thread says once per session that 10db's judge stopped answering.
       let saidUnavailable = false;

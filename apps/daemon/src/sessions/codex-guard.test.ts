@@ -776,6 +776,7 @@ describe('judgeHookCall with the session judge', () => {
               grants: [],
               yourMcpServers: [],
               claudeConnectors: false,
+              devAccess: { docker: false, localhost: false, compose: null },
             }),
             allowLines: () => [],
             judgeNow: () => JudgeKind.Tendb,

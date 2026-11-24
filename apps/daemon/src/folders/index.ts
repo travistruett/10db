@@ -11,6 +11,7 @@ export {
   probedCandidates,
   type Listener,
 } from './detect-app-address';
+export { readComposeServices, type ComposeServices } from './dev-services';
 export { CHANGED_CHECK_NOTE, changedCheckFor, uiUnitOf } from './detect-changed-check';
 export { shellWord } from './shell-word';
 export {

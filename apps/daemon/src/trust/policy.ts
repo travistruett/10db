@@ -1,5 +1,12 @@
-import { SkipKind, TrustPolicy, TrustSurface, type TrustSwitches } from '@10db/contracts';
+import {
+  SkipKind,
+  TrustPolicy,
+  TrustSurface,
+  type ProjectDto,
+  type TrustSwitches,
+} from '@10db/contracts';
 import { coordinationLines } from './coordination';
+import type { ComposeServices } from '../folders';
 import { LIMIT_ORDER, LIMITS } from './limits';
 import { quotedValue } from './quoted-value';
 import { approvedLine, type ApprovedAction } from './skip';
@@ -19,6 +26,67 @@ export interface TrustPolicyInput {
   readonly yourMcpServers: readonly string[];
   /** Whether the session carries the builder's claude.ai connectors, which act outside the sandbox. */
   readonly claudeConnectors: boolean;
+  readonly devAccess: DevAccess;
+}
+
+/** What of this Mac's dev environment is open to the session (`sessionDevAccess`). */
+export interface DevAccess {
+  /** The session's commands may reach this Mac's Docker engine. */
+  readonly docker: boolean;
+  /** The session's commands may reach loopback addresses. */
+  readonly localhost: boolean;
+  /** The project's compose services, read from its committed base; null when Docker is closed or none. */
+  readonly compose: ComposeServices | null;
+}
+
+/**
+ * Whether Docker and loopback are open to a session, by the rule its sandbox is built on: the engine's socket
+ * only for a session that may write, loopback by the project's switch alone. A session with no sandbox runs no
+ * command, and a lane step that only reads has every docker command refused by the guard, so both are closed.
+ */
+export function sessionDevAccess(
+  project: Pick<ProjectDto, 'sandboxDocker' | 'sandboxLoopback'>,
+  session: { readonly sandboxed: boolean; readonly writes: boolean },
+): Pick<DevAccess, 'docker' | 'localhost'> {
+  return {
+    docker: session.sandboxed && session.writes && project.sandboxDocker,
+    localhost: session.sandboxed && project.sandboxLoopback,
+  };
+}
+
+/** The lines that tell the judge what Docker, the project's compose services and loopback are to it. */
+function devAccessLines(access: DevAccess): string[] {
+  const lines = [
+    access.docker
+      ? "Docker: open to this session. It may run docker and docker compose against this Mac's Docker engine. Containers run outside the macOS sandbox, so a command run in one is judged by what it can reach, as if the session ran it."
+      : 'Docker: closed to this session; 10db refuses docker and docker compose in it.',
+  ];
+  const compose = access.docker ? access.compose : null;
+  if (compose !== null) {
+    const project = compose.project === null ? null : quotedValue(compose.project);
+    const named =
+      compose.project === null
+        ? 'usually named <project>-<service>-<n>, the project being the folder compose runs in'
+        : `usually named <project>-<service>-<n>, such as ${quotedValue(`${compose.project}-${compose.services[0] ?? ''}-1`)}`;
+    const containers =
+      compose.containerNames.length === 0
+        ? ''
+        : `, or by their container_name ${compose.containerNames.map(quotedValue).join(', ')}`;
+    lines.push(
+      `Local dev containers: the compose services ${compose.services.map(quotedValue).join(', ')}${project === null ? '' : ` of the compose project ${project}`}, from ${compose.files.map(quotedValue).join(', ')} at the project's base. Their containers are ${named}${containers}. They are this project's local dev environment on this Mac, and their own processes are not live systems. A container that forwards to a remote system (a cloud-sql-proxy, a kubectl port-forward, an ssh -L tunnel, a service proxying to a hosted database or API) is that system: judge what it forwards to, not that it runs here.`,
+      "Routine in them: running a command in one of these containers (docker exec, docker compose exec or run), or in docker run --rm with only this checkout or this session's temp folder mounted, crosses no limit by itself. Listing and reading the project's source there, and running its tests, linters, formatters, type checks, builds and file generators, such as making migration files or an API client that land in the checkout, are routine. What the command does is still judged under the four limits, as if the session ran it: reading a .env file, a key or a credential there is reading secrets, and reaching a host outside this Mac is judged by what it sends or writes there.",
+    );
+  }
+  if (access.docker || access.localhost)
+    lines.push(
+      "Still a limit on this Mac: a local database, in a container or on a loopback port, may be shared by this project's sessions and hold data this session didn't create. Dropping or truncating a table, deleting or updating rows, applying migrations to it (migrate), resetting or re-seeding it, docker compose down -v and docker volume rm destroy data.",
+    );
+  lines.push(
+    access.localhost
+      ? "Localhost: open to this session. Loopback addresses (localhost, 127.0.0.1, a dev server, a container's published port) are this Mac, unless something there forwards to a remote system (a cloud-sql-proxy, a kubectl port-forward, an ssh -L tunnel, a container proxying to a hosted service): that is judged as the remote system."
+      : 'Localhost: closed to this session; its commands reach no loopback address.',
+  );
+  return lines;
 }
 
 /** Whether a person is in the session: a lane runs alone; a pass, Plan and chat have the builder in them. */
@@ -56,6 +124,7 @@ function environmentLines(input: TrustPolicyInput): string[] {
           "Trusted repo: files tracked in this checkout are the session's to change; git keeps them, so deleting or rewriting them is not destroying data. Untracked or ignored files, files outside the checkout, databases and history others have are.",
         ]
       : []),
+    ...devAccessLines(input.devAccess),
     ...(input.yourMcpServers.length > 0
       ? [
           `Outside the sandbox: the MCP servers ${input.yourMcpServers.join(', ')} are the builder's own and run with the builder's access. Their tools can read and change anything the builder can, so judge each call to them under the four limits and the coordination rules above, as if the session made it directly.`,

@@ -75,6 +75,7 @@ import {
 import {
   approvedLines,
   buildTrustPolicy,
+  sessionDevAccess,
   CROSSES_LIMIT_QUESTION,
   PRE_EXISTING_READ_MAX,
   callKey,
@@ -226,6 +227,7 @@ import {
   type MigrationsBase,
 } from '../delivery';
 import { createLiveFrames, type LiveFrames, type StateStore } from '../events';
+import { readComposeServices } from '../folders';
 import {
   AccountLaunchError,
   KeychainError,
@@ -2856,6 +2858,13 @@ export function createRunner(opts: RunnerOptions): Runner {
           : 'default';
     // A plan account takes the builder's claude.ai connectors under the same switch as the servers.
     const claudeConnectors = yours.connectorsOn && account.kind === AccountKind.ClaudeSubscription;
+    // A step that only reads has the engine's socket in its sandbox, but the guard refuses every docker
+    // command in it, so Docker is closed to it too.
+    const open = sessionDevAccess(project, { sandboxed: true, writes: !readOnly });
+    const devAccess = {
+      ...open,
+      compose: open.docker ? await readComposeServices(opts.git, project) : null,
+    };
     const policy = buildTrustPolicy({
       surface: pass === null ? TrustSurface.Lane : TrustSurface.Pass,
       projectName: project.name,
@@ -2872,6 +2881,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       grants: projectGrantLines(db, project.id),
       yourMcpServers: Object.keys(yourServers),
       claudeConnectors,
+      devAccess,
     });
     // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
     // starts on 10db's rules.
