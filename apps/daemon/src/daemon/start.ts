@@ -1379,6 +1379,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     inbox,
     logger: logger.child({ component: 'gate' }),
     retryMs: GATE_HOLD_RETRY_MS,
+    held: new Map<ProjectId, number>(),
   };
   // A task's gate has no hold here: the runner holds it, for the load and the drain, before it takes
   // its batch's turn and its slot, so a held gate keeps neither.

@@ -17,6 +17,11 @@ export interface GateHoldDeps {
   readonly logger: Logger;
   /** How long a held gate waits before it runs again. */
   readonly retryMs: number;
+  /**
+   * Held gates per project, shared by every wrapper of one daemon so the project's one card closes
+   * only when the last held gate, whichever runner it came from, is released.
+   */
+  readonly held: Map<ProjectId, number>;
 }
 
 /** Waits `ms` on the clock; false when `signal` aborted first. */
@@ -43,8 +48,7 @@ function pause(clock: Clock, ms: number, signal: AbortSignal | undefined): Promi
  * no slot between tries. A gate that names no project is left alone.
  */
 export function holdStaleGates(inner: GateRunner, deps: GateHoldDeps): GateRunner {
-  /** Held gates per project; the card closes when the last one is released. */
-  const held = new Map<ProjectId, number>();
+  const { held } = deps;
 
   function release(projectId: ProjectId): void {
     const left = (held.get(projectId) ?? 1) - 1;

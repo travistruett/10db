@@ -2,6 +2,7 @@ import {
   EventType,
   PassState,
   PullRequestChecks,
+  type FailingCheckDto,
   PullRequestMergeBlocked,
   PullRequestState,
   type BatchDto,
@@ -378,17 +379,21 @@ export function createPrWatch(input: {
     batch: BatchDto,
     next: PullRequestStatusDto,
     cards = true,
+    /** The failing checks that are not the base's too; a failure all the base's raises no card here. */
+    ownFailing: readonly FailingCheckDto[] = next.failingChecks,
   ): void {
     recordPullRequestStatus(write, batch.id, next);
     if (!cards) return;
     const wasChecks = batch.pr?.checks ?? null;
     const wasState = batch.pr?.state ?? null;
     if (next.state === PullRequestState.Open && next.checks === PullRequestChecks.Failing) {
-      const card = prCards.checksFailed(batch, next.failingChecks);
-      if (wasChecks !== PullRequestChecks.Failing) raiseIn(write, batch.projectId, card);
-      // An open card names the checks that fail now and links their latest runs, however they
-      // changed since it was raised; a dismissed one stays dismissed.
-      rewriteIn(write, batch.projectId, card);
+      if (ownFailing.length > 0) {
+        const card = prCards.checksFailed(batch, ownFailing);
+        if (wasChecks !== PullRequestChecks.Failing) raiseIn(write, batch.projectId, card);
+        // An open card names the checks that fail now and links their latest runs, however they
+        // changed since it was raised; a dismissed one stays dismissed.
+        rewriteIn(write, batch.projectId, card);
+      }
     } else if (
       // An unknown read keeps the last known checks, so it says nothing new about them.
       next.state !== PullRequestState.Unknown &&
@@ -1343,9 +1348,25 @@ export function createPrWatch(input: {
       noteFlaky(root, read, required);
       // Whether this round withdrew the catch-up card: the stored sign that the merge is still to ask.
       let catchUpCardWasOpen = false;
+      // A failure the base has too is the base's card (`prCards.baseRed`), not one per pull request.
+      let ownFailing: readonly FailingCheckDto[] | undefined;
+      if (
+        read?.state === PrState.Open &&
+        read.checks === PullRequestChecks.Failing &&
+        root.repo !== null &&
+        read.baseRef != null
+      ) {
+        try {
+          const base = await readBase(root.repo, read.baseRef, baseReads, signal);
+          if (base !== null) ownFailing = read.failingChecks.filter((c) => !base.has(c.name));
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          if (ghDown(error)) ended = { error, at: root.id };
+        }
+      }
       ctx.state.write((write) => {
         for (const batch of members) {
-          record(write, batch, answer(batch, read), batch.id === root.id);
+          record(write, batch, answer(batch, read), batch.id === root.id, ownFailing);
           followConflict(write, batch, read);
         }
         if (read !== null) storeRequired(write, root, read, required, queue);
