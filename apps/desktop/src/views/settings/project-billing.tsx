@@ -24,7 +24,14 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
   // One patch for both: the daemon checks the backup against the account sent with it.
   const pair = useDraft({
     saved: { accountId: project.accountId, fallbackAccountId: project.fallbackAccountId },
-    save: (value) => patch.mutateAsync(value),
+    // Only what the builder changed: a move 10db made since the edit began is not undone.
+    save: (value) =>
+      patch.mutateAsync({
+        ...(value.accountId === project.accountId ? {} : { accountId: value.accountId }),
+        ...(value.fallbackAccountId === project.fallbackAccountId
+          ? {}
+          : { fallbackAccountId: value.fallbackAccountId }),
+      }),
   });
   const accountId = pair.value?.accountId ?? project.accountId;
   const fallbackAccountId = pair.value?.fallbackAccountId ?? null;

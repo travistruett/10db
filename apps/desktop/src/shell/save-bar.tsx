@@ -79,11 +79,16 @@ export function SaveBar({
               <Button
                 variant="default"
                 onClick={onDiscard}
-                disabled={shown === SaveBarState.Saving}
+                // Sliding away, the bar's buttons no longer act.
+                disabled={state === null || shown === SaveBarState.Saving}
               >
                 Discard
               </Button>
-              <Button onClick={onSave} loading={shown === SaveBarState.Saving}>
+              <Button
+                onClick={onSave}
+                disabled={state === null}
+                loading={shown === SaveBarState.Saving}
+              >
                 Save
               </Button>
             </Group>
