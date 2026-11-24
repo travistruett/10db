@@ -19,11 +19,10 @@ export {
   saveSlackWorkspace,
   setProjectSlack,
 } from './slack-workspaces';
-export { questionContext, type QuestionContext } from './question-context';
+export { questionContext } from './question-context';
 export {
   acceptWritten,
   answerPrompt,
-  ANSWER_LIMIT,
   type AnswerWriter,
   type WrittenAnswer,
 } from './answer-writer';
