@@ -12,7 +12,14 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
-import { branchOf, commitIn, onOrigin, pathOf, shipped } from '../../test/delivery-worlds';
+import {
+  branchOf,
+  checkoutOf,
+  commitIn,
+  onOrigin,
+  pathOf,
+  shipped,
+} from '../../test/delivery-worlds';
 import { createTempClone, isolatedGitEnv } from '../../test/fixtures';
 import { GhError, PrState } from '../github';
 import { silentLogger } from '../log';
@@ -284,6 +291,31 @@ describe('shipping a fix batch', () => {
     // The root's branch is still there for the pull request.
     expect(local(branch)).toBe(fixed);
     expect(h.cards()).toEqual([]);
+  });
+
+  it("adds the fix commit's Test-budget line to the open pull request's body, once", async () => {
+    const { batch: root, head, prUrl } = await shipped(h);
+    const { fix, ws } = await cutFix(root, head);
+    const reason = 'Test-budget: the closers guard an escaped bug';
+    const checkout = checkoutOf(h, fix);
+    mkdirSync(join(checkout, 'src/api'), { recursive: true });
+    writeFileSync(join(checkout, 'src/api/budget.txt'), 'budget\n');
+    await h.git.commit({
+      repo: checkout,
+      paths: ['src/api/budget.txt'],
+      message: `Add budget.txt\n\n${reason}`,
+      opId: 'op-budget-line',
+      branch: branchOf(fix),
+    });
+    h.settle(ws.id, 'DONE');
+    expect(h.gh.body(prUrl)).not.toContain(reason);
+
+    h.shipper.checkBatch(fix.id);
+    await h.jobs.idle();
+
+    expect(h.gh.body(prUrl)).toContain(reason);
+    expect(h.gh.body(prUrl).split(reason)).toHaveLength(2);
+    expect(h.gh.prCreates()).toHaveLength(1);
   });
 
   it('ends closed with nothing pushed when it made no commits, though main moved and was merged in', async () => {

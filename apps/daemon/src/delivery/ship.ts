@@ -116,7 +116,14 @@ import {
 } from './notices';
 import { readPrScopes, scopeOf } from './pr-scopes';
 import type { RetryMergeOptions } from './pr-watch';
-import { prBody, prSubject, prTitle, testBudgetLines, titlePrefix } from './pr-text';
+import {
+  bodyWithTestBudget,
+  prBody,
+  prSubject,
+  prTitle,
+  testBudgetLines,
+  titlePrefix,
+} from './pr-text';
 import { readPrTemplate } from './pr-template';
 import { retireWorktree } from './worktree-cleanup';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
@@ -753,6 +760,43 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
+   * Adds the batch's `Test-budget:` lines the open pull request's body lacks, which is how a CI fix
+   * or a later push clears the budget check of a pull request opened without them. The body is
+   * otherwise left as it is. Best effort: a pull request whose body can't be read or edited is
+   * still shipped.
+   */
+  async function addTestBudgetTo(
+    batch: BatchDto,
+    target: {
+      readonly repo: string;
+      readonly url: string;
+      readonly baseSha: string;
+      readonly checkout: string;
+    },
+    signal: AbortSignal,
+  ): Promise<void> {
+    try {
+      const call = ghCall(deps, signal);
+      const sha = await deps.git.head(target.checkout);
+      const lines = await testBudgetFor(batch, target, sha);
+      if (lines.length === 0) return;
+      const current = await deps.gh.prBody({ repo: target.repo, ref: target.url }, call);
+      if (current === null) return;
+      const body = bodyWithTestBudget(current, lines);
+      if (body === null) return;
+      const file = join(deps.dataDir, 'delivery', `${batch.id}-pr-body.md`);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, body);
+      await deps.gh.prEditBody({ repo: target.repo, url: target.url, bodyFile: file }, call);
+    } catch (error) {
+      deps.logger.warn(
+        { batchId: batch.id, err: error instanceof Error ? error.message : String(error) },
+        'test budget lines not added to the pull request',
+      );
+    }
+  }
+
+  /**
    * The project's title prefix when it sets one; otherwise the type from the tasks whose work shipped
    * (every task when none finished) and the batch's scope.
    */
@@ -1266,6 +1310,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
       const prUrl =
         existing?.url ??
         (await createPr(batch, project, { repo, branch, baseSha: base, checkout }, signal));
+      if (existing !== null && existing.state === PrState.Open) {
+        step = 'gh pr edit';
+        await addTestBudgetTo(batch, { repo, url: existing.url, baseSha: base, checkout }, signal);
+      }
       // 4b. A pull request the batch wants merged by itself, unless an earlier run already closed
       // or merged it.
       if (batch.autoMerge && (existing === null || existing.state === PrState.Open)) {
