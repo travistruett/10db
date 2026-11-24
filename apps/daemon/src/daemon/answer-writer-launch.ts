@@ -20,7 +20,7 @@ import { capStatus, unready } from '../accounts';
 import type { Clock } from '../clock';
 import type { Launcher } from '../environment';
 import { chooseModel } from '../routing';
-import { CODEX_NO_QUESTIONS, CompletionError, type AgentAdapter } from '../sessions';
+import { completeWithCodex, type AgentAdapter, type CodexCompleteOptions } from '../sessions';
 import {
   acceptWritten,
   answerPrompt,
@@ -42,6 +42,8 @@ export interface AnswerWriterDeps {
   readonly paused: (accountId: AccountId) => boolean;
   /** Where each question gets its own empty folder to start in. */
   readonly scratchRoot: string;
+  /** What a Codex account's tool-locked turn runs on; null while the pinned Codex copy isn't ready. */
+  readonly codex: () => CodexCompleteOptions | null;
 }
 
 const declined = (
@@ -55,7 +57,7 @@ const declined = (
  * Writes an answer to a stakeholder's question with a model of the card's project's account, at its Efficient
  * tier and low effort, and never the default account: the project's account is the builder's billing line. The
  * model starts in a new empty folder and gets the card's context as text, so no project file is read or run.
- * A Codex account is declined until the tool-locked turn serves it. Every failure is a decline; it never throws.
+ * A Codex account's turn is the tool-locked `completeWithCodex`. Every failure is a decline; it never throws.
  */
 export function createAnswerWriter(deps: AnswerWriterDeps): AnswerWriter {
   return async ({ cardId, question, askerName, signal }) => {
@@ -70,7 +72,8 @@ export function createAnswerWriter(deps: AnswerWriterDeps): AnswerWriter {
       })();
       if (unready(account) !== null || deps.paused(account.id) || overCap)
         return declined('no_account');
-      if (harnessOf(account) === Provider.Codex) return declined('provider');
+      const codex = harnessOf(account) === Provider.Codex ? deps.codex() : null;
+      if (harnessOf(account) === Provider.Codex && codex === null) return declined('failed');
       const choice = chooseModel({
         ...routingInputs(deps.db, project),
         def: { role: StepRole.Plan, need: 0 },
@@ -89,7 +92,7 @@ export function createAnswerWriter(deps: AnswerWriterDeps): AnswerWriter {
         listAccountModels(deps.db, account.id),
       );
       cwd = await mkdtemp(join(deps.scratchRoot, 'answer-'));
-      const raw = await deps.adapter.complete({
+      const completion = {
         cwd,
         prompt: answerPrompt(questionContext(deps.db, cardId), question, askerName),
         model: launch.model,
@@ -98,11 +101,13 @@ export function createAnswerWriter(deps: AnswerWriterDeps): AnswerWriter {
         effort: Effort.Low,
         timeoutMs: ANSWER_TIMEOUT_MS,
         ...(signal === undefined ? {} : { signal }),
-      });
+      };
+      const raw =
+        codex === null
+          ? await deps.adapter.complete(completion)
+          : await completeWithCodex(completion, codex);
       return acceptWritten(raw);
-    } catch (error) {
-      if (error instanceof CompletionError && error.message === CODEX_NO_QUESTIONS)
-        return declined('provider');
+    } catch {
       return declined('failed');
     } finally {
       if (cwd !== null) await rm(cwd, { recursive: true, force: true }).catch(() => undefined);

@@ -15,7 +15,7 @@ import {
   type CodexHome,
 } from './codex-home';
 import { LANE_PROFILE } from './codex-lane-config';
-import { readOnlyPermissions } from './codex-lane-permissions';
+import { noToolPermissions } from './codex-lane-permissions';
 import {
   HooksListResponse,
   InitializeResponse,
@@ -237,7 +237,7 @@ export async function completeWithCodex(
         approvalPolicy: 'never',
         developerInstructions: INSTRUCTIONS,
         config: {
-          permissions: readOnlyPermissions(spec.cwd, []),
+          permissions: noToolPermissions(spec.cwd),
           web_search: 'disabled',
           mcp_servers: {},
           shell_environment_policy: { inherit: 'none' },

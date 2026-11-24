@@ -205,6 +205,8 @@ import type { LogLevel } from '../env';
 import {
   AccountLaunchError,
   ACCOUNT_NAMES_VERIFIED_ON,
+  AgentState,
+  AgentTool,
   CODEX_VERIFIED_ON,
   ModelNotLaunchableError,
   sessionConfigDir,
@@ -2224,6 +2226,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     clock,
     paused: (id) => accountPauses.pausedFor(id) !== null,
     scratchRoot: tmpdir(),
+    codex: () => {
+      const status = opts.agents?.statuses().find((s) => s.tool === AgentTool.Codex);
+      if (status?.state !== AgentState.Ready || status.path === null) return null;
+      return {
+        codexPath: status.path,
+        logger: logger.child({ component: 'codex-complete' }),
+        homes: takeoverCodexHomes,
+      };
+    },
   });
   const replyWatches = createReplyWatches({
     state,
