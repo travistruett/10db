@@ -72,6 +72,17 @@ function answer(method, team, args) {
       const found = team.members.find((m) => m.id === args.user);
       return found ? { user: found } : { ok: false, error: 'user_not_found' };
     }
+    case 'conversations.list':
+      return {
+        channels: [
+          { id: `C-${team.id}-GEN`, name: 'general', is_private: false, is_member: true },
+          { id: `C-${team.id}-DESIGN`, name: 'design', is_private: false, is_member: false },
+          { id: `C-${team.id}-LEADS`, name: 'leads', is_private: true, is_member: true },
+        ],
+        response_metadata: { next_cursor: '' },
+      };
+    case 'conversations.join':
+      return { channel: { id: args.channel } };
     case 'conversations.open':
       return { channel: { id: `D-${String(args.users).replaceAll(',', '-')}` } };
     case 'chat.postMessage': {

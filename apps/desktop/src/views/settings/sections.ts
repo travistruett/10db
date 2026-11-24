@@ -2,6 +2,7 @@ export const SettingsSectionKey = {
   Overview: 'overview',
   General: 'general',
   PagesAndPictures: 'pages-and-pictures',
+  Sharing: 'sharing',
   BoardColumns: 'board-columns',
   Planning: 'planning',
   Areas: 'areas',
@@ -66,6 +67,7 @@ const { Project, App } = SettingsScope;
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   GENERAL_SECTION,
   section(SettingsSectionKey.PagesAndPictures, Project, 'Project', 'App Preview'),
+  section(SettingsSectionKey.Sharing, Project, 'Project', 'Sharing'),
   section(SettingsSectionKey.BoardColumns, Project, 'Project', 'Board Columns'),
   section(SettingsSectionKey.Planning, Project, 'Planning', 'Planning'),
   section(SettingsSectionKey.Areas, Project, 'Planning', 'Areas and Hazards'),

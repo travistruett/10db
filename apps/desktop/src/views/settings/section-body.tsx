@@ -12,6 +12,7 @@ import { AppearanceSection } from './appearance-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { LanePermissionsSection } from './lane-permissions-section';
 import { PeopleSection } from './people/people-section';
+import { ProjectSharing } from './sharing-section';
 import { PlannedRemainder } from './planned-section';
 import { WhoAnswersSection } from './who-answers-section';
 import { ModelsSection } from './models-section';
@@ -85,6 +86,13 @@ export function SectionBody({
         <>
           {heading}
           {project ? <ProjectPagesForm key={project.id} project={project} /> : <NoProject />}
+        </>
+      );
+    case SettingsSectionKey.Sharing:
+      return (
+        <>
+          {heading}
+          {project ? <ProjectSharing key={project.id} project={project} /> : <NoProject />}
         </>
       );
     case SettingsSectionKey.Linear:

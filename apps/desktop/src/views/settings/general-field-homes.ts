@@ -7,7 +7,7 @@ export interface FieldHome {
   readonly section: SettingsSectionKey;
 }
 
-const { General, PagesAndPictures, NetworkHosts, Billing } = SettingsSectionKey;
+const { General, PagesAndPictures, Sharing, NetworkHosts, Billing } = SettingsSectionKey;
 
 /** Where each field of the project's typed settings is shown, so a mistake in one can point to it. */
 export const FIELD_HOMES: Readonly<Record<keyof GeneralValues, FieldHome>> = {
@@ -28,7 +28,7 @@ export const FIELD_HOMES: Readonly<Record<keyof GeneralValues, FieldHome>> = {
   allowedCommands: { label: 'Allowed Commands', section: NetworkHosts },
   sandboxLoopback: { label: 'Allow localhost', section: NetworkHosts },
   sandboxDocker: { label: 'Allow Docker', section: NetworkHosts },
-  prPictures: { label: 'Pictures in Pull Requests', section: PagesAndPictures },
+  prPictures: { label: 'Pictures in Pull Requests', section: Sharing },
   workspaceMode: { label: 'Default for New Tasks', section: General },
   worktreeSeed: { label: "Copy Into Each Task's Copy", section: General },
   isolate: { label: 'Separate Copy for These Areas', section: General },

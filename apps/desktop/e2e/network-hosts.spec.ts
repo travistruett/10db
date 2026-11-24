@@ -80,4 +80,11 @@ test('a builder allows two hosts, is refused localhost and removes them', async 
   await page.goto('/settings/pages-and-pictures');
   await expect(page.getByRole('textbox', { name: 'App Address' })).toBeVisible();
   await expectAccessible(page, 'app preview');
+
+  // Sharing holds Pictures in Pull Requests and the Slack post; this daemon runs with Slack off.
+  await page.goto('/settings/sharing');
+  await expect(page.getByRole('switch', { name: 'Pictures in Pull Requests' })).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'Post Pictures to Slack' })).toBeDisabled();
+  await expect(page.getByText('Slack is turned off in this copy of 10db.')).toBeVisible();
+  await expectAccessible(page, 'sharing');
 });

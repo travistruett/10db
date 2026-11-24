@@ -1,5 +1,5 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Button, Group, Stack, Switch, Textarea, TextInput } from '@mantine/core';
+import { Button, Stack, Textarea, TextInput } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useWorkbenchSetup } from '../../daemon/pass-queries';
 import { CountBadge } from '../../shell/count-badge';
@@ -32,7 +32,6 @@ export function ProjectPagesForm({ project }: { readonly project: ProjectDto }) 
     'previewCommand',
     'devLoginCommand',
     'screens',
-    'prPictures',
   ]);
   const { values, errors, set } = fields;
   return (
@@ -104,21 +103,6 @@ export function ProjectPagesForm({ project }: { readonly project: ProjectDto }) 
               set({ screens });
             }}
           />
-        </SettingRow>
-        <SettingRow
-          label="Pictures in Pull Requests"
-          description="Shows each signed-off page before and after."
-          help="A UI Workbench pull request shows each signed-off page before and after. The pictures are pushed to a 10db-pictures branch on GitHub, so anyone who can see the repository can see them, data on the page included."
-        >
-          <Group justify="flex-end">
-            <Switch
-              aria-label="Pictures in Pull Requests"
-              checked={values.prPictures}
-              onChange={(e) => {
-                set({ prPictures: e.currentTarget.checked });
-              }}
-            />
-          </Group>
         </SettingRow>
       </SettingsCard>
 
