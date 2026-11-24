@@ -6,7 +6,7 @@
 ## Files
 
 - `apps/daemon/src/stakeholders/sends.ts`: `replyAsBuilder(cardId, text)`:
-  1. Find the live send. It must be `sent` with `returnedReason === 'asked'`, else `ConflictError`: "This question
+  1. Find the live send. It must be `sent` with `asked !== null` (Q, or T with a question, row 19), else `ConflictError`: "This question
      isn't waiting on your reply".
   2. Use the send's own client. A workspace that isn't signed in, or a binding that has changed, gets a
      `ConflictError` that names it.
@@ -24,8 +24,8 @@
 - `apps/daemon/src/api/services.ts` and `app.ts`: `POST /inbox/:id/stakeholder-reply`, with the body parsed by
   `StakeholderReplyInput`, returning `InboxItemDto`. Errors map as `keep-waiting`'s do. Wire it in the daemon's
   services.
-- `apps/desktop/src/views/inbox/stakeholder-extras.tsx`: in `SentNotice`, when `send.returnedReason === 'asked'`
-  and `send.asked`, show:
+- `apps/desktop/src/views/inbox/stakeholder-extras.tsx`: in `SentNotice`, when `send.asked` is set (whatever the
+  return's reason), show:
   - the title "{asked.name} asked";
   - their words, quoted, as `pre-wrap` text;
   - when `asked.declined` is set, one dimmed line on why 10db didn't answer it itself ("10db couldn't answer this
@@ -50,7 +50,7 @@ Implements `replyAsBuilder` and `builderReplyLine`. Calls `answerAsked(ctx, id, 
 
 ## State-table rows
 
-9, 10, 11, 13 (the notification), 21 and 22.
+9, 10, 11, 13 (the notification), 19 (the card), 21 and 22.
 
 ## Tests
 

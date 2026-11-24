@@ -117,7 +117,7 @@ person you can ask questions of in a DM.
 |---|---|---|
 | Claude plan | On the Decisions account (OpenRouter, an API key or Bedrock) if one is set; otherwise the rule fallback, so questions come to you | `complete()` through the Claude adapter, on the project's plan, Efficient tier |
 | Claude via API key or Bedrock | Same | `complete()` through the Claude adapter, on that account |
-| ChatGPT/Codex plan (and OpenRouter, which runs the Codex harness) | Same | `complete()` through the Codex adapter (card 3). If the tool lock can't ship, the writer answers `declined: provider` and questions come to you; Settings › Judge's `reply_kind` row says so |
+| ChatGPT/Codex plan (and OpenRouter, which runs the Codex harness) | Same | `completeWithCodex` (card 3), the tool-locked turn; `CodexAdapter.complete` still refuses. If the lock can't be proven, the writer answers `declined: provider` and questions come to you; Settings › Judge's `reply_kind` row says so |
 | Any account paused, over its cap or signed out | Same | The writer answers `declined: no_account`, and the question comes to you |
 
 Everything else (the routing, the builder's reply, the invite line, the notification) runs on the card and the
@@ -180,7 +180,8 @@ export interface QuestionContext {
   readonly card: { title: string; body: string; options: string[]; recommendation: string | null };
   readonly task: { title: string; description: string; acceptanceCriteria: string[] } | null;
   readonly goalTitle: string | null;
-  readonly laneMessages: readonly { author: 'builder' | 'agent'; text: string }[];
+  /** The lane agent's own messages only; the builder's messages to the lane never reach the writer. */
+  readonly laneMessages: readonly { text: string }[];
   readonly projectName: string;
   readonly builderName: string;
 }
@@ -213,7 +214,9 @@ replyAsBuilder(cardId: InboxItemId, text: string): Promise<InboxItemDto>;
 
 Keys: **W** = sent and out (no `returnedAt`). **Q** = returned, `returnedReason: 'asked'`. **T** = returned by
 timer or disagreement (today). A **group** is a conversation with more than one participant
-(`participants.length > 1`), whoever has spoken. "Reply" means a lone recipient's messages after
+(`participants.length > 1`), whoever has spoken. Routing follows `conversationState`'s path: a conversation on
+the lone branch (one recipient, only they spoke) takes the lone route even when others were brought in; the
+per-message group route covers only conversations on the settle path. "Reply" means a lone recipient's messages after
 `handledThroughTs`, joined, on their quiet tick. In a group, it means one new participant message after
 `handledThroughTs`. `handledThroughTs` is the sorting cursor only; `lastReadTs` still moves only when the card
 is answered, so settling and the quoted exchange read the whole conversation as today.
@@ -234,18 +237,18 @@ is answered, so settling and the quoted exchange read the whole conversation as 
 | 12 | Q | Mark answers (rows 1–2) | answered; card leaves Open |
 | 13 | Q | Mark asks again | `asked` replaced by the newest; one more notification; no automated answer while in Q |
 | 14 | Q or T | timers | none fire (returned sends owe nothing, `dueTimers`) |
-| 15 | W | crash after an `auto_answer` post, before its write | next tick: `findLine(…, 'auto_answer', { after: handledThroughTs })` finds it; the write runs; nothing reposts, even if Mark wrote again meanwhile |
+| 15 | W | crash after an `auto_answer` post, before its write | next tick: `findLine(…, 'auto_answer', { key })`, the key being the reply's first `ts` after `handledThroughTs`, finds it; the write runs; nothing reposts, even if Mark wrote again meanwhile |
 | 16 | W | proposal open (group) | unchanged; `approval_read` and settle rules as today |
 | 17 | W | during the writer's call: the builder answers or takes back, the card closes, Slack goes Off or the binding changes, or another write moved `handledThroughTs` | re-read before the post finds it; nothing posts; nothing written (the next tick re-sorts if still W) |
 | 18 | W | `recordAutoAnswer` or `markAsked` meets a `ConflictError` (the send moved) | caught and logged for that send only; the tick goes on to the other sends |
-| 19 | T | Mark asks anything | `markAsked` sets `asked` and keeps the reason; one notification; never an automated answer |
-| 20 | Q | group disagreement or settle | as for T today: a returned send gets no proposal and no disagreement return |
-| 21 | Q | crash after a `builder_reply` post, before `answerAsked` | stays Q; the builder's Send Reply again finds the line by its key and only writes; the card says the reply is in the thread |
+| 19 | T | Mark asks anything | `markAsked` sets `asked` and keeps the reason; one notification; never an automated answer. The card shows the question and the reply box (they key on `asked !== null`); the builder's reply clears the return and restarts the timers, as in Q |
+| 20 | Q | group disagreement or settle | as for T today: `settleConversation` doesn't check `returnedAt`, so proposals and which-way lines still post; unchanged |
+| 21 | Q | crash after a `builder_reply` post, before `answerAsked` | stays Q; the builder's Send Reply again finds the line by its key and only writes |
 | 22 | Q | Mark asks again between the builder's post and `answerAsked` | `answerAsked` with the older `askedTs` is a no-op; the newer question stays in Q |
 
 ## Tracks and tasks
 
-Track A runs in order: 1 → 2 → 4 → 5 → 6 → 7. Track B is card 3, alone after card 1. Card 4 lands with a
+Track A runs in order: 1 → 2 → 4 → 5 → 6 → 7. Track B is card 3, built alone after card 1; its switch of the writer's Codex branch lands after card 4. Card 4 lands with a
 writer that declines `provider` on Codex; card 3, once its live test passes, switches the writer's Codex branch
 to `completeWithCodex`.
 

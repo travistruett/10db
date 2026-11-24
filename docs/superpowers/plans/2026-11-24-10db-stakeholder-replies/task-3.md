@@ -36,8 +36,12 @@ that today. So this card adds a separate function that only the writer calls, an
   7. Reject with `CompletionError` on: a failed turn, any tool item the turn started (even if denied: the answer
      may lean on a refusal), the spec's `signal`, or `timeoutMs` (default 2 minutes, as Claude's).
   8. Always end the process.
-- `apps/daemon/src/daemon/answer-writer-launch.ts`: the Codex branch calls `completeWithCodex` instead of
-  declining `provider`. Only this card makes that switch, and only after the live test below passes.
+- `apps/daemon/src/daemon/answer-writer-launch.ts` (made by card 4, so this edit lands after card 4): the Codex
+  branch calls `completeWithCodex` instead of declining `provider`, and only after the live test below passes.
+  `createAnswerWriter` gains a `codex: CodexCompleteOptions` dep, built in `daemon/start.ts` from what the Codex
+  adapter's options already hold.
+- `CodexCompleteOptions` (in `codex-complete.ts`): the `codex` binary path, the account homes, the clock and the
+  logger, taken from the Codex adapter's options type so the two never drift.
 - `apps/daemon/src/sessions/AGENTS.md`: a note that `completeWithCodex` is an ephemeral, tool-locked turn for the
   answer writer only, how the two layers work, and that `CodexAdapter.complete` still rejects.
 

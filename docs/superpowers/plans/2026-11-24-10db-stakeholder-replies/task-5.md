@@ -12,7 +12,9 @@
   - none at all → `waiting`.
 
   The settle path (`settle`, `recipientPicks`) is unchanged and still reads from `lastReadTs`: in a group,
-  questions stay part of what the conversation said. A group is `participants.length > 1`, whoever has spoken.
+  questions stay part of what the conversation said. Routing follows the verdict path, not the participant
+  count: a conversation on the lone branch (one recipient, only they spoke, even with others brought in) takes
+  the lone route below; only one on the settle path takes the group route.
 - `apps/daemon/src/stakeholders/reply-watch.ts`:
   - `ReplyWatchDeps` gains `writer: AnswerWriter`. Pass `handledThroughTs` into `conversationState`. The writer
     gets an `AbortSignal` that `stop()` aborts, so shutdown never waits out a writer call.
@@ -26,7 +28,7 @@
     - `builder_question` → `markAsked`. `asked` holds the joined words (cut to 4,000), the recipient's id and
       name, and the last `ts`.
     - `simple_question` → `autoAnswer(...)` (below).
-  - **Group.** Only with `judge.ready(JudgeDecision.ReplyKind)`. For each counted participant message after
+  - **Group** (the settle path only). Only when `await judge.ready(JudgeDecision.ReplyKind)`. For each counted participant message after
     `handledThroughTs`, oldest first, at most 5 a tick, call `classifyReply` with `group: true`:
     - `simple_question` → `autoAnswer`;
     - `builder_question` → `markAsked`;
@@ -37,16 +39,15 @@
     1. Check `open.autoAnswers < AUTO_ANSWER_CAP` (else `declined: 'cap'`).
     2. Check the stored binding: `boundTeam(project) === open.teamId`, and `projectSlack(db, project).teamId` is
        not null. A changed binding stays `failSendsToBuilder`'s job, as in `remind`.
-    3. Check for a line already posted for this send since the cursor:
-       `findLine(thread, open.id, 'auto_answer', { after: open.handledThroughTs })`. If found, skip to step 7. (A
-       key on the reply's last `ts` would miss when Mark wrote again before a restart.) Post with
-       `key: reply.lastTs` all the same.
+    3. The key is the reply's **first** `ts` (the first counted message after `handledThroughTs`; in a group, the
+       message's own `ts`). It stays the same if Mark writes more before a restart, and differs for every later
+       question. Look for `findLine(thread, open.id, 'auto_answer', { key })`; if found, skip to step 7.
     4. Call `writer({ cardId, question: words, askerName, signal })`.
     5. **Re-check before posting** (row 17), as `settleConversation` does (`agree.ts:160-162`): re-read the send
        (still `sent`, not returned, the same `handledThroughTs`), the card (still Open) and the binding (step 2).
        Any change: post nothing, write nothing, and leave the reply for the next tick.
     6. On `kind: 'answer'`, build `automatedAnswerLine(text, letters, builderName)`, scan it again (a hold →
-       `markAsked` with `declined: 'held'`), and `postLine` with `line: 'auto_answer'`. On a decline,
+       `markAsked` with `declined: 'held'`), and `postLine` with `line: 'auto_answer'` and `key`. On a decline,
        `markAsked` with the writer's reason in `asked.declined`.
     7. In one write: `recordAutoAnswer(lastTs)`.
     8. Record the judge call's outcome: `Acted` when acted on, `BelowFloor` when the floor sent it to the
@@ -95,8 +96,8 @@ there), a fake `Judge` and a fake `AnswerWriter`. Three tests, each core (recove
 
    Then a fifth case on a fresh send: the project's Slack is turned Off while the writer is answering (the fake
    writer flips it before it resolves). No post; the send is unchanged.
-3. **Crash.** An `auto_answer` line for the send is already in the thread after `handledThroughTs` (the fake
-   Slack's replies), Mark has written one more message since, and the send has `autoAnswers` 0. One tick:
+3. **Crash.** An `auto_answer` line keyed on the reply's first `ts` is already in the thread (the fake Slack's
+   replies), Mark has written one more message since, and the send has `autoAnswers` 0. One tick:
    - no post;
    - `autoAnswers` is 1, and `handledThroughTs` is past the reply; `lastReadTs` hasn't moved.
 

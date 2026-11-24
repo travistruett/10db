@@ -38,8 +38,8 @@ Implements the four store functions quoted in the index, with these rules:
 - `handledThroughTs` only moves forward (compare like `setLastRead` does, with `compareTsText`).
 - `markAsked` keeps an existing `returnedAt` (row 13: a second ask while already returned) and always replaces
   `asked`. On a send returned by timer or disagreement (T) it keeps `returnedReason` (row 19).
-- `answerAsked` refuses (`ConflictError`) a send whose `returnedReason` is not `'asked'`, and is a no-op when
-  `asked.ts` isn't the given `askedTs` (row 22).
+- `answerAsked` refuses (`ConflictError`) a send with no `asked`, and is a no-op when `asked.ts` isn't the given
+  `askedTs` (row 22). It clears the return whatever its reason (Q or T, row 19).
 - `keepWaiting` also clears `asked`.
 
 ## State-table rows

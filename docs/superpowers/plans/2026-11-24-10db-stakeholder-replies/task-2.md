@@ -27,7 +27,7 @@ real answer.
 ## `classifyReply` (the judge read)
 
 1. A rule pick (row 1 of the table) returns `{ kind: 'answer', source: 'rule' }` without asking the judge.
-2. Group while `!judge.ready(JudgeDecision.ReplyKind)` (no Decisions account, the switch off, or
+2. Group while `!(await judge.ready(JudgeDecision.ReplyKind))` (no Decisions account, the switch off, or
    `TENDB_JUDGE=off`): return `answer`, source `rule`, without calling `choose`. The caller (card 5) acts on
    nothing but questions in a group, so this means "do as today". A lone reply in the same state takes
    `ruleReplyKind` without calling `choose` either.
