@@ -30,7 +30,12 @@ const WRITE_KEYS: Readonly<Record<string, readonly string[]>> = {
   create_attachment_from_upload: ['issue', 'assetUrl', 'title', 'subtitle'],
 };
 
+/** The only Linear tools a snapshot run calls: it reads the linked issue, its comments and its relations. */
+const SNAPSHOT_READS: ReadonlySet<string> = new Set(['get_issue', 'list_comments']);
+
 export interface ReporterRun {
+  /** A snapshot run reads and writes nothing: no 10db tool, no Linear write. */
+  readonly readOnly: boolean;
   readonly linearPrefixes: readonly string[];
   readonly link: ExternalLink;
   /** The task's PR: the only URL a `10db` link may point at. */
@@ -120,6 +125,7 @@ export function judgeReporterCall(
 ): { verdict: GuardVerdict; withheld?: string } {
   const { toolName } = call;
   if (toolName.startsWith('mcp__10db__')) {
+    if (run.readOnly) return { verdict: deny('A snapshot run may only read Linear.') };
     return {
       verdict: REPORT_TOOLS.has(toolName)
         ? allow()
@@ -137,6 +143,12 @@ export function judgeReporterCall(
   }
   const tool = toolName.slice(prefix.length);
   const secret = secretIn(call.input);
+  if (run.readOnly && !SNAPSHOT_READS.has(tool))
+    return {
+      verdict: deny(
+        'A snapshot run may only read the linked issue, its comments and its relations.',
+      ),
+    };
   if (LINEAR_READS.has(tool)) {
     return {
       verdict:

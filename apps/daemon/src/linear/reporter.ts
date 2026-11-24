@@ -10,6 +10,7 @@ import {
   type LinearReporterSettings,
   type LinearSignInsDto,
   type ProjectId,
+  parseItemBody,
   type ReportLinearPostInput,
   type SessionId,
   type TaskId,
@@ -20,6 +21,8 @@ import {
   getProject,
   getTask,
   insertItem,
+  lastItems,
+  listItems,
   pendingLinearPosts,
   recordLinearPosts,
   setAppSetting,
@@ -37,6 +40,12 @@ import { refreshReporterCard } from './reporter-inbox';
 import { taskPrUrl } from './reporter-brief';
 import { judgeReporterCall, type ReporterRun } from './reporter-guard';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
+import {
+  SNAPSHOT_FIRST_LINE,
+  SNAPSHOT_MAX_READS,
+  SNAPSHOT_STARTER,
+  type LinearSnapshot,
+} from './snapshot';
 import { linearLinkOf } from './task-link';
 
 // The Linear reporter's run: one timer per task, one short session per run,
@@ -45,6 +54,8 @@ import { linearLinkOf } from './task-link';
 
 /** How long a run may take before it is stopped and its rows fail. */
 export const RUN_DEADLINE_MS = 15 * 60_000;
+/** How long a snapshot may take: a lane waits on it before it starts. */
+export const SNAPSHOT_DEADLINE_MS = 3 * 60_000;
 /** A failed row is due again after `first` times two to the number of earlier failures, at most `max`. */
 export const BACKOFF_MS = { first: 5 * 60_000, max: 6 * 60 * 60_000 } as const;
 /** A row that fails this many times is failed for good. */
@@ -65,6 +76,12 @@ export interface LinearReporter {
   poke(taskId: TaskId): void;
   /** `report_linear_post`, from a reporter session only. */
   reportPost(sessionId: SessionId, input: ReportLinearPostInput): { ok: true };
+  /**
+   * Reads the task's linked Linear issue, its comments and its named relations through the account's own Linear
+   * sign-in, in a read-only run, for a lane's brief. Null for a task with no link; a run that can't read says why.
+   * It never writes to Linear and never throws.
+   */
+  snapshot(taskId: TaskId): Promise<LinearSnapshot | null>;
   /** The reporter's preToolUse for its own session. */
   verdict(sessionId: SessionId, req: ShapeToolRequest): ShapeVerdict;
   settings(projectId: ProjectId): LinearReporterSettings & { blockedBy: string | null };
@@ -113,6 +130,13 @@ interface Flight {
   taken: ReadonlySet<LinearPostId>;
   /** Rows the session reported failed; the settle leaves them be. */
   readonly failedByAgent: Set<LinearPostId>;
+  /** A snapshot run's wait: what the lane's start is waiting on, and where the run's own items begin. */
+  readonly snapshot: {
+    readonly resolve: (result: LinearSnapshot) => void;
+    readonly afterSeq: number;
+  } | null;
+  /** The Linear reads a snapshot run has made. */
+  reads: number;
   /** The error that stopped the run, when it is known; the rows fail with it. */
   error: string | null;
   guard: ReporterRun | null;
@@ -138,6 +162,8 @@ export function createLinearReporter(
   const byConversation = new Map<ConversationId, Flight>();
   /** The zero-delay timers that retire a settled run's conversation and re-arm its task. */
   const afters = new Set<Timer>();
+  /** Snapshots waiting for a task's run to finish; each is woken with whether the task went idle. */
+  const idleWaiters = new Map<TaskId, Set<(idle: boolean) => void>>();
   let stopped = false;
   /** Read again after an await, where the compiler has narrowed `stopped`. */
   const halted = (): boolean => stopped;
@@ -235,10 +261,15 @@ export function createLinearReporter(
       arm(taskId);
       return;
     }
-    trigger(taskId, task.projectId, due);
+    trigger(taskId, task.projectId, due, null);
   };
 
-  const trigger = (taskId: TaskId, projectId: ProjectId, due: readonly LinearPostDto[]): void => {
+  const trigger = (
+    taskId: TaskId,
+    projectId: ProjectId,
+    due: readonly LinearPostDto[],
+    snapshot: Flight['snapshot'],
+  ): void => {
     const conversationId = deps.conversations.reporterOf(taskId, projectId);
     const flight: Flight = {
       taskId,
@@ -246,6 +277,8 @@ export function createLinearReporter(
       conversationId,
       sessionId: null,
       due: new Set(due.map((p) => p.id)),
+      snapshot,
+      reads: 0,
       taken: new Set(),
       failedByAgent: new Set(),
       error: null,
@@ -256,16 +289,19 @@ export function createLinearReporter(
     };
     flights.set(taskId, flight);
     byConversation.set(conversationId, flight);
-    flight.deadline = clock.setTimeout(() => {
-      timeOut(flight);
-    }, RUN_DEADLINE_MS);
+    flight.deadline = clock.setTimeout(
+      () => {
+        timeOut(flight);
+      },
+      snapshot === null ? RUN_DEADLINE_MS : SNAPSHOT_DEADLINE_MS,
+    );
     try {
       engine.unretire(conversationId);
       state.write((ctx) => {
         insertItem(ctx, conversationId, {
           author: ConversationItemAuthor.Builder,
           kind: ConversationItemKind.Message,
-          body: { text: REPORTER_STARTER },
+          body: { text: snapshot === null ? REPORTER_STARTER : SNAPSHOT_STARTER },
         });
       });
       engine.queued(conversationId);
@@ -276,7 +312,12 @@ export function createLinearReporter(
 
   const timeOut = (flight: Flight): void => {
     const done = (): void => {
-      settle(flight, 'the run did not finish within 15 minutes');
+      settle(
+        flight,
+        flight.snapshot === null
+          ? 'the run did not finish within 15 minutes'
+          : 'reading the issue took too long',
+      );
     };
     // The conversation is stopped first, so what it still sends reaches a run that is over.
     engine.stop(flight.conversationId).then(done, (error: unknown) => {
@@ -289,11 +330,50 @@ export function createLinearReporter(
    * Ends the run once: its taken rows still pending become withheld when the guard withheld a write, and
    * fail otherwise. The conversation is retired, and the task re-armed, off the engine's effect chain.
    */
-  const settle = (flight: Flight, reason: string): void => {
+  const settle = (flight: Flight, reason: string, complete = false): void => {
     // A stopped reporter leaves every row as it is, for the next start to pick up.
     if (flight.settled || stopped) return;
     flight.settled = true;
     flight.deadline?.cancel();
+    if (flight.snapshot !== null) {
+      flight.snapshot.resolve(
+        snapshotOf(flight, flight.snapshot, flight.error ?? reason, complete),
+      );
+    } else {
+      settleRows(flight, reason);
+    }
+    if (flight.sessionId !== null) bySession.delete(flight.sessionId);
+    // The task stays in flight until its conversation is retired, so nothing starts on a conversation still closing.
+    retireAfter(flight);
+  };
+
+  /** What a snapshot run made: the last thing its session said when its turn completed, else why not. */
+  const snapshotOf = (
+    flight: Flight,
+    snapshot: NonNullable<Flight['snapshot']>,
+    reason: string,
+    complete: boolean,
+  ): LinearSnapshot => {
+    if (complete) {
+      try {
+        const said = listItems(state.db, flight.conversationId, { afterSeq: snapshot.afterSeq })
+          .filter((item) => item.kind === ConversationItemKind.AgentMessage)
+          .map((item) => parseItemBody(ConversationItemKind.AgentMessage, item.body).text.trim())
+          .filter((text) => text !== '');
+        const text = said.at(-1);
+        if (text?.startsWith(SNAPSHOT_FIRST_LINE) === true)
+          return { kind: 'read', text: text.slice(SNAPSHOT_FIRST_LINE.length).trim() };
+        if (text !== undefined)
+          return { kind: 'missing', reason: 'the session did not return the issue' };
+      } catch (error) {
+        log.error({ err: error, taskId: flight.taskId }, 'a snapshot run could not be read back');
+      }
+      return { kind: 'missing', reason: 'the session answered with nothing' };
+    }
+    return { kind: 'missing', reason };
+  };
+
+  const settleRows = (flight: Flight, reason: string): void => {
     try {
       const guard = flight.guard;
       // What the session took; when it never got that far, what was due when the run was triggered.
@@ -315,9 +395,9 @@ export function createLinearReporter(
     } catch (error) {
       log.error({ err: error, taskId: flight.taskId }, 'a reporter run could not be settled');
     }
-    if (flight.sessionId !== null) bySession.delete(flight.sessionId);
-    flights.delete(flight.taskId);
-    byConversation.delete(flight.conversationId);
+  };
+
+  const retireAfter = (flight: Flight): void => {
     const after = clock.setTimeout(() => {
       afters.delete(after);
       engine
@@ -329,11 +409,31 @@ export function createLinearReporter(
           );
         })
         .finally(() => {
+          flights.delete(flight.taskId);
+          byConversation.delete(flight.conversationId);
+          for (const wake of idleWaiters.get(flight.taskId) ?? []) wake(true);
+          idleWaiters.delete(flight.taskId);
           arm(flight.taskId);
         });
     }, 0);
     afters.add(after);
   };
+
+  /** Waits for the task's run to finish and its conversation to retire, for at most the snapshot deadline. */
+  const untilIdle = (taskId: TaskId): Promise<boolean> =>
+    new Promise((resolve) => {
+      const waiters = idleWaiters.get(taskId) ?? new Set();
+      idleWaiters.set(taskId, waiters);
+      const wake = (idle: boolean): void => {
+        timer.cancel();
+        waiters.delete(wake);
+        resolve(idle);
+      };
+      const timer = clock.setTimeout(() => {
+        wake(false);
+      }, SNAPSHOT_DEADLINE_MS);
+      waiters.add(wake);
+    });
 
   const runOf = (sessionId: SessionId): { flight: Flight; guard: ReporterRun } => {
     const flight = bySession.get(sessionId);
@@ -357,23 +457,72 @@ export function createLinearReporter(
       for (const flight of flights.values()) {
         flight.deadline?.cancel();
         flight.deadline = null;
+        flight.snapshot?.resolve({ kind: 'missing', reason: '10db is shutting down.' });
       }
+      for (const waiters of idleWaiters.values()) for (const wake of [...waiters]) wake(false);
+      idleWaiters.clear();
       return Promise.resolve();
     },
 
     poke: arm,
 
+    async snapshot(taskId) {
+      const missing = (reason: string): LinearSnapshot => ({ kind: 'missing', reason });
+      try {
+        if (linearLinkOf(state.db, taskId) === null) return null;
+        if (stopped) return missing('10db is shutting down.');
+        const task = getTask(state.db, taskId);
+        const blocked = reporterBlockedBy(state.db, task.projectId);
+        if (blocked !== null) return missing(blocked);
+        const accountId = getProject(state.db, task.projectId).accountId;
+        const row = (await deps.signIns.list()).rows.find((r) => r.accountId === accountId);
+        // An unchecked row is a maybe and goes ahead.
+        if (row?.via === LinearVia.None && !row.unchecked)
+          return missing(
+            row.note ??
+              "This account's agent has no Linear. Connect Linear under Settings › Integrations.",
+          );
+        if (halted()) return missing('10db is shutting down.');
+        if (flights.has(taskId) && !(await untilIdle(taskId)))
+          return missing('A Linear update for this task was still running.');
+        if (halted()) return missing('10db is shutting down.');
+        if (flights.has(taskId)) return missing('A Linear update for this task was running.');
+        const conversationId = deps.conversations.reporterOf(taskId, task.projectId);
+        const afterSeq = lastItems(state.db, conversationId, 1)[0]?.seq ?? -1;
+        return await new Promise<LinearSnapshot>((resolve) => {
+          trigger(taskId, task.projectId, [], { resolve, afterSeq });
+        });
+      } catch (error) {
+        log.warn({ err: error, taskId }, 'the Linear snapshot could not be read');
+        return missing(error instanceof Error ? error.message : String(error));
+      }
+    },
+
     begin(input) {
       const flight = byConversation.get(input.conversationId);
       if (flight === undefined || flight.settled)
         throw new ConflictError('No Linear update waits for this session.');
+      const link = linearLinkOf(state.db, flight.taskId)?.link;
+      if (link === undefined) throw new ConflictError('The task is not linked to a Linear issue.');
+      if (flight.snapshot !== null) {
+        const guard: ReporterRun = {
+          readOnly: true,
+          linearPrefixes: input.linearPrefixes,
+          link,
+          prUrl: null,
+          uploads: [],
+          withheld: new Set(),
+        };
+        flight.sessionId = input.sessionId;
+        flight.guard = guard;
+        bySession.set(input.sessionId, flight);
+        return { posts: [], run: guard };
+      }
       const now = clock.now().getTime();
       const posts = pendingLinearPosts(state.db, { taskId: flight.taskId }).filter(
         (p) => dueAtMs(p) <= now,
       );
       if (posts.length === 0) throw new ConflictError('No Linear update is owed any more.');
-      const link = linearLinkOf(state.db, flight.taskId)?.link;
-      if (link === undefined) throw new ConflictError('The task is not linked to a Linear issue.');
       state.write((ctx) => {
         takeLinearPosts(
           ctx,
@@ -382,6 +531,7 @@ export function createLinearReporter(
         );
       });
       const guard: ReporterRun = {
+        readOnly: false,
         linearPrefixes: input.linearPrefixes,
         link,
         prUrl: taskPrUrl(state.db, flight.taskId),
@@ -410,6 +560,7 @@ export function createLinearReporter(
           : end.how === 'stopped'
             ? 'the session was stopped'
             : 'the session ended without recording',
+        end.how === 'complete',
       );
     },
 
@@ -465,6 +616,11 @@ export function createLinearReporter(
       // The project may have switched the reporter off while the session ran.
       const blocked = reporterBlockedBy(state.db, flight.projectId);
       if (blocked !== null) return { decision: 'deny', reason: blocked };
+      if (flight.snapshot !== null && req.toolName !== 'ToolSearch') {
+        flight.reads += 1;
+        if (flight.reads > SNAPSHOT_MAX_READS)
+          return { decision: 'deny', reason: 'A snapshot run has read as much as it may.' };
+      }
       const judged = judgeReporterCall(flight.guard, { toolName: req.toolName, input: req.input });
       if (judged.withheld !== undefined) flight.guard.withheld.add(judged.withheld);
       // An allowed call is an explicit allow, so neither auto mode's classifier nor a judge sees it.

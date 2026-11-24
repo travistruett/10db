@@ -191,6 +191,7 @@ import {
   recordPlanPacked,
   RESULT_NUDGE,
 } from '../briefing';
+import { snapshotSection, type LinearSnapshot } from '../linear';
 import { handoffStands, nextUnaskedRun, workLeftIn, type UnaskedRun } from './handoff-rule';
 import {
   unready,
@@ -483,6 +484,11 @@ export interface RunnerOptions {
   readonly afterSession?: (workstreamId: WorkstreamId) => Promise<void>;
   /** The OS start time of a pid, stored beside it so recovery can tell a reused PID apart. */
   identifyProcess?(pid: number): Promise<string | null>;
+  /**
+   * Reads a task's linked Linear issue for a lane's brief (see `LinearReporter.snapshot`): null for a task with
+   * no link. Absent, a linked lane is told nothing of its issue.
+   */
+  readonly linearSnapshot?: (taskId: TaskId) => Promise<LinearSnapshot | null>;
   /** How each lane's brief and its re-injection after a compaction carry the Plan and knowledge; absent is full. */
   readonly laneBrief?: LaneBrief;
   /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
@@ -2470,6 +2476,29 @@ export function createRunner(opts: RunnerOptions): Runner {
         return { kind: 'stopped', reason: stoppedWhileWaiting, providerSessionId: savedResumeId };
       if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
     }
+    // Each fresh build attempt reads its Linear issue again, since comments and blockers move between attempts.
+    // It is read before the start gate, so the wait holds no slot, and a stop ends it at once.
+    let linearIssue: LinearSnapshot | null = null;
+    if (opts.linearSnapshot !== undefined && action.kind === 'start' && !readOnly) {
+      const reading = new AbortController();
+      ctl.holdAbort = reading;
+      try {
+        linearIssue = await Promise.race([
+          opts.linearSnapshot(row.taskId),
+          new Promise<null>((resolve) => {
+            reading.signal.addEventListener('abort', () => {
+              resolve(null);
+            });
+          }),
+        ]);
+      } finally {
+        ctl.holdAbort = null;
+      }
+      const stoppedWhileReading = stopRequested(ctl);
+      if (stoppedWhileReading)
+        return { kind: 'stopped', reason: stoppedWhileReading, providerSessionId: savedResumeId };
+      if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
+    }
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
     const resumeId = resumedSessionOf(action);
     const claims = () => activeClaims(db, id).map((c) => ({ kind: c.kind, name: c.name }));
@@ -2887,6 +2916,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         : null;
     const prompt = buildSessionPrompt({
       provider,
+      linearIssue: linearIssue === null ? null : snapshotSection(linearIssue),
       brief: opts.laneBrief ?? LaneBrief.Full,
       inPass: pass !== null,
       attended: policy.attended,
