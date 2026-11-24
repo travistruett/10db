@@ -20,6 +20,7 @@ let close: () => void;
 let state: StateStore;
 let clock: ManualClock;
 let status: number;
+let message = 'Insufficient credits';
 
 function build() {
   const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
@@ -50,7 +51,7 @@ function build() {
               }),
               { status: 200 },
             )
-          : new Response(JSON.stringify({ error: { message: 'Insufficient credits' } }), {
+          : new Response(JSON.stringify({ error: { message } }), {
               status,
             }),
       ),
@@ -72,6 +73,7 @@ beforeEach(() => {
   state = createStateStore(store, createEventBus());
   clock = new ManualClock();
   status = 402;
+  message = 'Insufficient credits';
   seedProject(store);
 });
 afterEach(() => {
@@ -79,27 +81,30 @@ afterEach(() => {
 });
 
 describe('a judge outage', () => {
-  it('raises one card for an out-of-credits account, keeps it single while down, and closes it on an answer', async () => {
+  it('raises one card for a lasting failure, keeps it single, closes it after three answers, and raises a dead account at once', async () => {
     const judge = build();
+    status = 500;
+    for (let i = 0; i < 4; i += 1) await judge.choose(request);
+    expect(cards()).toHaveLength(0);
     await judge.choose(request);
-    expect(cards()).toHaveLength(1);
-    expect(cards()[0]).toMatchObject({ state: InboxState.Open });
-    expect(cards()[0]?.body).toContain('OpenRouter says the account has no credits');
+    expect(cards()).toMatchObject([{ state: InboxState.Open }]);
+    expect(cards()[0]?.body).not.toContain('OpenRouter OpenRouter');
 
+    status = 402;
     for (let i = 0; i < 6; i += 1) await judge.choose(request);
     expect(cards()).toHaveLength(1);
 
     status = 200;
     await judge.choose(request);
-    expect(cards()).toMatchObject([{ state: InboxState.Resolved }]);
-  });
-
-  it('raises a card only after repeated failures of an error that may clear', async () => {
-    status = 500;
-    const judge = build();
-    for (let i = 0; i < 4; i += 1) await judge.choose(request);
-    expect(cards()).toHaveLength(0);
     await judge.choose(request);
-    expect(cards()).toHaveLength(1);
+    expect(cards()).toMatchObject([{ state: InboxState.Open }]);
+    await judge.choose(request);
+    expect(cards()).toMatchObject([{ state: InboxState.Resolved }]);
+
+    status = 400;
+    message = 'Your credit balance is too low';
+    await judge.choose(request);
+    expect(cards().map((c) => c.state)).toEqual([InboxState.Resolved, InboxState.Open]);
+    expect(cards()[1]?.body).toContain('says the account has no credits');
   });
 });

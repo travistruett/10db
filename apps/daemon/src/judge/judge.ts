@@ -292,9 +292,14 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         }),
       });
 
-      if (deps.off) return fallback('off', 'Started with TENDB_JUDGE=off', null);
-      if (!config.enabled || !decision.enabled)
+      if (deps.off) {
+        deps.onCallHealth?.({ kind: 'off' });
+        return fallback('off', 'Started with TENDB_JUDGE=off', null);
+      }
+      if (!config.enabled || !decision.enabled) {
+        deps.onCallHealth?.({ kind: 'off' });
         return fallback('off', 'Switched off in Settings', null);
+      }
 
       const result = await attempt(
         model,

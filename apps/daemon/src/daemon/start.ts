@@ -1108,11 +1108,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerDeadlockCard(item, answer);
     },
   });
-  watchJudgeOutage = createJudgeOutageWatch({
+  const watch = createJudgeOutageWatch({
     clock,
     logger: logger.child({ component: 'judge' }),
     sink: createJudgeOutageCard({ state, inbox }),
   });
+  watchJudgeOutage = watch;
+  // A card a stopped daemon left is closed at once when the judge is off.
+  if (opts.judgeOff === true) watch({ kind: 'off' });
   // Holds that pause work and end by themselves show as a line in the app's header, not as Inbox cards.
   const status = createStatusService({
     clock,

@@ -6,7 +6,7 @@ import type { InboxService } from './service';
 import { CardTier } from './card-tier';
 
 const FOLD_KEY = 'judge-outage';
-const RESOLVED = "10db's judge answered again";
+const RESOLVED = "10db's judge answers again, or is off";
 
 /** The project the failing call belonged to, else the first project: the card is the builder's, not a project's. */
 function projectOf(state: StateStore, outage: JudgeOutage): ProjectId | undefined {
@@ -47,9 +47,9 @@ export function createJudgeOutageCard(deps: {
         closesWhen: { by: 'withdrawn', when: 'the judge answers again (judge/outage)' },
         title: "10db's judge can't answer",
         body: [
-          `${outage.provider} ${outage.cause}.`,
+          `${outage.provider === 'the provider' ? 'The provider' : outage.provider} ${outage.cause}.`,
           'Until it does, the rules decide each case, so more actions are skipped than usually would be.',
-          'To fix it: add credits or check the key on that account, or pick another account or model for Decisions in Settings › Decisions. This card closes itself once the judge answers.',
+          `To fix it: ${outage.fix}, or pick another account or model for Decisions in Settings › Decisions. This card closes itself once the judge answers.`,
         ].join('\n'),
         detail: { [CARD_OPENS]: { to: 'settings', section: 'decisions', label: 'Open Decisions' } },
         foldKey: FOLD_KEY,
