@@ -1,33 +1,16 @@
 import {
   AccountKind,
-  LIVE_SYSTEM_MAX_CHARS,
-  LIVE_SYSTEMS_MAX,
   TrustOverrides,
   type ProjectDto,
-  type SetupPreviewDto,
   YourMcpServerState,
   type TrustSwitchKey,
 } from '@10db/contracts';
-import {
-  Alert,
-  Button,
-  Group,
-  List,
-  SegmentedControl,
-  Stack,
-  TagsInput,
-  Text,
-  Title,
-} from '@mantine/core';
-import { useId, useState, type ReactNode } from 'react';
-import { z } from 'zod';
+import { Alert, Button, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
+import { useId } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
-import { DaemonRequestError } from '../../daemon/client';
 import {
-  useLiveSystems,
   useProjectTrust,
   useRemoveTrustGrant,
-  useSetLiveSystems,
   useSetProjectTrust,
   useTrust,
   useTrustGrants,
@@ -35,13 +18,11 @@ import {
 import { HelpHint } from './help-hint';
 import { SettingRow, SettingsCard } from './setting-row';
 import { TrustRowText } from './trust-section';
-import {
-  GRANTS_DESCRIPTION,
-  GRANTS_EMPTY,
-  grantDescription,
-  LIVE_SYSTEMS_DESCRIPTION,
-  TRUST_ROWS,
-} from './trust-rows';
+import { GRANTS_DESCRIPTION, GRANTS_EMPTY, grantDescription, TRUST_ROWS } from './trust-rows';
+import { previewItems } from './trust/preview-items';
+import { ProductionSystems } from './trust/production-systems';
+import { RepoMcpServers } from './trust/repo-mcp-servers';
+import { OtherAndExpected, SwitchItems } from './trust/switch-items';
 
 /** The one line under each switch; the full account sits behind its info button. */
 const SHORT: Readonly<Record<TrustSwitchKey, string>> = {
@@ -130,135 +111,6 @@ function boolOf(choice: Choice): boolean | undefined {
   return choice === Choice.On;
 }
 
-/** A list that starts folded under how many items it holds, with a control to show it. */
-function FoldedList({
-  title,
-  count,
-  children,
-}: {
-  readonly title: string;
-  readonly count: number;
-  readonly children: ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <Stack gap="xs">
-      <Group gap="sm">
-        <Text size="sm">{count === 1 ? '1 item' : String(count) + ' items'}</Text>
-        <Button
-          variant="subtle"
-          size="compact-sm"
-          aria-expanded={open}
-          aria-label={`${open ? 'Hide' : 'Show'} ${title}`}
-          onClick={() => {
-            setOpen(!open);
-          }}
-        >
-          {open ? 'Hide' : 'Show'}
-        </Button>
-      </Group>
-      {open ? children : null}
-    </Stack>
-  );
-}
-
-/** What would load into the project's next session, and what was left out and why. */
-function ComesAlong({ preview }: { readonly preview: SetupPreviewDto | undefined }) {
-  const headingId = useId();
-  const loaded = [...(preview?.skills ?? []), ...(preview?.plugins ?? [])];
-  return (
-    <Stack gap="xs" role="region" aria-labelledby={headingId}>
-      <Title order={4} id={headingId}>
-        Comes Along
-      </Title>
-      {preview === undefined ? null : (
-        <>
-          <Text size="sm" c="dimmed">
-            What it starts with, as your switches and overrides stand.
-          </Text>
-          {loaded.length === 0 ? (
-            <Text size="sm">Nothing of yours or the project's.</Text>
-          ) : (
-            <FoldedList title="Comes along" count={loaded.length}>
-              <List size="sm">
-                {loaded.map((name) => (
-                  <List.Item key={name}>{name}</List.Item>
-                ))}
-              </List>
-            </FoldedList>
-          )}
-          {preview.leftOut.length === 0 ? null : (
-            <>
-              <Title order={5}>Left Out</Title>
-              <FoldedList title="Left out" count={preview.leftOut.length}>
-                <List size="sm">
-                  {preview.leftOut.map((item) => (
-                    <List.Item key={`${item.what} ${item.why}`}>
-                      <Text component="span" size="sm">
-                        {item.what}
-                      </Text>
-                      <Text component="span" size="sm" c="dimmed">
-                        {': '}
-                      </Text>
-                      <Text component="span" size="sm" c="dimmed">
-                        {item.why}
-                      </Text>
-                    </List.Item>
-                  ))}
-                </List>
-              </FoldedList>
-            </>
-          )}
-        </>
-      )}
-    </Stack>
-  );
-}
-
-const RefusedList = z.object({ issues: z.array(z.object({ message: z.string() })).min(1) });
-
-/** Why the daemon refused a list, without the field paths the builder never sees. */
-function refusal(error: Error | null): string | undefined {
-  if (error === null) return undefined;
-  const refused = error instanceof DaemonRequestError ? RefusedList.safeParse(error.body) : null;
-  return refused?.success === true
-    ? [...new Set(refused.data.issues.map((issue) => issue.message))].join('; ')
-    : error.message;
-}
-
-/**
- * The project's live systems. A change is sent at once and shows while it is on its way; one the daemon
- * refuses shows why under the input and leaves the saved list.
- */
-function LiveSystems({ projectId }: { readonly projectId: ProjectDto['id'] }) {
-  const live = useLiveSystems(projectId);
-  const set = useSetLiveSystems(projectId);
-  const saved = live.data?.liveSystems;
-  const shown = set.isPending ? set.variables : (saved ?? []);
-  return (
-    <SettingsCard title="Live Systems">
-      <SettingRow
-        label="Live Systems"
-        description="Hosts and profiles the judge treats as live."
-        help={LIVE_SYSTEMS_DESCRIPTION}
-        stacked
-      >
-        <TagsInput
-          aria-label="Live Systems"
-          value={[...shown]}
-          maxTags={LIVE_SYSTEMS_MAX}
-          maxLength={LIVE_SYSTEM_MAX_CHARS}
-          disabled={saved === undefined}
-          error={live.error?.message ?? refusal(set.error)}
-          onChange={(next) => {
-            set.mutate(next);
-          }}
-        />
-      </SettingRow>
-    </SettingsCard>
-  );
-}
-
 /** What the builder allowed in this project from now on, each line with its limit, its date and Remove. */
 function AllowedInProject({ projectId }: { readonly projectId: ProjectDto['id'] }) {
   const grants = useTrustGrants(projectId);
@@ -322,6 +174,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
   const onOpenRouter =
     accounts.data?.find((a) => a.id === project.accountId)?.kind === AccountKind.OpenRouter;
   const overrides = trust.data?.overrides;
+  const items = previewItems(trust.data?.preview);
   const plugins = app.data?.plugins ?? [];
   const mcpServers = (app.data?.mcpServers ?? []).filter(
     (server) => server.state === YourMcpServerState.Approved,
@@ -335,6 +188,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
             key={row.key}
             label={row.label}
             description={SHORT[row.key]}
+            below={<SwitchItems label={row.label} items={items.bySwitch.get(row.key) ?? []} />}
             help={
               <TrustRowText
                 label={row.label}
@@ -367,6 +221,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
           </SettingRow>
         ))}
       </SettingsCard>
+      <OtherAndExpected other={items.other} expected={items.expected} />
       {plugins.length === 0 ? null : (
         <SettingsCard title="Your Plugins">
           {plugins.map((plugin) => (
@@ -407,9 +262,9 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
           ))}
         </SettingsCard>
       )}
-      <LiveSystems projectId={project.id} />
+      <RepoMcpServers projectId={project.id} />
+      <ProductionSystems projectId={project.id} />
       <AllowedInProject projectId={project.id} />
-      <ComesAlong preview={trust.data?.preview} />
     </Stack>
   );
 }

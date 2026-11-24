@@ -1,7 +1,10 @@
 import {
   type ApproveYourMcpServer,
+  LiveSystemProposalsDto,
   LiveSystemsDto,
   McpSignInsDto,
+  RepoMcpServersDto,
+  type SetRepoMcpVerdict,
   type StartMcpSignIn,
   ProjectTrustDto,
   TrustGrantDto,
@@ -23,6 +26,8 @@ export const trustKeys = {
   project: (projectId: ProjectId) => ['trust', 'project', projectId],
   liveSystems: (projectId: ProjectId) => ['trust', 'live-systems', projectId],
   grants: (projectId: ProjectId) => ['trust', 'grants', projectId],
+  proposals: (projectId: ProjectId) => ['trust', 'proposals', projectId],
+  repoMcp: (projectId: ProjectId) => ['trust', 'repo-mcp', projectId],
   signIns: ['trust', 'mcp-sign-ins'],
 } as const;
 
@@ -205,5 +210,55 @@ export function useRemoveTrustGrant(projectId: ProjectId) {
       );
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: trustKeys.grants(projectId) }),
+  });
+}
+
+/** Production entries 10db read from the repo that the project does not list yet, each with where. */
+export function useLiveSystemProposals(projectId: ProjectId) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: trustKeys.proposals(projectId),
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId']['live-systems'].proposals.$get({
+          param: { projectId },
+        }),
+        LiveSystemProposalsDto,
+      ),
+  });
+}
+
+/** The checkout's `.mcp.json` servers and where each one's approval stands; reading raises no card. */
+export function useRepoMcpServers(projectId: ProjectId) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: trustKeys.repoMcp(projectId),
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId']['repo-mcp-servers'].$get({ param: { projectId } }),
+        RepoMcpServersDto,
+      ),
+  });
+}
+
+/** Approves or denies one repo server for the config the page showed; a changed config is refused. */
+export function useSetRepoMcpVerdict(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    scope: { id: `repo-mcp ${projectId}` },
+    mutationFn: async (input: SetRepoMcpVerdict & { readonly name: string }) => {
+      const { name, ...json } = input;
+      return readJson(
+        await client.projects[':projectId']['repo-mcp-servers'][':name'].$put({
+          param: { projectId, name },
+          json,
+        }),
+        RepoMcpServersDto,
+      );
+    },
+    onSuccess: (saved) => {
+      queryClient.setQueryData(trustKeys.repoMcp(projectId), saved);
+    },
   });
 }

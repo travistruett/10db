@@ -61,6 +61,8 @@ export interface SettingRowProps {
   readonly children: ReactNode;
   /** A control too wide for the right column, such as a list, goes under the text instead. */
   readonly stacked?: boolean;
+  /** What belongs to the row, shown under its text and control across the full width. */
+  readonly below?: ReactNode;
 }
 
 /** The control a row's description belongs to: its input, or the group of radios. */
@@ -73,6 +75,7 @@ export function SettingRow({
   help,
   children,
   stacked = false,
+  below,
 }: SettingRowProps) {
   const descriptionId = useId();
   const row = useRef<HTMLDivElement>(null);
@@ -115,6 +118,7 @@ export function SettingRow({
           </Box>
         </Group>
       )}
+      {below === undefined ? null : <Box mt="xs">{below}</Box>}
     </Box>
   );
 }
