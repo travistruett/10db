@@ -101,6 +101,7 @@ describe('a judge outage', () => {
     await judge.choose(request);
     expect(cards()).toMatchObject([{ state: InboxState.Resolved }]);
 
+    clock.advance(31 * 60 * 1000);
     status = 400;
     message = 'Your credit balance is too low';
     await judge.choose(request);

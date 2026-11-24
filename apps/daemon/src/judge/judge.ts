@@ -296,10 +296,10 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         deps.onCallHealth?.({ kind: 'off' });
         return fallback('off', 'Started with TENDB_JUDGE=off', null);
       }
-      if (!config.enabled || !decision.enabled) {
-        deps.onCallHealth?.({ kind: 'off' });
+      // One decision switched off says nothing of the judge's health: only the whole judge off does.
+      if (!config.enabled) deps.onCallHealth?.({ kind: 'off' });
+      if (!config.enabled || !decision.enabled)
         return fallback('off', 'Switched off in Settings', null);
-      }
 
       const result = await attempt(
         model,

@@ -49,7 +49,7 @@ const HARD_STATUS_AUTH = /\bHTTP (401|403)\b/;
 /** Anthropic answers an empty balance with a 400 whose message says so. */
 const CREDIT_BALANCE = /credit balance is too low/i;
 /** The SDK's error names for an expired or missing AWS sign-in carry no status. */
-const BEDROCK_SIGN_IN = /CredentialsProviderError|ExpiredToken|token (is )?expired|SSO/i;
+const BEDROCK_SIGN_IN = /CredentialsProviderError|ExpiredToken|SSO session|Token has expired/i;
 
 function providerOf(detail: string): string {
   return PROVIDERS.find((name) => detail.includes(name)) ?? 'the provider';
@@ -109,7 +109,7 @@ function causeOf(failure: Extract<JudgeCallHealth, { kind: 'failed' }>): {
  * Turns the judge's calls into one outage: the first failure of a run is logged at warn, and a failure
  * that won't clear on its own, or `OUTAGE_FAILURES` failures in a row (or failing for `OUTAGE_DURATION_MS`)
  * with no answer between, tells the sink once. The card closes after `OUTAGE_RECOVERY_ANSWERS` answers in a
- * row; a cause that may clear alone is not raised again within `OUTAGE_COOLDOWN_MS` of that.
+ * row; no cause is raised again within `OUTAGE_COOLDOWN_MS` of that.
  */
 export function createJudgeOutageWatch(deps: {
   readonly clock: Clock;
@@ -168,7 +168,7 @@ export function createJudgeOutageWatch(deps: {
       if (raised) return;
       const lasting = failures >= OUTAGE_FAILURES || now - failingSince >= OUTAGE_DURATION_MS;
       const cooling = clearedAt !== null && now - clearedAt < OUTAGE_COOLDOWN_MS;
-      if (!hard && (!lasting || cooling)) return;
+      if (cooling || (!hard && !lasting)) return;
       raised = true;
       deps.sink.raise({
         provider,
