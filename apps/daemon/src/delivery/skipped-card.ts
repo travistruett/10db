@@ -21,6 +21,7 @@ import {
   skipFollowUpOf,
   lastConfigHead,
   lastListed,
+  skipsAlreadyApproved,
   passHoldingTask,
   listSkipsForWorkstream,
   markListed,
@@ -189,14 +190,17 @@ export async function raiseSkippedCard(
   if (row.state !== WorkstreamState.Done && row.state !== WorkstreamState.Failed) return;
   const last = lastListed(db, workstreamId);
   const pass = passHoldingTask(db, getTask(db, row.taskId)) !== undefined;
-  const skips = pass ? [] : listSkipsForWorkstream(db, workstreamId, last ?? undefined);
+  const listed = pass ? [] : listSkipsForWorkstream(db, workstreamId, last ?? undefined);
+  // A call a follow-up of this task was already approved to run isn't listed again, though the run stays checked through it.
+  const ran = new Set(skipsAlreadyApproved(db, row.taskId, listed));
+  const skips = listed.filter((s) => !ran.has(s.id));
   // Each ending lists the config changed since the last check that read it; a pass lists none.
   const config = pass
     ? { paths: [], head: null }
     : await changedPaths(deps, workstreamId, lastConfigHead(db, workstreamId));
   const written = config === null ? null : writtenConfig(config.paths);
   const configHead = config?.head ?? null;
-  const through = skips.at(-1)?.id ?? last ?? null;
+  const through = listed.at(-1)?.id ?? last ?? null;
   deps.state.write((ctx: WriteContext) => {
     // Another check of the run got here first while the paths were read.
     if (lastListed(ctx.tx, workstreamId) !== last) return;

@@ -16,6 +16,7 @@ import {
 } from '@10db/contracts';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import * as schema from '../schema';
+import { skipFollowUpSourceTask } from './skip-follow-ups';
 import type { DbReader, WriteContext } from './store';
 
 // Trust line §5: what an unattended lane skipped, one row per call in a run, and the
@@ -220,4 +221,50 @@ export function approvedSkipsForTask(db: DbReader, taskId: TaskId): SkippedActio
 /** The keys of the calls approved for a follow-up, matched exactly; none once it is done. */
 export function approvedCallKeys(db: DbReader, taskId: TaskId): string[] {
   return approvedRows(db, taskId).flatMap((row) => (row.callKey === null ? [] : [row.callKey]));
+}
+
+/**
+ * The skips among `skips` that a follow-up already ran: their call key (the call's normalized tool and
+ * arguments) was approved for `taskId` or for an earlier task of its follow-up chain, so a later run
+ * skipping the same call again is not a new thing for the builder to approve.
+ */
+export function skipsAlreadyApproved(
+  db: DbReader,
+  taskId: TaskId,
+  skips: readonly SkippedActionDto[],
+): SkippedActionId[] {
+  const chain: TaskId[] = [taskId];
+  for (
+    let source = skipFollowUpSourceTask(db, taskId);
+    source !== null && !chain.includes(source);
+    source = skipFollowUpSourceTask(db, source)
+  )
+    chain.push(source);
+  const approved = new Set(
+    db
+      .select({ callKey: schema.skippedActions.callKey })
+      .from(schema.skipApprovals)
+      .innerJoin(
+        schema.skippedActions,
+        eq(schema.skippedActions.id, schema.skipApprovals.skippedActionId),
+      )
+      .where(inArray(schema.skipApprovals.taskId, chain))
+      .all()
+      .flatMap((r) => (r.callKey === null ? [] : [r.callKey])),
+  );
+  if (approved.size === 0) return [];
+  return db
+    .select({ id: schema.skippedActions.id })
+    .from(schema.skippedActions)
+    .where(
+      and(
+        inArray(
+          schema.skippedActions.id,
+          skips.map((s) => s.id),
+        ),
+        inArray(schema.skippedActions.callKey, [...approved]),
+      ),
+    )
+    .all()
+    .map((r) => r.id);
 }

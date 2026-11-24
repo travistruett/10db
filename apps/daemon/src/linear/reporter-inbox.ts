@@ -4,10 +4,14 @@ import {
   findOpenByFoldKey,
   latestLinearPostProblem,
   linearPostCounts,
+  linearPostProblems,
+  getTask,
+  type DbReader,
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { BY_ANSWER, CardTier, type InboxService } from '../inbox';
+import { linearLinkOf } from './task-link';
 
 // The project's one Inbox card for Linear updates that need the builder:
 // what waits on a retry, failed for good or was withheld by the secret scan.
@@ -18,6 +22,19 @@ const DISMISS = 'Dismiss';
 
 export const linearReporterFoldKey = (projectId: ProjectId): string =>
   `linear-reporter:${projectId}`;
+
+const LISTED_ROWS = 10;
+
+/** One line per row the card counts: the task, its issue, the event and the post id, so each can be found on the issue. */
+function problemLines(db: DbReader, projectId: ProjectId): string[] {
+  const rows = linearPostProblems(db, projectId, LISTED_ROWS + 1);
+  const lines = rows.slice(0, LISTED_ROWS).map((p) => {
+    const task = getTask(db, p.taskId);
+    const issue = linearLinkOf(db, p.taskId)?.link.id ?? 'no issue';
+    return `- ${task.title} (${issue}): ${p.event}, attempt ${String(p.attempt)}, ${p.state}, ${p.id}`;
+  });
+  return rows.length > LISTED_ROWS ? [...lines, '- and more'] : lines;
+}
 
 /**
  * Brings the project's card in line with its rows: withdrawn when nothing is left, otherwise one card with
@@ -53,7 +70,10 @@ export function refreshReporterCard(
     closesWhen: BY_ANSWER,
     workstreamId: null,
     title: 'Linear Updates Need You',
-    body: reason === null ? counts.join(', ') : `${counts.join(', ')}. Latest: ${reason}`,
+    body: [
+      reason === null ? counts.join(', ') : `${counts.join(', ')}. Latest: ${reason}`,
+      ...problemLines(deps.state.db, projectId),
+    ].join('\n'),
     detail: { [REPORTER_DETAIL]: projectId },
     options: [
       {
