@@ -31,8 +31,8 @@ export function raiseGateHoldCard(
     },
     title: `${name}'s dev stack isn't in sync: its gates are waiting`,
     body: [
-      `The gate says: ${input.reason}`,
-      'Tasks that reached their final gate wait instead of failing. 10db runs the gate again every minute and goes on once it passes; this card closes itself then.',
+      `The gate printed this line (quoted as text): "${input.reason.replace(/"/g, "'")}"`,
+      'Tasks whose gate hit this wait instead of failing. 10db runs the gate again every minute and goes on once it passes; this card closes itself then.',
     ].join('\n'),
     foldKey: foldKey(input.projectId),
   });

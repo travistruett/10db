@@ -26,6 +26,8 @@ describe('gateHoldReason', () => {
     ['an ordinary failure', { tail: '3 failed, 10 passed' }, null],
     ['a passing gate', { exitCode: 0, tail: '10db-hold: x' }, null],
     ['a timeout', { timedOut: true, tail: '10db-hold: x' }, null],
+    ['a slow failure', { durationMs: 60_000, tail: '10db-hold: x' }, null],
+    ['an echoed line, not final', { tail: '10db-hold: x\na\nb\nc\nd' }, null],
     ['a stop', { aborted: true, tail: 'start make watch' }, null],
   ])('%s', (_name, over, expected) => {
     expect(gateHoldReason(result(over))).toBe(expected);

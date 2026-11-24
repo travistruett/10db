@@ -7,6 +7,8 @@ import { gateHoldReason, type GateRequest, type GateResult, type GateRunner } fr
 
 /** How long a held gate waits between tries. */
 export const GATE_HOLD_RETRY_MS = 60_000;
+/** The longest a gate is held; after it the gate's real failure stands. */
+export const GATE_HOLD_MAX_MS = 30 * 60_000;
 
 export interface GateHoldDeps {
   readonly clock: Clock;
@@ -63,10 +65,13 @@ export function holdStaleGates(inner: GateRunner, deps: GateHoldDeps): GateRunne
       const projectId = project.id;
       held.set(projectId, (held.get(projectId) ?? 0) + 1);
       try {
+        const since = deps.clock.now().getTime();
         raiseGateHoldCard(deps, { projectId, reason });
         deps.logger.info({ projectId, reason }, 'a gate is held until its environment is ready');
         while (reason !== null) {
-          if (!(await pause(deps.clock, deps.retryMs, request.signal))) return result;
+          if (deps.clock.now().getTime() - since >= GATE_HOLD_MAX_MS) return result;
+          if (!(await pause(deps.clock, deps.retryMs, request.signal)))
+            return { ...result, aborted: true };
           result = await inner.run(request);
           reason = gateHoldReason(result);
         }
