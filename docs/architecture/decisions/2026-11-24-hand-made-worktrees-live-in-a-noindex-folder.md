@@ -17,17 +17,21 @@
   135 of its `package.json` files were indexed. So the daemon no longer creates the marker for a hand-made folder:
   the Keep Spotlight Out card is now a notice that Spotlight indexes the folder, shown only for a hand-made folder
   without the `.noindex` suffix that holds worktrees, never for a `.noindex` one. It says to make new worktrees in
-  `<repo>-worktrees.noindex` and to move existing ones with `git worktree move`; answering only dismisses it, writing
+  `<repo>-worktrees.noindex` and the old ones leave as their work merges; answering only dismisses it, writing
   no file and running no git call. The markers under `~/.10db` (the lane roots and sandbox temp roots) stay: `.10db`
   is a dot-directory Spotlight does not index here, so they are harmless.
-- **Who looks.** All of these agree with this file and cite it:
+- **Where the folder is named.** Each of these must agree with this file; a change to the rule changes all of them:
   - the daemon's Remove Merged Worktrees and Spotlight cards (`handMadeWorktreeFolders`): both folders,
     with the removal checks unchanged;
   - the Claude git guard's own-worktree exception (`.claude/hooks/git-guard.mjs`, `OWN_WORKTREE_FOLDERS`) and the
     note in `.codex/rules/default.rules`: a worktree directly in either folder;
   - `AGENTS.md` (Git), `README.md` and `apps/desktop/AGENTS.md`;
   - agent-os: the global `instructions/AGENTS.md` ("Where files go"), `skills/coordinating-builds/SKILL.md` and
-    `worktree-sweep.sh`, which lists every linked worktree of a repository wherever it lives, so it covers both.
+    `worktree-sweep.sh`, which lists every linked worktree of a repository wherever it lives, so it covers both;
+  - agent-os `check.py` (`WORKING_DIRS`) and `settings/required.md` (`permissions.additionalDirectories`): the
+    working directories of `agent-os-worktrees.noindex` and the draining `agent-os-worktrees`.
+- **The card's key.** The informational card has its own fold key, and an open card under the earlier key (the
+  one that offered the marker) is withdrawn at the next look.
 
 ## Why
 

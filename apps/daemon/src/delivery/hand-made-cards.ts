@@ -26,7 +26,9 @@ export const handMadeKey = {
       )
       .digest('hex')
       .slice(0, 16)}`,
-  spotlight: (folder: string): string => `hand-made-spotlight:${folder}`,
+  spotlight: (folder: string): string => `hand-made-spotlight-note:${folder}`,
+  /** The key of the card that once offered to write a marker file; any open one is withdrawn. */
+  spotlightMarker: (folder: string): string => `hand-made-spotlight:${folder}`,
 } as const;
 
 /** What the answers did, for the builder to read in Activity: they offer nothing to answer. */
@@ -82,7 +84,7 @@ export const handMadeCards = {
       when: 'the folder holds no worktree or the answer is given (hand-made-worktrees)',
     },
     title: `Spotlight indexes ${folder}`,
-    body: `${folder} holds your hand-made worktrees, each with its own node_modules and build output. Spotlight (mds_stores and mdworker) indexes every file there, and installs and test runs keep it busy.\n\nSpotlight skips any folder whose name ends in .noindex. Make new worktrees in ${folder.replace(/-worktrees$/, '-worktrees.noindex')}, beside the checkout, and move the existing ones with git worktree move. 10db changes nothing here.`,
+    body: `${folder} holds your hand-made worktrees, each with its own node_modules and build output. Spotlight (mds_stores and mdworker) indexes every file there, and installs and test runs keep it busy.\n\nSpotlight skips any folder whose name ends in .noindex. Make new worktrees in ${folder.replace(/-worktrees$/, '-worktrees.noindex')}, beside the checkout; the ones here leave as their work merges. 10db changes nothing here.`,
     foldKey: handMadeKey.spotlight(folder),
     ...worktreeOffer({ kind: 'spotlight', path: folder }),
   }),

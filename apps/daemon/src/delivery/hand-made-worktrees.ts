@@ -111,6 +111,12 @@ export async function offerHandMadeFolders(
   closeGoneMergedWorktreeCards(ctx.state.db, ctx.inbox);
   for (const project of listActiveProjects(ctx.state.db)) {
     if (project.delivery !== Delivery.PullRequest || !existsSync(project.repoPath)) continue;
+    withdraw(
+      ctx.state,
+      ctx.inbox,
+      project.id,
+      handMadeWorktreeFolders(project.repoPath).map(handMadeKey.spotlightMarker),
+    );
     const folders = foldersOf(project);
     if (folders.length === 0) continue;
     try {
@@ -118,7 +124,7 @@ export async function offerHandMadeFolders(
       for (const folder of folders.filter((f) => !skippedBySpotlightByName(f))) {
         const spotlight = handMadeKey.spotlight(folder);
         const holdsWorktrees = listed.some(
-          (e) => surelyInside(e.path, folder) && !samePath(e.path, folder),
+          (e) => existsSync(e.path) && surelyInside(e.path, folder) && !samePath(e.path, folder),
         );
         if (!holdsWorktrees) withdraw(ctx.state, ctx.inbox, project.id, [spotlight]);
         else if (!hasAnsweredByFoldKey(ctx.state.db, project.id, spotlight))
