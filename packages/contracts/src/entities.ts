@@ -769,6 +769,13 @@ export const ProjectDto = z.object({
 export type ProjectDto = z.infer<typeof ProjectDto>;
 
 /** Fields the builder can change after creation; the nudge/handoff rule is checked against the merged values. */
+/**
+ * An area split into `into` in the same patch that replaces the project's areas: every open task that names
+ * `from` names every `into` area instead, so no task loses a file. `into` names areas of that patch's list.
+ */
+export const AreaSplit = z.object({ from: AreaName, into: z.array(AreaName).min(2) });
+export type AreaSplit = z.infer<typeof AreaSplit>;
+
 export const ProjectPatch = z
   .object({
     name: z.string().min(1),
@@ -818,6 +825,8 @@ export const ProjectPatch = z
     screens: ScreensMatrix,
     /** Replaces the page names left out of a rebuild. */
     leftOutPages: z.array(AreaName).max(200),
+    /** Areas split by this patch's `areas`, whose open tasks are retagged in the same write. */
+    areaSplits: z.array(AreaSplit).min(1),
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' })
@@ -831,6 +840,15 @@ export const ProjectPatch = z
       return new Set(names).size === names.length;
     },
     { message: 'An area or hazard name is used twice', path: ['areas'] },
+  )
+  .refine(
+    (p) =>
+      p.areaSplits === undefined ||
+      (p.areas !== undefined &&
+        p.areaSplits.every((split) =>
+          split.into.every((name) => p.areas?.some((a) => a.name === name) === true),
+        )),
+    { message: 'A split names an area the new list lacks', path: ['areaSplits'] },
   );
 export type ProjectPatch = z.infer<typeof ProjectPatch>;
 

@@ -50,4 +50,8 @@ only process that writes the database.
   project's notices for a key. No index was added: medians of 20 on 250,000 events, in ms, dense (10,000 notices) and
   sparse (20): first page 2.21 and 24.76, middle page 1.13 and 4.16, one project 4.01 and 0.17, one task 0.19 and
   0.07. A read past 50 ms would need an index, which is a migration.
+- A project patch with `areaSplits` (`store/projects.ts`) splits an area in the same write as the new area list:
+  it is refused while a claim names the split area, and every open task that names it names each of its parts
+  instead, written to `tasks.areas` directly (not through `patchTask`, whose guards would refuse a superset that
+  loses no file). A project's `isolate` that names the split area gains its parts.
 - Separate copies (`schema.ts` `local_copies`, `store/local-copies.ts`): a batch is a local copy exactly when it has a journal row (`isLocalCopy`), written in the cut's transaction with the pinned teardown command. `copyIdOf` is the one place the id is derived and is stored, never recomputed. `unfinishedCopyOf` is the one-copy-at-a-time rule (CUTTING, OPEN, SHIPPING or FAILED), `isLivePromoting` and a wait's `retryAt` keep a parked landing out of the in-flight count, and `patchProject` refuses a `delivery` change while a copy is unfinished.

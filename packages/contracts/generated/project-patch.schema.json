@@ -364,6 +364,31 @@
         "type": "string",
         "pattern": "^[a-z][a-z0-9-]*$"
       }
+    },
+    "areaSplits": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "into": {
+            "minItems": 2,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]*$"
+            }
+          }
+        },
+        "required": [
+          "from",
+          "into"
+        ]
+      }
     }
   }
 }

@@ -1,10 +1,15 @@
 import { AreaRole, type ProjectDto } from '@10db/contracts';
-import { Button, Group, Stack, Text } from '@mantine/core';
+import { Group, Menu, Stack, Text } from '@mantine/core';
+import { IconSparkles } from '@tabler/icons-react';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ConfirmModal } from '../../shell/confirm-modal';
 import { AreaDrawer } from './area-drawer';
-import { ReviewSuggestions } from './review-suggestions';
+import { useWorkbenchSetup } from '../../daemon/pass-queries';
+import { CountBadge } from '../../shell/count-badge';
+import { WorkbenchSetupModal } from '../workbench/setup/setup-modal';
+import { setUpCount } from '../workbench/setup/setup-rules';
+import { SplitButton } from './split-button';
 import { SectionHeading } from './section-heading';
 import { PathSummary, Pill, RowActions } from './table-cells';
 import { useListPatch } from './use-list-patch';
@@ -42,6 +47,10 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
   const [editing, setEditing] = useState<Area | null>(null);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<Area | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const caret = useRef<HTMLButtonElement>(null);
+  const setup = useWorkbenchSetup(project.id);
+  const suggestions = setup.data === undefined ? 0 : setUpCount(setup.data, project.leftOutPages);
   const remove = useListPatch(project);
   // Unsaved edits in the open drawer, and the row asked for while they stand.
   const [dirty, setDirty] = useState(false);
@@ -110,31 +119,48 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
     <Stack gap="sm" component="section" aria-label="Areas">
       <SectionHeading
         title="Areas"
-        line="The parts of the project that tasks claim."
+        line="Split the project into parts, so tasks in different parts run at the same time."
         help={
           <>
             <Text size="sm">
-              An area is a part of the project. Tasks in different areas can run at the same time,
-              and a task may change only the files of the areas it names.
+              Each task names the areas it changes. Two tasks in different areas run side by side;
+              two in the same area take turns, so they never write the same file at once.
             </Text>
             <Text size="sm">
-              Paths are folder patterns, one per line: <code>src/api/**</code> means everything
-              inside src/api/.
+              Smaller areas mean more work at once: with <code>backend</code> split into{' '}
+              <code>billing</code> and <code>search</code>, a billing task and a search task no
+              longer wait on each other.
+            </Text>
+            <Text size="sm">
+              A task changes only the files of its areas. Paths are folder patterns, one per line:{' '}
+              <code>src/api/**</code> means everything inside src/api/.
+            </Text>
+            <Text size="sm">
+              Not sure where to start? Add Area › Suggest from the repository proposes areas from
+              the code: a page per screen, the code pages share, and the rest.
             </Text>
           </>
         }
         action={
-          <Group gap="sm" wrap="nowrap">
-            <ReviewSuggestions project={project} />
-            <Button
-              data-keeps-drawer
+          <SplitButton
+            label="Add Area"
+            menuLabel="More ways to add areas"
+            count={suggestions}
+            caretRef={caret}
+            onClick={() => {
+              request(null);
+            }}
+          >
+            <Menu.Item
+              leftSection={<IconSparkles size={16} stroke={1.5} />}
+              rightSection={suggestions > 0 ? <CountBadge count={suggestions} /> : null}
               onClick={() => {
-                request(null);
+                setSuggesting(true);
               }}
             >
-              Add Area
-            </Button>
-          </Group>
+              Suggest from the repository…
+            </Menu.Item>
+          </SplitButton>
         }
       />
       <DataTable<Area>
@@ -168,6 +194,15 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
           }}
         />
       ) : null}
+      <WorkbenchSetupModal
+        project={project}
+        opened={suggesting}
+        onClose={() => {
+          setSuggesting(false);
+          // The menu item that opened it is gone, so focus comes back to the caret, not the page.
+          caret.current?.focus();
+        }}
+      />
       <ConfirmModal
         opened={switchTo !== null}
         title="Discard Changes"

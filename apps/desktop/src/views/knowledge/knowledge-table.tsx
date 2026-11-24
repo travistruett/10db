@@ -141,6 +141,7 @@ export function KnowledgeTable<T>({
       columns={shown}
       idAccessor={idOf}
       withTableBorder
+      backgroundColor="var(--tendb-color-panel)"
       borderRadius="md"
       verticalSpacing="sm"
       horizontalSpacing="md"

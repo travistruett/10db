@@ -1,11 +1,5 @@
 import { realpathSync } from 'node:fs';
-import {
-  AreaRole,
-  SettingField,
-  type BranchNote,
-  type ProjectDto,
-  type SettingSuggestion,
-} from '@10db/contracts';
+import { AreaRole, SettingField, type ProjectDto, type SettingSuggestion } from '@10db/contracts';
 import {
   appAddressCandidates,
   appAddressFiles,
@@ -22,7 +16,6 @@ import {
   NAMING_MS,
   oneLine,
   probedCandidates,
-  shellWord,
   uiUnitOf,
   type AreaNamer,
   type DevLogin,
@@ -85,7 +78,6 @@ export type SettingsProject = Pick<
 
 export interface SuggestedSettings {
   readonly settings: SettingSuggestion[];
-  readonly branch: BranchNote | null;
 }
 
 type Reader = (path: string) => Promise<string | null>;
@@ -245,23 +237,9 @@ async function docker(
   return null;
 }
 
-/** The base branch's commits `origin/<base>` (at `tracking`) lacks, when there are any. */
-async function branchNote(
-  git: Git,
-  project: SettingsProject,
-  tracking: string,
-): Promise<BranchNote | null> {
-  const branch = project.baseBranch;
-  const tip = await git.branchTip(project.repoPath, branch);
-  if (tip === null) return null;
-  const ahead = await git.countCommits(project.repoPath, tracking, tip);
-  return ahead > 0 ? { branch, ahead, command: `git push origin ${shellWord(branch)}` } : null;
-}
-
 /**
  * What the Workbench setup suggests besides areas: the settings the project lacks, in the order the
- * screen lists them (app address, dev login, turn check, Allow Docker), and the branch note. A
- * setting the project has is never suggested. Files are read from `origin/<base>`'s commit; with no
+ * screen lists them (app address, dev login, turn check, Allow Docker). A setting the project has is never suggested. Files are read from `origin/<base>`'s commit; with no
  * such ref they are read from HEAD, and then no dev login is suggested, since a model would write it
  * from lines a lane may have committed. The UI package is the one holding `pageGlobs` (the proposed
  * pages) and the project's page areas. A part that fails is left out; the rest stands.
@@ -273,13 +251,11 @@ export async function suggestSettings(
   signal?: AbortSignal,
 ): Promise<SuggestedSettings> {
   const tracking = await originBaseCommit(deps.git, project.repoPath, project.baseBranch);
-  const branch =
-    tracking === null ? null : await branchNote(deps.git, project, tracking).catch(() => null);
   // One commit for every read, so they cannot span a branch that moves.
   const rev = tracking ?? (await deps.git.commitAt(project.repoPath, 'HEAD').catch(() => null));
-  if (rev === null) return { settings: [], branch };
+  if (rev === null) return { settings: [] };
   const files = await deps.git.filesAt(project.repoPath, rev).catch(() => []);
-  if (files.length === 0) return { settings: [], branch };
+  if (files.length === 0) return { settings: [] };
   const read: Reader = async (path) => {
     try {
       const file = await deps.git.fileAt(project.repoPath, rev, path, MAX_FILE_BYTES);
@@ -334,5 +310,5 @@ export async function suggestSettings(
   const settings = [address, login, check, dockerRow].filter(
     (s): s is SettingSuggestion => s !== null,
   );
-  return { settings, branch };
+  return { settings };
 }

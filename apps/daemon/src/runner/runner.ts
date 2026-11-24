@@ -3362,6 +3362,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       // The hook's input is the model's own JSON: read as a record here, where it is keyed.
       const input = ToolInputRecord.safeParse(req.input).data ?? {};
       const key = callKey(req.toolName, input, checkout);
+      // Areas and hazards as they are now: an area narrowed or split while the session runs is judged as
+      // it is, so a claim taken later never covers the files the area held at the session's start.
+      const live = getProject(db, row.projectId);
       const verdict = judgePreToolUse({
         attended: unattended === null,
         dockerOn: project.sandboxDocker,
@@ -3370,8 +3373,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         toolInput: req.input,
         repoPath: checkout,
         ...(req.cwd === undefined ? {} : { cwd: req.cwd }),
-        areas: pass ? passAreasOf(db, pass.id) : project.areas,
-        hazards: project.hazards,
+        areas: pass ? passAreasOf(db, pass.id) : live.areas,
+        hazards: live.hazards,
         claims: claims(),
         readOnly,
         delivery: project.delivery,

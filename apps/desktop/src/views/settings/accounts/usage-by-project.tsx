@@ -1,5 +1,5 @@
 import type { AccountDto } from '@10db/contracts';
-import { Group, Skeleton, Stack, Table, Text } from '@mantine/core';
+import { Group, Skeleton, Stack, Table, Text, Paper } from '@mantine/core';
 import { useAccountUsage } from '../../../daemon/account-queries';
 import { formatTokens, formatUsd, monthLabel } from './usage-text';
 
@@ -24,30 +24,32 @@ export function UsageByProject({ account }: { readonly account: AccountDto }) {
           No sessions this month
         </Text>
       ) : (
-        <Table aria-label="Usage by project" verticalSpacing="xs">
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Project</Table.Th>
-              <Table.Th ta="right">In</Table.Th>
-              <Table.Th ta="right">Out</Table.Th>
-              <Table.Th ta="right">Cached</Table.Th>
-              {metered ? <Table.Th ta="right">Cost</Table.Th> : null}
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {byProject.map((p) => (
-              <Table.Tr key={p.projectId}>
-                <Table.Td>{p.projectName}</Table.Td>
-                <Table.Td ta="right">{formatTokens(p.tokensIn)}</Table.Td>
-                <Table.Td ta="right">{formatTokens(p.tokensOut)}</Table.Td>
-                <Table.Td ta="right">{formatTokens(p.tokensCached)}</Table.Td>
-                {metered ? (
-                  <Table.Td ta="right">{p.costUsd === null ? '' : formatUsd(p.costUsd)}</Table.Td>
-                ) : null}
+        <Paper withBorder radius="md" bg="var(--tendb-color-panel)" style={{ overflow: 'hidden' }}>
+          <Table aria-label="Usage by project" verticalSpacing="xs">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Project</Table.Th>
+                <Table.Th ta="right">In</Table.Th>
+                <Table.Th ta="right">Out</Table.Th>
+                <Table.Th ta="right">Cached</Table.Th>
+                {metered ? <Table.Th ta="right">Cost</Table.Th> : null}
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+            </Table.Thead>
+            <Table.Tbody>
+              {byProject.map((p) => (
+                <Table.Tr key={p.projectId}>
+                  <Table.Td>{p.projectName}</Table.Td>
+                  <Table.Td ta="right">{formatTokens(p.tokensIn)}</Table.Td>
+                  <Table.Td ta="right">{formatTokens(p.tokensOut)}</Table.Td>
+                  <Table.Td ta="right">{formatTokens(p.tokensCached)}</Table.Td>
+                  {metered ? (
+                    <Table.Td ta="right">{p.costUsd === null ? '' : formatUsd(p.costUsd)}</Table.Td>
+                  ) : null}
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Paper>
       )}
     </Stack>
   );

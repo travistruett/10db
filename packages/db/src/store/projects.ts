@@ -18,8 +18,10 @@ import {
   ProjectPatch,
   Provider,
   SCREENS_MATRIX_DEFAULT,
+  TaskStatus,
   WorkspaceMode,
   type AccountId,
+  type AreaSplit,
   type HazardDef,
   type ProjectDto,
   type ProjectId,
@@ -216,9 +218,76 @@ function checkClaimedNames(
   }
 }
 
+/**
+ * Refuses a split of an area the project lacks, or of one a run holds: a held claim keeps the files the
+ * area had when it was granted, so the run could write a part another lane then claims.
+ */
+function checkSplits(ctx: WriteContext, current: ProjectDto, splits: readonly AreaSplit[]): void {
+  for (const split of splits) {
+    if (!current.areas.some((a) => a.name === split.from))
+      throw new InvalidError(`There is no area "${split.from}" to split`);
+    const holder = ctx.tx
+      .select({ title: schema.tasks.title })
+      .from(schema.claims)
+      .innerJoin(schema.workstreams, eq(schema.workstreams.id, schema.claims.workstreamId))
+      .innerJoin(schema.tasks, eq(schema.tasks.id, schema.workstreams.taskId))
+      .where(
+        and(
+          eq(schema.claims.projectId, current.id),
+          eq(schema.claims.kind, ClaimKind.Area),
+          eq(schema.claims.name, split.from),
+          isNull(schema.claims.releasedAt),
+        ),
+      )
+      .get();
+    if (holder)
+      throw new ConflictError(
+        `Can't split area "${split.from}": the running task "${holder.title}" holds it. Try again once it lets go, or leave the split out.`,
+      );
+  }
+}
+
+/** `names` with each split's `from` replaced in place by its `into`, each name once. */
+const splitNames = (names: readonly string[], splits: readonly AreaSplit[]): string[] => [
+  ...new Set(names.flatMap((name) => splits.find((s) => s.from === name)?.into ?? [name])),
+];
+
+/**
+ * Every open task of the project that names a split area names all of its parts instead, in the same
+ * write as the project's new areas, so no task is left on a narrowed name. The column is written
+ * directly: the parts hold every file the area held, so no rule that guards a task's own edit applies.
+ */
+function retagSplitTasks(ctx: WriteContext, id: ProjectId, splits: readonly AreaSplit[]): void {
+  const from = new Set(splits.map((s) => s.from));
+  const open = ctx.tx
+    .select({ id: schema.tasks.id, areas: schema.tasks.areas })
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.projectId, id), eq(schema.tasks.status, TaskStatus.Open)))
+    .all();
+  for (const task of open) {
+    if (!task.areas.some((name) => from.has(name))) continue;
+    const areas = splitNames(task.areas, splits);
+    ctx.tx
+      .update(schema.tasks)
+      .set({ areas, updatedAt: ctx.now })
+      .where(eq(schema.tasks.id, task.id))
+      .run();
+    ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: task.id });
+  }
+}
+
 export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPatch): ProjectDto {
-  const changes = ProjectPatch.parse(patch);
+  const { areaSplits, ...changes } = ProjectPatch.parse(patch);
   const current = getProject(ctx.tx, id);
+  if (areaSplits !== undefined) checkSplits(ctx, current, areaSplits);
+  // A project that keeps a split area apart in its own copy keeps each of its parts apart too.
+  if (
+    areaSplits !== undefined &&
+    (changes.isolate ?? current.isolate).some((n) => areaSplits.some((s) => s.from === n))
+  )
+    changes.isolate = ProjectPatch.parse({
+      isolate: splitNames(changes.isolate ?? current.isolate, areaSplits),
+    }).isolate;
   const nudgePct = changes.nudgePct ?? current.nudgePct;
   const handoffPct = changes.handoffPct ?? current.handoffPct;
   if (nudgePct <= handoffPct) throw new InvalidError('nudgePct must be above handoffPct');
@@ -316,6 +385,7 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
       .set({ accountId: changes.accountId, updatedAt: ctx.now })
       .where(eq(schema.conversations.projectId, id))
       .run();
+  if (areaSplits !== undefined) retagSplitTasks(ctx, id, areaSplits);
   ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: id });
   return getProject(ctx.tx, id);
 }

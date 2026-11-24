@@ -162,6 +162,118 @@
               "reason"
             ]
           }
+        },
+        "splits": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "into": {
+                "minItems": 2,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]*$"
+                    },
+                    "globs": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "catchAll": {
+                      "type": "boolean"
+                    },
+                    "role": {
+                      "type": "string",
+                      "enum": [
+                        "page",
+                        "shared"
+                      ]
+                    },
+                    "route": {
+                      "type": "string",
+                      "maxLength": 500,
+                      "format": "starts_with",
+                      "pattern": "^\\/.*"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 40
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "globs"
+                  ]
+                }
+              },
+              "was": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*$"
+                  },
+                  "globs": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "catchAll": {
+                    "type": "boolean"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "page",
+                      "shared"
+                    ]
+                  },
+                  "route": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "format": "starts_with",
+                    "pattern": "^\\/.*"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  }
+                },
+                "required": [
+                  "name",
+                  "globs"
+                ]
+              },
+              "tasks": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "from",
+              "into",
+              "was",
+              "tasks"
+            ]
+          }
         }
       },
       "required": [
@@ -289,43 +401,10 @@
           }
         ]
       }
-    },
-    "branch": {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "branch": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200,
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
-            },
-            "ahead": {
-              "type": "integer",
-              "exclusiveMinimum": 0,
-              "maximum": 9007199254740991
-            },
-            "command": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          "required": [
-            "branch",
-            "ahead",
-            "command"
-          ]
-        },
-        {
-          "type": "null"
-        }
-      ]
     }
   },
   "required": [
     "areas",
-    "settings",
-    "branch"
+    "settings"
   ]
 }

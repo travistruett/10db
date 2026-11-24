@@ -21,6 +21,8 @@ export function WorkbenchSetupModal({
       onClose={onClose}
       title={`Suggestions for ${project.name}`}
       size="xl"
+      // What opened it (a menu item) may be gone; the opener puts focus back itself.
+      returnFocus={false}
       scrollAreaComponent={ScrollArea.Autosize}
     >
       {opened ? <WorkbenchSetup project={project} onCancel={onClose} onApplied={onClose} /> : null}

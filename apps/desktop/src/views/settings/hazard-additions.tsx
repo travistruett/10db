@@ -5,6 +5,7 @@ import {
   Code,
   Collapse,
   Group,
+  Loader,
   Stack,
   Text,
   Tooltip,
@@ -52,6 +53,14 @@ export function HazardLookStatus({
   );
   return (
     <>
+      {look.isPending ? (
+        <Group gap="xs" role="status">
+          <Loader size="xs" />
+          <Text size="sm" c="dimmed">
+            Reading the repository for lockfiles, migrations and the commands that change them…
+          </Text>
+        </Group>
+      ) : null}
       {look.data?.ok === true ? (
         <Text size="sm">
           {look.data.added === 0
