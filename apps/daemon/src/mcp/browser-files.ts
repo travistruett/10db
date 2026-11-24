@@ -8,6 +8,7 @@ import {
   readSync,
   unlinkSync,
   realpathSync,
+  type Stats,
   statSync,
   writeSync,
 } from 'node:fs';
@@ -94,7 +95,7 @@ export function readUploads(
     try {
       fd = openSync(resolved, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
+      const code = errorCode(error);
       return {
         refused: `${spelled}: ${code === 'ELOOP' ? 'a link is never uploaded' : code === 'ENOENT' ? 'no such file' : 'cannot be opened'}`,
       };
@@ -142,6 +143,19 @@ function readExactly(fd: number, size: number): Buffer | null {
 
 const SCREENS_DIR = '10db-screens';
 
+/** The `code` of a failed system call, undefined for anything else. */
+function errorCode(error: unknown): unknown {
+  return typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+}
+
+function lstatSyncOrNull(path: string): Stats | null {
+  try {
+    return lstatSync(path);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Writes `<tempDir>/10db-screens/<screenId>.png` without following a link; null with why when it can't.
  * The directory is a real one directly under the temp dir's real path, held by descriptor; the file is new
@@ -159,7 +173,7 @@ export function writeScreenCopy(
     try {
       mkdirSync(dir, { mode: 0o700 });
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (errorCode(error) !== 'EEXIST') throw error;
     }
     if (!lstatSync(dir).isDirectory())
       return { path: null, why: `${dir} is not a plain directory` };
@@ -176,11 +190,23 @@ export function writeScreenCopy(
         0o600,
       );
       try {
+        // The file was opened by path, which follows a directory the lane swapped for a link. Before a
+        // byte is written, the path must name this very file in the directory held by descriptor: a swap
+        // and swap back leaves the path without it. At worst an empty file stays where the link led.
         const now = lstatSync(dir);
         const made = fstatSync(fd);
-        if (now.dev !== held.dev || now.ino !== held.ino || made.dev !== held.dev) {
+        const named = lstatSyncOrNull(path);
+        const intact =
+          now.dev === held.dev &&
+          now.ino === held.ino &&
+          named !== null &&
+          named.isFile() &&
+          named.dev === made.dev &&
+          named.ino === made.ino &&
+          named.nlink === 1;
+        if (!intact) {
           closeSync(fd);
-          unlinkSync(path);
+          if (named !== null && named.ino === made.ino && named.dev === made.dev) unlinkSync(path);
           return { path: null, why: `${dir} changed while the copy was written` };
         }
         writeSync(fd, png);
