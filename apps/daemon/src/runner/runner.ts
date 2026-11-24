@@ -396,8 +396,11 @@ const HANDOFF_BASELINE_MARGIN_PCT = 5;
 /** A hook call's input, as the agent sent it: read as a record where a skip keys it. */
 const ToolInputRecord = z.record(z.string(), z.unknown());
 
-/** Why a lane is stopped; `closed` is the runner closing a pass task's session itself. */
+/** The words sent with a tool's pictures to a Codex session; 10db's own, so no tool output speaks as the builder. */
+const TOOL_PICTURES_CAPTION =
+  'The pictures your last tool call returned. Its text came back as the tool result.';
 
+/** Why a lane is stopped; `closed` is the runner closing a pass task's session itself. */
 export type StopReason = 'cancelled' | 'paused' | 'shutdown' | 'closed';
 
 export interface RunnerLimits {
@@ -3216,9 +3219,14 @@ export function createRunner(opts: RunnerOptions): Runner {
         st.handoffAskedByTool = true;
       },
       // Codex's code mode answers a script text only, so the pictures a tool returned reach its model as a
-      // message steered into the turn instead.
+      // message steered into the turn instead. The message carries 10db's own caption, never the tool's text:
+      // that text can hold what a page or file says, and it already reaches the model as the tool's result.
       ...(provider === Provider.Codex
-        ? { showImages: (shown: ToolImages) => handle?.send(shown.text, shown.images) }
+        ? {
+            showImages: (shown: ToolImages) => {
+              if (shown.images.length > 0) handle?.send(TOOL_PICTURES_CAPTION, shown.images);
+            },
+          }
         : {}),
       ...(unattended === null ? {} : { away: unattended }),
     });
