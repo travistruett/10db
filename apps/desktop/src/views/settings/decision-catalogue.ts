@@ -166,6 +166,16 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
     fellBack: 'read with the word list',
     mode: DecisionMode.Acting,
   },
+  [JudgeDecision.ReplyKind]: {
+    group: DecisionGroup.Stakeholders,
+    label: 'Reply Kind',
+    asks: "Whether a stakeholder's reply answers the question, asks something 10db can explain, needs you, or is chatter",
+    onAnswer:
+      'Answers or chatter are handled; a question 10db can explain is answered; anything else goes to you.',
+    whenUnsure: 'A question goes to you; anything else is read as an answer.',
+    fellBack: 'sorted by rule',
+    mode: DecisionMode.Acting,
+  },
 };
 
 /** The groups that hold at least one of `configured`, in the page's order, each with its decisions. */
