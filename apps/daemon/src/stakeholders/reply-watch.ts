@@ -23,6 +23,7 @@ import {
   type OpenSendRow,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
+import type { AnswerWriter } from './answer-writer';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Judge } from '../judge';
@@ -85,6 +86,8 @@ export interface ReplyWatchDeps {
   readonly clock: Clock;
   readonly log: Logger;
   readonly connections: SlackConnections;
+  /** Writes the answer to a simple question; a watch without one sends every question to the builder. */
+  readonly answerWriter?: AnswerWriter;
   /** Shared by every watch; saved after each tick. */
   readonly matched: MatchState;
   readonly intervalMs?: number;

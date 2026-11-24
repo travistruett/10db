@@ -438,6 +438,7 @@ import {
 } from './git-refusal';
 import { acquireInstanceLock } from './instance-lock';
 import { devUiToken, removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
+import { createAnswerWriter } from './answer-writer-launch';
 import { createAreaNamer } from './area-namer';
 import { systemListeners, type ListenerReader } from './listening-ports';
 import { loopbackProbe, type AddressProbe } from './loopback-probe';
@@ -2216,6 +2217,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // Slack tokens are kept by workspace: the old single item and contacts of no signed-in workspace go.
   if (slackClients !== null) cleanUpSlackSignIns({ state, keychain: judgeKeychain, log: logger });
   const slackConnections = createSlackConnections({ state, off: slackClients === null });
+  const answerWriter = createAnswerWriter({
+    adapter,
+    launcher,
+    db: state.db,
+    clock,
+    paused: (id) => accountPauses.pausedFor(id) !== null,
+    scratchRoot: tmpdir(),
+  });
   const replyWatches = createReplyWatches({
     state,
     slack: slackClients,
@@ -2225,6 +2234,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     clock,
     log: logger.child({ component: 'reply-watch' }),
     connections: slackConnections,
+    answerWriter,
   });
   // The timers need no Slack: a card comes back to the builder even while Slack is down.
   const timerWatch = createTimerWatch({
