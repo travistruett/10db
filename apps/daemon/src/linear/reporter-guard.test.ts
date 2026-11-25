@@ -182,6 +182,8 @@ describe('judgeReporterCall', () => {
       false,
     );
     expect(isLinearUploadUrl('not a url')).toBe(false);
+    const twice = `${signed()}&X-Goog-Credential=${encodeURIComponent('me@evil-project.iam.gserviceaccount.com/x')}`;
+    expect(isLinearUploadUrl(twice)).toBe(false);
   });
 
   it('withholds a body with a key, naming the pattern', () => {

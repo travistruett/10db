@@ -67,15 +67,37 @@ export function isLinearUploadUrl(raw: string): boolean {
   } catch {
     return false;
   }
+  // Each signing parameter appears exactly once, so storage can't read a different one than this check did.
+  const one = (name: string): string | null => {
+    const values = url.searchParams.getAll(name);
+    return values.length === 1 ? (values[0] ?? null) : null;
+  };
   return (
     url.protocol === 'https:' &&
     url.host === UPLOAD_HOST &&
     url.username === '' &&
     url.password === '' &&
     url.pathname.startsWith(UPLOAD_BUCKET_PREFIX) &&
-    (url.searchParams.get('X-Goog-Credential') ?? '').startsWith(LINEAR_SIGNER)
+    one('X-Goog-Algorithm') !== null &&
+    one('X-Goog-Signature') !== null &&
+    (one('X-Goog-Credential') ?? '').startsWith(LINEAR_SIGNER)
   );
 }
+
+/** The headers Linear signs or sets on an upload; any other header the agent passes is dropped. */
+const UPLOAD_HEADERS: ReadonlySet<string> = new Set([
+  'content-type',
+  'cache-control',
+  'content-disposition',
+]);
+
+const uploadHeaders = (headers: Readonly<Record<string, string>>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(headers).filter(([name]) => {
+      const lower = name.toLowerCase();
+      return UPLOAD_HEADERS.has(lower) || lower.startsWith('x-goog-');
+    }),
+  );
 
 export class LinearUploadError extends Error {
   override readonly name = 'LinearUploadError';
@@ -102,7 +124,7 @@ export async function uploadPicture(
   try {
     response = await send(input.uploadUrl, {
       method: 'PUT',
-      headers: { ...input.headers },
+      headers: uploadHeaders(input.headers),
       body: bytes,
       redirect: 'error',
       signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
