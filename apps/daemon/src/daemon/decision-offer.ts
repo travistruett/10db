@@ -43,9 +43,9 @@ export function defaultDecisionModel(
 }
 
 /**
- * The model the second opinion on limits starts on: a step up from the first judge's. On OpenRouter that is Claude's
- * Haiku over a System One model; on an Anthropic API key or Bedrock account, whose first judge is already its
- * Efficient model, it is the Balanced tier's. Null when the account lists no such model.
+ * The model the second opinion on limits starts on: on OpenRouter, the model the replay validated; on an Anthropic
+ * API key or Bedrock account, whose first judge is already its Efficient model, the Balanced tier's from its own list.
+ * Null when the account lists no such model.
  */
 export function defaultSecondOpinionModel(
   db: DbReader,
@@ -67,17 +67,19 @@ export function defaultModelFor(
 }
 
 /**
- * Moves the second opinion on limits to a model the Decisions account offers, when its stored model is one the
- * account doesn't list: a config saved before the decision existed reads with OpenRouter's default model. Writes
- * nothing for an OpenRouter account, whose ids are checked by calling them.
+ * Moves the second opinion on limits to a stronger model the Decisions account lists, when its stored model is the
+ * first judge's own (a config saved before the decision existed reads with it) or, on an Anthropic API key or Bedrock
+ * account, one the account doesn't list. Writes nothing when the account lists no such model.
  */
 export function settleSecondOpinionModel(ctx: WriteContext, account: AccountRow | undefined): void {
   if (account === undefined || account.archived) return;
+  const { decisions } = getJudgeConfig(ctx.tx);
+  const stored = decisions[JudgeDecision.CrossesLimitSecond].model;
   const offered = offeredDecisionModels(ctx.tx, account);
-  const stored = getJudgeConfig(ctx.tx).decisions[JudgeDecision.CrossesLimitSecond].model;
-  if (offered === null || offered.size === 0 || offered.has(stored)) return;
+  const sameAsFirst = stored === decisions[JudgeDecision.CrossesLimit].model;
+  if (!sameAsFirst && (offered === null || offered.has(stored))) return;
   const model = defaultSecondOpinionModel(ctx.tx, account);
-  if (model === null) return;
+  if (model === null || model === stored) return;
   patchJudgeConfig(ctx, { decisions: { [JudgeDecision.CrossesLimitSecond]: { model } } });
 }
 

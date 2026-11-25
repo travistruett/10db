@@ -3,7 +3,6 @@ export {
   JUDGE_LOG_RETENTION_MS,
   type AssessAnswer,
   type AssessReading,
-  type AssessRequest,
   type Judge,
   type JudgeAnswer,
   type JudgeRequest,

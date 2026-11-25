@@ -85,7 +85,11 @@ const shapeDecision = (): z.ZodDefault<typeof JudgeDecisionConfig> =>
  */
 const LIMITS_FLOOR = 0.7;
 
-/** The model a second opinion on limits starts on for an OpenRouter account: a step up from a System One model. */
+/**
+ * The model the second opinion on limits starts on for an OpenRouter account: the one a replay of real lane calls
+ * and dangerous controls showed settles them (`decisions/2026-11-24-the-limits-judge-asks-a-question-per-limit.md`).
+ * A safety judge's default is a model shown to work, not whatever a tier resolves to on the account.
+ */
 export const OPENROUTER_SECOND_OPINION_MODEL = 'anthropic/claude-haiku-5.5';
 
 const SECOND_OPINION_DECISION: JudgeDecisionConfig = {

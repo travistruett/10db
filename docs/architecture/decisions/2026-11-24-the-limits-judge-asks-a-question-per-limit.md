@@ -39,8 +39,12 @@ mode. Both judges run on the Decisions account, so every kind of lane gets the s
   Today's question, replayed, runs 78 of the 188. Showing the model the first lines of a script the call runs made
   no difference, so the judge reads nothing from disk.
 
+- The OpenRouter default is named rather than taken from the account's tiers. On the builder's account the
+  Efficient tier resolved to `openai/gpt-6-luna`, which in the same replay skipped 9 routine calls and let 2
+  controls through, a production migration among them.
 - **Turned down:**
   - Keeping the question and adding a second opinion below the floor. That re-asks a stronger model a question the
     first had mostly answered.
   - A provider's classifier as the second judge, which doesn't exist where 10db's judge runs.
   - Lowering the floor, which would let truly unclear calls run.
+  - The account's tier model as the OpenRouter default, for the reason above.
