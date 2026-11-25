@@ -1,5 +1,5 @@
 import type { ChatDto, ConversationDto } from '@10db/contracts';
-import { ActionIcon, Box, Button, Menu, TextInput, Tooltip } from '@mantine/core';
+import { ActionIcon, Box, Button, Menu, Text, TextInput, Tooltip } from '@mantine/core';
 import { IconDots, IconLayoutSidebarRight } from '@tabler/icons-react';
 import { useRef, useState, type ReactNode } from 'react';
 import { OWNS_ESCAPE_ATTRIBUTE } from '../../conversation/escape';
@@ -117,9 +117,20 @@ export function SessionTitle({
 }: SessionTitleProps) {
   const [typing, setEditing] = useState(false);
   const [askedHere, setAskedHere] = useState(false);
-  // Mock-up only: held in the view until the chat row carries it.
-  const [fullAccess, setFullAccess] = useState(false);
+  const patch = usePatchChat();
+  const fullAccess = chat.fullAccess;
   const [confirmingFullAccess, setConfirmingFullAccess] = useState(false);
+  const setFullAccess = (on: boolean): void => {
+    patch.mutate({ chatId: chat.id, fullAccess: on });
+  };
+  // Not offered once the work moved to a task or the chat is in the terminal; a running turn waits.
+  const offersFullAccess =
+    chat.taskId === null && conversation.state !== 'sealed' && conversation.state !== 'taken_over';
+  const turnRunning =
+    conversation.state === 'starting' ||
+    conversation.state === 'running' ||
+    conversation.state === 'waiting_card' ||
+    conversation.state === 'stopping';
   const editing = typing || renaming;
   // Only a session the agent can take to a terminal, and not one in it already or sealed.
   const offersTerminal = projectPath !== null && canOpenTerminal(conversation);
@@ -150,8 +161,14 @@ export function SessionTitle({
               setFullAccess(true);
             }}
           />
-          {fullAccess ? (
+          {patch.isError ? (
+            <Text size="xs" c="red" role="alert">
+              {patch.error.message}
+            </Text>
+          ) : null}
+          {fullAccess && offersFullAccess ? (
             <FullAccessBadge
+              disabled={turnRunning}
               onTurnOff={() => {
                 setFullAccess(false);
               }}
@@ -198,11 +215,16 @@ export function SessionTitle({
                   onRename: () => {
                     setEditing(true);
                   },
-                  fullAccess,
-                  onToggleFullAccess: () => {
-                    if (fullAccess) setFullAccess(false);
-                    else setConfirmingFullAccess(true);
-                  },
+                  ...(offersFullAccess
+                    ? {
+                        fullAccess,
+                        fullAccessBusy: turnRunning,
+                        onToggleFullAccess: () => {
+                          if (fullAccess) setFullAccess(false);
+                          else setConfirmingFullAccess(true);
+                        },
+                      }
+                    : {}),
                   // Open in Terminal is the terminal button beside this menu, so the menu leaves it out.
                 }}
               />

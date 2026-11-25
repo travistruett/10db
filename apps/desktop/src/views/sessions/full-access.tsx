@@ -2,7 +2,14 @@ import { Badge, Button, Group, List, Menu, Modal, Text, Tooltip } from '@mantine
 import { IconShieldOff } from '@tabler/icons-react';
 
 /** The title row's mark while a chat has Full access; its menu turns it off. */
-export function FullAccessBadge({ onTurnOff }: { readonly onTurnOff: () => void }) {
+export function FullAccessBadge({
+  onTurnOff,
+  disabled = false,
+}: {
+  readonly onTurnOff: () => void;
+  /** A turn is running: the change waits for it to end. */
+  readonly disabled?: boolean;
+}) {
   return (
     <Menu position="bottom-end" withinPortal>
       <Tooltip
@@ -25,7 +32,9 @@ export function FullAccessBadge({ onTurnOff }: { readonly onTurnOff: () => void 
         </Menu.Target>
       </Tooltip>
       <Menu.Dropdown>
-        <Menu.Item onClick={onTurnOff}>Turn Off Full Access</Menu.Item>
+        <Menu.Item disabled={disabled} onClick={onTurnOff}>
+          {disabled ? 'Waits for the Turn to End' : 'Turn Off Full Access'}
+        </Menu.Item>
       </Menu.Dropdown>
     </Menu>
   );
@@ -55,9 +64,11 @@ export function FullAccessConfirm({ opened, agent, onCancel, onConfirm }: FullAc
           No 10db sandbox: it can write anywhere you can, run any command and reach any host.
         </List.Item>
         <List.Item>Your own settings, hooks, skills and MCP servers load.</List.Item>
+        <List.Item>This project’s own settings, hooks and MCP servers load and run too.</List.Item>
         <List.Item>
           It still asks before a force push, a production deploy or deleting files it didn’t make.
         </List.Item>
+        {agent === 'Codex' ? <List.Item>Your ~/.codex settings don’t load yet.</List.Item> : null}
       </List>
       <Text size="sm" c="dimmed" mt="sm">
         Board tasks are never affected. It starts with your next message and stays on for this chat
