@@ -2,13 +2,22 @@ import {
   AccountKind,
   DEFAULT_JUDGE_CONFIG,
   isModelTier,
+  JudgeDecision,
   ModelTier,
+  OPENROUTER_SECOND_OPINION_MODEL,
   Provider,
   StepRole,
   type AccountModelDto,
   type DecisionModelDto,
 } from '@10db/contracts';
-import { listAccountModels, type AccountRow, type DbReader } from '@10db/db';
+import {
+  getJudgeConfig,
+  listAccountModels,
+  patchJudgeConfig,
+  type AccountRow,
+  type DbReader,
+  type WriteContext,
+} from '@10db/db';
 import { chooseModel } from '../routing';
 import { routingInputs } from '../team';
 
@@ -30,6 +39,54 @@ export function defaultDecisionModel(
   account: Pick<AccountRow, 'id' | 'kind'>,
 ): string | null {
   if (account.kind === AccountKind.OpenRouter) return OPENROUTER_DEFAULT_MODEL;
+  return tierModel(db, account, ModelTier.Efficient);
+}
+
+/**
+ * The model the second opinion on limits starts on: a step up from the first judge's. On OpenRouter that is Claude's
+ * Haiku over a System One model; on an Anthropic API key or Bedrock account, whose first judge is already its
+ * Efficient model, it is the Balanced tier's. Null when the account lists no such model.
+ */
+export function defaultSecondOpinionModel(
+  db: DbReader,
+  account: Pick<AccountRow, 'id' | 'kind'>,
+): string | null {
+  if (account.kind === AccountKind.OpenRouter) return OPENROUTER_SECOND_OPINION_MODEL;
+  return tierModel(db, account, ModelTier.Balanced);
+}
+
+/** The model each decision starts on when Decisions move to the account. */
+export function defaultModelFor(
+  db: DbReader,
+  account: Pick<AccountRow, 'id' | 'kind'>,
+  decision: string,
+): string | null {
+  return decision === JudgeDecision.CrossesLimitSecond
+    ? (defaultSecondOpinionModel(db, account) ?? defaultDecisionModel(db, account))
+    : defaultDecisionModel(db, account);
+}
+
+/**
+ * Moves the second opinion on limits to a model the Decisions account offers, when its stored model is one the
+ * account doesn't list: a config saved before the decision existed reads with OpenRouter's default model. Writes
+ * nothing for an OpenRouter account, whose ids are checked by calling them.
+ */
+export function settleSecondOpinionModel(ctx: WriteContext, account: AccountRow | undefined): void {
+  if (account === undefined || account.archived) return;
+  const offered = offeredDecisionModels(ctx.tx, account);
+  const stored = getJudgeConfig(ctx.tx).decisions[JudgeDecision.CrossesLimitSecond].model;
+  if (offered === null || offered.size === 0 || offered.has(stored)) return;
+  const model = defaultSecondOpinionModel(ctx.tx, account);
+  if (model === null) return;
+  patchJudgeConfig(ctx, { decisions: { [JudgeDecision.CrossesLimitSecond]: { model } } });
+}
+
+/** The launch id of the account's model for `tier`, as routing resolves tiers; null when it lists none. */
+function tierModel(
+  db: DbReader,
+  account: Pick<AccountRow, 'id' | 'kind'>,
+  tier: ModelTier,
+): string | null {
   const models = listed(db, account);
   if (models.length === 0) return null;
   const choice = chooseModel({
@@ -39,7 +96,7 @@ export function defaultDecisionModel(
     effort: null,
     fallback: null,
     pinned: false,
-    task: { modelSetting: { kind: 'tier', tier: ModelTier.Efficient }, effortPin: null },
+    task: { modelSetting: { kind: 'tier', tier }, effortPin: null },
     project: { budgetCeiling: null },
     byScore: false,
   });

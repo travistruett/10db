@@ -63,8 +63,17 @@ async function start(
     keychain: createMemoryKeychain(),
     fetch: (input) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      // The second opinion's model is a chat model on OpenRouter; it answers the test decision there.
+      if (url.endsWith('/chat/completions'))
+        return Promise.resolve(
+          Response.json({
+            model: 'anthropic/claude-haiku-5.5',
+            choices: [{ message: { content: '{"choice":"review","confidence":0.9}' } }],
+            usage: { cost: 0 },
+          }),
+        );
       // The test decision a switch of decisions' account asks.
-      if (url.endsWith('/systemone'))
+      if (url.endsWith('/systemone') || url.endsWith('/alpha/decisions'))
         return Promise.resolve(
           Response.json({
             model: 'typesafe/jev-1.13',

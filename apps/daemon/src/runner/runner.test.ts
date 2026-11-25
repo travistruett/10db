@@ -4250,13 +4250,17 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
 
   describe("a lane on 10db's judge", () => {
     let states: string[];
-    /** What 10db's judge's model answers for a state: a choice, or `fail` for an HTTP failure. */
+    /**
+     * What 10db's judge's model answers for a state: `allow` (every limit unlikely), a limit's name (that one
+     * likely), or `fail` for an HTTP failure.
+     */
     let answer: (state: string) => string;
     const judgeFetch: typeof fetch = (_input, init) => {
       const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
-        state?: string;
+        state?: unknown;
+        questions?: Record<string, unknown>;
       };
-      const state = body.state ?? '';
+      const state = JSON.stringify(body.state ?? '');
       states.push(state);
       const choice = answer(state);
       if (choice === 'fail') return Promise.resolve(new Response('{}', { status: 500 }));
@@ -4264,14 +4268,12 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         new Response(
           JSON.stringify({
             model: 'typesafe/jev-1.13',
-            answers: {
-              decision: {
-                type: 'choice',
-                choice,
-                confidence: 0.95,
-                probabilities: { [choice]: 0.95 },
-              },
-            },
+            answers: Object.fromEntries(
+              Object.keys(body.questions ?? {}).map((id) => [
+                id,
+                { type: 'noul', noul: id === choice ? 0.95 : 0.02 },
+              ]),
+            ),
             usage: { cost: 0 },
           }),
           { status: 200, headers: { 'content-type': 'application/json' } },
@@ -4477,7 +4479,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         hunk: 'delete',
       });
       expect(states).toHaveLength(1);
-      expect(states[0]).toContain('Patch: deletes the file');
+      expect(states[0]).toContain('"patch":"deletes the file"');
       answer = () => 'writes_live';
       await hook(spec, judgeCall, bash('vercel deploy --prod', 'call_1'));
       expect(skipsOf(workstream.id).map((s) => s.source)).toEqual(['tendb_judge']);

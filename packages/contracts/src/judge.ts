@@ -36,6 +36,8 @@ export const JudgeDecision = {
   TaskKinds: 'task_kinds',
   /** Trust: does a tool call cross one of the four limits, where Claude Code's auto mode doesn't judge it? */
   CrossesLimit: 'crosses_limit',
+  /** Trust: the same questions, asked of a stronger model, for a call the limits judge left between yes and no. */
+  CrossesLimitSecond: 'crosses_limit_second',
   /** Delivery: does a test a step added earn its place, or duplicate or fold into one that exists? */
   TestValue: 'test_value',
 } as const;
@@ -77,6 +79,21 @@ const DEFAULT_DECISION: JudgeDecisionConfig = {
 const shapeDecision = (): z.ZodDefault<typeof JudgeDecisionConfig> =>
   JudgeDecisionConfig.default({ ...DEFAULT_DECISION });
 
+/**
+ * The limits decisions read their floor both ways: a limit at or above it skips the call, and every limit under
+ * one minus it runs the call.
+ */
+const LIMITS_FLOOR = 0.7;
+
+/** The model a second opinion on limits starts on for an OpenRouter account: a step up from a System One model. */
+export const OPENROUTER_SECOND_OPINION_MODEL = 'anthropic/claude-haiku-5.5';
+
+const SECOND_OPINION_DECISION: JudgeDecisionConfig = {
+  enabled: true,
+  model: OPENROUTER_SECOND_OPINION_MODEL,
+  floor: LIMITS_FLOOR,
+};
+
 export const JudgeConfig = z.object({
   enabled: z.boolean(),
   /** The OpenRouter, Anthropic API key or Bedrock account decisions run on; null until the builder picks one. */
@@ -92,6 +109,7 @@ export const JudgeConfig = z.object({
     [JudgeDecision.TaskRigor]: shapeDecision(),
     [JudgeDecision.TaskKinds]: shapeDecision(),
     [JudgeDecision.CrossesLimit]: shapeDecision(),
+    [JudgeDecision.CrossesLimitSecond]: JudgeDecisionConfig.default({ ...SECOND_OPINION_DECISION }),
     [JudgeDecision.TestValue]: shapeDecision(),
   }),
 });
@@ -113,7 +131,8 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
     [JudgeDecision.ReplyKind]: { ...DEFAULT_DECISION },
     [JudgeDecision.TaskRigor]: { ...DEFAULT_DECISION },
     [JudgeDecision.TaskKinds]: { ...DEFAULT_DECISION },
-    [JudgeDecision.CrossesLimit]: { ...DEFAULT_DECISION },
+    [JudgeDecision.CrossesLimit]: { ...DEFAULT_DECISION, floor: LIMITS_FLOOR },
+    [JudgeDecision.CrossesLimitSecond]: { ...SECOND_OPINION_DECISION },
     [JudgeDecision.TestValue]: { ...DEFAULT_DECISION },
   },
 };
@@ -164,6 +183,7 @@ export const JudgeConfigPatch = z
         [JudgeDecision.TaskRigor]: JudgeDecisionConfigPatch,
         [JudgeDecision.TaskKinds]: JudgeDecisionConfigPatch,
         [JudgeDecision.CrossesLimit]: JudgeDecisionConfigPatch,
+        [JudgeDecision.CrossesLimitSecond]: JudgeDecisionConfigPatch,
         [JudgeDecision.TestValue]: JudgeDecisionConfigPatch,
       })
       .partial()
@@ -192,6 +212,8 @@ export const JudgeCallDto = z.object({
   question: z.string(),
   answer: z.string().nullable(),
   confidence: z.number().nullable(),
+  /** Each question's probability of yes, for a decision that asks several yes/no questions; null for a choice. */
+  probabilities: z.record(z.string(), z.number()).nullable(),
   outcome: z.enum(JudgeOutcome),
   latencyMs: z.number().nullable(),
   costUsd: z.number().nullable(),

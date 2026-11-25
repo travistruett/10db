@@ -3,9 +3,9 @@ import type { AddressInfo } from 'node:net';
 import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
 import { AccountKind } from '@10db/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
-import { askModel, type ModelQuestion } from './ask';
+import { askModel, askModelNouls, type ModelNouls, type ModelQuestion } from './ask';
 import { JudgeCallError } from './credential';
-import { ModelApi } from './openrouter';
+import { ModelApi, OpenRouterError } from './openrouter';
 
 // Bedrock's runtime client speaks HTTP/2, so the stand-in runtime does too (cleartext, on loopback).
 // Value: protects=the request shape and answer parse of a decision on an Anthropic key or Bedrock; fails_when=the schema loses its option enum, the choice is not matched to an offered option, or a malformed answer is accepted; why_new=core: these answers decide crosses_limit; no_claim=a live call to either API succeeds
@@ -128,5 +128,73 @@ describe('a Bedrock account', () => {
     expect(answer).toMatchObject({ choice: 'review', confidence: 0.8, costUsd: null });
     text = '{"choice":"review"}';
     await expect(askModel(question)).rejects.toBeInstanceOf(JudgeCallError);
+  });
+});
+
+describe('yes/no questions', () => {
+  const questions = {
+    destroys_data: {
+      instructions: 'Does `call` destroy data?',
+      criteria: { true: 'yes', false: 'no' },
+    },
+    writes_live: {
+      instructions: 'Does `call` change a live system?',
+      criteria: { true: 'yes', false: 'no' },
+    },
+  };
+  const asked = {
+    model: 'claude-haiku-4-5',
+    api: ModelApi.Chat,
+    state: { call: { tool: 'Bash', input: { command: 'pnpm test' } } },
+    questions,
+    signal: new AbortController().signal,
+    fetch,
+  } as const satisfies Omit<ModelNouls, 'credential'>;
+
+  // A low number lets a call run, so an answer that leaves a question out or strays from 0..1 fails the call.
+  it('read every probability, and refuse an answer missing one or out of range, on a Messages body and on System One', async () => {
+    const anthropic = (text: string): Promise<unknown> =>
+      askModelNouls({
+        ...asked,
+        credential: { kind: AccountKind.AnthropicApiKey, key: 'sk-ant-test' },
+        fetch: () => Promise.resolve(new Response(answerBody(text), { status: 200 })),
+      });
+    await expect(anthropic('{"destroys_data":0.1,"writes_live":0.2}')).resolves.toMatchObject({
+      probabilities: { destroys_data: 0.1, writes_live: 0.2 },
+    });
+    await expect(anthropic('{"destroys_data":0.1}')).rejects.toBeInstanceOf(JudgeCallError);
+    await expect(anthropic('{"destroys_data":0.1,"writes_live":-3}')).rejects.toBeInstanceOf(
+      JudgeCallError,
+    );
+    await expect(anthropic('{"destroys_data":0.1,"writes_live":1.5}')).rejects.toBeInstanceOf(
+      JudgeCallError,
+    );
+
+    const systemOne = (answers: Record<string, unknown>): Promise<unknown> =>
+      askModelNouls({
+        ...asked,
+        model: 'typesafe/jev-1.14',
+        api: ModelApi.SystemOne,
+        credential: { kind: AccountKind.OpenRouter, key: 'router-key' },
+        fetch: () =>
+          Promise.resolve(
+            new Response(JSON.stringify({ model: 'typesafe/jev-1.14', answers }), { status: 200 }),
+          ),
+      });
+    await expect(
+      systemOne({
+        destroys_data: { type: 'noul', noul: 0.1 },
+        writes_live: { type: 'noul', noul: 0.2 },
+      }),
+    ).resolves.toMatchObject({ probabilities: { destroys_data: 0.1, writes_live: 0.2 } });
+    await expect(systemOne({ destroys_data: { type: 'noul', noul: 0.1 } })).rejects.toBeInstanceOf(
+      OpenRouterError,
+    );
+    await expect(
+      systemOne({
+        destroys_data: { type: 'noul', noul: 0.1 },
+        writes_live: { type: 'noul', noul: -0.5 },
+      }),
+    ).rejects.toBeInstanceOf(OpenRouterError);
   });
 });

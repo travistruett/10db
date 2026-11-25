@@ -1,0 +1,1 @@
+ALTER TABLE `judge_calls` ADD `probabilities` text;

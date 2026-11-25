@@ -29,6 +29,7 @@ import {
 } from '@10db/db';
 import {
   defaultDecisionModel,
+  defaultModelFor,
   offeredDecisionModels,
   accountDecisionModelList,
 } from './decision-offer';
@@ -121,15 +122,17 @@ function switchedTo(
     account,
     Object.values(named).flatMap((c) => (c?.model === undefined ? [] : [c.model])),
   );
-  const fallback = defaultDecisionModel(db, account);
-  if (fallback === null)
+  if (defaultDecisionModel(db, account) === null)
     throw new InvalidError(
       `"${account.label}" has no model list yet; check the account in Settings › Accounts first`,
     );
   const decisions = Object.fromEntries(
     Object.keys(config.decisions).map((decision) => [
       decision,
-      { ...named[decision], model: named[decision]?.model ?? fallback },
+      {
+        ...named[decision],
+        model: named[decision]?.model ?? defaultModelFor(db, account, decision) ?? undefined,
+      },
     ]),
   );
   return JudgeConfigPatch.parse({ ...patch, decisions });

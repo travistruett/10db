@@ -15,6 +15,7 @@ import {
   insertTrustGrant,
   insertWorkstream,
   listSkipsForWorkstream,
+  patchJudgeConfig,
   schema,
   seedProject,
   type Store,
@@ -41,13 +42,38 @@ const json = (body: unknown): Response =>
     headers: { 'content-type': 'application/json' },
   });
 
-const answering = (choice: string, p: number) => ({
+/**
+ * A System One answer to the limits questions `ids` that reads as `choice`: `allow` puts every limit at 1 − `p`, a
+ * limit's name puts that one at `p` and the rest near zero, and `unsure` puts every limit between yes and no.
+ */
+const answering = (choice: string, p: number, ids: readonly string[]) => ({
   id: 'gen-1',
   model: 'typesafe/jev-1.13-20260917',
   provider: 'TypeSafe',
-  answers: { decision: { type: 'choice', choice, confidence: p, probabilities: { [choice]: p } } },
+  answers: Object.fromEntries(
+    ids.map((id) => [
+      id,
+      {
+        type: 'noul',
+        noul:
+          id === 'builder_allowed'
+            ? 0
+            : choice === 'allow'
+              ? 1 - p
+              : choice === 'unsure'
+                ? 0.5
+                : id === choice
+                  ? p
+                  : 0.02,
+      },
+    ]),
+  ),
   usage: { input_tokens: 300, output_tokens: 10, cost: 0.00002 },
 });
+
+/** What a call both judges leave between yes and no is stopped with: every limit even, the first listed named. */
+const UNSETTLED =
+  "10db's judges couldn't settle this call (Destroying Data It Didn't Create, 50% likely)";
 
 type Model = { readonly choice: string; readonly p: number } | 'no_key' | 'timeout' | null;
 
@@ -74,6 +100,12 @@ beforeEach(() => {
   writeFileSync(join(checkout, 'src', 'a.ts'), 'export {};\n');
   ({ store, close } = createTestStore());
   state = createStateStore(store, createEventBus());
+  // The fake answers as a System One model, so the second opinion runs on one too.
+  state.write((ctx) =>
+    patchJudgeConfig(ctx, {
+      decisions: { crosses_limit_second: { model: 'typesafe/jev-1.13' } },
+    }),
+  );
   clock = new ManualClock();
   sent = [];
   model = { choice: 'allow', p: 0.95 };
@@ -92,9 +124,10 @@ function judge() {
     clock,
     fetch: (_input, init) => {
       const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
-        state?: string;
+        state?: unknown;
+        questions?: Record<string, unknown>;
       };
-      sent.push(body.state ?? '');
+      sent.push(JSON.stringify(body.state ?? ''));
       if (model === 'timeout')
         return new Promise<Response>((_resolve, reject) => {
           init?.signal?.addEventListener('abort', () => {
@@ -102,7 +135,9 @@ function judge() {
           });
         });
       if (model === null || model === 'no_key') throw new Error('no request was expected');
-      return Promise.resolve(json(answering(model.choice, model.p)));
+      return Promise.resolve(
+        json(answering(model.choice, model.p, Object.keys(body.questions ?? {}))),
+      );
     },
     readCredential: () =>
       Promise.resolve(model === 'no_key' ? null : { kind: 'openrouter', key: 'router-key-0123' }),
@@ -166,6 +201,7 @@ function hookJudge(
         devAccess: { docker: false, localhost: false, compose: null },
       }),
       allowLines: () => grants,
+      builderNotes: [],
       judgeNow: () => opts.now ?? JudgeKind.Tendb,
       coveredByBuilderRule: (req) =>
         allowedCommand !== null &&
@@ -252,9 +288,9 @@ describe('the hook judge, attended', () => {
       { choice: 'unsure', p: 0.7 },
       {
         decision: 'ask',
-        reason: "10db's judge asks the builder: 10db's judge wasn't sure this is safe",
+        reason: `10db's judge asks the builder: ${UNSETTLED}`,
       },
-      { limit: null, reason: "10db's judge wasn't sure this is safe" },
+      { limit: null, reason: UNSETTLED },
     ],
     [
       'AskUserQuestion',
@@ -279,7 +315,10 @@ describe('the hook judge, attended', () => {
   ])('%s', async (_name, now, req, answer, verdict, noted) => {
     model = answer;
     expect(await run(hookJudge({ now }), req)).toEqual(verdict);
-    expect(sent).toHaveLength(answer === null ? 0 : 1);
+    // A call left between yes and no is asked again of the second opinion.
+    expect(sent).toHaveLength(
+      answer === null ? 0 : typeof answer === 'object' && answer.choice === 'unsure' ? 2 : 1,
+    );
     expect(limits.take('toolu_1')).toEqual(noted);
   });
 
@@ -454,7 +493,9 @@ describe('the hook judge, attended', () => {
     grants = [grant];
     await run(judgeCall, bash('pnpm test'));
     grants = [];
+    // The first call's verdict was reached without the grant, so it stands; a new call is judged without it.
     await run(judgeCall, bash('pnpm test'));
+    await run(judgeCall, bash('pnpm build'));
     expect(sent.map((s) => s.includes(grant))).toEqual([false, true, false]);
   });
 

@@ -36,7 +36,14 @@ const decisionModel = {
 };
 
 function answer(url: string): Response {
-  if (url.endsWith('/systemone'))
+  // The second opinion's model is a chat model on OpenRouter; it answers the test decision there.
+  if (url.endsWith('/chat/completions'))
+    return Response.json({
+      model: 'anthropic/claude-haiku-5.5',
+      choices: [{ message: { content: '{"choice":"review","confidence":0.9}' } }],
+      usage: { cost: 0 },
+    });
+  if (url.endsWith('/systemone') || url.endsWith('/alpha/decisions'))
     return Response.json({
       model: 'typesafe/jev-1.13',
       answers: {

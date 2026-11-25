@@ -142,6 +142,10 @@ export function outcomeText(
     const said = limitOutcomeText(call);
     if (said !== null) return said;
   }
+  if (call.decision === JudgeDecision.CrossesLimitSecond) {
+    const said = secondOpinionText(call);
+    if (said !== null) return said;
+  }
   switch (call.outcome) {
     case JudgeOutcome.Acted:
       if (call.answer === 'skip') return 'Skipped the review';
@@ -168,7 +172,17 @@ const AUTO_MODE_MODEL = 'claude-code-auto-mode';
 /** A limits call's outcome where it reads differently from the others; null where it doesn't. */
 function limitOutcomeText(call: Pick<JudgeCallDto, 'outcome' | 'answer' | 'model'>): string | null {
   if (call.model === AUTO_MODE_MODEL) return 'Auto mode stopped it';
-  if (call.outcome === JudgeOutcome.BelowFloor) return 'Not sure enough; treated as a limit';
+  if (call.outcome === JudgeOutcome.BelowFloor)
+    return 'Between yes and no; asked the second opinion';
+  if (call.outcome === JudgeOutcome.Acted)
+    return call.answer === 'allow' ? 'Allowed' : 'Stopped at a Limit';
+  return null;
+}
+
+/** A second opinion's outcome: it settles the call, or neither judge could and it was stopped. */
+function secondOpinionText(call: Pick<JudgeCallDto, 'outcome' | 'answer'>): string | null {
+  if (call.outcome === JudgeOutcome.BelowFloor)
+    return "Couldn't settle it either; stopped the call";
   if (call.outcome === JudgeOutcome.Acted)
     return call.answer === 'allow' ? 'Allowed' : 'Stopped at a Limit';
   return null;

@@ -214,6 +214,13 @@ const judging = (kind: ReplyKind, confidence: number): Judge => ({
       costUsd: null,
       callId: mintId('JudgeCall'),
     }),
+  assess: () =>
+    Promise.resolve({
+      kind: 'fallback',
+      reason: 'off',
+      detail: 'off',
+      callId: mintId('JudgeCall'),
+    }),
 });
 
 const answering =

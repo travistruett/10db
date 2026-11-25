@@ -51,6 +51,13 @@ const keepAll: Judge = {
       callId: mintId('JudgeCall'),
     });
   },
+  assess: () =>
+    Promise.resolve({
+      kind: 'fallback',
+      reason: 'off',
+      detail: 'off',
+      callId: mintId('JudgeCall'),
+    }),
 };
 
 function judgeFor(apiKey: string): Judge {

@@ -250,11 +250,20 @@ export function revertedWorkNotice(revert: string): Notice {
  * that can commit is asked to redo the work; a read-only step can't, so it is told only what happened,
  * and the implement step gets the full note when the run enters it (`actionEntering`).
  */
+/** How a revert note opens; a Retry joins it after the builder's own words in one note. */
+const REVERTED_NOTE_OPENING = "Your earlier commits on this batch's branch were reverted:";
+
 export function revertedWorkNote(revert: string, step: Pick<WorkstreamStep, 'tools'>): string {
-  const undone = `Your earlier commits on this batch's branch were reverted: the builder chose Ship without it after this run failed, and 10db undid them in commit ${revert}. They are not in the branch's files now.`;
+  const undone = `${REVERTED_NOTE_OPENING} the builder chose Ship without it after this run failed, and 10db undid them in commit ${revert}. They are not in the branch's files now.`;
   const next =
     step.tools === ToolAccess.ReadOnly
       ? `This work still has to be done again, and the step that can commit is told so when it runs. The reverted commits are still in the branch's history, so \`git show ${revert}\` lists them and you can read what they changed.`
       : `Redo the work and commit it with the commit tool; the reverted commits are still in the branch's history, so \`git show ${revert}\` lists them and you can read what they changed. A run that commits nothing new is left out of the pull request as not done.`;
   return [undone, next, revertCommitLine(revert)].join('\n\n');
+}
+
+/** A builder note without the revert note 10db joined to it: only the builder's own words. */
+export function withoutRevertNote(note: string): string {
+  const at = note.indexOf(REVERTED_NOTE_OPENING);
+  return (at < 0 ? note : note.slice(0, at)).trim();
 }
