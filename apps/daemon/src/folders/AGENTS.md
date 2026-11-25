@@ -10,3 +10,10 @@
   (`propose-areas.ts`) and the setup's structural areas no task names are split in place; a kept area open tasks
   name is offered as a `SplitRow` the builder ticks, and Apply's `areaSplits` retags its open tasks in the same
   write (`packages/db/AGENTS.md`). New folders under a split root fall to the catch-all.
+- `committed-file.ts` (`readCommitted`) reads a repository file for 10db's judge (`trust/call-runs.ts`): its text at
+  `refs/remotes/origin/<base>` (`Git.bytesAt`, then `fileAt` to tell a missing path from a link or one over 256
+  KiB), given only while the checkout holds the same bytes at that path. The checkout's side finds each part of the
+  path by its exact name in its folder's listing and `lstat`s it, so a link anywhere on the path, or a name only
+  another case of which is there (the Mac opens `gnumakefile` for `GNUmakefile`), is `differs`. A path in neither
+  is `absent`; anything else, a git error included, is `differs`. It never throws.
+  `dev-services.ts` (`readComposeServices`) reads the compose files at the same base for the judge's environment.

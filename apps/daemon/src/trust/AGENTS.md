@@ -22,6 +22,19 @@
 - The hook judge that runs them is `inbox/hook-judge.ts` (`createHookJudge`, `LimitNotes`); the card a noted limit
   raises is `inbox/limit-card.ts`, with the three answers, and Always in this project stores a grant in the
   answer's write (`inbox/service.ts`).
+- `call.runs`: for a shell call the hook judge shows 10db's judge the committed text of what it runs
+  (`call-runs.ts`, `callRuns`; `decisions/2026-11-25-the-judge-reads-the-committed-code-a-call-runs.md`): the rules of
+  the make targets it names (`make [-C dir] target`, with their prerequisites, `$(MAKE)` calls and the scripts on their
+  recipe lines, and the variables the recipes use) and repository scripts named by a path or after an interpreter,
+  whole. Files come through `HookJudgeContext.readCommitted` (`folders/committed-file.ts`): `origin/<base>`'s text only
+  where the checkout holds the same bytes, so a script the lane changed or created is judged as before, without its
+  text. Bounded: `RUNS_MAX_DEPTH` 3, `RUNS_MAX_READS` 12, `RUNS_MAX_SCRIPT_BYTES` 16 KiB (a larger script is not shown,
+  never cut), `RUNS_MAX_CHARS` 24,000. `crossesLimit` adds `about_runs` and `call.runs` only when there is something
+  to show. The runs are in the hook judge's verdict key, so an edit to a script judges its call again. Claude's auto
+  mode and Codex's Auto-review don't see this text; a native session's calls they judge run as before.
+  `make-rules.ts` (`parseRules`, `within`, `MAKEFILE_NAMES`) is the Makefile reader it shares with
+  `daemon/docker-need.ts`; it lives here because `folders/` reaches `guard/` through `git/` and the sandbox, and
+  `guard/` imports `trust/`, so `trust/` imports `folders/` for types only.
 - `propose-production.ts` (`proposeProduction`, behind `GET /projects/:id/live-systems/proposals`) reads a capped set of
   files from `origin/<base>`'s commit, else HEAD, in git's object store and proposes live-system entries (vercel.json
   aliases, `*PROD*` names and production URLs in `.env*.example`, prod compose images, production workflow urls, prod
