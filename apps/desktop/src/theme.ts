@@ -180,9 +180,18 @@ function boardVariables(
   };
 }
 
-/** The raised tone a page's tables and charts sit on, one step off the body in either scheme. */
-function panelVariables(variant: SelenizedVariant): Record<string, string> {
-  return { '--tendb-color-panel': variant.bg1 };
+/**
+ * The raised tone a page's tables and charts sit on, one step off the body in either scheme, and the row a
+ * pointer is over: a faint tint of the accent, so a clickable row shows itself without reading as a group header.
+ */
+function panelVariables(
+  variant: SelenizedVariant,
+  scheme: 'light' | 'dark',
+): Record<string, string> {
+  return {
+    '--tendb-color-panel': variant.bg1,
+    [`--mantine-datatable-highlight-on-hover-color-${scheme}`]: `color-mix(in srgb, ${variant.bg1} 88%, ${variant.accents.blue.base})`,
+  };
 }
 
 /** Mantine's scheme variables, each one a value from `variant`. */
@@ -218,12 +227,12 @@ export const cssVariablesResolver: CSSVariablesResolver = (t) => {
     light: {
       ...schemeVariables(names, SelenizedLight),
       ...boardVariables(SelenizedLight, 'light'),
-      ...panelVariables(SelenizedLight),
+      ...panelVariables(SelenizedLight, 'light'),
     },
     dark: {
       ...schemeVariables(names, SelenizedDark),
       ...boardVariables(SelenizedDark, 'dark'),
-      ...panelVariables(SelenizedDark),
+      ...panelVariables(SelenizedDark, 'dark'),
     },
   };
 };
