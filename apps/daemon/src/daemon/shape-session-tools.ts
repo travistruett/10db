@@ -391,6 +391,7 @@ export function createShapePreparer(
           observer: input.observer,
           signal: input.signal,
           mcpApproved: projectMcp.configHashes,
+          ...(input.chat === true ? { chat: true as const } : {}),
           sandbox: {
             fileAccess: sandboxed.fileAccess,
             hazards: [],
@@ -401,6 +402,8 @@ export function createShapePreparer(
                   unsandboxed: {
                     mayRun: input.unsandboxedAsk.mayRun,
                     changes: input.unsandboxedAsk.changes,
+                    bump: input.unsandboxedAsk.bump,
+                    background: input.unsandboxedAsk.background,
                   },
                 }),
           },

@@ -392,6 +392,7 @@ describe("a chat's command outside the sandbox", () => {
     request('Bash', { command, dangerouslyDisableSandbox: true });
   let refusal: string | null;
   let changes = 0;
+  let background = false;
 
   function chatBroker(owner: ReturnType<typeof conversation>) {
     return createPermissionBroker(
@@ -400,6 +401,7 @@ describe("a chat's command outside the sandbox", () => {
         projectId: owner.projectId,
         workstreamId: null,
         conversationId: owner.conversationId,
+        chat: true,
         sessionId: mintId('Session'),
         observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
         signal: new AbortController().signal,
@@ -407,7 +409,14 @@ describe("a chat's command outside the sandbox", () => {
           fileAccess,
           hazards: [],
           commandsAsk: true,
-          unsandboxed: { mayRun: () => refusal, changes: () => changes },
+          unsandboxed: {
+            mayRun: () => refusal,
+            changes: () => changes,
+            bump: () => {
+              changes += 1;
+            },
+            background: () => background,
+          },
         },
       },
     );
@@ -416,6 +425,7 @@ describe("a chat's command outside the sandbox", () => {
   beforeEach(() => {
     refusal = null;
     changes = 0;
+    background = false;
   });
 
   it('asks with three answers, remembers only the exact command for the session, and stores no rule', async () => {
@@ -425,6 +435,8 @@ describe("a chat's command outside the sandbox", () => {
     const card = onlyOpenCard();
     expect(card.title).toBe('Run this outside the sandbox?');
     expect(card.detail?.['unsandboxed']).toBe(true);
+    // The command leads the body, so the Inbox shows it too; then what Claude says, then the warning.
+    expect(card.body.split('\n\n')[0]).toBe('pnpm test');
     expect(card.options.map((o) => o.label)).toEqual([
       PermissionChoice.AllowOnce,
       PermissionChoice.AllowChat,
@@ -443,6 +455,19 @@ describe("a chat's command outside the sandbox", () => {
     inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
     expect(await afterChange).toEqual({ behavior: 'allow' });
     expect(await broker(outside('pnpm test'))).toEqual({ behavior: 'allow' });
+    // Another command allowed once, outside the sandbox, may have changed what this one runs: it asks again.
+    const other = broker(outside('pnpm build'));
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowOnce });
+    await other;
+    const afterOther = broker(outside('pnpm test'));
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    await afterOther;
+    // A background task still running may write, so a remembered call asks again until it ends.
+    background = true;
+    const whileRunning = broker(outside('pnpm test'));
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    await whileRunning;
+    background = false;
     const elsewhere = broker({ ...outside('pnpm test'), cwd: '/other' });
     inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny });
     await elsewhere;

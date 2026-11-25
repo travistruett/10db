@@ -90,9 +90,9 @@ export const CHAT_ONLY_RUNS_OUTSIDE =
 /** What a chat on its own branch reads when it asks to run a command outside the sandbox. */
 export const BRANCH_RUNS_INSIDE =
   'A chat on its own branch runs commands inside its sandbox. Run it there, or the builder can turn on Full access for this chat.';
-/** What a session opened without a place to write reads when it asks to run a command outside the sandbox. */
-export const OUTSIDE_NEEDS_A_PLACE =
-  'This session was opened before the work had a place, so it cannot run a command outside the sandbox. A new turn can.';
+/** What a session opened read-only reads when it asks to run a command outside the sandbox. */
+export const OUTSIDE_NEEDS_A_TURN =
+  'This session opened read-only, because something else held your checkout or the work had no place yet, so it cannot run a command outside the sandbox. The next turn can.';
 
 /**
  * Why a chat's command may not run outside its sandbox right now, or null when it may: only while the
@@ -102,7 +102,7 @@ export function outsideSandboxRefusal(folder: ChatPlace): string | null {
   if (folder.place === WorkPlace.Moving) return CHAT_MOVING;
   if (folder.place === WorkPlace.Branch) return BRANCH_RUNS_INSIDE;
   if (folder.place !== WorkPlace.Here) return WAITING_FOR_CHOICE;
-  if (!folder.writable) return OUTSIDE_NEEDS_A_PLACE;
+  if (!folder.writable) return OUTSIDE_NEEDS_A_TURN;
   if (!folder.holds()) return folder.current() ? chatFolderInUse(folder.heldBy()) : CHAT_TURN_ENDED;
   return null;
 }

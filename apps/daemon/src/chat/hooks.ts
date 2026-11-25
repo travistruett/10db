@@ -609,7 +609,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       // builder; Full access has no sandbox, and Codex runs with approvals off.
       const codexChat = launch.account.harness === Provider.Codex;
       // How many calls that could change something this session has let through: a command the builder allowed
-      // to run again outside the sandbox lasts only until this moves (`changesFiles`).
+      // to run again outside the sandbox lasts only until this moves, or a background task runs.
       let changes = 0;
       const asksOutside = full === null && !fullCodex && launch.account.harness === Provider.Claude;
       const shapeId = planOfConversation(state.db, conv.id);
@@ -633,11 +633,16 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         signal: ending.signal,
         observer: start.observer,
         limits: limitNotes,
+        chat: true,
         ...(asksOutside
           ? {
               unsandboxedAsk: {
                 mayRun: () => outsideSandboxRefusal(folder),
                 changes: () => changes,
+                bump: () => {
+                  changes += 1;
+                },
+                background: () => runningNow(),
               },
             }
           : {}),

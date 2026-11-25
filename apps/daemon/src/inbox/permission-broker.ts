@@ -107,6 +107,8 @@ type BrokerOwner =
     };
 
 type BrokerContext = BrokerOwner & {
+  /** A chat's session: the builder's no reaches it as a chat's denial text. */
+  readonly chat?: true;
   readonly projectId: ProjectId;
   readonly sessionId: SessionId;
   readonly observer: WaitObserver;
@@ -147,6 +149,10 @@ type BrokerContext = BrokerOwner & {
       readonly mayRun: () => string | null;
       /** The session's count of calls that could change something: a remembered command lasts until it moves. */
       readonly changes: () => number;
+      /** Counts a command the builder allowed to run outside the sandbox: it may have changed anything. */
+      readonly bump: () => void;
+      /** Whether a background task or job is running now, which may still write. */
+      readonly background: () => boolean;
     };
     /**
      * Where an allowed Read of the checkout's secret is served from (`LaneSession.secretReadsDir`):
@@ -280,11 +286,6 @@ function passGitCardBody(call: Extract<PassGitCall, { kind: 'run' }>): string {
 const LOOP_CARD_BODY =
   'This command runs something that never ends (a loop with no exit, `yes`, or the like) in the background, behind an `&` or the Bash tool’s own background flag: the lane goes on working while it holds a core, until something stops it. Behind an `&` it also outlives the command and the session that started it. 10db tries to stop what a session leaves when the session ends, but it cannot promise to find all of it (a job that leaves the command’s process tree and group within a second, with no file open in the lane’s temp dir, escapes), and until then a loop like this holds the Mac busy and makes gates and tests fail on timeouts. Allowing it covers this call only: the next one is asked about again.';
 
-/**
- * What a lane is told when the builder denies a call. It names the call and says the denial covers
- * its equivalents, because a lane that reads a refusal as being about one spelling tries the next
- * (a `yes` loop denied, then a `while :` loop).
- */
 /** What a chat is told when the builder says no: it invites another way, and carries their note. */
 function chatDenialMessage(toolName: string, summary: string, note: string | undefined): string {
   const call = summary.length > 300 ? `${summary.slice(0, 300)}…` : summary;
@@ -294,6 +295,11 @@ function chatDenialMessage(toolName: string, summary: string, note: string | und
   return parts.join('\n');
 }
 
+/**
+ * What a lane is told when the builder denies a call. It names the call and says the denial covers
+ * its equivalents, because a lane that reads a refusal as being about one spelling tries the next
+ * (a `yes` loop denied, then a `while :` loop).
+ */
 export function denialMessage(toolName: string, summary: string, note: string | undefined): string {
   const call = summary.length > 300 ? `${summary.slice(0, 300)}…` : summary;
   const parts = [
@@ -439,7 +445,7 @@ export function createPermissionBroker(
   // The commands outside the sandbox the builder allowed for this session: forgotten when it ends.
   // Each with the session's change count when it was last allowed.
   const chatAllowed = new Map<string, number>();
-  const isChat = ctx.workstreamId === null;
+  const isChat = ctx.chat === true;
   /** Why the chat's command may not run outside the sandbox now; null when it may. */
   const outsideRefusal = (): string | null => {
     const outside = ctx.sandbox?.unsandboxed;
@@ -612,7 +618,11 @@ export function createPermissionBroker(
     if (chatOnce) {
       const key = chatCallKey(req.toolName, ask.summary, req.cwd);
       const seen = chatAllowed.get(key);
-      const remembered = seen !== undefined && seen === ctx.sandbox?.unsandboxed?.changes();
+      const outside = ctx.sandbox?.unsandboxed;
+      // Anything that may have changed since (a change, another command allowed to run outside, a job still
+      // running) makes the same command ask again.
+      const unchanged = seen !== undefined && seen === outside?.changes();
+      const remembered = unchanged && !outside.background();
       const refusal = outsideRefusal();
       if (refusal !== null) return { behavior: 'deny', message: refusal, by: DeniedBy.TenDb };
       if (remembered) return { behavior: 'allow' };
@@ -717,6 +727,8 @@ export function createPermissionBroker(
         // The turn may have ended or the checkout moved while the card waited: the yes is read again.
         const refusal = outsideRefusal();
         if (refusal !== null) return { behavior: 'deny', message: refusal, by: DeniedBy.TenDb };
+        // A command allowed now may change anything, so what was remembered before it asks again.
+        ctx.sandbox?.unsandboxed?.bump();
         if (result.choice === PermissionChoice.AllowChat)
           chatAllowed.set(
             chatCallKey(req.toolName, summary, req.cwd),
@@ -824,8 +836,13 @@ export function createPermissionBroker(
       return {
         summary: command,
         title: OUTSIDE_CARD_TITLE,
-        body: [why, OUTSIDE_CARD_WARNING]
-          .filter((part) => part !== null && part !== '')
+        // The command first, as the Inbox shows only the body; then what Claude says it is for.
+        body: [
+          command,
+          why === null || why === '' ? '' : `Claude says: ${why}`,
+          OUTSIDE_CARD_WARNING,
+        ]
+          .filter((part) => part !== '')
           .join('\n\n'),
         chatOnce: true,
       };
