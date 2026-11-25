@@ -14,7 +14,10 @@ A lane's call to the builder's own Linear is a settled allow when it is a read, 
   left out.
 - It goes to the builder's own Linear: the claude.ai Linear connector (`mcp__claude_ai_Linear__`) on a plan
   whose connectors the session loads, or one of the builder's remote servers on `mcp.linear.app`, by the name the
-  harness registers it under (`laneLinearPrefixes`).
+  harness registers it under (`laneLinearPrefixes`). A prefix that another server of the session also holds is
+  left out: a project server, one of the builder's stdio servers, or one of their remote servers on another
+  host, compared by the tool prefix its registered name makes. A repository's server named `claude_ai_Linear`
+  takes the connector's place in the session (`connectorsForSession`), so its calls keep the broker ask.
 - Its input is a JSON object, or none, of at most 2,000 characters.
 - No string in it matches a secret pattern (`secretIn`, the Linear reporter's scan).
 

@@ -2879,11 +2879,17 @@ export function createRunner(opts: RunnerOptions): Runner {
           : 'default';
     // A plan account takes the builder's claude.ai connectors under the same switch as the servers.
     const claudeConnectors = yours.connectorsOn && account.kind === AccountKind.ClaudeSubscription;
-    // The tool prefixes of the builder's own Linear in this session, whose reads the guard settles.
+    // The tool prefixes of the builder's own Linear in this session, whose reads the guard settles. A
+    // prefix one of the session's other servers holds is not Linear's, so those are named too.
     const linearPrefixes = laneLinearPrefixes({
       remote: yours.remote,
       connectors: claudeConnectors,
       harness: provider,
+      otherServers: [
+        ...Object.keys(mcpServers.remote),
+        ...Object.keys(mcpServers.stdio),
+        ...Object.keys(yours.stdio),
+      ],
     });
     // A step that only reads has the engine's socket in its sandbox, but the guard refuses every docker
     // command in it, so Docker is closed to it too.

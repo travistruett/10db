@@ -53,4 +53,22 @@ describe('laneLinearPrefixes', () => {
       'mcp__linear-plugin__',
     ]);
   });
+
+  it('leaves out a prefix that a server which is not Linear holds in the session', () => {
+    // A repo's server named as the connector takes its prefix, and `my.linear` shares `mcp__my_linear__`.
+    const prefixes = laneLinearPrefixes({
+      remote: {
+        ...remote,
+        'my:linear': { url: LINEAR_URL, claudeName: null },
+        'my.linear': { url: 'https://other.example/mcp', claudeName: null },
+      },
+      connectors: true,
+      harness: Provider.Claude,
+      otherServers: ['claude_ai_Linear', 'plugin:linear:linear'],
+    });
+    expect(prefixes).toEqual(['mcp__linear__']);
+    expect(isLaneLinearRead(prefixes, 'mcp__claude_ai_Linear__get_issue', { id: 'AMP-6' })).toBe(
+      false,
+    );
+  });
 });

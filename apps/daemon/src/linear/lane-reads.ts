@@ -1,4 +1,5 @@
 import { Provider } from '@10db/contracts';
+import { mcpToolPrefix } from '../sessions';
 import { linearToolPrefixes, secretIn } from './reporter-guard';
 
 const LINEAR_HOST = 'mcp.linear.app';
@@ -64,6 +65,11 @@ const LINEAR_READ_INPUT_MAX_CHARS = 2_000;
  * The tool-name prefixes of the Linear servers a lane's session registers: the claude.ai connector on
  * Claude, and each of the builder's remote servers on `mcp.linear.app`, by the name the harness registers
  * it under (Claude's `claudeName` where it has one, Codex's the plan's own name).
+ *
+ * A prefix that a server which is not Linear also holds is left out, so its calls stay judged: the
+ * builder's other remote servers, and `otherServers`, the registered names of every other server in the
+ * session (the project's servers and the builder's stdio ones). A server named as the connector takes the
+ * connector's place in the session, so the connector's prefix would otherwise reach it.
  */
 export function laneLinearPrefixes(session: {
   readonly remote: Readonly<
@@ -71,17 +77,23 @@ export function laneLinearPrefixes(session: {
   >;
   readonly connectors: boolean;
   readonly harness: Provider;
+  readonly otherServers?: readonly string[];
 }): string[] {
-  const entries = Object.entries(session.remote)
-    .filter(([, server]) => isLinearServer(server.url))
-    .map(([name, server]) =>
-      session.harness === Provider.Claude ? (server.claudeName ?? name) : name,
-    );
+  const registered = Object.entries(session.remote).map(([name, server]) => ({
+    name: session.harness === Provider.Claude ? (server.claudeName ?? name) : name,
+    linear: isLinearServer(server.url),
+  }));
+  const taken = new Set(
+    [
+      ...registered.filter((server) => !server.linear).map((server) => server.name),
+      ...(session.otherServers ?? []),
+    ].map((name) => `mcp__${mcpToolPrefix(name)}__`),
+  );
   return linearToolPrefixes({
     connector: session.connectors,
-    entries,
+    entries: registered.filter((server) => server.linear).map((server) => server.name),
     harness: session.harness,
-  });
+  }).filter((prefix) => !taken.has(prefix));
 }
 
 const isRecord = (input: unknown): boolean =>
