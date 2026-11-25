@@ -74,7 +74,8 @@ import { createStatusService } from '../status';
 import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { createSelfUpdate } from '../self-update';
-import { createScheduler } from './index';
+import { createStallSweep } from '../stalls';
+import { createQueueWaits, createScheduler } from './index';
 
 let store: Store;
 let close: () => void;
@@ -155,8 +156,10 @@ function scheduler(
   awaited: ReadonlySet<WorkstreamId> = new Set(),
   // The launch rule for saved Workbench work is the delivery harness's (kept-work-start.test.ts).
   keptWork: { ready(run: WorkstreamDto): boolean } = { ready: () => true },
+  waits?: ReturnType<typeof createQueueWaits>,
 ) {
   return createScheduler({
+    ...(waits ? { waits } : {}),
     folderHold,
     keptWork,
     state,
@@ -674,6 +677,52 @@ describe('scheduler', () => {
     });
     running.clear();
     expect(await scheduler().tick()).toBe(1);
+  });
+
+  it('says a dependent of cancelled work waits for ever, raises one Stuck card at once, and closes it once the run moves, changing no run or batch', async () => {
+    const dep = queue();
+    moveWorkstream(dep.workstream.id, 'CANCELLED');
+    const waiting = add(dep.project, ['api'], [dep.task.id]);
+    const waits = createQueueWaits({ state, clock });
+    const s = scheduler(undefined, undefined, undefined, waits);
+    const sweep = createStallSweep({ state, inbox, waits, clock, logger: silentLogger });
+    const rows = () => ({
+      runs: store.db.select().from(schema.workstreams).all(),
+      batches: store.db.select().from(schema.batches).all(),
+    });
+
+    const endless = { kind: 'dependency', endless: true, line: 'for t, which was cancelled' };
+    const openStuck = () =>
+      listInbox(store.db, { states: ['OPEN'] }).filter((c) => c.title.startsWith('Stuck:'));
+    // A busy Mac and full lanes are passed over first, yet neither hides a wait that can't end.
+    held = true;
+    expect(await s.tick()).toBe(0);
+    expect(waits.get(waiting.workstream.id)).toMatchObject(endless);
+    held = false;
+    const before = rows();
+    sweep.sweep();
+    const first = openStuck();
+    expect(first).toHaveLength(1);
+    expect(await scheduler({ global: 0 }, undefined, undefined, waits).tick()).toBe(0);
+    expect(waits.get(waiting.workstream.id)).toMatchObject(endless);
+    expect(await s.tick()).toBe(0);
+    expect(waits.get(waiting.workstream.id)).toMatchObject(endless);
+    clock.advance(3 * 60 * 60_000);
+    sweep.sweep();
+    const stuck = openStuck();
+    expect(stuck.map((c) => c.id)).toEqual(first.map((c) => c.id));
+    expect(stuck[0]?.options.map((o) => o.label)).toEqual(['Cancel Run']);
+    // The card names a fixed time, so what it says stays true however long it stays open.
+    expect(stuck[0]?.body).toBe(first[0]?.body);
+    expect(stuck[0]?.body).toContain('It has not moved since ');
+    expect(rows()).toEqual(before);
+
+    moveWorkstream(waiting.workstream.id, 'CANCELLED');
+    await s.tick();
+    sweep.sweep();
+    expect(listInbox(store.db, { states: ['OPEN'] }).filter((c) => c.id === stuck[0]?.id)).toEqual(
+      [],
+    );
   });
 
   it('leases with a fresh fence and renews the lease on the heartbeat', async () => {

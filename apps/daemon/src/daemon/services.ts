@@ -191,7 +191,7 @@ import {
 import type { AgentSkill } from '../agent-skill';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
-import type { Admission, Scheduler } from '../scheduler';
+import type { Admission, QueueWaits, Scheduler } from '../scheduler';
 import type { StatusService } from '../status';
 import { capacitySettings, setCapacitySettings } from '../load';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
@@ -303,6 +303,8 @@ export function createServices(deps: {
   readonly liveFrames: LiveFrames;
   readonly runner: Runner;
   readonly scheduler: Scheduler;
+  /** What each queued run waits for, as the scheduler's last tick found it. */
+  readonly waits: Pick<QueueWaits, 'get'>;
   readonly inbox: InboxService;
   /** Where each Slack workspace stands: Open leaves out what Waiting holds only while its workspace is connected. */
   readonly slackConnections: Pick<SlackConnections, 'connectedTeams'>;
@@ -810,9 +812,9 @@ export function createServices(deps: {
     getGoal: (id) => getGoal(db, id),
     listWorkstreams({ active }) {
       const live = new Set(listActiveProjects(db).map((p) => p.id));
-      return listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}).filter((w) =>
-        live.has(w.projectId),
-      );
+      return listWorkstreams(db, active ? { states: ACTIVE_STATES } : {})
+        .filter((w) => live.has(w.projectId))
+        .map((w) => ({ ...w, wait: deps.waits.get(w.id) ?? null }));
     },
     async cancelWorkstream(id) {
       await deps.runner.cancel(id);

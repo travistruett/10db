@@ -68,6 +68,8 @@
   a left-out card for a batch that is over), the card is `BY_ANSWER`, keeps its Dismiss, and may
   still carry the event closer by writing `[CARD_RESOLVES_WHEN]` into its own `detail`, so `resolveStaleCards` still closes
   it by itself. A ship-failure card is a condition card whose batch's abandon withdraws it (`shipFailureFoldKey`).
+- `stall_cleared` closes a Stuck card once the stall sweep (`stalls/sweep.ts`) no longer finds the stall its
+  `key` names.
 - The three event closers are `update_installed` (`SelfUpdate.closeInstalled`, at start: a card whose commit is the
   running one or behind it), `branch_ready` (`resolveBranchReadyCards`, from the scheduler's `onBranchReady` and
   after Switch Back) and `mcp_config_changed` (`resolveMcpConfigCards`, on every repo MCP config read; a card
