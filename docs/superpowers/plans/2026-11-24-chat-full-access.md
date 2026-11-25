@@ -118,3 +118,27 @@ export function judgeFullAccessCall(call: ChatCall, root: string, folder: ChatPl
 5. Docs and notes (`task-5.md`).
 
 Order: 0, 1, 2, 3 (2 and 3 share `spec()`), then 4, then 5. One implementer runs it end to end.
+
+## Spike answers
+
+Run live on 2026-11-24 with SDK 0.3.316 driving the installed `claude` 2.1.332 (the SDK's own native binary is not
+installed in this checkout; the daemon passes `pathToClaudeCodeExecutable`), `settingSources:
+['user','project','local']`, `strictMcpConfig: false`, no `sandbox`, `permissionMode: 'auto'`, model haiku, one tiny turn.
+
+1. **Project `.mcp.json` server: it starts with no approval.** Its stdio command ran (marker file written) and it
+   listed as `source: project`. Task 2 does not pass project servers over `setMcpServers`.
+2. **Default config folder: plugins and skills load once.** 13 plugins, no duplicate skill names. The repo's
+   `CLAUDE.md` loads with `project` and appears beside the user's own once. (A repo under `/private/tmp` did not
+   load its `CLAUDE.md`; one under the home folder did. Not a 10db concern.)
+3. **`setMcpServers` adds.** After `setMcpServers({ ten })` the status listed the plugin, project and claude.ai
+   servers plus `ten` (scope `dynamic`).
+4. **Keyed account: no API-key account exists on this Mac, so a real key was not run.** A fresh config folder with
+   `apiKeyHelper` in inline settings (helper echoing a dummy key; one turn made no model call that needed it) gave
+   init `apiKeySource: 'apiKeyHelper'` and `apiProvider` absent. Task 2's account check accepts
+   `apiKeySource === 'apiKeyHelper'` for the API-key kind, and an absent `apiProvider`. On that folder only the
+   folder's own plugins and the project server loaded, as expected.
+5. **Codex `sandbox: 'danger-full-access'` on a home whose `default_permissions` is `lane`: the param wins.** The
+   response says `sandbox: { type: 'dangerFullAccess' }` and `activePermissionProfile: null`, so task 3 skips the
+   lane-profile check for a Full access thread and sends `sandbox` on start and resume. A warm `thread/resume`
+   with and without the param both stayed `dangerFullAccess`; a cold resume was not tried, so task 3 sends it on
+   every start and resume.
