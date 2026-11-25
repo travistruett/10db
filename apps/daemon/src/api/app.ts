@@ -50,6 +50,8 @@ import {
   ModelsQuery,
   AgentSkillInput,
   KeepAwakeInput,
+  ProjectWatchpoints,
+  YourWatchpoints,
   SKILL_VERSION_HEADER,
   KindId,
   KindInput,
@@ -2091,6 +2093,23 @@ export function createApp(deps: ApiDeps) {
     .get('/tasks/:taskId/session', (c) =>
       c.json(deps.services.taskSession(TaskId.parse(c.req.param('taskId')))),
     )
+    .get('/projects/:projectId/watchpoints', (c) =>
+      c.json(deps.services.projectWatchpoints(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/watchpoints',
+      validator('json', (value): ProjectWatchpoints => ProjectWatchpoints.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setProjectWatchpoints(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/workstreams/:id/watchpoint-hits', (c) =>
+      c.json(deps.services.watchpointHits(WorkstreamId.parse(c.req.param('id')))),
+    )
     .get('/workstreams/:id/skips', (c) =>
       c.json(deps.services.listWorkstreamSkips(WorkstreamId.parse(c.req.param('id')))),
     )
@@ -2171,6 +2190,12 @@ export function createApp(deps: ApiDeps) {
       '/settings/keep-awake',
       validator('json', (value): z.infer<typeof KeepAwakeInput> => KeepAwakeInput.parse(value)),
       (c) => c.json(deps.services.setKeepAwake(c.req.valid('json').mode)),
+    )
+    .get('/settings/watchpoints', (c) => c.json(deps.services.yourWatchpoints()))
+    .put(
+      '/settings/watchpoints',
+      validator('json', (value): YourWatchpoints => YourWatchpoints.parse(value)),
+      (c) => c.json(deps.services.setYourWatchpoints(c.req.valid('json'))),
     )
     .get('/settings/agent-skill', (c) => c.json(deps.services.agentSkill()))
     .put(

@@ -51,6 +51,9 @@ import {
   type WorkstreamId,
   type FigmaSignInsDto,
   type LinearSignInsDto,
+  effectiveWatchpoints,
+  type EffectiveWatchpointsDto,
+  type ProjectId,
 } from '@10db/contracts';
 import {
   closeTask,
@@ -134,6 +137,10 @@ import {
   offerAllowThis,
   offeredText,
   offerToAgent,
+  readProjectWatchpoints,
+  readYourWatchpoints,
+  writeProjectWatchpoints,
+  writeYourWatchpoints,
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService, type McpSignIns } from '../accounts';
 import type { Clock } from '../clock';
@@ -158,6 +165,7 @@ import {
   type PassOpenInput,
   type PassPullRequests,
   type Shipper,
+  watchpointHitsOf,
 } from '../delivery';
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
 import type { EventBus, LiveFrames, StateStore } from '../events';
@@ -404,6 +412,10 @@ export function createServices(deps: {
   readonly figmaSignIns: { list(): Promise<FigmaSignInsDto> };
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
+  const effectiveWatchpointsOf = (projectId: ProjectId): EffectiveWatchpointsDto => {
+    getProject(db, projectId);
+    return effectiveWatchpoints(readYourWatchpoints(db), readProjectWatchpoints(db, projectId));
+  };
   const restarts = createFailedRestarts(deps);
   const catalogueStatus = (): CatalogueStatusDto => ({
     ...deps.catalogue.status(),
@@ -870,6 +882,22 @@ export function createServices(deps: {
         benchmarkSync: syncWarning(deps.benchmarks.status()),
       };
     },
+    yourWatchpoints: () => readYourWatchpoints(db),
+    setYourWatchpoints(watchpoints) {
+      deps.state.write((ctx) => {
+        writeYourWatchpoints(ctx, watchpoints);
+      });
+      return readYourWatchpoints(db);
+    },
+    projectWatchpoints: (projectId) => effectiveWatchpointsOf(projectId),
+    setProjectWatchpoints(projectId, entries) {
+      getProject(db, projectId);
+      deps.state.write((ctx) => {
+        writeProjectWatchpoints(ctx, projectId, entries);
+      });
+      return effectiveWatchpointsOf(projectId);
+    },
+    watchpointHits: (id) => watchpointHitsOf(db, id),
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
     agentSkill: () => deps.agentSkill.status(),
