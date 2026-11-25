@@ -1,6 +1,7 @@
 import { Tooltip, VisuallyHidden } from '@mantine/core';
 import {
   IconBulb,
+  IconFlask,
   IconBuildingFactory2,
   IconInbox,
   IconLayoutKanban,
@@ -35,6 +36,7 @@ const ICONS: Readonly<Record<RailSection, Icon>> = {
   board: IconLayoutKanban,
   workbench: IconTools,
   knowledge: IconBulb,
+  evals: IconFlask,
   settings: IconSettings,
 };
 

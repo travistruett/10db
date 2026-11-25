@@ -20,6 +20,7 @@ import {
 } from './api-views';
 import type { Api } from './connection';
 import { TendbError, UnknownCommandError } from './errors';
+import { evalsCommand } from './evals-command';
 import { mergeHazards } from './hazards';
 import {
   KnowledgeItemView,
@@ -663,12 +664,13 @@ const COMMANDS: Record<string, Command> = {
   next: runNext,
   hold,
   hazards,
+  evals: evalsCommand,
   'resave-account': resaveAccount,
   'account-settings': accountSettings,
 };
 
 const USAGE =
-  'usage: node tendb.mjs context|project|areas|create|goal|plan-import|knowledge|decision|principle|supersede|edit|remove|start|move|inbox|answer|ship|abandon|close|join|next ... (commands and arguments: SKILL.md beside this file)';
+  'usage: node tendb.mjs context|project|areas|create|goal|plan-import|knowledge|decision|principle|supersede|edit|remove|start|move|inbox|answer|ship|abandon|close|join|next|hazards|evals ... (commands and arguments: SKILL.md beside this file)';
 
 /** Runs one command line, as `node tendb.mjs <argv>` does. */
 export async function runCommand(argv: readonly string[], deps: CommandDeps): Promise<void> {

@@ -166,6 +166,7 @@ import { inspectFolder, proposeAreas, proposeSetupAreas, type AreaNamer } from '
 import { dropPendingPageLabels } from './page-label-guess';
 import { adoptGoal } from '../goals';
 import { taskSession } from '../chat';
+import type { EvalsService } from '../evals';
 import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
@@ -398,6 +399,8 @@ export function createServices(deps: {
   readonly probe: AddressProbe;
   /** Works out each project's hazards from its repository. */
   readonly hazards: Pick<HazardAssessor, 'assess'>;
+  /** Reads each project's committed eval results and keeps the manifest an agent recorded. */
+  readonly evals: EvalsService;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
   /** Settings › Trust: the switches, the builder's plugins and each project's preview. */
@@ -917,6 +920,15 @@ export function createServices(deps: {
     getHazardAssessment(projectId) {
       getProject(db, projectId);
       return hazardAssessmentDto(db, projectId);
+    },
+    evals(projectId) {
+      return deps.evals.read(projectId, getProject(db, projectId).repoPath);
+    },
+    evalSuite(projectId, key, run) {
+      return deps.evals.suite(projectId, getProject(db, projectId).repoPath, key, run);
+    },
+    recordEvalManifest(projectId, manifest) {
+      return deps.evals.record(projectId, getProject(db, projectId).repoPath, manifest);
     },
     async lookAgainAtHazards(projectId, signal) {
       getProject(db, projectId);

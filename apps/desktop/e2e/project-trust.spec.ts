@@ -1,11 +1,52 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect } from '@playwright/test';
 import { claudeIsInstalled } from './claude-is-installed';
 import { test } from './routed-test';
+import { E2E_DIR } from './paths';
 import { createProject } from './shape-project';
+
+/** A gate report as ampsio commits one: one model passes, the other misses a gate. */
+const GATE_REPORT = {
+  task: 'ingest.mapping',
+  version: 2,
+  fingerprint: 'f'.repeat(64),
+  repeat: 1,
+  passed: false,
+  slots: [
+    {
+      slot: 'SMART@medium',
+      slug: 'acme/model-a',
+      passed: true,
+      trials: 2,
+      gates: { complete: { rate: 1, good: 2, total: 2, trials: 2, minimum: 1, passed: true } },
+      outcomes: { ok: 2 },
+      cost: { total: '0.42', per_trial: '0.21', basis: 'billed' },
+      latency_ms: { p50: 5400, p95: 9000 },
+      served: [{ model: 'acme/model-a', provider: 'Acme', responses: 2 }],
+      unrecorded_cases: [],
+      recordings_withheld: null,
+    },
+    {
+      slot: 'acme/model-b@medium',
+      slug: 'acme/model-b',
+      passed: false,
+      trials: 2,
+      gates: { complete: { rate: 0.5, good: 1, total: 2, trials: 2, minimum: 1, passed: false } },
+      outcomes: { ok: 2 },
+      cost: { total: '0.5', per_trial: '0.25', basis: 'billed' },
+      latency_ms: { p50: 7400, p95: 9900 },
+      served: [{ model: 'acme/model-b', provider: 'Acme', responses: 2 }],
+      unrecorded_cases: [],
+      recordings_withheld: null,
+    },
+  ],
+};
 
 // Core flow 10 (a setting that changes behavior): This Project › Trust says what a lane gets. A switch lists
 // what it brings, 10db proposes a Production entry from the repo's vercel.json, and the repo's own MCP
-// server waits until the builder turns it On after reading what it runs.
+// server waits until the builder turns it On after reading what it runs. Evals reads the same repository: a
+// gitignored gate report in the checkout becomes a suite with its result per model, and its drawer shows the failing gate.
 test('a builder sees what a lane gets, adds a Production proposal and turns on a repo server', async ({
   page,
   request,
@@ -34,7 +75,13 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
     'vercel.json': JSON.stringify({ alias: ['app.acme-prod.dev'] }, null, 2),
     '.claude/skills/deploy/SKILL.md':
       '---\nname: deploy\ndescription: Ships the app\n---\nShip it.\n',
+    // Results are local output a project keeps out of git, as ampsio does.
+    '.gitignore': 'evals/reports/\n',
+    'evals/ingest/mapping.py': 'DATASET = None\n',
   });
+  const reports = join(E2E_DIR, 'trust-page-repo', 'evals', 'reports', 'ingest.mapping');
+  mkdirSync(reports, { recursive: true });
+  writeFileSync(join(reports, '20261013T140758276231Z.json'), JSON.stringify(GATE_REPORT));
   await claudeIsInstalled(page);
   await page.addInitScript((id: string) => {
     window.localStorage.setItem('tendb.project', JSON.stringify(id));
@@ -80,4 +127,17 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await expect(tools).toContainText('short-lived credentials for profile acme-dev');
   await expect(tools).toContainText('Its env block replaces PATH');
   await tools.getByRole('button', { name: 'Cancel' }).click();
+
+  // Evals: the local report is a suite, the failing model says which gate, nothing ran a model.
+  await page.goto('/evals');
+  const suites = page.getByRole('table', { name: 'Suites' });
+  await expect(suites).toContainText('ingest.mapping');
+  await expect(suites).toContainText('acme/model-b');
+  await expect(suites).toContainText('complete 0.5 < 1');
+  await expect(page.getByText('Found by file names.')).toBeVisible();
+  await expect(page.getByText('evals/ingest/mapping.py')).toBeVisible();
+  await suites.getByText('ingest.mapping').click();
+  const drawer = page.getByRole('dialog', { name: 'Suite' });
+  await expect(drawer).toContainText('Gates');
+  await expect(drawer).toContainText('$0.92');
 });
