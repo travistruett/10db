@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { defaultDataDir } from '../src/runtime-files/data-dir';
 import {
   AccountKind,
   AccountPauseReason,
@@ -694,6 +695,9 @@ if (!existsSync(databasePath))
     `${databasePath} does not exist: start the daemon once to create it, then stop it`,
   );
 const dataDir = dirname(databasePath);
+// The installed app's database is the builder's real factory; the demo is only for dev data dirs.
+if (resolve(dataDir) === resolve(defaultDataDir()))
+  throw new Error(`${databasePath} is the installed app's database: seed a dev data dir instead`);
 const db = openDatabase(databasePath);
 const startedAt = Date.now();
 // The store's clock: each write is stamped with the time the seed set for it.
@@ -744,6 +748,8 @@ function demoRepository(spec: ProjectSpec): { path: string; head: string } {
       'user.name=10db',
       '-c',
       'user.email=demo@10db.invalid',
+      '-c',
+      'commit.gpgsign=false',
       'commit',
       '-q',
       '--no-verify',

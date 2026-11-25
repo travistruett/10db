@@ -1,147 +1,12 @@
-/* Factory under Live: the tiles, Needs you, and one accordion row per project. */
+/* Factory under Live. Mantine draws the parts; this module lays out the task lines' fixed columns. */
 .page {
   max-width: 1120px;
-}
-
-/* At a glance: five tiles on the raised panel tone. */
-.tiles {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.tile {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
-  border-radius: var(--mantine-radius-md);
-  background: var(--tendb-color-panel);
-}
-
-.tileFigure {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.tileNumber {
-  font-size: 24px;
-  line-height: 1;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--mantine-color-bright);
-}
-
-.tileOf {
-  font-size: var(--mantine-font-size-xs);
-  color: var(--mantine-color-dimmed);
-}
-
-.tileLabel {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--mantine-font-size-xs);
-}
-
-.sectionHead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.sectionTitle {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--mantine-color-bright);
-}
-
-.sectionMeta {
-  margin-left: 8px;
-  font-size: var(--mantine-font-size-xs);
-  color: var(--mantine-color-dimmed);
-}
-
-/* Needs you: rows on the raised panel, parted by hairlines. */
-.needs {
-  border-radius: var(--mantine-radius-md);
-  background: var(--tendb-color-panel);
-  padding-block: 2px;
-}
-
-.need {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) 160px 56px 180px;
-  align-items: center;
-  column-gap: 10px;
-  padding: 10px 14px;
-}
-
-.need + .need,
-.needRuns {
-  border-top: 1px solid var(--mantine-color-default-border);
-}
-
-.needMark {
-  display: inline-flex;
-  justify-content: center;
-}
-
-.needText {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.needTitleLine {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-
-.needKind {
-  flex: none;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.needKind[data-tone='you'] {
-  color: var(--mantine-color-yellow-filled);
-}
-
-.needKind[data-tone='failed'] {
-  color: var(--mantine-color-red-filled);
-}
-
-.needTitle {
-  min-width: 0;
-  font-size: var(--mantine-font-size-sm);
-  font-weight: 500;
-  color: var(--mantine-color-bright);
-}
-
-.needSub {
-  font-size: var(--mantine-font-size-xs);
-  color: var(--mantine-color-dimmed);
 }
 
 .clip {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.where {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  font-size: var(--mantine-font-size-xs);
 }
 
 .when {
@@ -151,175 +16,7 @@
   color: var(--mantine-color-dimmed);
 }
 
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.needRuns {
-  padding: 4px 14px 8px 44px;
-}
-
-.waitingLine {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-inline: 14px;
-  font-size: var(--mantine-font-size-xs);
-  color: var(--mantine-color-dimmed);
-}
-
-/* A ring around a dot: waits on the builder (yellow) or stopped (red), never color alone. */
-.ring {
-  flex: none;
-  margin-inline: 3px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--mantine-color-yellow-filled);
-  box-shadow:
-    0 0 0 2px var(--tendb-color-panel),
-    0 0 0 3.5px var(--mantine-color-yellow-filled);
-}
-
-/* Projects: hairline-divided rows with no fill of their own, so an open goal inside keeps the bg_1 fill. */
-.projects {
-  border-top: 1px solid var(--mantine-color-default-border);
-}
-
-.project {
-  border-bottom: 1px solid var(--mantine-color-default-border);
-}
-
-.projectHead {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 16px 18px minmax(0, 160px) 240px minmax(0, 1fr) 64px;
-  align-items: center;
-  column-gap: 12px;
-  padding: 12px 14px;
-  border-radius: var(--mantine-radius-md);
-}
-
-.projectName {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--mantine-color-bright);
-}
-
-.projectLine {
-  min-width: 0;
-  font-size: var(--mantine-font-size-sm);
-}
-
-.projectBody {
-  padding: 0 14px 14px 44px;
-}
-
-.groupLabel {
-  padding: 10px 0 4px;
-  font-size: var(--mantine-font-size-xs);
-  font-weight: 600;
-  color: var(--mantine-color-dimmed);
-}
-
-/* The bar and its key. */
-.bar {
-  display: flex;
-  gap: 2px;
-  height: 8px;
-  border-radius: 4px;
-  overflow: hidden;
-  background: var(--mantine-color-default);
-}
-
-.bar[data-size='sm'] {
-  width: 140px;
-  height: 6px;
-  flex: none;
-  align-self: center;
-}
-
-.segment,
-.swatch {
-  flex-basis: 0;
-  min-width: 4px;
-}
-
-.segment[data-part='merged'],
-.swatch[data-part='merged'] {
-  background: var(--mantine-color-green-filled);
-}
-
-.segment[data-part='running'],
-.swatch[data-part='running'] {
-  background: var(--mantine-color-blue-filled);
-}
-
-.segment[data-part='in_review'],
-.swatch[data-part='in_review'] {
-  background: repeating-linear-gradient(
-    135deg,
-    var(--mantine-color-blue-filled) 0 3px,
-    var(--mantine-color-default) 3px 6px
-  );
-}
-
-.segment[data-part='needs_you'],
-.swatch[data-part='needs_you'] {
-  background: var(--mantine-color-yellow-filled);
-}
-
-.segment[data-part='failed'],
-.swatch[data-part='failed'] {
-  background: var(--mantine-color-red-filled);
-}
-
-.segment[data-part='waiting'],
-.swatch[data-part='waiting'] {
-  background: var(--mantine-color-default-border);
-}
-
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-  font-size: 11px;
-  color: var(--mantine-color-dimmed);
-}
-
-.legendItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.swatch {
-  flex: none;
-  width: 10px;
-  height: 8px;
-  border-radius: 2px;
-}
-
-.pips {
-  display: flex;
-  gap: 2px;
-  width: 80px;
-}
-
-.pip {
-  flex: 1;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--mantine-color-default-border);
-}
-
-.pip[data-on='true'] {
-  background: var(--mantine-color-blue-filled);
-}
-
-/* A task line inside a project: dot, title, pips, what it is doing, when, and an action slot. */
+/* A task line inside a project: mark, title, step progress, what it is doing, when, and an action slot. */
 .line {
   display: flex;
   align-items: center;
@@ -345,8 +42,7 @@
   border-radius: var(--mantine-radius-sm);
 }
 
-.lineOpen:focus-visible,
-.projectHead:focus-visible {
+.lineOpen:focus-visible {
   outline: 2px solid var(--mantine-primary-color-filled);
   outline-offset: 2px;
 }
@@ -376,9 +72,7 @@
   justify-content: flex-end;
 }
 
-/* On the page's own tone, a ring's gap is the body's. */
-.line .ring {
-  box-shadow:
-    0 0 0 2px var(--mantine-color-body),
-    0 0 0 3.5px var(--mantine-color-yellow-filled);
+/* An open project's chevron turns a quarter, from right to down. */
+.chevron[data-rotate] {
+  transform: rotate(90deg);
 }

@@ -9,8 +9,10 @@
 Factory's page, under **Live**, is three parts, narrowed by its Project filter:
 
 - **At a glance:** five figures. The first counts runs and Workbench passes waiting on the builder. The second
-  counts failed runs and says how many causes they come from. The third counts running work out of the Mac's
-  lane cap (`GET /admission`'s `machineLaneCap`), with how many are queued. Then pull requests open, and merged
+  counts failed runs and says how many causes they come from. The third
+  counts the Mac's lanes in use out of its cap (`GET /admission`'s `lanesRunning` and `machineLaneCap`) while
+  every project is shown, and the shown project's running work under the Project filter, with how many are
+  queued. Then pull requests open, and merged
   today.
 - **Needs you:** one panel across projects. It lists each run waiting on the builder, named by the open Inbox
   card that targets it, with Open and Answer (the Inbox, filtered to the project). It lists each Workbench pass
@@ -21,10 +23,10 @@ Factory's page, under **Live**, is three parts, narrowed by its Project filter:
 - **Projects:** each shown project is one accordion row: its tile and name, a bar split by where its work stands,
   one line of the same counts in words, and its last activity. The bar shows only this view's runs (open work and
   today's merges), never the backlog. Green is only merged work, and in review is striped blue. A project that
-  needs the builder or has a run going sorts first and starts open; an idle one sorts last and starts folded. With
+  needs the builder (a run, or a Workbench pass with pages waiting) or has a run going sorts first and starts open; an idle one sorts last and starts folded. With
   one project shown, it starts open. Opened, it holds its goals (the goal list as before, each row with a small
   bar of merged, in review and the rest), then its work in no goal. That work lists what needs the builder,
-  failed, running (with step pips) and waiting runs. Its pull requests open and its merges today sit behind one
+  failed, running (with step progress) and waiting runs. Its pull requests open and its merges today sit behind one
   line each, which opens them.
 
 The flat list of every run by section is gone. Activity, Metrics and the admission note stay as they were.

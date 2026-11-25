@@ -1,8 +1,8 @@
 import { WorkstreamState, type WorkstreamDto } from '@10db/contracts';
-import { UnstyledButton } from '@mantine/core';
+import { Box, UnstyledButton } from '@mantine/core';
 import type { ReactNode } from 'react';
 import classes from './factory-overview.module.css';
-import { StepPips } from './stacked-bar';
+import { StepProgress } from './stacked-bar';
 import { StatusDot } from './status-dot';
 
 const S = WorkstreamState;
@@ -82,7 +82,7 @@ export function TaskLine({
       <UnstyledButton className={classes['lineOpen']} onClick={onOpen}>
         <span className={classes['lineMark']}>{mark}</span>
         <span className={classes['clip']}>{title}</span>
-        <span>{showPips ? <StepPips run={run} /> : null}</span>
+        <span>{showPips ? <StepProgress run={run} /> : null}</span>
         <span
           className={`${classes['lineDetail'] ?? ''} ${classes['clip'] ?? ''}`}
           data-tone={tone}
@@ -97,8 +97,32 @@ export function TaskLine({
   );
 }
 
+/**
+ * A dot with a ring: waits on the builder. The ring's gap takes `--ring-gap`, the tone it sits on (the
+ * page's body unless a panel sets it).
+ */
+export function WaitRing() {
+  return (
+    <Box
+      component="span"
+      aria-hidden
+      w={7}
+      h={7}
+      mx={3}
+      style={{
+        flex: 'none',
+        display: 'inline-block',
+        borderRadius: '50%',
+        background: 'var(--mantine-color-yellow-filled)',
+        boxShadow:
+          '0 0 0 2px var(--ring-gap, var(--mantine-color-body)), 0 0 0 3.5px var(--mantine-color-yellow-filled)',
+      }}
+    />
+  );
+}
+
 /** The mark for a run's line: a ring waits on the builder, a dot runs, red failed, green merged, gray waits. */
 export function RunMark({ color }: { readonly color: string }) {
-  if (color === 'yellow') return <span className={classes['ring']} />;
+  if (color === 'yellow') return <WaitRing />;
   return <StatusDot color={color} />;
 }

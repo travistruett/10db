@@ -1,5 +1,5 @@
 import { InboxKind, type InboxItemDto, type ProjectId, type WorkstreamDto } from '@10db/contracts';
-import { Alert, Button, Stack } from '@mantine/core';
+import { Alert, Button, Group, Paper, Stack, Table, Text, Title } from '@mantine/core';
 import { IconClock } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
 import { useRetryWorkstream } from '../../daemon/queries';
@@ -7,11 +7,10 @@ import { ProjectTile } from '../../shell/project-tile';
 import { failureLine } from '../board/task-state';
 import { joinNames } from '../inbox/route-line';
 import type { FailureCause } from './factory-summary';
-import classes from './factory-overview.module.css';
 import { lastMoment } from './live-groups';
 import { shortAgo } from './short-ago';
 import { StatusDot } from './status-dot';
-import { LineTone, RunMark, TaskLine } from './task-line';
+import { LineTone, RunMark, TaskLine, WaitRing } from './task-line';
 
 const KIND_LABELS: Readonly<Record<InboxKind, string>> = {
   [InboxKind.Question]: 'Question',
@@ -52,6 +51,7 @@ export interface NeedsYouProps {
   readonly onOpenPass: (projectId: ProjectId) => void;
 }
 
+/** One row of the panel: its mark, what kind of ask and its title over one dim line, the project, when, actions. */
 function Need({
   mark,
   kind,
@@ -74,26 +74,46 @@ function Need({
   readonly children: ReactNode;
 }) {
   return (
-    <div className={classes['need']}>
-      <span className={classes['needMark']}>{mark}</span>
-      <div className={classes['needText']}>
-        <div className={classes['needTitleLine']}>
-          <span className={classes['needKind']} data-tone={tone}>
+    <Table.Tr>
+      <Table.Td w={28} ta="center">
+        {mark}
+      </Table.Td>
+      <Table.Td style={{ maxWidth: 0 }}>
+        <Group gap={8} wrap="nowrap" align="baseline">
+          <Text fz={11} fw={600} c={tone === 'you' ? 'yellow' : 'red'} style={{ flex: 'none' }}>
             {kind}
-          </span>
-          <span className={`${classes['needTitle'] ?? ''} ${classes['clip'] ?? ''}`}>{title}</span>
-        </div>
-        <span className={`${classes['needSub'] ?? ''} ${classes['clip'] ?? ''}`} title={subTitle}>
+          </Text>
+          <Text size="sm" fw={500} c="bright" truncate>
+            {title}
+          </Text>
+        </Group>
+        <Text size="xs" c="dimmed" truncate title={subTitle}>
           {sub}
-        </span>
-      </div>
-      <span className={classes['where']}>
-        <ProjectTile name={project} size={14} />
-        <span className={classes['clip']}>{project}</span>
-      </span>
-      <span className={classes['when']}>{when}</span>
-      <span className={classes['actions']}>{children}</span>
-    </div>
+        </Text>
+      </Table.Td>
+      <Table.Td w={160}>
+        <Group gap={6} wrap="nowrap">
+          <ProjectTile name={project} size={14} />
+          <Text size="xs" truncate>
+            {project}
+          </Text>
+        </Group>
+      </Table.Td>
+      <Table.Td w={84} ta="right">
+        <Text
+          size="xs"
+          c="dimmed"
+          style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}
+        >
+          {when}
+        </Text>
+      </Table.Td>
+      <Table.Td w={170}>
+        <Group gap={6} justify="flex-end" wrap="nowrap">
+          {children}
+        </Group>
+      </Table.Td>
+    </Table.Tr>
   );
 }
 
@@ -193,39 +213,40 @@ function Cause({
         ) : null}
       </Need>
       {shown ? (
-        <div
-          className={classes['needRuns']}
-          role="group"
-          aria-label={`${String(cause.runs.length)} failed tasks`}
-        >
-          {cause.runs.map((run) => (
-            <TaskLine
-              key={run.id}
-              mark={<RunMark color="red" />}
-              title={run.taskTitle}
-              detail={run.failureReason ?? 'Failed'}
-              tone={LineTone.Failed}
-              when={shortAgo(lastMoment(run), props.now)}
-              action={
-                props.canRetry(run) ? (
-                  <Button
-                    size="compact-xs"
-                    variant="default"
-                    loading={retrying}
-                    onClick={() => {
-                      onRetry([run]);
-                    }}
-                  >
-                    Retry
-                  </Button>
-                ) : undefined
-              }
-              onOpen={() => {
-                props.onOpen(run);
-              }}
-            />
-          ))}
-        </div>
+        <Table.Tr>
+          <Table.Td />
+          <Table.Td colSpan={4}>
+            <Stack gap={0} role="group" aria-label={`${String(cause.runs.length)} failed tasks`}>
+              {cause.runs.map((run) => (
+                <TaskLine
+                  key={run.id}
+                  mark={<RunMark color="red" />}
+                  title={run.taskTitle}
+                  detail={run.failureReason ?? 'Failed'}
+                  tone={LineTone.Failed}
+                  when={shortAgo(lastMoment(run), props.now)}
+                  action={
+                    props.canRetry(run) ? (
+                      <Button
+                        size="compact-xs"
+                        variant="default"
+                        loading={retrying}
+                        onClick={() => {
+                          onRetry([run]);
+                        }}
+                      >
+                        Retry
+                      </Button>
+                    ) : undefined
+                  }
+                  onOpen={() => {
+                    props.onOpen(run);
+                  }}
+                />
+              ))}
+            </Stack>
+          </Table.Td>
+        </Table.Tr>
       ) : null}
     </>
   );
@@ -275,107 +296,113 @@ export function NeedsYouPanel(props: NeedsYouProps) {
     .join(' · ');
 
   return (
-    <section aria-labelledby="factory-needs-you">
-      <Stack gap={8}>
-        <div className={classes['sectionHead']}>
-          <span>
-            <h2
-              id="factory-needs-you"
-              className={classes['sectionTitle']}
-              style={{ display: 'inline' }}
-            >
-              Needs you
-            </h2>
-            {meta === '' ? null : <span className={classes['sectionMeta']}>{meta}</span>}
-          </span>
-        </div>
-        {retry.error === null ? null : (
-          <Alert
-            color="red"
-            title="Couldn't retry the run"
-            withCloseButton
-            onClose={() => {
-              retry.reset();
-            }}
-          >
-            {retry.error.message}
-          </Alert>
+    <Stack component="section" aria-labelledby="factory-needs-you" gap={8}>
+      <Group gap={8} align="baseline">
+        <Title id="factory-needs-you" order={2} fz={14} fw={600} c="bright">
+          Needs you
+        </Title>
+        {meta === '' ? null : (
+          <Text size="xs" c="dimmed">
+            {meta}
+          </Text>
         )}
-        {asks + failed > 0 ? (
-          <div className={classes['needs']}>
-            {waiting.map(({ run, card }) => (
-              <Need
-                key={run.id}
-                mark={<span className={classes['ring']} />}
-                kind={card === undefined ? 'Waiting on you' : KIND_LABELS[card.kind]}
-                tone="you"
-                title={card?.title ?? run.taskTitle}
-                sub={card === undefined ? 'Open the task to see what it asks' : run.taskTitle}
-                project={nameOf(run.projectId)}
-                when={shortAgo(lastMoment(run), now)}
-              >
-                <Button
-                  size="compact-xs"
-                  variant="default"
-                  onClick={() => {
-                    props.onOpen(run);
-                  }}
+      </Group>
+      {retry.error === null ? null : (
+        <Alert
+          color="red"
+          title="Couldn't retry the run"
+          withCloseButton
+          onClose={() => {
+            retry.reset();
+          }}
+        >
+          {retry.error.message}
+        </Alert>
+      )}
+      {asks + failed > 0 ? (
+        <Paper
+          radius="md"
+          bg="var(--tendb-color-panel)"
+          style={{ '--ring-gap': 'var(--tendb-color-panel)' }}
+        >
+          <Table verticalSpacing={10} horizontalSpacing={10} layout="fixed">
+            <Table.Tbody>
+              {waiting.map(({ run, card }) => (
+                <Need
+                  key={run.id}
+                  mark={<WaitRing />}
+                  kind={card === undefined ? 'Waiting on you' : KIND_LABELS[card.kind]}
+                  tone="you"
+                  title={card?.title ?? run.taskTitle}
+                  sub={card === undefined ? 'Open the task to see what it asks' : run.taskTitle}
+                  project={nameOf(run.projectId)}
+                  when={shortAgo(lastMoment(run), now)}
                 >
-                  Open
-                </Button>
-                <Button
-                  size="compact-xs"
-                  variant="default"
-                  onClick={() => {
-                    props.onOpenInbox(run.projectId);
-                  }}
+                  <Button
+                    size="compact-xs"
+                    variant="default"
+                    onClick={() => {
+                      props.onOpen(run);
+                    }}
+                  >
+                    Open
+                  </Button>
+                  <Button
+                    size="compact-xs"
+                    variant="default"
+                    onClick={() => {
+                      props.onOpenInbox(run.projectId);
+                    }}
+                  >
+                    Answer
+                  </Button>
+                </Need>
+              ))}
+              {passes.map((pass) => (
+                <Need
+                  key={pass.key}
+                  mark={<WaitRing />}
+                  kind="UI Workbench"
+                  tone="you"
+                  title={pass.title}
+                  sub={`${String(pass.pages)} ${pass.pages === 1 ? 'page' : 'pages'} waiting on you`}
+                  project={nameOf(pass.projectId)}
+                  when=""
                 >
-                  Answer
-                </Button>
-              </Need>
-            ))}
-            {passes.map((pass) => (
-              <Need
-                key={pass.key}
-                mark={<span className={classes['ring']} />}
-                kind="UI Workbench"
-                tone="you"
-                title={pass.title}
-                sub={`${String(pass.pages)} ${pass.pages === 1 ? 'page' : 'pages'} waiting on you`}
-                project={nameOf(pass.projectId)}
-                when=""
-              >
-                <Button
-                  size="compact-xs"
-                  variant="default"
-                  onClick={() => {
-                    props.onOpenPass(pass.projectId);
+                  <Button
+                    size="compact-xs"
+                    variant="default"
+                    onClick={() => {
+                      props.onOpenPass(pass.projectId);
+                    }}
+                  >
+                    Open Pass
+                  </Button>
+                </Need>
+              ))}
+              {causes.map((cause) => (
+                <Cause
+                  key={cause.key}
+                  cause={cause}
+                  props={props}
+                  retrying={retryingKey === cause.key}
+                  onRetry={(runs) => {
+                    void retryAll(cause.key, runs);
                   }}
-                >
-                  Open Pass
-                </Button>
-              </Need>
-            ))}
-            {causes.map((cause) => (
-              <Cause
-                key={cause.key}
-                cause={cause}
-                props={props}
-                retrying={retryingKey === cause.key}
-                onRetry={(runs) => {
-                  void retryAll(cause.key, runs);
-                }}
-              />
-            ))}
-          </div>
-        ) : null}
-        {others === null ? null : (
-          <div className={classes['waitingLine']}>
-            <IconClock size={14} stroke={1.5} aria-hidden />
+                />
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Paper>
+      ) : null}
+      {others === null ? null : (
+        <Group gap={8} px={14} wrap="nowrap">
+          <IconClock size={14} stroke={1.5} color="var(--mantine-color-dimmed)" aria-hidden />
+          <Text size="xs" c="dimmed">
             {others}
-          </div>
-        )}
-      </Stack>
-    </section>
+          </Text>
+        </Group>
+      )}
+    </Stack>
   );
 }

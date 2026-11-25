@@ -1,5 +1,5 @@
+import { Group, Progress, Text, Tooltip, type MantineColor } from '@mantine/core';
 import { BAR_ORDER, BarPart, type BarCounts } from './factory-summary';
-import classes from './factory-overview.module.css';
 
 export const BAR_LABELS: Readonly<Record<BarPart, string>> = {
   [BarPart.Merged]: 'Merged today',
@@ -10,9 +10,19 @@ export const BAR_LABELS: Readonly<Record<BarPart, string>> = {
   [BarPart.Waiting]: 'Waiting',
 };
 
+/** DESIGN.md's status colors: green only for merged work, in review is running's blue, striped. */
+const PART_COLORS: Readonly<Record<BarPart, MantineColor>> = {
+  [BarPart.Merged]: 'green',
+  [BarPart.Running]: 'blue',
+  [BarPart.InReview]: 'blue',
+  [BarPart.NeedsYou]: 'yellow',
+  [BarPart.Failed]: 'red',
+  [BarPart.Waiting]: 'gray',
+};
+
 /**
- * A bar split by where work stands, one part per state in DESIGN.md's colors: green only for merged work, in
- * review striped blue. Decorative: the line beside it says the same counts in words.
+ * A bar split by where work stands, one section per state. Decorative: the line beside it says the same
+ * counts in words, and each section's tooltip names its part.
  */
 export function StackedBar({
   counts,
@@ -23,37 +33,60 @@ export function StackedBar({
   readonly size?: 'sm' | 'md';
   readonly labels?: Readonly<Record<BarPart, string>>;
 }) {
+  const total = BAR_ORDER.reduce((n, part) => n + counts[part], 0);
   return (
-    <span className={classes['bar']} data-size={size} aria-hidden>
+    <Progress.Root
+      size={size === 'sm' ? 6 : 8}
+      w={size === 'sm' ? 140 : '100%'}
+      style={{ flex: 'none' }}
+      aria-hidden
+    >
       {BAR_ORDER.filter((part) => counts[part] > 0).map((part) => (
-        <span
-          key={part}
-          className={classes['segment']}
-          data-part={part}
-          style={{ flexGrow: counts[part] }}
-          title={`${labels[part]}: ${String(counts[part])}`}
-        />
+        <Tooltip key={part} label={`${labels[part]}: ${String(counts[part])}`}>
+          <Progress.Section
+            value={(counts[part] / total) * 100}
+            color={PART_COLORS[part]}
+            striped={part === BarPart.InReview}
+          />
+        </Tooltip>
       ))}
-    </span>
+    </Progress.Root>
+  );
+}
+
+/** One part's swatch: a short bar in its color, striped for in review, as the bars draw it. */
+export function BarSwatch({ part }: { readonly part: BarPart }) {
+  return (
+    <Progress
+      value={100}
+      size={8}
+      w={12}
+      color={PART_COLORS[part]}
+      striped={part === BarPart.InReview}
+      style={{ flex: 'none' }}
+      aria-hidden
+    />
   );
 }
 
 /** The key under the Projects heading: each part's swatch and name. */
 export function BarLegend() {
   return (
-    <span className={classes['legend']} aria-hidden>
+    <Group gap={14} aria-hidden>
       {BAR_ORDER.map((part) => (
-        <span key={part} className={classes['legendItem']}>
-          <span className={classes['swatch']} data-part={part} />
-          {BAR_LABELS[part]}
-        </span>
+        <Group key={part} gap={5} wrap="nowrap">
+          <BarSwatch part={part} />
+          <Text size="xs" c="dimmed">
+            {BAR_LABELS[part]}
+          </Text>
+        </Group>
       ))}
-    </span>
+    </Group>
   );
 }
 
-/** A running run's steps as pips: the ones done and the one under way filled, the rest empty. */
-export function StepPips({
+/** How far a running run is through its steps, with the steps named in the tooltip. */
+export function StepProgress({
   run,
 }: {
   readonly run: {
@@ -63,16 +96,14 @@ export function StepPips({
 }) {
   if (run.steps.length === 0) return null;
   return (
-    <span className={classes['pips']} aria-hidden>
-      {run.steps.map((step, i) => (
-        <span
-          // Steps repeat roles (implement, review, implement), so the place is the key.
-          key={i}
-          className={classes['pip']}
-          data-on={i <= run.stepIndex}
-          title={step.role}
-        />
-      ))}
-    </span>
+    <Tooltip label={run.steps.map((s) => s.role).join(' → ')}>
+      <Progress
+        value={((run.stepIndex + 1) / run.steps.length) * 100}
+        size={4}
+        w={80}
+        color="blue"
+        aria-hidden
+      />
+    </Tooltip>
   );
 }

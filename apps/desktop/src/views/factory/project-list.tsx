@@ -7,13 +7,20 @@ import {
   type TaskId,
   type WorkstreamDto,
 } from '@10db/contracts';
-import { UnstyledButton } from '@mantine/core';
+import { Accordion, Box, Collapse, Group, Stack, Text, Title, UnstyledButton } from '@mantine/core';
 import { IconChevronDown, IconChevronRight, IconTools } from '@tabler/icons-react';
-import { useId, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ProjectTile } from '../../shell/project-tile';
 import { failureLine } from '../board/task-state';
 import { useSelectedProject } from '../../shell/selected-project';
-import { barCounts, projectLine, projectRank, startsOpen, type LiveRow } from './factory-summary';
+import {
+  barCounts,
+  projectLine,
+  projectRank,
+  startsOpen,
+  type BarCounts,
+  type LiveRow,
+} from './factory-summary';
 import classes from './factory-overview.module.css';
 import { GoalList } from './goal-list';
 import { LiveGroup, lastMoment } from './live-groups';
@@ -40,6 +47,8 @@ export interface ProjectEntry {
   readonly project: ProjectViewDto;
   readonly rows: readonly LiveRow[];
   readonly passes: readonly BusyPass[];
+  /** Workbench passes of this project with pages waiting on the builder. */
+  readonly asks: number;
   readonly goals: GoalListDto | undefined;
 }
 
@@ -89,7 +98,9 @@ function Fold({
         </UnstyledButton>
         <span className={classes['lineAction']} />
       </div>
-      {open ? <div style={{ paddingLeft: 24 }}>{children}</div> : null}
+      <Collapse expanded={open} keepMounted={false} pl={24}>
+        {children}
+      </Collapse>
     </>
   );
 }
@@ -181,92 +192,88 @@ function Work({
   );
 }
 
-function ProjectRow({
+/** A project's row: the control (tile, name, bar, line, when) and, opened, its goals and its other work. */
+function ProjectItem({
   entry,
-  initiallyOpen,
   props,
 }: {
   readonly entry: ProjectEntry;
-  readonly initiallyOpen: boolean;
   readonly props: ProjectListProps;
 }) {
   const { project, rows, passes, goals } = entry;
   const { select } = useSelectedProject();
-  const [open, setOpen] = useState(initiallyOpen);
-  const id = useId();
-  const counts = barCounts(rows);
-  const withPasses = { ...counts, running: counts.running + passes.length };
-  const latest = rows
-    .map((r) => lastMoment(r.run))
-    .sort()
-    .at(-1);
+  const counts = withPasses(entry);
+  const line = projectLine(counts);
+  const latest = latestOf(entry);
   const hasGoals = goals !== undefined && goals.goals.length > 0;
   const loose = hasGoals
     ? rows.filter((r) => (props.goalOf.get(r.run.taskId) ?? null) === null)
     : rows;
-  const Chevron = open ? IconChevronDown : IconChevronRight;
   return (
-    <div className={classes['project']}>
-      <UnstyledButton
-        className={classes['projectHead']}
-        aria-expanded={open}
-        aria-controls={`${id}-region`}
-        aria-labelledby={`${id}-title ${id}-line`}
-        onClick={() => {
-          setOpen(!open);
+    <Accordion.Item value={project.id}>
+      <Accordion.Control aria-label={`${project.name} ${line}`}>
+        <Group gap={12} wrap="nowrap">
+          <ProjectTile name={project.name} size={18} />
+          <Text fw={600} c="bright" truncate w={160} style={{ flex: 'none' }}>
+            {project.name}
+          </Text>
+          <Box w={240} style={{ flex: 'none' }}>
+            <StackedBar counts={counts} />
+          </Box>
+          <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
+            {line}
+          </Text>
+          <Text size="xs" c="dimmed" w={64} ta="right" style={{ flex: 'none' }}>
+            {latest === '' ? '' : shortAgo(latest, props.now)}
+          </Text>
+        </Group>
+      </Accordion.Control>
+      <Accordion.Panel
+        // Capture runs before a click reaches a link inside, so the project is chosen first.
+        onClickCapture={() => {
+          select(project.id);
         }}
       >
-        <Chevron size={16} stroke={1.5} aria-hidden />
-        <ProjectTile name={project.name} size={18} />
-        <span
-          id={`${id}-title`}
-          className={`${classes['projectName'] ?? ''} ${classes['clip'] ?? ''}`}
-        >
-          {project.name}
-        </span>
-        <StackedBar counts={withPasses} />
-        <span
-          id={`${id}-line`}
-          className={`${classes['projectLine'] ?? ''} ${classes['clip'] ?? ''}`}
-        >
-          {projectLine(withPasses)}
-        </span>
-        <span className={classes['when']}>
-          {latest === undefined ? '' : shortAgo(latest, props.now)}
-        </span>
-      </UnstyledButton>
-      {open ? (
-        <div
-          id={`${id}-region`}
-          role="region"
-          aria-labelledby={`${id}-title`}
-          className={classes['projectBody']}
-          // Capture runs before a click reaches a link inside, so the project is chosen first.
-          onClickCapture={() => {
-            select(project.id);
-          }}
-        >
-          {hasGoals ? (
-            <GoalList project={project} list={goals} linkedGoalId={props.linkedGoalId} />
-          ) : null}
-          {hasGoals && loose.length + passes.length > 0 ? (
-            <div className={classes['groupLabel']}>Not in a goal</div>
-          ) : null}
-          <Work
-            rows={loose}
-            passes={passes}
-            now={props.now}
-            onOpen={props.onOpen}
-            onOpenPass={props.onOpenPass}
-          />
-          {!hasGoals && loose.length + passes.length === 0 ? (
-            <div className={classes['groupLabel']}>Nothing open</div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
+        {hasGoals ? (
+          <GoalList project={project} list={goals} linkedGoalId={props.linkedGoalId} />
+        ) : null}
+        {hasGoals && loose.length + passes.length > 0 ? (
+          <Text size="xs" fw={600} c="dimmed" pt={10} pb={4}>
+            Not in a goal
+          </Text>
+        ) : null}
+        <Work
+          rows={loose}
+          passes={passes}
+          now={props.now}
+          onOpen={props.onOpen}
+          onOpenPass={props.onOpenPass}
+        />
+        {!hasGoals && loose.length + passes.length === 0 ? (
+          <Text size="xs" c="dimmed" pt={4}>
+            Nothing open
+          </Text>
+        ) : null}
+      </Accordion.Panel>
+    </Accordion.Item>
   );
 }
+
+const latestOf = (e: ProjectEntry): string =>
+  e.rows
+    .map((r) => lastMoment(r.run))
+    .sort()
+    .at(-1) ?? '';
+
+/** A project's counts, with its Workbench passes: waiting on the builder as needs you, busy as running. */
+const withPasses = (e: ProjectEntry): BarCounts => {
+  const counts = barCounts(e.rows);
+  return {
+    ...counts,
+    needs_you: counts.needs_you + e.asks,
+    running: counts.running + e.passes.length,
+  };
+};
 
 /**
  * Every shown project as an accordion row: its bar and one line, then, opened, its goals and the rest of its
@@ -274,48 +281,43 @@ function ProjectRow({
  */
 export function ProjectList(props: ProjectListProps) {
   const { entries, linkedGoalId } = props;
-  const latest = (e: ProjectEntry): string =>
-    e.rows
-      .map((r) => lastMoment(r.run))
-      .sort()
-      .at(-1) ?? '';
-  const ranked = entries
-    .map((entry) => ({ entry, counts: barCounts(entry.rows) }))
-    .sort(
-      (a, b) =>
-        projectRank(a.counts) - projectRank(b.counts) ||
-        latest(b.entry).localeCompare(latest(a.entry)) ||
-        a.entry.project.name.localeCompare(b.entry.project.name),
-    );
+  const ranked = [...entries].sort(
+    (a, b) =>
+      projectRank(withPasses(a)) - projectRank(withPasses(b)) ||
+      latestOf(b).localeCompare(latestOf(a)) ||
+      a.project.name.localeCompare(b.project.name),
+  );
   const holdsLinked = (e: ProjectEntry): boolean =>
     linkedGoalId !== undefined && (e.goals?.goals.some((g) => g.goal.id === linkedGoalId) ?? false);
   const goalAsks = (e: ProjectEntry): boolean =>
     e.goals?.goals.some((g) => OPENING_GOALS.has(g.digest.status)) ?? false;
+  // One project shown opens whatever it holds; several open only those with something going on.
+  const opened = ranked
+    .filter(
+      (e) => entries.length === 1 || startsOpen(withPasses(e)) || goalAsks(e) || holdsLinked(e),
+    )
+    .map((e) => e.project.id);
   return (
-    <section aria-labelledby="factory-projects">
-      <div className={classes['sectionHead']} style={{ paddingBottom: 8 }}>
-        <h2 id="factory-projects" className={classes['sectionTitle']}>
+    <Stack component="section" aria-labelledby="factory-projects" gap={8}>
+      <Group justify="space-between" align="baseline">
+        <Title id="factory-projects" order={2} fz={14} fw={600} c="bright">
           Projects
-        </h2>
+        </Title>
         <BarLegend />
-      </div>
-      <div className={classes['projects']}>
-        {ranked.map(({ entry, counts }) => (
-          <ProjectRow
-            key={entry.project.id}
-            entry={entry}
-            // One project shown opens whatever it holds; several open only those with something going on.
-            initiallyOpen={
-              entries.length === 1 ||
-              startsOpen(counts) ||
-              entry.passes.length > 0 ||
-              goalAsks(entry) ||
-              holdsLinked(entry)
-            }
-            props={props}
-          />
+      </Group>
+      <Accordion
+        multiple
+        defaultValue={opened}
+        chevronPosition="left"
+        keepMounted={false}
+        // Folded points right and open points down, as the goal rows inside do.
+        chevron={<IconChevronRight size={16} stroke={1.5} />}
+        classNames={{ chevron: classes['chevron'] }}
+      >
+        {ranked.map((entry) => (
+          <ProjectItem key={entry.project.id} entry={entry} props={props} />
         ))}
-      </div>
-    </section>
+      </Accordion>
+    </Stack>
   );
 }

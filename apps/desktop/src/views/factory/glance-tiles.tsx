@@ -1,6 +1,9 @@
+import { Group, Paper, SimpleGrid, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
-import classes from './factory-overview.module.css';
+import { BarPart } from './factory-summary';
+import { BarSwatch } from './stacked-bar';
 import { StatusDot } from './status-dot';
+import { WaitRing } from './task-line';
 
 export interface GlanceFigures {
   readonly needsYou: number;
@@ -28,26 +31,32 @@ function Tile({
   readonly label: string;
 }) {
   return (
-    <div className={classes['tile']}>
-      <div className={classes['tileFigure']}>
-        <span className={classes['tileNumber']}>{n}</span>
-        {of === undefined ? null : <span className={classes['tileOf']}>{of}</span>}
-      </div>
-      <div className={classes['tileLabel']}>
+    <Paper radius="md" px={14} py={12} bg="var(--tendb-color-panel)">
+      <Group gap={8} align="baseline">
+        <Text fz={24} fw={600} lh={1} c="bright" style={{ fontVariantNumeric: 'tabular-nums' }}>
+          {n}
+        </Text>
+        {of === undefined ? null : (
+          <Text size="xs" c="dimmed">
+            {of}
+          </Text>
+        )}
+      </Group>
+      <Group gap={6} mt={6} wrap="nowrap">
         {mark}
-        {label}
-      </div>
-    </div>
+        <Text size="xs">{label}</Text>
+      </Group>
+    </Paper>
   );
 }
 
 /** Factory's five figures at a glance: what needs the builder, what broke, what runs, what waits to merge, what merged. */
 export function GlanceTiles({ figures: f }: { readonly figures: GlanceFigures }) {
   return (
-    <section aria-label="At a glance" className={classes['tiles']}>
+    <SimpleGrid component="section" aria-label="At a glance" cols={5} spacing={10}>
       <Tile
         n={f.needsYou}
-        mark={<span className={classes['ring']} />}
+        mark={<WaitRing />}
         label={`${plural(f.needsYou, 'needs', 'need')} you`}
       />
       <Tile
@@ -65,10 +74,10 @@ export function GlanceTiles({ figures: f }: { readonly figures: GlanceFigures })
       />
       <Tile
         n={f.inReview}
-        mark={<span className={classes['swatch']} data-part="in_review" />}
+        mark={<BarSwatch part={BarPart.InReview} />}
         label={`${plural(f.inReview, 'pull request')} open`}
       />
       <Tile n={f.merged} mark={<StatusDot color="green" />} label="merged today" />
-    </section>
+    </SimpleGrid>
   );
 }

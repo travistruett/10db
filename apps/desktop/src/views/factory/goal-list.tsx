@@ -28,7 +28,7 @@ function newsOf(summary: GoalSummaryDto, now: number): string | undefined {
 
 /**
  * The project's goals as one list: open goals in status order, then the done ones behind one collapsed
- * line. Work in no goal is the Factory's live list. Every row starts collapsed and one is open at a time.
+ * line. Work in no goal is listed under the goals, in its project's row. Every row starts collapsed and one is open at a time.
  */
 export function GoalList({
   project,

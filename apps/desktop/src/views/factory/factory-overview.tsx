@@ -136,13 +136,14 @@ export function FactoryOverview({
     runs.isPending ||
     passesRead.isPending ||
     taskLists.some((q) => q.isPending) ||
-    batchLists.some((q) => q.isPending)
+    batchLists.some((q) => q.isPending) ||
+    goalLists.some((q) => q.isPending)
   ) {
     return <PageLoading shape={PageLoadingShape.List} rows={4} label="Loading the runs" />;
   }
   const goalsFailed = goalLists.find((q) => q.isError)?.error;
   const anyGoals = goalLists.some((q) => (q.data?.goals.length ?? 0) > 0);
-  if (rows.length === 0 && livePasses.length === 0 && !anyGoals) {
+  if (rows.length === 0 && livePasses.length === 0 && !anyGoals && goalsFailed == null) {
     return (
       <EmptyState
         icon={IconBuildingFactory2}
@@ -161,8 +162,13 @@ export function FactoryOverview({
   const causes = failureCauses(failed);
   const waiting = of(LiveGroup.Waiting);
   const openCards = inbox.filter((card) => card.state === InboxState.Open);
-  const cardFor = (ws: WorkstreamDto) =>
-    openCards.find((card) => card.targets.some((t) => t.workstreamId === ws.id));
+  // The card the run waits on names it: its next action's, else the first open card that targets it.
+  const cardFor = (ws: WorkstreamDto) => {
+    const action = ws.nextAction;
+    const named =
+      action.kind === 'answer' ? openCards.find((card) => card.id === action.inboxId) : undefined;
+    return named ?? openCards.find((card) => card.targets.some((t) => t.workstreamId === ws.id));
+  };
 
   return (
     <Stack gap={26} className={classes['page']}>
@@ -171,8 +177,12 @@ export function FactoryOverview({
           needsYou: needsYou.length + waitingPasses.length,
           failed: failed.length,
           causes: causes.length,
-          running: of(LiveGroup.Running).length + busyPasses.length,
-          laneCap: admission?.machineLaneCap ?? null,
+          // Across every project the figure is the Mac's lanes in use, out of its cap; for one project, its runs.
+          running:
+            filter === null && admission !== undefined
+              ? admission.lanesRunning
+              : of(LiveGroup.Running).length + busyPasses.length,
+          laneCap: filter === null ? (admission?.machineLaneCap ?? null) : null,
           queued: waiting.filter((ws) => ws.state === WorkstreamState.Queued).length,
           inReview: of(LiveGroup.InReview).length,
           merged: of(LiveGroup.Done).length,
@@ -200,6 +210,7 @@ export function FactoryOverview({
           project,
           rows: rows.filter((r) => r.run.projectId === project.id),
           passes: busyPasses.filter((p) => p.projectId === project.id),
+          asks: waitingPasses.filter((p) => p.projectId === project.id).length,
           goals: goalLists[i]?.data,
         }))}
         goalOf={new Map([...tasks.values()].map((t) => [t.id, t.goalId ?? null]))}
