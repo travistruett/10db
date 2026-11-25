@@ -69,6 +69,8 @@ export const DEV_UI_READS: readonly string[] = [
   // The header's status line: what pauses work, with process names and no command lines. Memory only.
   '/status',
   '/settings/keep-awake',
+  '/settings/watchpoints',
+  '/projects/:projectId/watchpoints',
   '/settings/agent-skill',
   '/agent-skill',
   '/settings/lane-permissions',
@@ -100,6 +102,8 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/system': 'A system check runs commands on the machine.',
   '/github': 'A GitHub status check runs gh on the machine.',
   '/workstreams/:id/changes': "A lane's changes are read by running git in its copy.",
+  '/workstreams/:id/watchpoint-hits':
+    "A run's hunks and the agent's notes are text the lane wrote, which the preview's agent-editable code must not read.",
   '/workstreams/:id/skips':
     "What a lane skipped holds the commands it tried, which the preview's agent-editable code must not read.",
   '/goals/:goalId/pass-pages': "A goal's pass pages are read from its tasks' commits with git.",
