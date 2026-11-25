@@ -815,10 +815,7 @@ function steps(index: number, status: StepStatus, startedAt: string): Workstream
       personaName: PERSONAS[role],
       tools: role === StepRole.Implement ? ToolAccess.Edit : ToolAccess.ReadOnly,
       profileId: null,
-      model:
-        role === StepRole.Implement || role === StepRole.Qa
-          ? 'claude-sonnet-4-5'
-          : 'claude-opus-4-5',
+      model: role === StepRole.Implement || role === StepRole.Qa ? 'sonnet' : 'opus',
       effort: role === StepRole.Implement ? Effort.Medium : Effort.High,
       need: 50,
       reason: 'the rigor plan',
@@ -853,7 +850,7 @@ function startRun(
   const ws = write((ctx) =>
     insertWorkstream(ctx, taskId, {
       batchId,
-      first: { model: 'claude-sonnet-4-5', effort: Effort.Medium },
+      first: { model: 'sonnet', effort: Effort.Medium },
     }),
   );
   write((ctx) => {
@@ -912,7 +909,7 @@ function seedRun(seeded: Seeded, taskId: TaskId, spec: TaskSpec, batchId: BatchI
       at(run.at);
       const ws = write((ctx) =>
         insertWorkstream(ctx, taskId, {
-          first: { model: 'claude-sonnet-4-5', effort: Effort.Medium },
+          first: { model: 'sonnet', effort: Effort.Medium },
         }),
       );
       if (run.kind === 'held')
