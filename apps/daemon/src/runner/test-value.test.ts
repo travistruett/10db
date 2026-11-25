@@ -185,6 +185,8 @@ describe('the acceptance check at the end of an implement step', () => {
       stepIndex: 0,
       nextAction: { kind: 'fix' },
     });
+    const fix = ws(workstream.id).nextAction;
+    expect(fix.kind === 'fix' ? typeof fix.providerSessionId : null).toBe('string');
     const sentBack = listEventsAfter(engine.store.db, 0, 10_000).filter(
       (e) => e.type === 'step.changed' && e.data['sentBackBy'] === 'acceptance',
     );
