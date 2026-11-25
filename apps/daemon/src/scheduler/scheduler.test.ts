@@ -691,20 +691,30 @@ describe('scheduler', () => {
       batches: store.db.select().from(schema.batches).all(),
     });
 
+    const endless = { kind: 'dependency', endless: true, line: 'for t, which was cancelled' };
+    const openStuck = () =>
+      listInbox(store.db, { states: ['OPEN'] }).filter((c) => c.title.startsWith('Stuck:'));
+    // A busy Mac and full lanes are passed over first, yet neither hides a wait that can't end.
+    held = true;
     expect(await s.tick()).toBe(0);
-    expect(waits.get(waiting.workstream.id)).toMatchObject({
-      kind: 'dependency',
-      endless: true,
-      line: 'for t, which was cancelled',
-    });
+    expect(waits.get(waiting.workstream.id)).toMatchObject(endless);
+    held = false;
     const before = rows();
     sweep.sweep();
+    const first = openStuck();
+    expect(first).toHaveLength(1);
+    expect(await scheduler({ global: 0 }, undefined, undefined, waits).tick()).toBe(0);
+    expect(waits.get(waiting.workstream.id)).toMatchObject(endless);
+    expect(await s.tick()).toBe(0);
+    expect(waits.get(waiting.workstream.id)).toMatchObject(endless);
+    clock.advance(3 * 60 * 60_000);
     sweep.sweep();
-    const stuck = listInbox(store.db, { states: ['OPEN'] }).filter((c) =>
-      c.title.startsWith('Stuck:'),
-    );
-    expect(stuck).toHaveLength(1);
+    const stuck = openStuck();
+    expect(stuck.map((c) => c.id)).toEqual(first.map((c) => c.id));
     expect(stuck[0]?.options.map((o) => o.label)).toEqual(['Cancel Run']);
+    // The card names a fixed time, so what it says stays true however long it stays open.
+    expect(stuck[0]?.body).toBe(first[0]?.body);
+    expect(stuck[0]?.body).toContain('It has not moved since ');
     expect(rows()).toEqual(before);
 
     moveWorkstream(waiting.workstream.id, 'CANCELLED');

@@ -29,6 +29,8 @@ export const StallCardDetail = z.object({
 });
 export type StallCardDetail = z.infer<typeof StallCardDetail>;
 
+const SINCE = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
 const ACTION_WORDS: Readonly<Record<StallAction, string>> = {
   [StallAction.CancelRun]: 'Stops this run, as Cancel on the Board does.',
   [StallAction.RetryDependency]: 'Runs the failed task it waits for again.',
@@ -43,9 +45,8 @@ export function stallCardOf(item: InboxItemDto): StallCardDetail | null {
   return parsed.success ? parsed.data : null;
 }
 
-/** The one Stuck card of a stall: what is stuck, why, for how long, and the ways out 10db has. */
-export function stallCard(stall: Stall, now: Date): FlagInput {
-  const minutes = Math.max(0, Math.floor((now.getTime() - Date.parse(stall.since)) / 60_000));
+/** The one Stuck card of a stall: what is stuck, why, since when, and the ways out 10db has. */
+export function stallCard(stall: Stall): FlagInput {
   const detail: StallCardDetail = {
     key: stall.key,
     fingerprint: stall.fingerprint,
@@ -68,7 +69,8 @@ export function stallCard(stall: Stall, now: Date): FlagInput {
     title: `Stuck: ${stall.title}`,
     body: [
       stall.reason,
-      `It has not moved for ${String(minutes)} minute${minutes === 1 ? '' : 's'}.`,
+      // A fixed time, in this Mac's own: the card is written once and stays true while it is open.
+      `It has not moved since ${SINCE.format(new Date(stall.since))}.`,
       '10db changes nothing by itself; this card closes once it moves.',
     ].join('\n\n'),
     detail: { [STALL_CARD]: detail },

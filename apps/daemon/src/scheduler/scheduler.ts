@@ -394,6 +394,61 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     });
   }
 
+  /** What a run would ask to claim at its launch. */
+  function claimAskOf(
+    ws: WorkstreamDto,
+    task: ReturnType<typeof getTask>,
+    project: ReturnType<typeof getProject>,
+    inPass: PassDto | null,
+  ) {
+    const areaScope = claimScopeOf(db, ws);
+    // A page holds its pass's areas for its life; one that waited at the open for a page another
+    // task held claims it at its launch, and runs only once it has it.
+    const requests = inPass
+      ? passHeldAreas(passAreasOf(db, inPass.id), task).map((name) => ({
+          kind: ClaimKind.Area,
+          name,
+        }))
+      : claimRequestsForTask(task, project);
+    return {
+      projectId: project.id,
+      workstreamId: ws.id,
+      requests,
+      copyHazards: copyHazardNames(project),
+      ...(areaScope ? { areaScope } : {}),
+    };
+  }
+
+  function claimWait(conflict: NonNullable<ReturnType<typeof claimConflict>>): FoundWait {
+    const holder = getWorkstreamRow(db, conflict.heldBy);
+    return queueWait.claim({
+      name: conflict.name,
+      holderTitle: getTask(db, holder.taskId).title,
+      holder: { taskId: holder.taskId, workstreamId: holder.id },
+      holderEnded: isTerminal(holder.state),
+    });
+  }
+
+  /**
+   * The wait of a queued run that can't end by itself, if it has one: a dependency that ended or
+   * waits for this run, a batch that is over, or a claim a finished run still holds.
+   */
+  function endlessWait(ws: WorkstreamDto): FoundWait | null {
+    const dependency = queueWait.dependency(dependencyWaits(db, ws.taskId), ws.batchId);
+    if (dependency?.endless) return dependency;
+    const copy = queueWait.copy(ws.batchId ? getBatch(db, ws.batchId) : null);
+    if (copy.endless) return copy;
+    const task = getTask(db, ws.taskId);
+    const project = getProject(db, ws.projectId);
+    const conflict = claimConflict(
+      db,
+      claimAskOf(ws, task, project, passHoldingTask(db, task) ?? null),
+    );
+    if (conflict === null) return null;
+    const claim = claimWait(conflict);
+    return claim.endless ? claim : null;
+  }
+
   /**
    * Records what each queued run waits for, then forgets the runs no longer queued and tells the app
    * what changed. A run whose runner is still unwinding keeps the wait it had.
@@ -401,8 +456,13 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   function launchQueued(snapshot: CheckoutSnapshot): number {
     const queued = listWorkstreams(db, { states: [WorkstreamState.Queued] });
     const launchedIds = new Set<WorkstreamId>();
+    const byId = new Map(queued.map((ws) => [ws.id, ws]));
+    // A wait that can't end is the one to say, whichever check passed the run over first: a full lane
+    // or a busy Mac would otherwise hide it on some ticks and show it on others.
     const found = (id: WorkstreamId, wait: FoundWait): void => {
-      opts.waits?.record(id, wait);
+      if (!opts.waits) return;
+      const ws = byId.get(id);
+      opts.waits.record(id, wait.endless || !ws ? wait : (endlessWait(ws) ?? wait));
     };
     try {
       if (opts.held?.()) {
@@ -661,37 +721,13 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         continue;
       }
       const leaseUntil = new Date(opts.clock.now().getTime() + opts.leaseMs).toISOString();
-      const areaScope = claimScopeOf(db, ws);
-      // A page holds its pass's areas for its life; one that waited at the open for a page another
-      // task held claims it here, and runs only once it has it.
-      const requests = inPass
-        ? passHeldAreas(passAreasOf(db, inPass.id), task).map((name) => ({
-            kind: ClaimKind.Area,
-            name,
-          }))
-        : claimRequestsForTask(task, project);
-      const ask = {
-        projectId: project.id,
-        workstreamId: ws.id,
-        requests,
-        copyHazards: copyHazardNames(project),
-        ...(areaScope ? { areaScope } : {}),
-      };
+      const ask = claimAskOf(ws, task, project, inPass);
       // Last, just before the claim, and only with the claim free: a put-back starts only for a run
       // that would launch now, and never writes where another lane holds the area.
       const conflict = claimConflict(db, ask);
       if (conflict !== null) {
         waitForClaim(ws.id, conflict);
-        const holder = getWorkstreamRow(db, conflict.heldBy);
-        found(
-          ws.id,
-          queueWait.claim({
-            name: conflict.name,
-            holderTitle: getTask(db, holder.taskId).title,
-            holder: { taskId: holder.taskId, workstreamId: holder.id },
-            holderEnded: isTerminal(holder.state),
-          }),
-        );
+        found(ws.id, claimWait(conflict));
         continue;
       }
       if (!opts.keptWork.ready(ws)) {

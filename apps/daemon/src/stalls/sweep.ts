@@ -93,7 +93,7 @@ export function createStallSweep(deps: {
     const changed = stalls.filter((s) => open.get(s.key)?.fingerprint !== s.fingerprint);
     if (changed.length > 0)
       deps.state.write((ctx) => {
-        for (const stall of changed) flagCard(ctx, stallCard(stall, now));
+        for (const stall of changed) flagCard(ctx, stallCard(stall));
       });
     const current = new Set(stalls.map((s) => s.key));
     const closed = resolveStaleCards(db, deps.inbox, null, (when, item) =>
