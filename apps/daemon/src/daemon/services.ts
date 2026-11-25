@@ -152,6 +152,7 @@ import type { SizingService } from '../sizing';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
 import {
   createFailedRestarts,
+  runSkippedCalls,
   workstreamChanges,
   type BatchStarter,
   type PassOpened,
@@ -192,7 +193,7 @@ import {
 import type { AgentSkill } from '../agent-skill';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
-import type { Admission, Scheduler } from '../scheduler';
+import type { Admission, QueueWaits, Scheduler } from '../scheduler';
 import type { StatusService } from '../status';
 import { capacitySettings, setCapacitySettings } from '../load';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
@@ -304,6 +305,8 @@ export function createServices(deps: {
   readonly liveFrames: LiveFrames;
   readonly runner: Runner;
   readonly scheduler: Scheduler;
+  /** What each queued run waits for, as the scheduler's last tick found it. */
+  readonly waits: Pick<QueueWaits, 'get'>;
   readonly inbox: InboxService;
   /** Where each Slack workspace stands: Open leaves out what Waiting holds only while its workspace is connected. */
   readonly slackConnections: Pick<SlackConnections, 'connectedTeams'>;
@@ -349,6 +352,8 @@ export function createServices(deps: {
   /** The port the API listens on; null until it does. */
   readonly daemonPort: () => number | null;
   readonly starter: BatchStarter;
+  /** Starts each Run These Now follow-up its source now lets start. */
+  readonly startFollowUps: () => void;
   /** The sizing in flight, which a start from the Board, the API or the builder's MCP waits for. */
   readonly sizing: Pick<SizingService, 'settled'>;
   /** How long that wait is at most. */
@@ -813,9 +818,9 @@ export function createServices(deps: {
     getGoal: (id) => getGoal(db, id),
     listWorkstreams({ active }) {
       const live = new Set(listActiveProjects(db).map((p) => p.id));
-      return listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}).filter((w) =>
-        live.has(w.projectId),
-      );
+      return listWorkstreams(db, active ? { states: ACTIVE_STATES } : {})
+        .filter((w) => live.has(w.projectId))
+        .map((w) => ({ ...w, wait: deps.waits.get(w.id) ?? null }));
     },
     async cancelWorkstream(id) {
       await deps.runner.cancel(id);
@@ -826,6 +831,12 @@ export function createServices(deps: {
     listWorkstreamSkips(id) {
       getWorkstream(db, id);
       return listSkipsForWorkstream(db, id);
+    },
+    runSkippedCalls(id) {
+      getWorkstream(db, id);
+      const followUp = deps.state.write((ctx) => runSkippedCalls(ctx, id));
+      deps.startFollowUps();
+      return followUp;
     },
     retryWorkstream(id, note) {
       const ws = deps.starter.retry(id, note);

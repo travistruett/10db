@@ -101,12 +101,7 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
       </Group>
       <NeedsYou digest={digest} rows={rows} />
       <WaitingOnOthers digest={digest} />
-      <GoalTasks
-        goalId={goal.id}
-        rows={rows}
-        loading={tasks.isPending || sessions.loading}
-        error={loadError}
-      />
+      <GoalTasks rows={rows} loading={tasks.isPending || sessions.loading} error={loadError} />
       <Divider />
       <Stack gap="xs">
         <SinceYouLooked opened={opened} />

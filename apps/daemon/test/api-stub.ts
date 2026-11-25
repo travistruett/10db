@@ -39,6 +39,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     workstreamChanges: none,
     taskSession: none,
     listWorkstreamSkips: () => [],
+    runSkippedCalls: none,
     listInbox: () => [],
     pageInbox: track('pageInbox'),
     pageActivity: () => ({ rows: [], next: null }),

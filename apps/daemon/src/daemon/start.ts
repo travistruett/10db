@@ -417,7 +417,8 @@ import {
 } from '../sandbox';
 import { createFolderHold } from '../folder-hold';
 import { createStatusService } from '../status';
-import { createAdmission, createScheduler, type Scheduler } from '../scheduler';
+import { createAdmission, createQueueWaits, createScheduler, type Scheduler } from '../scheduler';
+import { createStallCardAnswers, createStallSweep } from '../stalls';
 import {
   createDrain,
   createScriptInstaller,
@@ -1009,6 +1010,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       (!runner.isRunning(id) || runner.isParked(id) || isLaneWaitingOnCard(state.db, id)),
   });
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerStallCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerSelfUpdateCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
@@ -1160,6 +1162,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerWorktreeCard?.(item, answer);
       answerPassCards?.(item, answer);
       answerDeadlockCard(item, answer);
+      answerStallCard?.(item, answer);
     },
   });
   const watch = createJudgeOutageWatch({
@@ -1663,6 +1666,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   answerWorktreeCard = createWorktreeCardAnswers(delivery, {
     starter,
     abandon: (id) => shipper.abandon(id),
+  });
+  answerStallCard = createStallCardAnswers({
+    state,
+    cancel: (id) => {
+      if (!runner) throw new RunnerNotStartedError();
+      return runner.cancel(id);
+    },
+    retry: (id) => {
+      starter.retry(id);
+      scheduler?.requestTick();
+    },
+    abandon: (id) => {
+      shipper.abandon(id);
+    },
+    log: logger,
   });
   answerBatchCard = createBatchCardAnswers({
     retry: (id, note) => {
@@ -2289,6 +2307,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   if (closedNoticeCards > 0) {
     logger.info({ closed: closedNoticeCards }, 'closed open cards that are notices now');
   }
+  const queueWaits = createQueueWaits({ state, clock });
   const createdScheduler = createScheduler({
     state,
     folderHold,
@@ -2331,8 +2350,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     awaitedHolders: () => claimWaits.awaitedHolders(),
     held: () => admission.held(),
+    waits: queueWaits,
   });
   scheduler = createdScheduler;
+  // The watchdog: one Stuck card per run or batch that stopped moving. It writes nothing else.
+  const stallSweep = createStallSweep({
+    state,
+    inbox,
+    waits: queueWaits,
+    clock,
+    logger: logger.child({ component: 'stalls' }),
+  });
 
   // The changed-files check after a page's turn (Workbench spec §8.1): advice, through the shared
   // slots at advice priority. Started before recovery, which settles turns a stopped daemon
@@ -2912,6 +2940,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     liveFrames,
     runner: createdRunner,
     scheduler: createdScheduler,
+    startFollowUps: () => {
+      startFollowUps();
+    },
+    waits: queueWaits,
     moves,
     inbox,
     keepAwake,
@@ -3227,12 +3259,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         pause: async () => {
           installHold.begin(clock.now());
           createdScheduler.stop();
+          stallSweep.stop();
           await createdScheduler.idle();
         },
         resume: () => {
           installHold.end();
           folderHold.serveWaiters();
           createdScheduler.start();
+          stallSweep.start();
           createdScheduler.requestTick();
         },
       });
@@ -3452,6 +3486,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger.error({ err: error }, 'could not close the failed-update cards of an update that took');
   });
   createdScheduler.start();
+  stallSweep.start();
   createdScheduler.requestTick();
   loadGuard.start();
   prWatch.start();
@@ -3479,6 +3514,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         },
       );
       createdScheduler.stop();
+      stallSweep.stop();
       // A move under way leaves its worktree and its row for the next start to finish.
       chatMovesAbort.abort();
       // A sign-in's agent is a child of ours: it is told to end now, in step with the lanes, and awaited

@@ -161,6 +161,8 @@ describe('a lane for a task filed from a proposal', () => {
       clock,
       watch,
       batchMs: 500,
+      // A stray cards at its first batch, so the write the lane's claims don't cover shows at once.
+      strayWaitMs: 0,
     });
     watcher.sync();
     expect([...open.keys()]).toEqual([repo.path]);

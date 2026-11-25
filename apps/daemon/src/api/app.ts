@@ -2123,6 +2123,9 @@ export function createApp(deps: ApiDeps) {
     .get('/workstreams/:id/skips', (c) =>
       c.json(deps.services.listWorkstreamSkips(WorkstreamId.parse(c.req.param('id')))),
     )
+    .post('/workstreams/:id/skips/run', (c) =>
+      c.json(deps.services.runSkippedCalls(WorkstreamId.parse(c.req.param('id'))), 201),
+    )
     .get(
       '/inbox',
       validator('query', (query): { state?: string } =>

@@ -1,9 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import {
+  accessSync,
+  constants,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -40,6 +43,22 @@ import { createTempRepo, isolatedGitEnv, tempDir, waitForAsync, type TempDir } f
  * Seatbelt can't nest (`TENDB_SANDBOX=1`, which every sandboxed command gets).
  */
 const SEATBELT = process.platform === 'darwin' && process.env['TENDB_SANDBOX'] !== '1';
+
+// The standalone Tailscale app's local API: a port link (to a bare number, so it dangles) and a
+// same-user proof any admin user can read.
+const TAILSCALE = '/Library/Tailscale';
+// Only where the builder can read the proof outside the sandbox does a denial inside it prove anything.
+const readable = (path: string): boolean => {
+  try {
+    accessSync(path, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const tailscaleProof = (SEATBELT && existsSync(TAILSCALE) ? readdirSync(TAILSCALE) : []).find(
+  (name) => name.startsWith('sameuserproof-') && readable(join(TAILSCALE, name)),
+);
 
 const listen = (server: Server, at: string | number): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -291,6 +310,33 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
       'own-env': 'ok',
     });
   }, 120_000);
+
+  it.skipIf(tailscaleProof === undefined)(
+    "keeps Tailscale's local API credential away from the gate, with localhost off and on",
+    async () => {
+      for (const sandboxLoopback of [false, true]) {
+        expect(
+          await probe(
+            {
+              'tailscale-dir': `ls ${TAILSCALE}`,
+              'tailscale-port': `readlink ${join(TAILSCALE, 'ipnport')}`,
+              'tailscale-proof': `cat ${join(TAILSCALE, tailscaleProof ?? '')}`,
+              // Control: the rest of /Library stays a system read.
+              library: 'ls /Library',
+            },
+            { project: { repoPath: checkout, sandboxLoopback } },
+          ),
+          `localhost ${sandboxLoopback ? 'on' : 'off'}`,
+        ).toEqual({
+          'tailscale-dir': 'denied',
+          'tailscale-port': 'denied',
+          'tailscale-proof': 'denied',
+          library: 'ok',
+        });
+      }
+    },
+    120_000,
+  );
 
   it("keeps a project's browser sign-in and its dev login's log away from the gate", async () => {
     // The data dir inside the checkout, which a gate reads: only the protected reads keep it out.
