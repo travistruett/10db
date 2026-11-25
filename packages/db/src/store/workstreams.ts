@@ -132,6 +132,8 @@ function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
     lastActivityAt: row.lastActivityAt,
     runNextAt: row.runNextAt,
     notice: row.notice,
+    // The scheduler holds what a queued run waits for in memory; the daemon's services add it.
+    wait: null,
     revertTold: revertTold(db, row),
     waitingOn: waitingOnFor(db, row.id),
     createdAt: row.createdAt,

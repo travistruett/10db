@@ -28,6 +28,7 @@ import {
   Why,
   WorkstreamId,
   WorkstreamState,
+  type BatchId,
   type GoalId,
   type KindDto,
   type BoardColumnId,
@@ -729,19 +730,51 @@ export function setTaskStatus(ctx: WriteContext, id: TaskId, status: TaskStatus)
  * is not done: its dependents wait for the landing.
  */
 export function dependenciesDone(db: DbReader, taskId: TaskId): boolean {
+  return dependencyWaits(db, taskId).length === 0;
+}
+
+/** A dependency that is not done yet, and why: the shape `dependencyWaits` answers. */
+export interface DependencyWait {
+  readonly taskId: TaskId;
+  readonly title: string;
+  /** Finished, with its work in a separate copy that has not landed. */
+  readonly landing: boolean;
+  /** The copy's batch it waits to land, when `landing`. */
+  readonly landingBatchId: BatchId | null;
+  /** The dependency can't finish by itself: the task or its latest run was cancelled, or that run failed. */
+  readonly ended: 'failed' | 'cancelled' | null;
+  /** Its latest run, when that run failed. */
+  readonly failedRunId: WorkstreamId | null;
+}
+
+/** Each dependency of the task that is not done (`dependenciesDone`), with what it waits for. */
+export function dependencyWaits(db: DbReader, taskId: TaskId): DependencyWait[] {
   const deps = db
-    .select({ id: schema.tasks.id, status: schema.tasks.status })
+    .select({ id: schema.tasks.id, status: schema.tasks.status, title: schema.tasks.title })
     .from(schema.taskDeps)
     .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.dependsOnId))
     .where(eq(schema.taskDeps.taskId, taskId))
     .all();
-  return deps.every(({ id, status }) =>
-    status === TaskStatus.Done ? !waitsForLanding(db, id) : mergedDespiteFailure(db, id),
-  );
+  return deps.flatMap(({ id, status, title }): DependencyWait[] => {
+    const base = { taskId: id, title, landing: false, landingBatchId: null, failedRunId: null };
+    if (status === TaskStatus.Done) {
+      const landing = landingBatch(db, id);
+      return landing === null
+        ? []
+        : [{ ...base, landing: true, landingBatchId: landing, ended: null }];
+    }
+    if (mergedDespiteFailure(db, id)) return [];
+    if (status === TaskStatus.Cancelled) return [{ ...base, ended: 'cancelled' }];
+    const latest = latestRun(db, id);
+    if (latest?.state === WorkstreamState.Cancelled) return [{ ...base, ended: 'cancelled' }];
+    if (latest?.state === WorkstreamState.Failed)
+      return [{ ...base, ended: 'failed', failedRunId: latest.id }];
+    return [{ ...base, ended: null }];
+  });
 }
 
-/** Whether the task's latest run is in a separate copy whose batch has not shipped. */
-function waitsForLanding(db: DbReader, taskId: TaskId): boolean {
+/** The batch of the task's latest run when it is a separate copy that has not shipped, else null. */
+function landingBatch(db: DbReader, taskId: TaskId): BatchId | null {
   const latest = db
     .select({ batchId: schema.workstreams.batchId, batchState: schema.batches.state })
     .from(schema.workstreams)
@@ -750,11 +783,11 @@ function waitsForLanding(db: DbReader, taskId: TaskId): boolean {
     .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
     .limit(1)
     .get();
-  return (
-    latest?.batchId != null &&
+  return latest?.batchId != null &&
     latest.batchState !== BatchState.Shipped &&
     isLocalCopy(db, latest.batchId)
-  );
+    ? latest.batchId
+    : null;
 }
 
 /** Whether the task's latest run failed but shipped anyway, and its pull request has merged. */

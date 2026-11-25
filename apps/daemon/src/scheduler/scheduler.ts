@@ -33,7 +33,7 @@ import {
   claimRequestsForTask,
   copyHazardNames,
   countLanes,
-  dependenciesDone,
+  dependencyWaits,
   findOpenPass,
   getBatch,
   getAccountRow,
@@ -71,6 +71,7 @@ import { folderCardOpen, folderSeenOn } from '../pass';
 import { untakenMessages } from '../runner';
 import { roomForLane } from './lane-room';
 import { passLaunch, PassLaunch } from './pass-launch';
+import { queueWait, type FoundWait, type QueueWaits } from './queue-waits';
 import { FREE_SESSION_WAIT_KEY, freeSessionWait, laneToYield, type WarmLane } from './warm-yield';
 
 /** The notice key of a queued task that waits for a claim another task holds. */
@@ -134,6 +135,8 @@ export interface SchedulerOptions {
    * its work is put back in its checkout. Asked last, of a run every other check would launch now.
    */
   readonly keptWork: { ready(run: WorkstreamDto): boolean };
+  /** Where each tick records what every queued run it passed over waits for. */
+  readonly waits?: QueueWaits;
 }
 
 export interface Scheduler {
@@ -391,8 +394,37 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     });
   }
 
+  /**
+   * Records what each queued run waits for, then forgets the runs no longer queued and tells the app
+   * what changed. A run whose runner is still unwinding keeps the wait it had.
+   */
   function launchQueued(snapshot: CheckoutSnapshot): number {
-    if (opts.held?.()) return 0;
+    const queued = listWorkstreams(db, { states: [WorkstreamState.Queued] });
+    const launchedIds = new Set<WorkstreamId>();
+    const found = (id: WorkstreamId, wait: FoundWait): void => {
+      opts.waits?.record(id, wait);
+    };
+    try {
+      if (opts.held?.()) {
+        for (const ws of queued)
+          if (!opts.runner.isRunning(ws.id)) found(ws.id, queueWait.machine());
+        return 0;
+      }
+      return launchLine(queued, snapshot, found, launchedIds);
+    } finally {
+      if (opts.waits) {
+        opts.waits.retain(queued.map((w) => w.id).filter((id) => !launchedIds.has(id)));
+        opts.waits.flush();
+      }
+    }
+  }
+
+  function launchLine(
+    queued: readonly WorkstreamDto[],
+    snapshot: CheckoutSnapshot,
+    found: (id: WorkstreamId, wait: FoundWait) => void,
+    launchedIds: Set<WorkstreamId>,
+  ): number {
     const signingIn = opts.connecting?.()?.accountId ?? null;
     const lanes = countLanes(db);
     let global = lanes.global;
@@ -447,7 +479,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
           : (byPass.get(ask.pass.id) ?? 0);
       waitForSession(ws.id, working);
     };
-    const line = listWorkstreams(db, { states: [WorkstreamState.Queued] }).toSorted(queueOrder);
+    const line = queued.toSorted(queueOrder);
     // Open passes whose page this tick held for Your folder being off the pass's branch.
     const folderHeld = new Set<PassId>();
     for (const ws of line) {
@@ -459,8 +491,10 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         global >= opts.caps.global &&
         (warm ??= warmLanes()).length === 0 &&
         !passHoldingTask(db, getTask(db, ws.taskId))
-      )
+      ) {
+        if (!opts.runner.isRunning(ws.id)) found(ws.id, queueWait.lane());
         continue;
+      }
       // A runner that just re-queued this row is still unwinding; launch() would refuse it and
       // leave it STARTING with a lane. Its lane-freed callback ticks again once it has exited.
       if (opts.runner.isRunning(ws.id)) continue;
@@ -469,7 +503,10 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       // A pass task runs a turn only when its pass's rows say so (Workbench spec §5.5), while the
       // pass holds it.
       const inPass = passHoldingTask(db, task) ?? null;
-      if (inPass && !passPageRuns(ws, task, inPass, project, snapshot, folderHeld)) continue;
+      if (inPass && !passPageRuns(ws, task, inPass, project, snapshot, folderHeld)) {
+        found(ws.id, queueWait.pass('for its next turn in the UI Workbench'));
+        continue;
+      }
       const batch = ws.batchId ? getBatch(db, ws.batchId) : null;
       // Nothing else runs in Your folder while a pass holds it (W9): the task waits, saying so.
       const holding =
@@ -478,6 +515,10 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
           : undefined;
       if (holding) {
         waitForPass(ws.id, holding);
+        found(
+          ws.id,
+          queueWait.pass(`for the UI Workbench pass ‘${holding.name}’ to give back Your folder`),
+        );
         continue;
       }
       if (ws.notice?.key === PASS_FOLDER_WAIT_NOTICE_KEY) endPassWait(ws.id);
@@ -489,24 +530,39 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         const held = chatHolders(project.id);
         if (held.length > 0) {
           waitForFolder(ws.id, project.id, held);
+          found(ws.id, queueWait.folder(held.map((b) => holderWords(b.holder)).join(' and ')));
           continue;
         }
       }
       if (ws.notice?.key === FOLDER_HOLD_WAIT_NOTICE_KEY) endFolderWait(ws.id);
       const account = getAccountRow(db, project.accountId);
-      if (account.id === signingIn) continue;
-      if (opts.modelWait?.holds(account.id)) continue;
-      if (notReady.has(account.id)) continue;
+      if (account.id === signingIn) {
+        found(ws.id, queueWait.account('signing in'));
+        continue;
+      }
+      if (opts.modelWait?.holds(account.id)) {
+        found(ws.id, queueWait.account('reading its models'));
+        continue;
+      }
+      if (notReady.has(account.id)) {
+        found(ws.id, queueWait.account('not ready'));
+        continue;
+      }
       if (!open.has(account.id) && unready(account)) {
         opts.accounts.prepare(account, project.id);
         notReady.add(account.id);
+        found(ws.id, queueWait.account('not ready'));
         continue;
       }
       if (!open.has(account.id)) {
         const asked = `${account.id}:${project.id}`;
-        if (blockedThisTick.has(asked)) continue;
+        if (blockedThisTick.has(asked)) {
+          found(ws.id, queueWait.account('blocked'));
+          continue;
+        }
         if (opts.accounts.blocked(account, project.id) !== null) {
           blockedThisTick.add(asked);
+          found(ws.id, queueWait.account('blocked'));
           continue;
         }
         opts.accounts.readList?.(account.id);
@@ -526,7 +582,10 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       let needsRoom = false;
       if (!overCaps && !room) {
         // A project's own limit is never freed by a warm session, which it does not count.
-        if (inPass === null && (byProject.get(project.id) ?? 0) >= project.maxLanes) continue;
+        if (inPass === null && (byProject.get(project.id) ?? 0) >= project.maxLanes) {
+          found(ws.id, queueWait.lane());
+          continue;
+        }
         // A warm session closes only for work that could start once it has: after every check.
         needsRoom = true;
       }
@@ -544,11 +603,22 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
             warnedMissing.add(batch.id);
             opts.onWorktreeMissing(batch, checkout);
           }
+          found(ws.id, queueWait.checkout('for its copy, whose worktree is missing'));
           continue;
         }
         if (batch) warnedMissing.delete(batch.id);
         // Read after this tick's branch snapshot: wait for the next tick rather than guess.
-        if (!snapshot.branches.has(checkout)) continue;
+        if (!snapshot.branches.has(checkout)) {
+          // A copy still being cut is not read; a checkout git refuses has its own card.
+          found(
+            ws.id,
+            batch !== null &&
+              (batch.state !== BatchState.Open || batch.branch === null || batch.baseSha === null)
+              ? queueWait.copy(batch)
+              : queueWait.checkout("for its checkout's branch to be read"),
+          );
+          continue;
+        }
         const current = snapshot.branches.get(checkout) ?? null;
         const verdict = batchLaunchVerdict(batch, current);
         if (verdict === LaunchVerdict.WrongBranch && batch && !warned.has(batch.id)) {
@@ -556,7 +626,17 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
           opts.onWrongBranch(batch, current, checkout);
         }
         if (verdict === LaunchVerdict.WrongBranch && batch) branchReady.delete(batch.id);
-        if (verdict !== LaunchVerdict.Launch) continue;
+        if (verdict === LaunchVerdict.WrongBranch) {
+          found(
+            ws.id,
+            queueWait.checkout(`for its checkout to be on ${batch?.branch ?? 'its branch'}`),
+          );
+          continue;
+        }
+        if (verdict !== LaunchVerdict.Launch) {
+          found(ws.id, queueWait.copy(batch));
+          continue;
+        }
         if (batch) {
           warned.delete(batch.id);
           if (!branchReady.has(batch.id)) {
@@ -565,11 +645,19 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
           }
         }
       }
-      if (!dependenciesDone(db, ws.taskId)) continue;
+      const dependency = queueWait.dependency(dependencyWaits(db, ws.taskId), ws.batchId);
+      if (dependency !== null) {
+        found(ws.id, dependency);
+        continue;
+      }
       // A parked task never launches, whatever its queue holds.
-      if (task.boardColumnId !== null) continue;
+      if (task.boardColumnId !== null) {
+        found(ws.id, queueWait.parked());
+        continue;
+      }
       if (needsRoom) {
         makeRoom(ws, { accountId: account.id, pass: inPass });
+        found(ws.id, queueWait.lane());
         continue;
       }
       const leaseUntil = new Date(opts.clock.now().getTime() + opts.leaseMs).toISOString();
@@ -594,9 +682,22 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       const conflict = claimConflict(db, ask);
       if (conflict !== null) {
         waitForClaim(ws.id, conflict);
+        const holder = getWorkstreamRow(db, conflict.heldBy);
+        found(
+          ws.id,
+          queueWait.claim({
+            name: conflict.name,
+            holderTitle: getTask(db, holder.taskId).title,
+            holder: { taskId: holder.taskId, workstreamId: holder.id },
+            holderEnded: isTerminal(holder.state),
+          }),
+        );
         continue;
       }
-      if (!opts.keptWork.ready(ws)) continue;
+      if (!opts.keptWork.ready(ws)) {
+        found(ws.id, queueWait.keptWork());
+        continue;
+      }
       const fence = opts.state.write((ctx) => {
         // The take and the start are both synchronous: read again here, a chat can't slip between.
         if (firstInFolder && chatHolders(project.id).length > 0) return null;
@@ -621,6 +722,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       else byProject.set(project.id, (byProject.get(project.id) ?? 0) + 1);
       byAccount.set(account.id, (byAccount.get(account.id) ?? 0) + 1);
       launched += 1;
+      launchedIds.add(ws.id);
       opts.runner.launch(ws.id, fence);
     }
     showPassFolders(snapshot, folderHeld);
