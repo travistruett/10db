@@ -10,7 +10,8 @@
     "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
     "build": "tsx scripts/build.ts",
     "generate:codex": "tsx scripts/codex-generate.ts",
-    "drift": "tsx scripts/codex-stamp-check.ts"
+    "drift": "tsx scripts/codex-stamp-check.ts",
+    "seed:factory": "tsx scripts/seed-factory-demo.ts"
   },
   "dependencies": {
     "@10db/contracts": "workspace:*",

@@ -39,6 +39,12 @@ const ALLOWED: readonly Allowed[] = [
       'the aliases Claude Code’s own Agent tool takes: they are its vocabulary, not a model 10db chose',
   },
   {
+    file: 'apps/daemon/scripts/seed-factory-demo.ts',
+    names: ['sonnet', 'opus'],
+    reason:
+      'dev-only demo rows the Factory shows; they sit on a paused account, so no run ever starts on these models',
+  },
+  {
     file: 'apps/daemon/src/trust/auto-mode-models.ts',
     names: ['opus', 'fable', 'sonnet', 'haiku'],
     reason:

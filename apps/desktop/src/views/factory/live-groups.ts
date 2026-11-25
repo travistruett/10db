@@ -21,15 +21,6 @@ export const LiveGroup = {
 } as const;
 export type LiveGroup = (typeof LiveGroup)[keyof typeof LiveGroup];
 
-export const LIVE_GROUP_LABELS: Readonly<Record<LiveGroup, string>> = {
-  [LiveGroup.NeedsYou]: 'Needs You',
-  [LiveGroup.Failed]: 'Failed',
-  [LiveGroup.Running]: 'Running',
-  [LiveGroup.InReview]: 'In Review',
-  [LiveGroup.Waiting]: 'Waiting',
-  [LiveGroup.Done]: 'Done Today',
-};
-
 const ORDER: readonly LiveGroup[] = [
   LiveGroup.NeedsYou,
   LiveGroup.Failed,

@@ -1,0 +1,78 @@
+/* Factory under Live. Mantine draws the parts; this module lays out the task lines' fixed columns. */
+.page {
+  max-width: 1120px;
+}
+
+.clip {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.when {
+  text-align: right;
+  font-size: var(--mantine-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--mantine-color-dimmed);
+}
+
+/* A task line inside a project: mark, title, step progress, what it is doing, when, and an action slot. */
+.line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding-inline: 8px;
+  border-radius: var(--mantine-radius-md);
+}
+
+.line:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.lineOpen {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 80px 220px 56px;
+  align-items: center;
+  column-gap: 10px;
+  font-size: var(--mantine-font-size-sm);
+  border-radius: var(--mantine-radius-sm);
+}
+
+.lineOpen:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 2px;
+}
+
+.lineMark {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.lineDetail {
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+}
+
+.lineDetail[data-tone='you'] {
+  color: var(--mantine-color-yellow-filled);
+}
+
+.lineDetail[data-tone='failed'] {
+  color: var(--mantine-color-red-filled);
+}
+
+.lineAction {
+  flex: none;
+  width: 52px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* An open project's chevron turns a quarter, from right to down. */
+.chevron[data-rotate] {
+  transform: rotate(90deg);
+}
