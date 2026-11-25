@@ -101,6 +101,7 @@ interface Case {
   readonly base: string;
   readonly head: string;
   readonly gate: { command: string; summary: string };
+  readonly report: string | null;
   /** The reviewer's first verdict, for a reviewed run. */
   readonly reviewer: string | null;
 }
@@ -148,6 +149,20 @@ const gateOf = sql.prepare<[string], { command: string | null; summary: string }
 );
 const FAR_FUTURE = '9999-12-31T00:00:00.000Z';
 
+const RawReport = z.array(
+  z.object({ role: z.string(), report: z.object({ summary: z.string() }).optional() }).loose(),
+);
+
+/** The latest report an implement step kept, as the runner hands it to the check. */
+function implementReport(steps: string): string | null {
+  const parsed = RawReport.safeParse(JSON.parse(steps));
+  if (!parsed.success) return null;
+  return (
+    parsed.data.findLast((s) => s.role === 'implement' && s.report !== undefined)?.report
+      ?.summary ?? null
+  );
+}
+
 function caseFor(kind: Kind, w: WorkstreamRow, head: string, reviewer: string | null): Case | null {
   if (w.base_head === null) return null;
   const gate = gateOf.get(w.id);
@@ -162,6 +177,7 @@ function caseFor(kind: Kind, w: WorkstreamRow, head: string, reviewer: string | 
     base: w.base_head,
     head,
     gate: { command: gate?.command ?? 'make gate', summary: gate?.summary ?? 'passed' },
+    report: implementReport(w.steps),
     reviewer,
   };
 }
@@ -282,6 +298,7 @@ for (const c of sample) {
       accepted: new Set(),
       diff,
       gate: c.gate,
+      report: c.report,
       workstreamId: WorkstreamId.parse(c.workstreamId),
       taskId: TaskId.parse(c.taskId),
     },

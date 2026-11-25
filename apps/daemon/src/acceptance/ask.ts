@@ -37,6 +37,8 @@ export interface AcceptanceInput {
   readonly accepted: ReadonlySet<string>;
   readonly diff: DiffSince;
   readonly gate: { readonly command: string; readonly summary: string };
+  /** The build session's own report of what it did, measured and skipped; null when it wrote none. */
+  readonly report: string | null;
   readonly workstreamId: WorkstreamId;
   readonly taskId: TaskId;
 }
@@ -45,7 +47,7 @@ const questionId = (index: number): string => `met_${String(index)}`;
 
 function criterionQuestion(criterion: string): NoulQuestion {
   return {
-    instructions: `Does the change meet this acceptance criterion: ${criterion}? Read the diff and the gate output. A criterion about behavior is met only if the diff makes that behavior happen.`,
+    instructions: `Does the change meet this acceptance criterion: ${criterion}? Read the diff, the gate output and the build's report. A criterion about behavior is met only if the diff makes that behavior happen. A criterion about something outside the code, such as a measurement, an eval run, a number in the pull request or a recorded result, is met when the report gives it.`,
     criteria: {
       true: 'The change meets it.',
       false: 'The change does not meet it, or only partly.',
@@ -139,6 +141,7 @@ export async function checkAcceptance(
     criteria: input.criteria,
     diff: { text: diff.text, truncated: diff.truncated, changed_files: diff.files },
     gate: input.gate,
+    report: input.report,
   };
   const ids = { workstreamId: input.workstreamId, taskId: input.taskId };
   const read = (
