@@ -264,6 +264,7 @@ export function chatWorld(
   );
   let takeoverService: TakeoverService | null = null;
   const chat = createChatService({
+    fullAccessNotes: () => [],
     state,
     engine,
     folderHold,

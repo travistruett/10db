@@ -4,6 +4,7 @@ import {
   ChatDto,
   ChatModelsDto,
   ChatSearchPage,
+  FullAccessPreviewDto,
   ProjectFileMatchDto,
   type ChatId,
   type ChatPatchInput,
@@ -28,6 +29,7 @@ export const chatKeys = {
   files: (conversationId: ConversationId, q: string) =>
     ['conversation-files', conversationId, q] as const,
   search: (q: string) => ['chats', 'search', q] as const,
+  fullAccessPreview: (chatId: ChatId) => ['chats', 'full-access-preview', chatId] as const,
 } as const;
 
 const ChatList = z.array(ChatDto);
@@ -224,5 +226,20 @@ export function useUnarchiveChat() {
     mutationFn: async (chatId: ChatId) =>
       readJson(await client.chats[':chatId'].unarchive.$post({ param: { chatId } }), ChatDto),
     onSettled: () => queryClient.invalidateQueries({ queryKey: chatKeys.all }),
+  });
+}
+
+/** The setup lines of the Full access confirmation, read when it opens and never kept: they follow the account. */
+export function useFullAccessPreview(chatId: ChatId, enabled: boolean) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: chatKeys.fullAccessPreview(chatId),
+    queryFn: async () =>
+      readJson(
+        await client.chats[':chatId']['full-access'].preview.$get({ param: { chatId } }),
+        FullAccessPreviewDto,
+      ),
+    enabled,
+    gcTime: 0,
   });
 }

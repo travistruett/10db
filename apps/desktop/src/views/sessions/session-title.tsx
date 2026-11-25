@@ -1,9 +1,9 @@
 import type { ChatDto, ConversationDto } from '@10db/contracts';
-import { ActionIcon, Box, Button, Menu, Text, TextInput, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Box, Button, Menu, TextInput, Tooltip } from '@mantine/core';
 import { IconDots, IconLayoutSidebarRight } from '@tabler/icons-react';
 import { useRef, useState, type ReactNode } from 'react';
 import { OWNS_ESCAPE_ATTRIBUTE } from '../../conversation/escape';
-import { usePatchChat } from '../../daemon/chat-queries';
+import { useFullAccessPreview, usePatchChat } from '../../daemon/chat-queries';
 import { TitleRow } from '../../shell/title-row';
 import { canOpenTerminal } from './can-open-terminal';
 import { FullAccessBadge, FullAccessConfirm } from './full-access';
@@ -120,6 +120,8 @@ export function SessionTitle({
   const patch = usePatchChat();
   const fullAccess = chat.fullAccess;
   const [confirmingFullAccess, setConfirmingFullAccess] = useState(false);
+  const [dismissedError, setDismissedError] = useState<unknown>(null);
+  const preview = useFullAccessPreview(chat.id, confirmingFullAccess);
   const setFullAccess = (on: boolean): void => {
     patch.mutate({ chatId: chat.id, fullAccess: on });
   };
@@ -153,6 +155,7 @@ export function SessionTitle({
           <FullAccessConfirm
             opened={confirmingFullAccess}
             agent={conversation.capabilities.label}
+            notes={preview.data?.notes ?? []}
             onCancel={() => {
               setConfirmingFullAccess(false);
             }}
@@ -161,10 +164,18 @@ export function SessionTitle({
               setFullAccess(true);
             }}
           />
-          {patch.isError ? (
-            <Text size="xs" c="red" role="alert">
+          {patch.isError && patch.error !== dismissedError ? (
+            <Alert
+              color="red"
+              py={2}
+              role="alert"
+              withCloseButton
+              onClose={() => {
+                setDismissedError(patch.error);
+              }}
+            >
               {patch.error.message}
-            </Text>
+            </Alert>
           ) : null}
           {fullAccess && offersFullAccess ? (
             <FullAccessBadge

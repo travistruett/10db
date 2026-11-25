@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
   AccountKind,
+  Provider,
   ConversationOwnerKind,
   Delivery,
   type ChatId,
@@ -1994,6 +1995,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     worktrees: createChatWorktrees({ state, git }),
     reopenBranch: (chatId) => chatWork.reopen(chatId),
     work: () => chatWork,
+    fullAccessNotes: (projectId) => {
+      const row = getAccountRow(db, getProject(db, projectId).accountId);
+      if (requireHarness(row) === Provider.Codex)
+        return [
+          '10db brings your instructions and MCP servers across.',
+          'Your ~/.codex settings don’t load yet.',
+        ];
+      return row.configDir === null
+        ? ['Your own settings, hooks, skills and MCP servers load.']
+        : [
+            '10db brings your plugins, instructions and MCP servers across.',
+            'Your ~/.claude settings and hooks don’t load on this account.',
+          ];
+    },
     pendingOpens,
     clock,
     dataDir: opts.dataDir,

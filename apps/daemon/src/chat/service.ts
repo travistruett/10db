@@ -29,6 +29,7 @@ import {
   type ArchivePreviewDto,
   type ArchiveRequest,
   type ChatPatchInput,
+  type FullAccessPreviewDto,
   type ConversationId,
   type ConversationItemId,
   type ProjectId,
@@ -171,6 +172,8 @@ export interface ChatService {
   recent(projectId: ProjectId, limit?: number): ChatDto[];
   search(query: ChatSearchQuery): ChatSearchPage;
   patch(id: ChatId, input: ChatPatchInput): Promise<ChatDto>;
+  /** The setup lines of the Full access confirmation: where this chat's settings, plugins and servers come from. */
+  fullAccessPreview(id: ChatId): FullAccessPreviewDto;
   models(projectId: ProjectId): ChatModelsDto;
   /**
    * Archives the chat. On a branch with a worktree the request carries the files the builder was warned Archive
@@ -258,6 +261,8 @@ export interface ChatServiceDeps {
   readonly worktrees?: ChatWorktrees;
   /** Records a reading or choosing session as Here, read when Full access is turned on (made after this service). */
   readonly work?: () => Pick<ChatWorkService, 'enterHere'>;
+  /** What the confirmation says of a project's account: how its agent gets the builder's setup under Full access. */
+  readonly fullAccessNotes: (projectId: ProjectId) => string[];
   /** Remakes the worktree of a branch session that has none, once it is open again. */
   readonly reopenBranch?: (chatId: ChatId) => Promise<void>;
   /** Told of each builder message a chat takes, for what listens to a plan's talk (Jev's shadow); it never throws. */
@@ -451,6 +456,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       // is already open, and its worktree was tried when it opened.
       if (wasClosed && input.tabPosition !== undefined && input.tabPosition !== null) reopen(id);
       return dtoOf(id);
+    },
+
+    fullAccessPreview(id) {
+      return { notes: deps.fullAccessNotes(getChat(state.db, id).projectId) };
     },
 
     models(projectId) {

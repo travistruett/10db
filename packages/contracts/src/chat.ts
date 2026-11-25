@@ -60,6 +60,10 @@ export const ChatDto = z.object({
 });
 export type ChatDto = z.infer<typeof ChatDto>;
 
+/** What the Full access confirmation tells the builder about where this chat's setup comes from. */
+export const FullAccessPreviewDto = z.object({ notes: z.array(z.string()) });
+export type FullAccessPreviewDto = z.infer<typeof FullAccessPreviewDto>;
+
 /** A new chat; the daemon titles it from its first message. */
 export const ChatCreateInput = z.strictObject({
   projectId: ProjectId,

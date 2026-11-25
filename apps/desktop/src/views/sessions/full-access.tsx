@@ -44,12 +44,20 @@ export interface FullAccessConfirmProps {
   readonly opened: boolean;
   /** The agent's name, `capabilities.label`. */
   readonly agent: string;
+  /** Where the chat's settings, plugins and servers come from, as the daemon words it; empty until read. */
+  readonly notes: readonly string[];
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
 }
 
 /** What Full access lifts and what still holds, asked once each time it is turned on. */
-export function FullAccessConfirm({ opened, agent, onCancel, onConfirm }: FullAccessConfirmProps) {
+export function FullAccessConfirm({
+  opened,
+  agent,
+  notes,
+  onCancel,
+  onConfirm,
+}: FullAccessConfirmProps) {
   return (
     <Modal
       opened={opened}
@@ -63,12 +71,13 @@ export function FullAccessConfirm({ opened, agent, onCancel, onConfirm }: FullAc
         <List.Item>
           No 10db sandbox: it can write anywhere you can, run any command and reach any host.
         </List.Item>
-        <List.Item>Your own settings, hooks, skills and MCP servers load.</List.Item>
+        {notes.map((note) => (
+          <List.Item key={note}>{note}</List.Item>
+        ))}
         <List.Item>This project’s own settings, hooks and MCP servers load and run too.</List.Item>
         <List.Item>
           It still asks before a force push, a production deploy or deleting files it didn’t make.
         </List.Item>
-        {agent === 'Codex' ? <List.Item>Your ~/.codex settings don’t load yet.</List.Item> : null}
       </List>
       <Text size="sm" c="dimmed" mt="sm">
         Board tasks are never affected. It starts with your next message and stays on for this chat
