@@ -34,7 +34,9 @@ export interface Opened {
 
 /**
  * A fresh tab right after `afterPosition`, in the selected project, or the first one when it is not
- * among `projects`; null when there are no projects.
+ * among `projects`; null when there are no projects. A project keeps one fresh tab: when it has one,
+ * that tab opens again, keeping its draft and taking the Plan toggle asked for, so the panel never
+ * lists two empty New Session rows.
  */
 export function openFreshTab(
   tabs: readonly FreshTab[],
@@ -46,6 +48,10 @@ export function openFreshTab(
 ): Opened | null {
   const project = projects.find((p) => p.id === selected) ?? projects[0];
   if (project === undefined) return null;
+  const existing = tabs.find((tab) => tab.projectId === project.id);
+  if (existing !== undefined) {
+    return { tabs: setFreshPlan(tabs, existing.id, plan), opened: { ...existing, plan } };
+  }
   const opened: FreshTab = {
     id,
     projectId: project.id,
