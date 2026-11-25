@@ -45,6 +45,7 @@ import { shapeKeys } from './shape-queries';
 import { linearPostKeys } from './linear-queries';
 import { designCheckKeys, screenKeys } from './screen-queries';
 import { skipKeys } from './skip-queries';
+import { watchpointKeys } from './watchpoint-queries';
 import { statusKeys } from './status-queries';
 import {
   FIGMA_SIGN_INS_KEY,
@@ -146,7 +147,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   session: [...WORK, humanTouchKeys.all],
   claim: [...WORK, CANDIDATES],
   handoff: WORK,
-  evidence: WORK,
+  // A run's watchpoint reading is an evidence row, so its For You section follows it.
+  evidence: [...WORK, watchpointKeys.hits],
   // An account pause moves workstreams, which send their own events.
   account: [accountKeys.all, modelKeys.all],
   inbox: [
@@ -157,7 +159,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
     cardTypesKeys.all,
     acceptanceFiguresKeys.all,
   ],
-  app_setting: [queryKeys.keepAwake, queryKeys.agentSkill],
+  app_setting: [queryKeys.keepAwake, queryKeys.agentSkill, watchpointKeys.all],
   // Settings › People lists people and the routes each answers; Question Routing and a task's question routes
   // name them. Step plans, which only the batch sheet shows, are not read from people; they follow personas,
   // and so do the Models page's picks.

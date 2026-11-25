@@ -102,7 +102,7 @@ export function RowActions({
   onRemove,
   removeBlocked,
 }: {
-  readonly noun: 'area' | 'hazard';
+  readonly noun: 'area' | 'hazard' | 'watchpoint';
   readonly name: string;
   readonly onEdit: () => void;
   readonly onRemove: () => void;
@@ -150,7 +150,7 @@ export function ChangedAlert({
   noun,
   onShowLatest,
 }: {
-  readonly noun: 'area' | 'hazard';
+  readonly noun: 'area' | 'hazard' | 'watchpoint';
   readonly onShowLatest: () => void;
 }) {
   return (
