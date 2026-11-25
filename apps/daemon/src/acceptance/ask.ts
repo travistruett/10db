@@ -37,7 +37,10 @@ export interface AcceptanceInput {
   readonly accepted: ReadonlySet<string>;
   readonly diff: DiffSince;
   readonly gate: { readonly command: string; readonly summary: string };
-  /** The build session's own report of what it did, measured and skipped; null when it wrote none. */
+  /**
+   * The build session's own report of this attempt: what it did, measured and skipped. It is the judged agent's
+   * claim, so the questions weigh it only for criteria a diff can't show. Null when this attempt wrote none.
+   */
   readonly report: string | null;
   readonly workstreamId: WorkstreamId;
   readonly taskId: TaskId;
@@ -47,7 +50,7 @@ const questionId = (index: number): string => `met_${String(index)}`;
 
 function criterionQuestion(criterion: string): NoulQuestion {
   return {
-    instructions: `Does the change meet this acceptance criterion: ${criterion}? Read the diff, the gate output and the build's report. A criterion about behavior is met only if the diff makes that behavior happen. A criterion about something outside the code, such as a measurement, an eval run, a number in the pull request or a recorded result, is met when the report gives it.`,
+    instructions: `Does the change meet this acceptance criterion: ${criterion}? Read the diff, the gate output and the build's report. A criterion about behavior is met only if the diff makes that behavior happen. A criterion about something outside the code, such as a measurement, an eval run, a number in the pull request or a recorded result, can be met only by the build's report, which is the build's own unverified claim: count it only when the report gives the specific result (the number, the command run, what it showed), never for a bare claim that it was done.`,
     criteria: {
       true: 'The change meets it.',
       false: 'The change does not meet it, or only partly.',
@@ -141,7 +144,7 @@ export async function checkAcceptance(
     criteria: input.criteria,
     diff: { text: diff.text, truncated: diff.truncated, changed_files: diff.files },
     gate: input.gate,
-    report: input.report,
+    build_report_unverified: input.report,
   };
   const ids = { workstreamId: input.workstreamId, taskId: input.taskId };
   const read = (

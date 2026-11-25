@@ -16,7 +16,6 @@ import {
   type EvidenceDto,
   ConflictError,
   currentStep,
-  reportOf,
   EventType,
   type SessionActivityData,
   findingNotes,
@@ -750,6 +749,12 @@ const PERMISSION_ANSWER_TEXT: Readonly<Record<string, string>> = {
 };
 
 /** An allow choice with no stored rule behind it (a one-time allow, or a call with no safe rule to store) lets the first identical call through. */
+/** The implement step's report only when this attempt wrote it: an older attempt's claims are not about this diff. */
+function thisAttemptsReport(step: WorkstreamStep | undefined): string | null {
+  if (step?.report === undefined || step.startedAt === null) return null;
+  return step.report.at >= step.startedAt ? step.report.summary : null;
+}
+
 /**
  * Whether a question card, read afresh, goes to someone other than the builder. A card still waiting
  * for triage is the builder's until it is routed.
@@ -1637,7 +1642,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           accepted: acceptedCriteria(db, id),
           diff,
           gate,
-          report: reportOf(now.steps)?.summary ?? null,
+          report: thisAttemptsReport(now.steps[now.stepIndex]),
           workstreamId: id,
           taskId: row.taskId,
         },
