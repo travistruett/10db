@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TaskId } from './ids';
 import { RIGOR_FIGURES_PERIODS } from './rigor-figures';
 
 /** What the acceptance check read of one criterion. `unread` is a call that gave no answer. */
@@ -38,12 +39,26 @@ export const AcceptanceChecking = z.discriminatedUnion('on', [
 ]);
 export type AcceptanceChecking = z.infer<typeof AcceptanceChecking>;
 
-/** The Board's acceptance counts for the last `days` days. */
+/** One run behind a Board count: the task, when it happened, and for a send-back who sent it back. */
+export const AcceptanceRow = z.object({
+  taskId: TaskId,
+  title: z.string(),
+  at: z.string(),
+  by: z.string().optional(),
+});
+export type AcceptanceRow = z.infer<typeof AcceptanceRow>;
+
+/** The Board's acceptance counts for the last `days` days, and the newest rows behind each. */
 export const AcceptanceFigures = z.object({
   days: z.number().int(),
   completed: z.number().int(),
   sentBack: z.number().int(),
   sentToYou: z.number().int(),
+  rows: z.object({
+    completed: z.array(AcceptanceRow),
+    sentBack: z.array(AcceptanceRow),
+    sentToYou: z.array(AcceptanceRow),
+  }),
   checking: AcceptanceChecking,
 });
 export type AcceptanceFigures = z.infer<typeof AcceptanceFigures>;

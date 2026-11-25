@@ -259,6 +259,11 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(
     page.getByText("Acceptance isn't checking: no account can answer decisions"),
   ).toBeVisible();
+  // The number opens Factory's Acceptance panel, which lists the task behind it.
+  await page.getByRole('button', { name: 'Completed 1' }).click();
+  await expect(
+    page.getByRole('table', { name: 'Completed runs' }).getByRole('button', { name: TASK }),
+  ).toBeVisible();
   // Factory lists every project's runs by what they need: the finished task is under Done Today, and with
   // no goals anywhere there is no Goals section to read about.
   await open(page, 'Factory');

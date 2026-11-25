@@ -30,6 +30,7 @@ export function useAcceptanceFigures(projectId: ProjectId | null, days: RigorFig
             completed: 0,
             sentBack: 0,
             sentToYou: 0,
+            rows: { completed: [], sentBack: [], sentToYou: [] },
             checking: { on: true } as const,
           },
     enabled: projectId !== null,

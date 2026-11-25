@@ -126,6 +126,7 @@ export function baseHandlers(
         completed: 0,
         sentBack: 0,
         sentToYou: 0,
+        rows: { completed: [], sentBack: [], sentToYou: [] },
         checking: { on: true },
       }),
     ),
