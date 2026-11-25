@@ -48,8 +48,7 @@ work a lane can't do. A bare Retry fixes neither. Of the cards around them, 11 h
 - An already-fixed task closes by itself, with Reopen, rather than asking you first.
 - Out-of-attempts cards drop Retry. Try This with an empty note is the old Retry.
 
-**Needed from you:** one decision, where the judge's-skip item lives ("Open decision", below). I recommend one
-Inbox card per skipped call. F0 and F1 don't wait on it.
+**Needed from you:** nothing. You approved the brief and chose one Inbox card per skipped call (2026-11-25).
 
 ---
 
@@ -252,9 +251,8 @@ that made the criterion true and, for a command criterion, the passing run. 10db
 
 ## Trust
 
-Every limit stays the judge's: the diagnosis's calls are judged like a lane's, the replay asks the judge, Allow
-writes a builder line the judge reads, and the sort allows nothing. The sort only coordinates 10db's own work
-(retries, waits, folds, closes). A task waiting on the builder for what 10db could do is the bug it fixes
+Every limit stays the judge's: the diagnosis's calls are judged like a lane's, the replay asks the judge, and Allow
+writes a builder line the judge reads. The sort only coordinates 10db's own work
 (`decisions/2026-11-12-10db-trusts-the-developer-and-contains-the-agent.md`).
 
 ## Dependencies and scope
@@ -280,16 +278,12 @@ writes a builder line the judge reads, and the sort allows nothing. The sort onl
 - All additive, generated last, one migrating pull request at a time. Contracts: `FailureSort`, `EngineItemDto`,
   `ReportDiagnosisInput`.
 
-## Open decision (for the builder)
+## Decided: the judge's skips are one Inbox card per call
 
-**Where does the judge's-skip item live?**
-- **A. One Inbox card per pattern, with Allow / Report / Keep Skipping** (recommended). You can clear it in one
-  click, and it's the only class that needs a trust choice. Cost if wrong: one more Normal card per skipped
-  call per project, which the replay closes once a 10db build runs that call.
-- **B. No card: a "10db is blocking" row in Factory and an auto-filed 10db task.** Your Inbox stays quieter, but
-  nothing waiting on the item moves until 10db ships a fix, and a builder without 10db's repo has no way to act.
-- **C. Both:** the card, plus an auto-filed task when 10db's repo is a project. This doubles the surfaces for one
-  cause.
+The builder chose this on 2026-11-25: one card per project and skipped call, with Allow, Report and Keep Skipping.
+Turned down:
+- a Factory row plus an auto-filed 10db task, with no card: nothing waiting moves until 10db ships a fix;
+- both: two surfaces for one cause.
 
 ## Milestones
 
@@ -305,7 +299,7 @@ Each milestone gets its own plan once the one before it merges.
 | F3 | Diagnosis session and `report_diagnosis`: question, host session, out of attempts (Try This / Split / Close, CI cap card), obsolete | Core | **needed** | F2 | `workstreams.diagnosis` |
 | F4 | Waits on other work: File a Fix, `fixes_check`, wait, then bring the base in and rerun on merge | Core (git: merges and pushes) | later | F3 | `tasks.fixes_check` |
 
-**F0 and F1 don't wait on the open decision.** They change no retry, git or judge path.
+**F0 and F1 can run ahead of F2's plan.** They change no retry, git or judge path.
 
 **Tests** (`.claude/rules/testing.md`):
 - F1: one regression test for the fold. It's an escaped bug: three cards for one task.
