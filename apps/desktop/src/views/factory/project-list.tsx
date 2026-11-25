@@ -241,7 +241,14 @@ function ProjectItem({
           <Text fw={600} c="bright" truncate w={220} style={{ flex: 'none' }}>
             {project.name}
           </Text>
-          <HoverCard position="bottom-start" openDelay={150} shadow="md" width={300}>
+          {/* The card repeats the control's accessible name, so it adds no popup roles to the bar. */}
+          <HoverCard
+            position="bottom-start"
+            openDelay={150}
+            shadow="md"
+            width={300}
+            withRoles={false}
+          >
             <HoverCard.Target>
               <Box
                 py={6}
