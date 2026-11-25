@@ -21,7 +21,7 @@ import {
 } from '@10db/db';
 
 /** The detail key naming whether a Review follows the run, so the card says where the work went. */
-export const ACCEPTANCE_REVIEW_FOLLOWS_KEY = 'reviewFollows';
+const ACCEPTANCE_REVIEW_FOLLOWS_KEY = 'reviewFollows';
 
 function bodyOf(detail: AcceptanceDetail, reviewFollows: boolean): string {
   const open = detail.criteria
