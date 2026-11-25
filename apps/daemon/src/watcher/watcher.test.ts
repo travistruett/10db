@@ -11,6 +11,8 @@ import {
 import { dirname, join } from 'node:path';
 import {
   ConflictError,
+  SkipKind,
+  SkipSource,
   TaskStatus,
   WorkstreamState,
   type BatchId,
@@ -34,6 +36,7 @@ import {
   transitionBatch,
   releaseClaims,
   seedProject,
+  recordSkip,
   setTaskStatus,
   transitionWorkstream,
 } from '@10db/db';
@@ -171,6 +174,48 @@ describe('watcher', () => {
       targets: [{ workstreamId: workstream.id, sessionId: null }],
     });
     expect(open[0]?.detail).toMatchObject({ path: 'docs/stray.md', candidates: [workstream.id] });
+  });
+
+  // Value: protects=a stray card names the run that left the file; fails_when=a failed run's leftover is pinned
+  // on whichever lanes are running; why_new=escaped bug: a Diagnostic run's .proof file carded two other lanes;
+  // no_claim=a run that never named the file is found
+  it('names the failed run whose skipped call named a leftover file, not the lanes running now', async () => {
+    running();
+    const left = seedWorkstream(base, { project, title: 'Diagnostic', areas: ['api'] });
+    base.write((ctx) => {
+      transitionWorkstream(ctx, left.workstream.id, { to: WorkstreamState.Starting, fence: null });
+      transitionWorkstream(ctx, left.workstream.id, { to: WorkstreamState.Running, fence: null });
+      transitionWorkstream(ctx, left.workstream.id, { to: WorkstreamState.Failed, fence: null });
+      recordSkip(ctx, {
+        workstreamId: left.workstream.id,
+        sessionId: null,
+        toolName: 'apply_patch',
+        toolUseId: 'call-1',
+        callKey: null,
+        summary: `${repo.path}/docs/notes.md.proof`,
+        kind: SkipKind.Classifier,
+        limit: null,
+        reason: 'deletes a file',
+        source: SkipSource.TendbJudge,
+      });
+    });
+    watcher.sync();
+    touch('docs/notes.md.proof');
+    touch('docs/notes.md');
+    emit('docs/notes.md.proof');
+    emit('docs/notes.md');
+    await watcher.flush();
+
+    const byPath = new Map(flags().map((card) => [card.detail?.['path'], card]));
+    expect(byPath.get('docs/notes.md.proof')).toMatchObject({
+      body: 'docs/notes.md.proof\nLeft by the failed run of "Diagnostic", which named it',
+      targets: [{ workstreamId: left.workstream.id, sessionId: null }],
+      detail: { candidates: [left.workstream.id] },
+    });
+    // A path the run named only as part of a longer name is not its.
+    expect(byPath.get('docs/notes.md')?.detail).toMatchObject({
+      candidates: [expect.not.stringMatching(left.workstream.id)],
+    });
   });
 
   describe('a stray card with nothing left to do', () => {

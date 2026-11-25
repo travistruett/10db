@@ -41,6 +41,8 @@ import {
   listPermissionRules,
   listActiveProjects,
   listWorkstreamCommitShas,
+  latestHandoff,
+  listSkipsForWorkstream,
   listWorkstreams,
   setAppSetting,
 } from '@10db/db';
@@ -83,6 +85,7 @@ import {
   writeStamp,
 } from './allowed-writes';
 import { filesUnderBounded as filesUnder } from './dir-files';
+import { leftBy, type EndedRun } from './left-by';
 import { accountedAt, passWrites, type PassLane } from './pass-writes';
 import {
   bulkFoldKey,
@@ -351,6 +354,7 @@ export function createWatcher(deps: {
   /** Where a write happened: fold keys scope to the batch in a worktree, and its cards name the path. */
   interface Site {
     readonly scope: string;
+    readonly batchId: BatchId | null;
     readonly worktree: string | null;
     /** The checkout the write is in. */
     readonly root: string;
@@ -358,8 +362,8 @@ export function createWatcher(deps: {
 
   const siteOf = (project: ProjectDto, batchId: BatchId | null, root: string): Site =>
     batchId === null
-      ? { scope: project.id, worktree: null, root }
-      : { scope: batchId, worktree: root, root };
+      ? { scope: project.id, batchId, worktree: null, root }
+      : { scope: batchId, batchId, worktree: root, root };
 
   /**
    * The paths among `rels` that are not a write the builder trusted: one holding exactly a trusted content.
@@ -419,6 +423,9 @@ export function createWatcher(deps: {
     });
   }
 
+  const leftNote = (runs: readonly EndedRun[]): string =>
+    `\nLeft by the failed ${runs.length === 1 ? 'run' : 'runs'} of ${runs.map((run) => `"${run.title}"`).join(' and ')}, which named it`;
+
   const labelled = (site: Site, rel: string): string =>
     site.worktree === null ? rel : `${site.worktree}: ${rel}`;
 
@@ -437,6 +444,7 @@ export function createWatcher(deps: {
   ): string[] {
     const raised = withoutTrusted(project, site, strays, stamps);
     if (raised.length === 0) return raised;
+    const left = leftBy(raised, site.root, retryableFailedRuns(project, site.batchId));
     const workstreamId = owner ?? (candidates.length === 1 ? (candidates[0] ?? null) : null);
     const titles = working.map((lane) => lane.title);
     const during =
@@ -447,20 +455,23 @@ export function createWatcher(deps: {
     const { sensitive, ordinary } = splitSensitive(raised, (rel) => rel);
     const single = (rel: string): void => {
       const note = notes.get(rel);
+      // A failed run that named the path on its way out left it: the card names that run, not the lanes running now.
+      const leavers = left.get(rel) ?? [];
+      const leaver = leavers.length === 1 ? (leavers[0]?.id ?? null) : null;
       flagStamped(
         site,
         rel,
         {
           projectId: project.id,
-          workstreamId,
+          workstreamId: leavers.length === 0 ? workstreamId : leaver,
           tier: CardTier.Ask,
           urgency: Urgency.High,
           closesWhen: BY_ANSWER,
           title: STRAY_TITLE,
-          body: `${labelled(site, rel)}${during}${note === undefined ? '' : `\n${note}`}`,
+          body: `${labelled(site, rel)}${leavers.length === 0 ? during : leftNote(leavers)}${note === undefined ? '' : `\n${note}`}`,
           detail: {
             path: rel,
-            candidates: [...candidates],
+            candidates: leavers.length === 0 ? [...candidates] : leavers.map((run) => run.id),
             ...(isSensitivePath(rel) ? sensitiveDetail : {}),
           },
           foldKey: strayFoldKey(site.scope, rel),
@@ -470,23 +481,45 @@ export function createWatcher(deps: {
       );
     };
     sensitive.forEach(single);
-    if (ordinary.length > STRAY_BULK_THRESHOLD) {
-      const listed = ordinary.slice(0, BULK_LISTED);
+    // A path a failed run named gets a card of its own, so the bulk card never blames the running lanes for it.
+    ordinary.filter((rel) => left.has(rel)).forEach(single);
+    const unnamed = ordinary.filter((rel) => !left.has(rel));
+    if (unnamed.length > STRAY_BULK_THRESHOLD) {
+      const listed = unnamed.slice(0, BULK_LISTED);
       deps.inbox.flag({
         projectId: project.id,
         workstreamId,
         tier: CardTier.Ask,
         urgency: Urgency.High,
         closesWhen: BY_ANSWER,
-        title: `${String(ordinary.length)} writes outside every claim`,
-        body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(ordinary.length - listed.length)} more${during}`,
-        detail: { count: ordinary.length, paths: listed, candidates: [...candidates] },
+        title: `${String(unnamed.length)} writes outside every claim`,
+        body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(unnamed.length - listed.length)} more${during}`,
+        detail: { count: unnamed.length, paths: listed, candidates: [...candidates] },
         foldKey: bulkFoldKey(site.scope),
       });
       return raised;
     }
-    ordinary.forEach(single);
+    unnamed.forEach(single);
     return raised;
+  }
+
+  /**
+   * The failed runs in the checkout whose task is still open, with what each said on its way out. Only these:
+   * a run of a finished or cancelled task owns nothing (`couldBeOwned`), so naming one would let its card close
+   * unanswered.
+   */
+  function retryableFailedRuns(project: ProjectDto, batchId: BatchId | null): EndedRun[] {
+    return listWorkstreams(db, { states: [WorkstreamState.Failed], projectId: project.id })
+      .filter((ws) => worktreeBatchOf(ws) === batchId && taskIsOpen(ws.taskId))
+      .map((ws) => ({
+        id: ws.id,
+        title: getTask(db, ws.taskId).title,
+        texts: [
+          ws.failureReason ?? '',
+          JSON.stringify(latestHandoff(db, ws.id)?.content ?? ''),
+          ...listSkipsForWorkstream(db, ws.id).map((skip) => skip.summary),
+        ],
+      }));
   }
 
   /**
