@@ -278,6 +278,7 @@ badge, ⌘J and the needs-you mirror read it as they read any open card, and it 
 - **Why these restrictions** (AGENTS.md asks): the bar, the read-only sandbox before the choice and the closed
   checkout after a move all exist to coordinate 10db's own writers in your checkout. None is a rule about what the
   agent may do. On a branch, it works as freely as a lane does.
+- **Full access** (`decisions/2026-11-24-a-chat-the-builder-turns-full-access-on-for-runs-as-claude-code-does.md`): the chat's shell can write anywhere, so the folder hold, which a Full access turn takes wherever the chat works and keeps until its background commands end, is what keeps 10db's writers apart.
 
 ### 4.4 Archive and reopen
 
