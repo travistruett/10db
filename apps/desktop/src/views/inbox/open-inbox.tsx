@@ -13,6 +13,7 @@ import { createPortal } from 'react-dom';
 import { DaemonRequestError } from '../../daemon/client';
 import { dropCard, refreshCard as refreshCardEverywhere } from '../../daemon/inbox-live';
 import { useInboxRows, type InboxRow } from '../../daemon/inbox-queries';
+import { useInOpenChat } from './open-chat-cards';
 import { usePeople, useSlackStatus } from '../../daemon/people';
 import { useDaemon } from '../../daemon/provider';
 import { queryKeys, useAnswerInbox, useSystemCheck } from '../../daemon/queries';
@@ -85,6 +86,7 @@ export function OpenInbox({
 }) {
   const now = useNow();
   const open = useInboxRows(inboxList(search, new Date(now)));
+  const inOpenChat = useInOpenChat();
   const slack = useSlackStatus();
   const systemChecks = systemCards(useSystemCheck().data, slack.data);
   // 10db's own cards are not in the daemon's list, so a search or a kind would otherwise leave them showing.
@@ -96,7 +98,10 @@ export function OpenInbox({
   const openWorkbench = useOpenPassWorkbench();
   const people = usePeople().data ?? [];
 
-  const shown: OpenRow[] = [...ownCards.map(systemRow), ...open.rows.map(inboxRowOf)];
+  const shown: OpenRow[] = [
+    ...ownCards.map(systemRow),
+    ...open.rows.filter((row) => !row.items.every(inOpenChat)).map(inboxRowOf),
+  ];
   const keys = shown.map((row) => row.key);
 
   // The row and scroll the builder left Open at come back with them.

@@ -262,6 +262,7 @@ import {
   createJudgeOutageCard,
   createParkAnswers,
   leftWithBuilder,
+  withdrawStaleConversationCards,
 } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
 import { backfillAttachmentRevisions } from '../plan-record';
@@ -2521,6 +2522,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   await resumePassWork(passTakeOuts);
   // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
   withdrawStaleClaimWaits(state, inbox);
+  // Nor does a chat's or Plan's session wait on a card from before: its call ended with the daemon.
+  withdrawStaleConversationCards(state.db, inbox);
   accountPauses.restore();
   // A move back that came due reads the pauses.
   moveBack.restore();

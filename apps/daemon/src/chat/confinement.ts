@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { ChatToolName, JudgeKind, ShapeToolName, type WorkPlace } from '@10db/contracts';
-import { isWithinOnEveryReading, stringField } from '../guard';
+import { ChatToolName, JudgeKind, ShapeToolName, WorkPlace } from '@10db/contracts';
+import { isWithinOnEveryReading, runsOutsideSandbox, stringField } from '../guard';
 import type { ShapeVerdict } from '../sessions';
 import { expandHome } from '../sandbox';
 import { judgePlanTool, judgeShapeCall, type ShapeAccess, type ShapeReviewTurn } from '../shape';
@@ -84,6 +84,29 @@ export const CHAT_TURN_ENDED =
 /** What a chat's agent reads when it edits while another holder has the builder's checkout. */
 export const chatFolderInUse = (holder: string): string => `Your checkout is in use by ${holder}.`;
 
+/** What a chat's agent reads when it asks to run a command outside the sandbox from a subagent. */
+export const CHAT_ONLY_RUNS_OUTSIDE =
+  'Only the chat itself runs a command outside the sandbox. Run it inside the sandbox, or say what it needs.';
+/** What a chat on its own branch reads when it asks to run a command outside the sandbox. */
+export const BRANCH_RUNS_INSIDE =
+  'A chat on its own branch runs commands inside its sandbox. Run it there, or the builder can turn on Full access for this chat.';
+/** What a session opened read-only reads when it asks to run a command outside the sandbox. */
+export const OUTSIDE_NEEDS_A_TURN =
+  'This session opened read-only, because something else held your checkout or the work had no place yet, so it cannot run a command outside the sandbox. The next turn can.';
+
+/**
+ * Why a chat's command may not run outside its sandbox right now, or null when it may: only while the
+ * session works in the builder's checkout and its turn holds it. Read at the call and again at the builder's yes.
+ */
+export function outsideSandboxRefusal(folder: ChatPlace): string | null {
+  if (folder.place === WorkPlace.Moving) return CHAT_MOVING;
+  if (folder.place === WorkPlace.Branch) return BRANCH_RUNS_INSIDE;
+  if (folder.place !== WorkPlace.Here) return WAITING_FOR_CHOICE;
+  if (!folder.writable) return OUTSIDE_NEEDS_A_TURN;
+  if (!folder.holds()) return folder.current() ? chatFolderInUse(folder.heldBy()) : CHAT_TURN_ENDED;
+  return null;
+}
+
 /** The path a file tool names, with `~` read as the home folder and the rest resolved from the call's directory. */
 function editedPath(call: ChatCall, access: ShapeAccess): string | null {
   if (typeof call.input !== 'object' || call.input === null) return null;
@@ -160,6 +183,8 @@ export function judgeChatCall(
     ...(call.cwd === undefined ? {} : { cwd: call.cwd }),
   };
   if (HARNESS_TOOLS.has(call.toolName)) return ALLOW;
+  const outside = call.toolName === 'Bash' && runsOutsideSandbox(call.input);
+  if (outside && call.agentId !== undefined) return deny(CHAT_ONLY_RUNS_OUTSIDE);
   if (folder !== undefined) {
     // A session that only reads or is being asked where to work keeps no call once the chat has another
     // session (a background agent's, however long it stays warm).
@@ -176,6 +201,10 @@ export function judgeChatCall(
   }
   if (EDIT_TOOLS.has(call.toolName)) return judgeEdit(call, access, folder);
   if (READ_TOOLS.has(call.toolName)) return judgeShapeCall(asSession, access);
+  if (outside && folder !== undefined) {
+    const refusal = outsideSandboxRefusal(folder);
+    if (refusal !== null) return deny(refusal);
+  }
   if (call.toolName === 'Bash')
     return judgeShapeCall(asSession, { ...access, gitWriteRefusal: CHAT_GIT_REFUSAL });
   if (WEB_TOOLS.has(call.toolName))
