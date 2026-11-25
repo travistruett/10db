@@ -204,6 +204,17 @@ describe('a task whose latest run failed in an open batch', () => {
   });
 });
 
+describe('a failed run retried from its drawer or its card', () => {
+  it('closes the failed card, so the run that fails again raises the only open one', async () => {
+    const { ws } = await failedAlone();
+    const card = failedCard(ws);
+
+    h.starter.retry(ws.id);
+
+    expect(cardState(card)).not.toBe('OPEN');
+  });
+});
+
 describe('a task whose placement no longer matches the batch its failed run is in', () => {
   it('is moved once set to a separate copy: continuing declines, Retry is refused naming both places and Start over, and Retry runs once the task is set back', async () => {
     const { alpha, batchId, ws } = await failedAlone();

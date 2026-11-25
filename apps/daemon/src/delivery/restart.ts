@@ -73,10 +73,8 @@ export function createFailedRestarts(deps: {
       const failed = failedRun(taskId);
       // A retry stays in its batch, so it can't run where the task now says it should.
       if (!failed || placementMovedFrom(taskId, failed.batch)) return null;
-      const retried = deps.starter.retry(failed.workstream.id);
-      // The run is going again: the card that offered Retry for its failure has been answered.
-      deps.inbox.cancelForWorkstream(failed.workstream.id);
-      return retried;
+      // The retry closes the card that offered Retry for its failure.
+      return deps.starter.retry(failed.workstream.id);
     },
     supersede(taskId) {
       const failed = failedRun(taskId);
