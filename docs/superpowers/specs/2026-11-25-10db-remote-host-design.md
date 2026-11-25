@@ -108,9 +108,21 @@ merges.
 An app-wide section, on This Mac only. It reads each step live, re-reads every 10 s while open, and shows one
 state: **Off**, **Setting up**, **Ready** or **Paused**.
 
+- **Tailscale is named up front.** Under the heading, in every state: "Reach this Mac's 10db from your phone, and
+  later another Mac. It runs over Tailscale ↗, a private network between your own devices, so nothing on the
+  internet can reach it." The link goes to `https://tailscale.com`.
+- **Before Tailscale is installed** the page shows one card in place of the checklist: "Remote Access needs
+  Tailscale. Tailscale is a private network between your own devices. Your phone reaches this Mac through it, and
+  nothing on the internet can. It's free for personal use." Three steps follow (install it on this Mac and sign
+  in; install it on your phone and sign in to the same account; come back here, and 10db finds it on its own), with
+  **Get Tailscale ↗** linking to `https://tailscale.com/download`. The page re-reads every 10 s, so the checklist
+  appears once Tailscale is installed.
+- The Pair dialog (slice 2) says the phone needs Tailscale on and signed in to the same account, with the same
+  download link.
+
 | Step        | Read from                                                                                                             | When it fails                                                                                                    |
 | ----------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Installed   | the CLI at `/usr/local/bin/tailscale`, else `/Applications/Tailscale.app/Contents/MacOS/Tailscale`                    | "Install Tailscale" with the download link                                                                       |
+| Installed   | the CLI at `/usr/local/bin/tailscale`, else `/Applications/Tailscale.app/Contents/MacOS/Tailscale`                    | the "needs Tailscale" card above                                                                                    |
 | Connected   | `tailscale status --json`: `BackendState` is `Running`; the login from `User[Self.UserID].LoginName`, the name from `Self.DNSName` | "Open Tailscale and connect"                                                                          |
 | Not tagged  | `Self.Tags` is empty                                                                                                  | "A tagged Mac gets no identity headers. Untag it in the Tailscale admin console."                                |
 | HTTPS on    | `CertDomains` holds the name                                                                                          | "Turn on HTTPS" with the admin console's DNS link, and the name-is-public line below                            |

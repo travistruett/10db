@@ -94,6 +94,12 @@ table.devices td { padding: 10px 14px; border-top: 1px solid var(--bg2); color: 
 table.devices tr:first-child td { border-top: 0; }
 table.devices td.name { color: var(--fg1); font-weight: 500; }
 table.devices td.name small { display: block; color: var(--dim); font-weight: 400; font-size: 11.5px; }
+.ext { color: var(--blue); text-decoration: none; }
+.needs { border: 1px solid var(--bg2); border-radius: 8px; padding: 18px 20px; display: grid; grid-template-columns: 1fr auto; gap: 6px 20px; align-items: center; }
+.needs b { color: var(--fg1); font-size: 14px; }
+.needs p { margin: 0; color: var(--fg0); font-size: 12.5px; grid-column: 1; }
+.needs ol { margin: 6px 0 0; padding-left: 18px; color: var(--fg0); font-size: 12.5px; grid-column: 1 / -1; }
+.needs ol li { margin: 2px 0; }
 .planned { color: var(--dim); font-size: 12px; margin-top: 12px; font-style: italic; }
 
 /* ---------- Modal ---------- */
@@ -204,6 +210,30 @@ table.devices td.name small { display: block; color: var(--dim); font-weight: 40
 </template>
 
 <section class="frame-block">
+  <h2>0. Settings › Remote Access, before Tailscale is installed</h2>
+  <p class="note">What a first visit shows: one card that says what Tailscale is and why 10db needs it, three steps, and a link to Tailscale's download page. The rest of the checklist appears once Tailscale is found.</p>
+  <div class="win" data-shell data-on="remote" data-footer="">
+    <div class="titlerow"><b>Settings</b><span class="chev">›</span><span class="kind">Remote Access</span></div>
+    <div class="surface"><div class="content"><div class="col">
+      <div class="sec-head">
+        <div><h3>Remote Access <span class="badge" style="background:var(--bg1);color:var(--dim)">Off</span></h3>
+          <div class="line">Reach this Mac's 10db from your phone, and later another Mac.</div></div>
+      </div>
+      <div class="needs">
+        <b>Remote Access needs Tailscale</b>
+        <a class="btn primary" href="https://tailscale.com/download" style="grid-row:1 / span 2;grid-column:2;text-decoration:none">Get Tailscale ↗</a>
+        <p>Tailscale is a private network between your own devices. Your phone reaches this Mac through it, and nothing on the internet can. It's free for personal use.</p>
+        <ol>
+          <li>Install Tailscale on this Mac and sign in.</li>
+          <li>Install it on your phone and sign in to the same account.</li>
+          <li>Come back here. 10db finds it on its own.</li>
+        </ol>
+      </div>
+    </div></div></div>
+  </div>
+</section>
+
+<section class="frame-block">
   <h2>1. Settings › Remote Access, while the certificate is being issued</h2>
   <p class="note">A checklist that reads Tailscale live. Each step that fails says how to fix it. Share stays off until every step above it passes. The HTTPS step says the Mac's name becomes public before the first certificate.</p>
   <div class="win" data-shell data-on="remote" data-footer="">
@@ -211,7 +241,7 @@ table.devices td.name small { display: block; color: var(--dim); font-weight: 40
     <div class="surface"><div class="content"><div class="col">
       <div class="sec-head">
         <div><h3>Remote Access <span class="badge wait">Setting up</span></h3>
-          <div class="line">Reach this Mac's 10db from your phone, and later another Mac, over your tailnet. Nothing else can reach it.</div></div>
+          <div class="line">Reach this Mac's 10db from your phone, and later another Mac. It runs over <a class="ext" href="https://tailscale.com">Tailscale ↗</a>, a private network between your own devices, so nothing on the internet can reach it.</div></div>
       </div>
       <div class="paper">
         <div class="r"><span class="ic ok">✓</span><span class="t">Tailscale is installed</span><span class="right"></span><span class="d mono">/usr/local/bin/tailscale · 1.102.2</span></div>
@@ -233,7 +263,7 @@ table.devices td.name small { display: block; color: var(--dim); font-weight: 40
     <div class="surface"><div class="content"><div class="col">
       <div class="sec-head">
         <div><h3>Remote Access <span class="badge ready">Ready</span></h3>
-          <div class="line">Reach this Mac's 10db from your phone, and later another Mac, over your tailnet. Nothing else can reach it.</div></div>
+          <div class="line">Reach this Mac's 10db from your phone, and later another Mac. It runs over <a class="ext" href="https://tailscale.com">Tailscale ↗</a>, a private network between your own devices, so nothing on the internet can reach it.</div></div>
         <button class="btn danger">Stop Sharing</button>
       </div>
       <div class="addr"><span class="mono">https://studio.tail1234.ts.net:4319</span><button class="btn">Copy</button></div>
@@ -271,7 +301,7 @@ table.devices td.name small { display: block; color: var(--dim); font-weight: 40
     </div></div>
     <div class="scrim"><div class="modal">
       <div class="modal-head"><b>Pair a Device</b><span class="x">×</span></div>
-      <p>Scan this with your phone's camera. It opens 10db in Chrome and pairs it.</p>
+      <p>Scan this with your phone's camera. It opens 10db in Chrome and pairs it. The phone needs <a class="ext" href="https://tailscale.com/download">Tailscale ↗</a> on and signed in to your account.</p>
       <div class="qr-wrap"><div class="qr" id="qr"></div></div>
       <div class="code">7KQ2-M9XD</div>
       <div class="expires">Expires in 4:32 · works once</div>
