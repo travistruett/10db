@@ -32,9 +32,12 @@ Only the first command of a line is followed, past the `cd`s that certainly move
 in the same call can write the script or the Makefile (`cp e x.sh && ./x.sh`, `git checkout other -- Makefile &&
 make x`), or change the shell (`export MAKEFLAGS=…`, a function named `make`, `PATH`), after the reader compared
 the bytes, so the committed text would not be what runs. For the same reason a command that holds a substitution
-or a here-document shows nothing: the shell runs those first. A `cd` is followed only as a plain command joined
-to the next by `&&`, `;` or a newline; one in a subshell, a pipeline, the background or a conditional's body, or
-before `||`, stops the walk. The same holds on each recipe line.
+or a here-document (closed or not, quoted or not) shows nothing: the shell runs those first. A `cd` is followed
+only where the line's own text, from its start, is `cd`, one bare word and `&&`, `;` or a newline, then the next
+command. The parser keeps no trace of a bracket, a brace or an empty word, so the text decides: a `cd` in a
+subshell, a group, a pipeline, the background or a conditional's body, before `||`, with a quoted or second
+argument or an option, stops the walk. `(cd sub && ./x)` shows nothing too, to keep the rule simple. The same
+holds on each recipe line.
 
 Nothing is shown for a command whose program or arguments the shell fills in, one that starts with `VAR=value`,
 `make -f`, any other make option, a make with no target, a dynamic include, an interpreter's option (`-c`, `-m`),

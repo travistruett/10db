@@ -28,9 +28,10 @@
   recipe lines, and the variables the recipes use) and repository scripts named by a path or after an interpreter,
   whole. Files come through `HookJudgeContext.readCommitted` (`folders/committed-file.ts`): `origin/<base>`'s text only
   where the checkout holds the same bytes, so a script the lane changed or created is judged as before, without its
-  text. Only the first command of a line is followed, past `cd`s that certainly move it (plain, joined by `&&`, `;`
-  or a newline): an earlier command could write the file or change the shell (`cp e x.sh && ./x.sh`, `export
-MAKEFLAGS=…; make x`), and so could a substitution in the command itself, so those show nothing. Where a folder
+  text. Only the first command of a line is followed, past `cd`s that certainly move it (the line's text is
+  exactly `cd`, one bare word, then `&&`, `;` or a newline; a bracket, brace, quote or second argument stops the
+  walk): an earlier command could write the file or change the shell (`cp e x.sh && ./x.sh`, `export
+MAKEFLAGS=…; make x`), and so could a substitution or a here-document on the command itself, so those show nothing. Where a folder
   holds only `Makefile`, the reader's `differs` for `makefile` names that entry and the walk reads `Makefile`.
   Bounded: `RUNS_MAX_DEPTH` 3, `RUNS_MAX_READS` 12, `RUNS_MAX_SCRIPT_BYTES` 16 KiB (a larger script is not shown,
   never cut), `RUNS_MAX_CHARS` 24,000. `crossesLimit` adds `about_runs` and `call.runs` only when there is something

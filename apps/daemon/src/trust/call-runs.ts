@@ -58,8 +58,14 @@ const MAKE_QUIET_OPTIONS: ReadonlySet<string> = new Set([
   '--no-print-directory',
 ]);
 const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
-/** The separators after which the next command runs in the folder a `cd` before them moved to, or not at all. */
-const CD_APPLIES: ReadonlySet<string> = new Set(['&&', ';', '\n']);
+/**
+ * A `cd` the walk follows, at the start of the text: `cd`, one bare word that is no option, and a separator the
+ * next command waits on. After `;` or a newline the next command runs even when the `cd` failed, so the word must
+ * be all the shell's `cd` gets: no quote, bracket, expansion or second argument.
+ */
+const CD_THEN = /^[ \t]*cd[ \t]+([A-Za-z0-9_./@%+,:][A-Za-z0-9_./@%+,:-]*)[ \t]*(&&|;|\n)/;
+/** A here-document operator (`<<`, `<<-`), not a here-string (`<<<`). */
+const HERE_DOCUMENT = /(?<!<)<<(?!<)/;
 const INCLUDE = /^(-?include|sinclude)\s+(.*)$/;
 const VARIABLE_ASSIGNMENT =
   /^(?:(?:export|override)\s+)*([A-Za-z_][A-Za-z0-9_.-]*)\s*(?::::=|::=|:=|\?=|\+=|!=|=)/;
@@ -312,29 +318,46 @@ export async function callRuns(
     const parsed = parseShell(line);
     if (!parsed.certain) return;
     let dir = from;
+    // The line's text not yet accounted for by a followed `cd`.
+    let rest = line;
     for (const segment of parsed.segments) {
-      if (segment.words.length === 0 && segment.nested.length === 0) continue;
+      // A command whose words the parser dropped (`''`) still runs, and takes its separator with it.
+      if (segment.words.length === 0) return;
       const lead = leadingWords(segment.words);
       const offset = segment.words.length - lead.command.length;
       const dynamic = segment.dynamicWords.slice(offset);
       const [program = '', ...args] = lead.command;
-      // A substitution or here-document of the segment runs before its command.
-      if (!segment.wordsCertain || lead.outOfOrder || segment.nested.length > 0) return;
+      // A substitution or here-document of the segment runs before its command. A here-document that never
+      // closes has no body the parser kept, so its operator among the words counts too.
+      if (
+        !segment.wordsCertain ||
+        lead.outOfOrder ||
+        segment.nested.length > 0 ||
+        segment.hereDocuments.length > 0 ||
+        segment.words.some((word) => HERE_DOCUMENT.test(word))
+      )
+        return;
       if (program === 'cd') {
         // A `cd` moves what follows only as a plain command of this shell that the next one waits on: not in a
-        // conditional's body, a subshell, a pipeline or the background, and not where `||` runs the next.
-        const into =
-          offset === 0 &&
-          args.length === 1 &&
-          dynamic[1] !== true &&
-          CD_APPLIES.has(segment.separator)
-            ? (args[0] ?? '')
-            : null;
-        const next = into === null || into === '-' ? null : repoPath(dir, into, checkout);
+        // conditional's body, a group, a subshell, a pipeline or the background, and not where `||` runs the
+        // next. The line's own text decides, since the parser keeps no trace of a bracket or an empty word.
+        const plain = CD_THEN.exec(rest);
+        if (
+          plain === null ||
+          offset !== 0 ||
+          args.length !== 1 ||
+          args[0] !== plain[1] ||
+          segment.separator !== plain[2]
+        )
+          return;
+        const next = repoPath(dir, plain[1] ?? '', checkout);
         if (next === null) return;
         dir = next;
+        rest = rest.slice(plain[0].length);
         continue;
       }
+      // After a `cd`, the command followed is the text right after it.
+      if (rest !== line && !rest.trimStart().startsWith(segment.raw)) return;
       if (lead.hiddenByRedirection || dynamic[0] === true) return;
       if (MAKES.has(program)) await make(args, dynamic.slice(1), dir, depth);
       else if (INTERPRETERS.has(program)) {
