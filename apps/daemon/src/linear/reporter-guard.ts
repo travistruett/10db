@@ -191,6 +191,29 @@ export function judgeReporterCall(
   return { verdict: allow() };
 }
 
+/** The Linear tools a posting run's brief names: what an update reads and writes. */
+const POSTING_LINEAR_TOOLS: readonly string[] = [
+  'get_issue',
+  'list_comments',
+  'list_issue_statuses',
+  'save_comment',
+  'save_issue',
+];
+
+/**
+ * The full names of the tools a run needs, from the rule's own lists: a snapshot's reads, or a posting run's reads,
+ * writes and report tool, with the upload tools only when it was offered pictures. The brief names them so a
+ * session whose tools are deferred searches for them by name.
+ */
+export function runToolNames(run: Readonly<ReporterRun>): string[] {
+  const pictures = run.pictures.length > 0;
+  const linear = run.readOnly
+    ? [...SNAPSHOT_READS]
+    : [...POSTING_LINEAR_TOOLS, ...(pictures ? ['prepare_file_upload'] : [])];
+  const tenDb = run.readOnly ? [] : [...REPORT_TOOLS, ...(pictures ? [UPLOAD_TOOL] : [])];
+  return [...run.linearPrefixes.flatMap((prefix) => linear.map((tool) => prefix + tool)), ...tenDb];
+}
+
 /**
  * The tool-name prefixes (`mcp__<server>__`) Linear's tools carry. Claude and Codex both name a server's
  * tool `mcp__<server>__<tool>` (the Codex hook's name is split the same way in `codex-refused-calls.ts`),
