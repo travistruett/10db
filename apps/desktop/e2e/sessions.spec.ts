@@ -816,6 +816,9 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
       ).json(),
     );
   await panel.getByRole('button', { name: 'Accept', exact: true }).click();
+  await expect(
+    dialog.getByRole('status').filter({ hasText: /start now|wait for a lane/ }),
+  ).toBeVisible();
   await dialog.getByRole('button', { name: 'Accept', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(goalRow.getByText('On the Board · 2 ready', { exact: true })).toBeVisible();
