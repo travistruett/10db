@@ -10,13 +10,6 @@ export const RailSection = {
 } as const;
 export type RailSection = (typeof RailSection)[keyof typeof RailSection];
 
-/** The status controls at the rail's foot, which are not sections. */
-export const RailControl = {
-  Download: 'download',
-  Daemon: 'daemon',
-} as const;
-export type RailControl = (typeof RailControl)[keyof typeof RailControl];
-
 export interface RailItem {
   readonly section: RailSection;
   /** The name a tooltip and the accessible name carry. */
@@ -49,7 +42,8 @@ export type RailEntry =
   | { readonly kind: 'divider' }
   | { readonly kind: 'project-tile' }
   | { readonly kind: 'spacer' }
-  | { readonly kind: 'control'; readonly control: RailControl };
+  /** The agent download's status at the rail's foot, shown only while it downloads. */
+  | { readonly kind: 'download-status' };
 
 const item = (section: RailSection): RailEntry => ({ kind: 'item', section });
 
@@ -63,8 +57,7 @@ export const RAIL_ORDER: readonly RailEntry[] = [
   item(RailSection.Workbench),
   item(RailSection.Knowledge),
   { kind: 'spacer' },
-  { kind: 'control', control: RailControl.Download },
-  { kind: 'control', control: RailControl.Daemon },
+  { kind: 'download-status' },
   item(RailSection.Settings),
 ];
 

@@ -174,6 +174,11 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
 - **Alerts:** an `Alert` is for something the builder must act on, such as a missing tool or a
   refused key. A condition that clears on its own, such as a rate-limited sync, is a dimmed
   `xs` line with an icon in the header of the view it affects.
+- **Lost daemon connection:** one quiet pill in the title row, before the view's actions, on every view
+  (`shell/reconnecting-indicator.tsx`): a gray light `Badge` with a yellow dot and "Reconnecting…", shown only after
+  5 s without the daemon so a restart doesn't flash it, and "Reconnecting · 3m" from two minutes on. Its hover card
+  says work keeps running and when the connection was lost. Nothing is drawn while connected, and nothing moves
+  when it shows: no banner over the content and no icon in the rail.
 - **Copy:** Title Case for buttons, menu items and the names of things, such as flows and columns
   ("Create Task", "Start Ready Tasks", "Quick"); sentence case for labels, descriptions and messages.
   A button or menu item never ends in "…", even when it opens a dialog; "…" is for work in progress

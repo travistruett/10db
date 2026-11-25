@@ -14,6 +14,7 @@ import { FrameSlotsContext, type FrameSlots } from './frame-slots';
 import { px, usePanelWidth } from './panel-width';
 import { Rail } from './rail';
 import { railSectionForPath, type RailSection } from './rail-items';
+import { ReconnectingIndicator } from './reconnecting-indicator';
 import { useSidebarLabels } from './sidebar-labels';
 import {
   PANEL_MAX_WIDTH,
@@ -60,14 +61,7 @@ const aMenuIsOpen = (): boolean =>
  * through `TitleRow` and `Panel`. The window never scrolls: the box is as tall as the window less the bar and the
  * gutter, and the content scrolls inside it.
  */
-export function AppFrame({
-  banner,
-  children,
-}: {
-  /** What sits at the top of the content, above the view. */
-  readonly banner?: ReactNode;
-  readonly children: ReactNode;
-}) {
+export function AppFrame({ children }: { readonly children: ReactNode }) {
   const band = useShellBand();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const section = railSectionForPath(pathname);
@@ -339,15 +333,17 @@ export function AppFrame({
             </Splitter.Pane>
             <Splitter.Pane defaultSize={100} className={classes['workspace']}>
               <div
-                ref={setTitleHost}
                 className={classes['titleRow']}
                 style={{ paddingLeft: titleStart }}
                 data-title-row=""
                 data-tauri-drag-region
                 inert={sheetOpen}
-              />
+              >
+                {/* The view's parts are the row's own flex items; the frame's status sits before its actions. */}
+                <div ref={setTitleHost} className={classes['titleHost']} />
+                <ReconnectingIndicator />
+              </div>
               <div className={classes['content']} inert={sheetOpen}>
-                {banner}
                 <main className={classes['main']}>{children}</main>
                 <div ref={setDrawerHost} className={classes['drawerLayer']} />
               </div>
