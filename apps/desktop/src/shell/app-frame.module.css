@@ -162,6 +162,16 @@
 
 /* Controls in the title row are 28 px tall, as the spec has them. Mantine declares each control's size
    variables on the control itself, so the box is set directly. */
+/* The view's title-row parts sit in the row itself. The frame's status (the reconnecting pill, order 1) comes after
+   the spacer and before the view's actions, so when it shows the spacer gives it room and nothing else moves. */
+.titleHost {
+  display: contents;
+}
+
+.titleRow [data-title-actions] {
+  order: 2;
+}
+
 .titleRow :global(.mantine-Button-root),
 .titleRow :global(.mantine-Input-input),
 .titleRow :global(.mantine-ActionIcon-root) {

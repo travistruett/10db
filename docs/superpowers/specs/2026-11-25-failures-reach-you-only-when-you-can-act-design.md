@@ -614,14 +614,15 @@ Each milestone gets its own plan once the one before it merges.
 
 ### Builder's cut
 
-In build order: what each buys in unattended time for its work.
+Cut by the builder on 2026-11-25: they took this order as written ("Get it done"). F0 is done (#859); F4, S2 and H are
+later. In build order: what each buys in unattended time for its work.
 
-| # | Milestone | Size | Recommended | Needs | Migration |
+| # | Milestone | Size | Builder's cut | Needs | Migration |
 | --- | --- | --- | --- | --- | --- |
 | — | In flight, not new work: the copy deadlock, the copy queue, the Linear hold, the watchdog, the replay cases | as filed | **needed** | — | theirs |
 | P1 | Precedent: the Makefile reader keeps recipes inside conditionals (filed and running as tsk_01a2149e); `trust_precedents`; the program key; `precedent_applies` and its reading; the proposal card and Run and Make Routine; Standing Approvals in Settings; conflicts pause | Core (the judge) | **needed** | — | `trust_precedents`; `judge_calls.precedent_id` and `program_key`; `skipped_actions.program_key` |
 | P2 | The floor goes back: the "asked twice at 0.8" number and its notice | Small | **needed** | P1, tsk_01a20e8c-fcee | none |
-| F0 | Cause-first failure lines and Close for a failed task in Factory | Small | **needed** | — | none |
+| F0 | Cause-first failure lines and Close for a failed task in Factory | Small | **done** (#859) | — | none |
 | F1 | Card hygiene: fold per task, cap card replaces checks card, Factory dedupe, skip cards close when the task is done | Feature | **needed** | F0 | none |
 | F1b | Stray writes wait: a non-sensitive "Write outside every claim" card waits 3 minutes or the step's end | Core (claims), one task | **needed** | F1 | none |
 | F2 | The sort's rules pass: transient retry, permission runs wait and replay, engine bugs filed, host session by rules, `retryable: false`; keys for MCP tools and web hosts | Core (recovery) | **needed** | P1, F1 | `workstreams.sort`, `auto_retry_at`, `auto_retried_at`, `waits_on` |

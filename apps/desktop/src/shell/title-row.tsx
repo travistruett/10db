@@ -67,7 +67,7 @@ export function TitleRow({
       )}
       <Box style={{ flex: 1, alignSelf: 'stretch', minWidth: 8 }} data-tauri-drag-region />
       {actions === undefined ? null : (
-        <Group gap={8} wrap="nowrap" style={{ flex: 'none' }}>
+        <Group gap={8} wrap="nowrap" style={{ flex: 'none' }} data-title-actions="">
           {actions}
         </Group>
       )}

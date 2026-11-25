@@ -5,6 +5,8 @@ import {
   Modal,
   MultiSelect,
   NavLink,
+  Paper,
+  Popover,
   rem,
   SegmentedControl,
   Select,
@@ -14,6 +16,7 @@ import {
   type MantineColorsTuple,
   type VariantColorsResolver,
 } from '@mantine/core';
+import paper from './paper.module.css';
 import segmented from './segmented-control.module.css';
 import { CONTENT_WIDTH_PX, ContentWidth, isContentWidth } from './shell/content-width';
 import tooltip from './tooltip.module.css';
@@ -146,6 +149,10 @@ export const theme = createTheme({
     Select: Select.extend({ defaultProps: { checkIconPosition: 'right' } }),
     MultiSelect: MultiSelect.extend({ defaultProps: { checkIconPosition: 'right' } }),
     Switch: Switch.extend({ defaultProps: { withThumbIndicator: false } }),
+    // Level 1 of the elevation is `<Paper variant="raised">`, drawn in `paper.module.css` (DESIGN.md, Elevation).
+    Paper: Paper.extend({ classNames: paper }),
+    // Level 2: what floats above the page. Menus, hover cards and select lists are popovers, so they all take it.
+    Popover: Popover.extend({ defaultProps: { shadow: 'md' } }),
     SegmentedControl: SegmentedControl.extend({ classNames: segmented }),
     Tooltip: Tooltip.extend({ classNames: tooltip }),
     NavLink: NavLink.extend({
@@ -181,8 +188,9 @@ function colorVariables(name: string, variant: SelenizedVariant): [string, strin
 }
 
 /**
- * The Board's surfaces. A card is always the raised tone and its column the recessed one, so the
- * pair swaps between schemes: Selenized dark lightens from bg_0 to bg_2, Selenized light darkens.
+ * The Board's column surfaces: the recessed tray a column of cards sits in. The card itself is level 1
+ * (`elevationVariables`), so the pair swaps between schemes: Selenized dark lightens from bg_0 to bg_2,
+ * Selenized light darkens.
  */
 function boardVariables(
   variant: SelenizedVariant,
@@ -192,13 +200,27 @@ function boardVariables(
     '--tendb-color-column': scheme === 'dark' ? variant.bg0 : variant.bg1,
     '--tendb-color-column-header': scheme === 'dark' ? variant.bg1 : variant.bg2,
     '--tendb-color-column-border': variant.bg1,
-    '--tendb-color-card': scheme === 'dark' ? variant.bg1 : variant.bg0,
   };
 }
 
 /**
- * The raised tone a page's tables and charts sit on, one step off the body in either scheme, and the row a
- * pointer is over: a faint tint of the accent, so a clickable row shows itself without reading as a group header.
+ * Level 1 of the elevation, a self-contained thing the builder scans as a unit (DESIGN.md, Elevation):
+ * one Selenized step lighter than the body in dark, the body's own tone in light, and the `xs` shadow.
+ */
+function elevationVariables(
+  variant: SelenizedVariant,
+  scheme: 'light' | 'dark',
+): Record<string, string> {
+  return {
+    '--tendb-color-card': scheme === 'dark' ? variant.bg1 : variant.bg0,
+    '--tendb-elevation-raised': 'var(--mantine-shadow-xs)',
+  };
+}
+
+/**
+ * The panel tone, bg_1 in both schemes, that a block inside the content takes to stand apart without
+ * rising (the composer, a diff, an opened Plan row), and the row a pointer is over: a faint tint of the
+ * accent, so a clickable row shows itself without reading as a group header.
  */
 function panelVariables(
   variant: SelenizedVariant,
@@ -247,11 +269,13 @@ export const cssVariablesResolver: CSSVariablesResolver = (t) => {
     light: {
       ...schemeVariables(names, SelenizedLight),
       ...boardVariables(SelenizedLight, 'light'),
+      ...elevationVariables(SelenizedLight, 'light'),
       ...panelVariables(SelenizedLight, 'light'),
     },
     dark: {
       ...schemeVariables(names, SelenizedDark),
       ...boardVariables(SelenizedDark, 'dark'),
+      ...elevationVariables(SelenizedDark, 'dark'),
       ...panelVariables(SelenizedDark, 'dark'),
     },
   };

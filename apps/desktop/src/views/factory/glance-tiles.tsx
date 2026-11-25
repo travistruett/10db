@@ -31,7 +31,7 @@ function Tile({
   readonly label: string;
 }) {
   return (
-    <Paper radius="md" px={16} py={14} bg="var(--tendb-color-card)" shadow="xs">
+    <Paper variant="raised" radius="md" px={16} py={14}>
       <Group gap={8} align="baseline">
         <Text
           fz={24}

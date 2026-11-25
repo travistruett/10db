@@ -15,11 +15,17 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   by the panel's hairline; a column's hairline crosses the bar as a short divider centred in it, 12 px clear above
   and below (`--shell-bar-divider-inset`), for the labelled rail and the panel. Sheets draw their own edges and
   stand over the box. The traffic lights sit at y 20, centred on the bar with the button in the installed app.
-  Lists in the panel and the rail scroll without a scrollbar. The rail's foot holds the status controls and
+  Lists in the panel and the rail scroll without a scrollbar. The rail's foot holds the agent download's status and
   Settings; the theme and keep-awake are set in Settings › App. The window never scrolls; the content is exactly
   the window's height less the bar and the gutter and scrolls inside it, and it is its own stacking context so a
   sheet always stands over it.
   Rail widths (200 labelled, 60 icons only) and the title row's height (44 px) are constants there.
+- The frame draws one part of the title row itself: `ReconnectingIndicator` (`reconnecting-indicator.tsx`), the
+  only sign that the daemon is unreachable, a pill with a yellow dot shown 5 s into an outage (with the minutes from
+  two minutes on) and a hover card saying work keeps running. The title host (`.titleHost`) is `display: contents`,
+  so a view's parts are the row's own flex items; the pill takes `order: 1` and `TitleRow`'s actions
+  (`data-title-actions`) `order: 2`, so it lands between the spacer and the actions and nothing else moves when it
+  shows. There is no reconnect button: the provider already retries every second.
 - The panel column and the content are a Mantine `Splitter`: the panel's hairline is the handle, and the builder
   drags the panel between 240 and 480 px (340 until dragged, and again on a double-click of the handle; `PANEL_WIDTH` and its bounds in `shell-layout.ts`).
   One width for every section, remembered (`panel-width.ts`, `tendb.shell.panelWidth`); a sheet takes it too.
@@ -36,7 +42,7 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   link, the open section's too. Esc, a click on the backdrop, or moving anywhere closes a sheet.
 - The rail is `rail.tsx` over `rail-items.ts` (`RAIL_ITEMS`, one flat list with no group type; a route maps to its
   section with `railSectionForPath`) and draws labelled or icons only from `RailModeContext` (`rail-mode.ts`), which the
-  project row and the status controls read. `rail-badges.tsx` draws the counts. `factory-status.tsx` is the Factory row's status dot (`GET /status`, refetched on `status.changed`, never polled), in the row's count slot so nothing moves when it shows: amber from load level 1 (very busy, a hold near), orange while 10db holds new work for the load or any other status line, nothing otherwise. Its hovercard (`role="tooltip"`, so it describes the link) says in plain words what is happening, the busiest things by name where the daemon sends them, and that a hold ends by itself; it asks the builder nothing. The rail's foot has no status bar.
+  project row and the download status read. `rail-badges.tsx` draws the counts. `factory-status.tsx` is the Factory row's status dot (`GET /status`, refetched on `status.changed`, never polled), in the row's count slot so nothing moves when it shows: amber from load level 1 (very busy, a hold near), orange while 10db holds new work for the load or any other status line, nothing otherwise. Its hovercard (`role="tooltip"`, so it describes the link) says in plain words what is happening, the busiest things by name where the daemon sends them, and that a hold ends by itself; it asks the builder nothing. The rail's foot has no status bar.
 
 ## Drawing into the frame
 
@@ -95,3 +101,6 @@ jsdom has no layout, so a component that draws into the frame or measures itself
 - `frame.tsx`: `FrameSlots` wraps a component with a title row, a panel and a drawer layer.
 - `sized-observer.ts`: `observeWidthsOf(width)` makes every `ResizeObserver` report `width`, and
   `resetObservedWidth` restores the real one after the test. Use it for a view that measures its container.
+- `RaisedPanel` (`raised-panel.tsx`) is the page-level surface of level 1 (DESIGN.md, Elevation): a
+  `<Paper variant="raised">`, flush and clipped for a table drawn transparent inside it, `padded` for a chart.
+  The variant itself is drawn by `paper.module.css` from `theme.ts`'s two elevation tokens.

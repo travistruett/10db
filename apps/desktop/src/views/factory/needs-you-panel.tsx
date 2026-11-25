@@ -291,6 +291,7 @@ function Cause({
                     run.failureReason === null ? failedAt(run) : firstSentence(run.failureReason)
                   }
                   when={shortAgo(lastMoment(run), props.now)}
+                  compact
                   action={
                     <>
                       {props.canRetry(run) ? (
@@ -403,7 +404,7 @@ export function NeedsYouPanel(props: NeedsYouProps) {
         </Alert>
       )}
       {asks + failed > 0 ? (
-        <Paper radius="md" bg="var(--tendb-color-panel)">
+        <Paper variant="raised" radius="md">
           <Table verticalSpacing={14} horizontalSpacing="md" layout="fixed">
             <Table.Tbody>
               {waiting.map(({ run, card }) => (

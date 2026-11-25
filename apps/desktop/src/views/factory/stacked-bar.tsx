@@ -82,42 +82,51 @@ export function BarLegend() {
   );
 }
 
+/** A running run's step in words, with its place in the plan: "Implement 2/4". */
+export function stepLabel(run: {
+  readonly steps: readonly { readonly role: StepRole }[];
+  readonly stepIndex: number;
+}): string | null {
+  const current = run.steps[run.stepIndex];
+  if (current === undefined) return null;
+  return `${STEP_LABEL[current.role]} ${String(run.stepIndex + 1)}/${String(run.steps.length)}`;
+}
+
 /**
- * How far a running run is through its steps: one segment per step (done solid, the current one striped and
- * moving, the rest gray), each naming its step in a tooltip, then the step in words and the model it runs on.
+ * How far a running run is through its steps, as Mantine's segmented progress: one segment per step (done
+ * solid, the current one striped and moving, the rest an empty track), each naming its step in a tooltip.
  */
 export function StepProgress({
   run,
 }: {
   readonly run: {
-    readonly steps: readonly { readonly role: StepRole; readonly model: string }[];
+    readonly steps: readonly { readonly role: StepRole }[];
     readonly stepIndex: number;
   };
 }) {
-  const current = run.steps[run.stepIndex];
-  if (current === undefined) return null;
   return (
-    <Group gap={10} wrap="nowrap">
-      <Group gap={3} w={120} wrap="nowrap" style={{ flex: 'none' }} aria-hidden>
-        {run.steps.map((step, i) => (
-          <Tooltip key={`${String(i)}-${step.role}`} label={STEP_LABEL[step.role]}>
-            <Progress
-              value={100}
-              size={6}
-              style={{ flex: 1 }}
-              color={i <= run.stepIndex ? 'blue' : 'var(--mantine-color-default-border)'}
-              striped={i === run.stepIndex}
-              animated={i === run.stepIndex}
-            />
-          </Tooltip>
-        ))}
-      </Group>
-      <Text size="xs" c="dimmed" style={{ flex: 'none', whiteSpace: 'nowrap' }}>
-        {`${STEP_LABEL[current.role]} ${String(run.stepIndex + 1)}/${String(run.steps.length)}`}
-      </Text>
-      <Badge size="xs" variant="default" ff="monospace" tt="none" fw={500} miw={0}>
-        {current.model}
-      </Badge>
+    <Group grow gap={4} w={120} wrap="nowrap" aria-hidden>
+      {run.steps.map((step, i) => (
+        <Tooltip key={`${String(i)}-${step.role}`} label={STEP_LABEL[step.role]}>
+          <Progress
+            size="xs"
+            color="blue"
+            value={i <= run.stepIndex ? 100 : 0}
+            striped={i === run.stepIndex}
+            animated={i === run.stepIndex}
+            transitionDuration={0}
+          />
+        </Tooltip>
+      ))}
     </Group>
+  );
+}
+
+/** The model a run's step runs on, as a small monospace badge. */
+export function ModelBadge({ model }: { readonly model: string }) {
+  return (
+    <Badge size="xs" variant="default" ff="monospace" tt="none" fw={500} maw="100%">
+      {model}
+    </Badge>
   );
 }

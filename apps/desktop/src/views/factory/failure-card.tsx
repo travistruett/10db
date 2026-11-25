@@ -24,7 +24,7 @@ export function FailureDot({
   const close = useCloseTask();
   const refusal = retry.error ?? close.error;
   return (
-    <HoverCard width={380} position="bottom-start" withArrow shadow="md" openDelay={80}>
+    <HoverCard width={380} position="bottom-start" withArrow openDelay={80}>
       <HoverCard.Target>
         <Box component="span" display="inline-flex" p={4} style={{ cursor: 'default' }}>
           <StatusDot color="red" />

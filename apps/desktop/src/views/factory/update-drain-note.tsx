@@ -47,7 +47,7 @@ export function UpdateDrainNote() {
   const note = status === undefined ? null : noteFor(status);
   if (note === null) return null;
   return (
-    <HoverCard width={340} position="bottom-end" withArrow shadow="md" openDelay={150}>
+    <HoverCard width={340} position="bottom-end" withArrow openDelay={150}>
       <HoverCard.Target>
         <Badge
           component="button"

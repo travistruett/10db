@@ -8,7 +8,7 @@ import {
   type WorkstreamDto,
 } from '@10db/contracts';
 import { Accordion, Box, Collapse, Group, Stack, Text, Title, UnstyledButton } from '@mantine/core';
-import { IconChevronDown, IconChevronRight, IconTools } from '@tabler/icons-react';
+import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
 import { ProjectTile } from '../../shell/project-tile';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -83,23 +83,26 @@ function Fold({
   return (
     <>
       <div className={classes['line']}>
-        <span className={classes['lineMark']}>{mark}</span>
-        <UnstyledButton
-          className={classes['lineOpen']}
-          aria-expanded={open}
-          onClick={() => {
-            setOpen(!open);
-          }}
-        >
-          <span className={classes['clip']}>{label}</span>
-          <Text component="span" size="xs" c="dimmed" truncate>
-            {detail}
-          </Text>
-          <span className={classes['when']}>
-            <Chevron size={14} stroke={1.5} aria-hidden />
-          </span>
-        </UnstyledButton>
-        <span className={classes['lineAction']} />
+        <div className={classes['cols']}>
+          <span className={classes['lineMark']}>{mark}</span>
+          <UnstyledButton
+            className={classes['lineOpen']}
+            aria-expanded={open}
+            onClick={() => {
+              setOpen(!open);
+            }}
+          >
+            <span className={`${classes['lineTitle'] ?? ''} ${classes['clip'] ?? ''}`}>
+              {label}
+            </span>
+            <Text component="span" size="xs" c="dimmed" truncate className={classes['lineState']}>
+              {detail}
+            </Text>
+            <span className={classes['when']}>
+              <Chevron size={14} stroke={1.5} aria-hidden />
+            </span>
+          </UnstyledButton>
+        </div>
       </div>
       <Collapse expanded={open} keepMounted={false} pl={24}>
         {children}
@@ -175,7 +178,6 @@ function Work({
           title={pass.title}
           detail="UI Workbench"
           when=""
-          action={<IconTools size={14} stroke={1.5} aria-hidden />}
           onOpen={() => {
             onOpenPass(pass.projectId);
           }}
@@ -225,7 +227,8 @@ function ProjectItem({
       <Accordion.Control aria-label={`${project.name} ${line}`}>
         <Group gap={12} wrap="nowrap">
           <ProjectTile name={project.name} size={18} />
-          <Text fw={600} c="bright" truncate w={160} style={{ flex: 'none' }}>
+          {/* 220 px puts the bar on the goal rows' bar column below. */}
+          <Text fw={600} c="bright" truncate w={220} style={{ flex: 'none' }}>
             {project.name}
           </Text>
           <Box w={240} style={{ flex: 'none' }}>

@@ -11,6 +11,7 @@ import { NO_DATA } from './model-format';
 import { decisionSourceText } from './number-source';
 import { SettingsSectionKey } from './sections';
 import { SourcedNumber } from './sourced-number';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 const SortColumn = { Name: 'name', Cost: 'cost', Time: 'time', Answers: 'answers' } as const;
 type SortColumn = (typeof SortColumn)[keyof typeof SortColumn];
@@ -169,21 +170,21 @@ export function DecisionModelsTable({
     numeric(SortColumn.Answers, 'Answers (30 Days)', (m) => String(answers.get(m.id) ?? 0)),
   ];
   return (
-    <DataTable<DecisionModelDto>
-      aria-label="Decision models"
-      records={shown}
-      columns={columns}
-      idAccessor="id"
-      withTableBorder
-      backgroundColor="var(--tendb-color-panel)"
-      borderRadius="md"
-      verticalSpacing="sm"
-      horizontalSpacing="md"
-      highlightOnHover
-      {...pagerProps({ ...paging, page, total: sorted.length }, TABLE_PAGE_SIZES)}
-      onRowClick={({ record }) => {
-        onOpen(record);
-      }}
-    />
+    <RaisedPanel>
+      <DataTable<DecisionModelDto>
+        aria-label="Decision models"
+        records={shown}
+        columns={columns}
+        idAccessor="id"
+        backgroundColor="transparent"
+        verticalSpacing="sm"
+        horizontalSpacing="md"
+        highlightOnHover
+        {...pagerProps({ ...paging, page, total: sorted.length }, TABLE_PAGE_SIZES)}
+        onRowClick={({ record }) => {
+          onOpen(record);
+        }}
+      />
+    </RaisedPanel>
   );
 }

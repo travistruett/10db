@@ -13,6 +13,7 @@ import { PRINCIPLE_KIND_COLORS, PRINCIPLE_KIND_LABELS } from './knowledge-labels
 import { pagerProps, type TablePage } from '../../shell/table-pager';
 import { PAGE_SIZES } from './knowledge-paging';
 import './knowledge-table.css';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 /** The accessor of a list's last column, the row's menu, whose header holds the Columns menu. */
 export const ACTIONS_COLUMN = 'actions';
@@ -134,42 +135,42 @@ export function KnowledgeTable<T>({
       : drawn;
   });
   return (
-    <DataTable<T>
-      aria-label={label}
-      storeColumnsKey={storeKey}
-      records={[...records]}
-      columns={shown}
-      idAccessor={idOf}
-      withTableBorder
-      backgroundColor="var(--tendb-color-panel)"
-      borderRadius="md"
-      verticalSpacing="sm"
-      horizontalSpacing="md"
-      highlightOnHover
-      {...(records.length === 0 ? { minHeight: 160 } : {})}
-      emptyState={
-        <Text c="dimmed" size="sm" ta="center" maw={420}>
-          {empty}
-        </Text>
-      }
-      {...(onOpen
-        ? {
-            onRowClick: ({ record }: { record: T }) => {
-              onOpen(record);
-            },
-            // A press on another row opens that record instead of closing the open one's drawer.
-            customRowAttributes: () => ({ 'data-keeps-drawer': '' }),
-          }
-        : {})}
-      {...(openId === undefined
-        ? {}
-        : {
-            rowStyle: (record: T) =>
-              idOf(record) === openId
-                ? { background: 'var(--mantine-color-default-hover)' }
-                : undefined,
-          })}
-      {...pagerProps(paging, PAGE_SIZES)}
-    />
+    <RaisedPanel>
+      <DataTable<T>
+        aria-label={label}
+        storeColumnsKey={storeKey}
+        records={[...records]}
+        columns={shown}
+        idAccessor={idOf}
+        backgroundColor="transparent"
+        verticalSpacing="sm"
+        horizontalSpacing="md"
+        highlightOnHover
+        {...(records.length === 0 ? { minHeight: 160 } : {})}
+        emptyState={
+          <Text c="dimmed" size="sm" ta="center" maw={420}>
+            {empty}
+          </Text>
+        }
+        {...(onOpen
+          ? {
+              onRowClick: ({ record }: { record: T }) => {
+                onOpen(record);
+              },
+              // A press on another row opens that record instead of closing the open one's drawer.
+              customRowAttributes: () => ({ 'data-keeps-drawer': '' }),
+            }
+          : {})}
+        {...(openId === undefined
+          ? {}
+          : {
+              rowStyle: (record: T) =>
+                idOf(record) === openId
+                  ? { background: 'var(--mantine-color-default-hover)' }
+                  : undefined,
+            })}
+        {...pagerProps(paging, PAGE_SIZES)}
+      />
+    </RaisedPanel>
   );
 }

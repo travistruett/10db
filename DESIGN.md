@@ -51,17 +51,35 @@ favors legibility and calm over decoration.
   Workbench are the drawer's. A done card keeps the plain border: its column says it.
 - **Board depth:** depth comes from tone, not lines, and every tone is a Selenized background. A column
   with cards is a recessed tray (`--tendb-color-column`) under a header band of its own tone, with a soft
-  `bg_1` edge; an empty column or rail is an unfilled dashed slot. Cards are the raised tone
-  (`--tendb-color-card`) with no outline of their own. The pair swaps between schemes, because Selenized
+  `bg_1` edge; an empty column or rail is an unfilled dashed slot. Cards are raised (level 1 of the
+  Elevation below: the card tone, `--tendb-color-card`, and the `xs` shadow) with no outline of their own. The pair swaps between schemes, because Selenized
   dark lightens from `bg_0` and Selenized light darkens: in dark the tray is `bg_0` and the card `bg_1`, in
   light the tray is `bg_1` and the card `bg_0`. The cards sit 20 px in from every side of the tray. The
   list draws no scrollbar; an end of it fades into the tray while cards are hidden past it, as the board's
   own sides fade while columns are. A column's footer (Add Task, Show All) sits 10 px from the tray's
   edges, wider than the cards, and Add Task is an unfilled dashed slot that takes the card tone on hover,
   so it never reads as a card.
-- **Page panels:** a Settings page's tables and charts can sit on the raised panel tone
-  (`--tendb-color-panel`, `bg_1` in both schemes) through `RaisedPanel` or a table's `backgroundColor`, so
-  they stand off the page body. Settings › Playbook and Models use it; other pages adopt it one at a time.
+- **Elevation:** three levels, set by what a thing is, never by which component draws it.
+  - **0, flat:** part of the page. Rows, lists, text and section heads take no fill and no shadow.
+  - **1, raised:** a self-contained thing the builder scans as a unit: a Board card, Factory's glance tiles,
+    its Needs you panel and its project cards, and every page-level table or chart (Knowledge's lists, the
+    Plan record's tables, each Settings table, Factory's Metrics tables). It takes the card tone
+    (`--tendb-color-card`: `bg_1` in dark, `bg_0` in light) and the `xs` shadow (`--tendb-elevation-raised`),
+    and no border besides; a Board card's border is its state color.
+  - **2, overlay:** what floats above the page. Menus, popovers, hover cards and select lists take the `md`
+    shadow (`Popover`'s default in `theme.ts`, which they all render through); a drawer and the sidebar sheet
+    cast the sheet's own shadow (see Surfaces), and a modal Mantine's.
+  - **One raised layer.** Nothing raised sits inside something raised: a table inside a drawer, a modal or a
+    card stays flat. Factory's Waiting on others stays outlined and unlit, below Needs you.
+  - **Depth means "a thing", never decoration.** The panel tone (`--tendb-color-panel`, `bg_1` in both
+    schemes) is not a level: it sets a block inside the content apart without raising it (the composer, a
+    diff, an opened Plan row).
+  - **Set once.** The two tokens live in `theme.ts` (`elevationVariables`), and level 1 is
+    `<Paper variant="raised">` (`paper.module.css`). A page's table or chart sits in `RaisedPanel`
+    (`shell/raised-panel.tsx`), flush with the table drawn transparent (`DataTable`'s
+    `backgroundColor="transparent"`, no `withTableBorder`) or `padded` for a chart; a table gets its depth
+    from the panel, never from a global `Table` selector. Factory's project cards are accordion items, not
+    `Paper`, so their stylesheet reads the same two tokens.
 - **Card state:** the card's border takes the status color (blue running, yellow waiting on you, orange
   paused, red failed, green done); a queued card's border is its own tone, so it shows none. No fill, no left stripe, no pulsing. A
   card waiting on the builder is the most prominent: a full 2 px yellow border. The card writes the state
@@ -108,12 +126,14 @@ favors legibility and calm over decoration.
   the Board's In review column: a task whose pull request is open is in review, never done. Green is only
   for work that has merged: a goal with open pull requests is Shipping, in blue, never green. A goal's
   Decisions are those its own tasks recorded, not every decision in the project.
-- **Factory leads with what needs the builder, then each project as a bar:** five figures at a glance (needs you, failed and in how many causes, running of the Mac's lanes, pull requests open, merged today; tiles on the project cards' tone and `xs` shadow, and a figure of 0 is dimmed); a Needs you panel on the raised tone, one row per ask or per failure cause (several failures with one cause are one row with Retry All), each led by its kind as an `xs` light badge that is the row's only mark (red for a failure, yellow for a question or a plan, gray for the rest), so every title starts at one edge; a failed task has Close beside Retry, as the task drawer has, with no confirm; then, apart and unlit, a Waiting on others table naming each question out with someone else by its person and its own words; then Projects, one separated accordion card each (the Board card's tone, `xs` shadow and `md` radius): chevron, tile, name, a bar split by where the work stands (green merged, blue running, striped blue in review, yellow needs you, red failed, `bg_2` waiting) and one line saying the same in words; the bar is 6 px, and the key above the cards is small and dimmed (`decisions/2026-11-25-factory-leads-with-needs-you-then-projects.md`). The bar is decorative; the line carries the meaning. A project that needs the builder or runs work starts open; an idle one is folded. Opened, it holds its goals, then its work in no goal: needs you, failed, running and waiting lines (40 px tall; colored text only for "Waiting on you"; a running line shows one segment per step, done solid blue, the current one blue striped and moving, the rest gray, each naming its step in a tooltip, then "Implement 2/3" and its model as a monospace `xs` badge), then one line each for its open pull requests and today's merges, which opens them. Metrics, a switch in the title row, holds Rigor, Human touch and Card types for one project. Within a project, goals are rows of one list separated by hairline dividers, and the open
+- **Factory leads with what needs the builder, then each project as a bar:** five figures at a glance (needs you, failed and in how many causes, running of the Mac's lanes, pull requests open, merged today; tiles raised (see Elevation), and a figure of 0 is dimmed); a Needs you panel, raised, one row per ask or per failure cause (several failures with one cause are one row with Retry All), each led by its kind as an `xs` light badge that is the row's only mark (red for a failure, yellow for a question or a plan, gray for the rest), so every title starts at one edge; a failed task has Close beside Retry, as the task drawer has, with no confirm; then, apart and unlit, a Waiting on others table naming each question out with someone else by its person and its own words; then Projects, one separated accordion card each (raised, with the `md` radius): chevron, tile, name, a bar split by where the work stands (green merged, blue running, striped blue in review, yellow needs you, red failed, `bg_2` waiting) and one line saying the same in words; the bar is 6 px, and the key above the cards is small and dimmed (`decisions/2026-11-25-factory-leads-with-needs-you-then-projects.md`). The bar is decorative; the line carries the meaning. A project that needs the builder or runs work starts open; an idle one is folded. Opened, it holds its goals, then its work in no goal: needs you, failed, running and waiting lines (40 px tall; colored text only for "Waiting on you"; a running line shows Mantine's segmented progress, one `xs` segment per step, done solid blue, the current one blue striped and moving, the rest an empty track, each naming its step in a tooltip, then "Implement 2/3" in the state column and its model as a monospace `xs` badge in its own), then one line each for its open pull requests and today's merges, which opens them. Metrics, a switch in the title row, holds Rigor, Human touch and Card types for one project. Within a project, goals are rows of one list separated by hairline dividers, and the open
   goal's area takes the `bg_1` fill. Rows take no borders and no shadows; cards stay the Board's draggable
   things. Each row is a button (`aria-expanded`) over a `role="region"`: title, status dot, a small bar and one line, collapsed
   until opened, one open at a time. Order: failed, waiting on you, waiting on someone, paused, running,
-  shipping, idle, not started, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
-  no badge and no color.
+  shipping, idle, not started, then done goals under one collapsed "Done (n)". News is plain text at the row's right edge ("3 new since 3h ago"):
+  no badge and no color. Goal rows and task lines inside a project card share one set of columns (chevron, dot,
+  title, bar, the line, step progress, state, model, when), so titles, bars, states and times each run down
+  one edge; the project header's bar starts on the goal bars' edge.
 - **An open goal has four zones, ordered by what the builder acts on:** a bar split by state with its counts
   ("0 merged · 4 in review · 1 ready · 3 not started"; green only for merged) and Start Ready Tasks; a
   Needs you block, drawn only when an Inbox card waits on a goal task or a run failed (a failure is said in
@@ -154,6 +174,11 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
 - **Alerts:** an `Alert` is for something the builder must act on, such as a missing tool or a
   refused key. A condition that clears on its own, such as a rate-limited sync, is a dimmed
   `xs` line with an icon in the header of the view it affects.
+- **Lost daemon connection:** one quiet pill in the title row, before the view's actions, on every view
+  (`shell/reconnecting-indicator.tsx`): a gray light `Badge` with a yellow dot and "Reconnecting…", shown only after
+  5 s without the daemon so a restart doesn't flash it, and "Reconnecting · 3m" from two minutes on. Its hover card
+  says work keeps running and when the connection was lost. Nothing is drawn while connected, and nothing moves
+  when it shows: no banner over the content and no icon in the rail.
 - **Copy:** Title Case for buttons, menu items and the names of things, such as flows and columns
   ("Create Task", "Start Ready Tasks", "Quick"); sentence case for labels, descriptions and messages.
   A button or menu item never ends in "…", even when it opens a dialog; "…" is for work in progress

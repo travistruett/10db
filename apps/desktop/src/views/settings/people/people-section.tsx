@@ -8,7 +8,6 @@ import {
   Group,
   Loader,
   Modal,
-  Paper,
   Stack,
   Table,
   Text,
@@ -29,6 +28,7 @@ import { SettingsSectionKey } from '../sections';
 import { PersonAnswers } from './person-answers';
 import { PersonModal } from './person-modal';
 import { StakeholderTimers } from './stakeholder-timers';
+import { RaisedPanel } from '../../../shell/raised-panel';
 
 /** The builder's person is named "You" until they pick their Slack member. */
 function rowName(person: PersonDto): string {
@@ -185,12 +185,7 @@ export function PeopleSection() {
           </Alert>
         ) : null}
         {people.isSuccess ? (
-          <Paper
-            withBorder
-            radius="md"
-            bg="var(--tendb-color-panel)"
-            style={{ overflow: 'hidden' }}
-          >
+          <RaisedPanel>
             <Table.ScrollContainer minWidth={640}>
               <Table verticalSpacing="sm" horizontalSpacing="md">
                 <Table.Thead>
@@ -257,7 +252,7 @@ export function PeopleSection() {
                 </Table.Tbody>
               </Table>
             </Table.ScrollContainer>
-          </Paper>
+          </RaisedPanel>
         ) : null}
         {onlyYou ? (
           <EmptyState

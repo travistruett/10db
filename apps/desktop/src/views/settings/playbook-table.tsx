@@ -15,6 +15,7 @@ import { processLine, scopeSource } from './playbook-edits';
 import { PlaybookRowDrawer } from './playbook-row-drawer';
 import { RIGOR_LABELS } from './rigor-labels';
 import { ROLES } from './role-labels';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 /**
  * The playbook of one scope: a row per rigor saying which steps run and how it is reviewed, and a cell per rigor and role showing what
@@ -121,19 +122,19 @@ export function PlaybookTable({
   const failed = [...picks.values()].find((q) => q?.isError);
   return (
     <Stack gap="xs">
-      <DataTable<PlaybookRowDto>
-        aria-label="Playbook"
-        records={ordered}
-        columns={columns}
-        idAccessor="rigor"
-        withTableBorder
-        backgroundColor="var(--tendb-color-panel)"
-        borderRadius="md"
-        verticalSpacing="xs"
-        horizontalSpacing="md"
-        // Too narrow a frame scrolls the table sideways instead of wrapping a model name.
-        styles={{ table: { minWidth: 1000 } }}
-      />
+      <RaisedPanel>
+        <DataTable<PlaybookRowDto>
+          aria-label="Playbook"
+          records={ordered}
+          columns={columns}
+          idAccessor="rigor"
+          backgroundColor="transparent"
+          verticalSpacing="xs"
+          horizontalSpacing="md"
+          // Too narrow a frame scrolls the table sideways instead of wrapping a model name.
+          styles={{ table: { minWidth: 1000 } }}
+        />
+      </RaisedPanel>
       {failed?.isError ? (
         <Group gap="sm">
           <Text size="xs" c="red" role="alert">
