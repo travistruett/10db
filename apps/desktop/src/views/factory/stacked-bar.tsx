@@ -1,5 +1,7 @@
-import { Group, Progress, Text, Tooltip, type MantineColor } from '@mantine/core';
+import type { StepRole } from '@10db/contracts';
+import { Badge, Group, Progress, Text, Tooltip, type MantineColor } from '@mantine/core';
 import { BAR_ORDER, BarPart, type BarCounts } from './factory-summary';
+import { STEP_LABEL } from './task-rows';
 
 export const BAR_LABELS: Readonly<Record<BarPart, string>> = {
   [BarPart.Merged]: 'Merged today',
@@ -35,12 +37,7 @@ export function StackedBar({
 }) {
   const total = BAR_ORDER.reduce((n, part) => n + counts[part], 0);
   return (
-    <Progress.Root
-      size={size === 'sm' ? 6 : 8}
-      w={size === 'sm' ? 140 : '100%'}
-      style={{ flex: 'none' }}
-      aria-hidden
-    >
+    <Progress.Root size={6} w={size === 'sm' ? 140 : '100%'} style={{ flex: 'none' }} aria-hidden>
       {BAR_ORDER.filter((part) => counts[part] > 0).map((part) => (
         <Tooltip key={part} label={`${labels[part]}: ${String(counts[part])}`}>
           <Progress.Section
@@ -59,8 +56,8 @@ export function BarSwatch({ part }: { readonly part: BarPart }) {
   return (
     <Progress
       value={100}
-      size={8}
-      w={12}
+      size={6}
+      w={10}
       color={PART_COLORS[part]}
       striped={part === BarPart.InReview}
       style={{ flex: 'none' }}
@@ -72,11 +69,11 @@ export function BarSwatch({ part }: { readonly part: BarPart }) {
 /** The key under the Projects heading: each part's swatch and name. */
 export function BarLegend() {
   return (
-    <Group gap={14} aria-hidden>
+    <Group gap={12} aria-hidden>
       {BAR_ORDER.map((part) => (
         <Group key={part} gap={5} wrap="nowrap">
           <BarSwatch part={part} />
-          <Text size="xs" c="dimmed">
+          <Text fz={11} c="dimmed">
             {BAR_LABELS[part]}
           </Text>
         </Group>
@@ -85,25 +82,42 @@ export function BarLegend() {
   );
 }
 
-/** How far a running run is through its steps, with the steps named in the tooltip. */
+/**
+ * How far a running run is through its steps: one segment per step (done solid, the current one striped and
+ * moving, the rest gray), each naming its step in a tooltip, then the step in words and the model it runs on.
+ */
 export function StepProgress({
   run,
 }: {
   readonly run: {
-    readonly steps: readonly { readonly role: string }[];
+    readonly steps: readonly { readonly role: StepRole; readonly model: string }[];
     readonly stepIndex: number;
   };
 }) {
-  if (run.steps.length === 0) return null;
+  const current = run.steps[run.stepIndex];
+  if (current === undefined) return null;
   return (
-    <Tooltip label={run.steps.map((s) => s.role).join(' → ')}>
-      <Progress
-        value={((run.stepIndex + 1) / run.steps.length) * 100}
-        size={4}
-        w={80}
-        color="blue"
-        aria-hidden
-      />
-    </Tooltip>
+    <Group gap={10} wrap="nowrap">
+      <Group gap={3} w={120} wrap="nowrap" style={{ flex: 'none' }} aria-hidden>
+        {run.steps.map((step, i) => (
+          <Tooltip key={`${String(i)}-${step.role}`} label={STEP_LABEL[step.role]}>
+            <Progress
+              value={100}
+              size={6}
+              style={{ flex: 1 }}
+              color={i <= run.stepIndex ? 'blue' : 'var(--mantine-color-default-border)'}
+              striped={i === run.stepIndex}
+              animated={i === run.stepIndex}
+            />
+          </Tooltip>
+        ))}
+      </Group>
+      <Text size="xs" c="dimmed" style={{ flex: 'none', whiteSpace: 'nowrap' }}>
+        {`${STEP_LABEL[current.role]} ${String(run.stepIndex + 1)}/${String(run.steps.length)}`}
+      </Text>
+      <Badge size="xs" variant="default" ff="monospace" tt="none" fw={500} miw={0}>
+        {current.model}
+      </Badge>
+    </Group>
   );
 }

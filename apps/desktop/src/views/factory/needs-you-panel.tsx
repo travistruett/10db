@@ -1,15 +1,27 @@
 import { InboxKind, type InboxItemDto, type ProjectId, type WorkstreamDto } from '@10db/contracts';
-import { Alert, Avatar, Button, Group, Paper, Stack, Table, Text, Title } from '@mantine/core';
+import {
+  Alert,
+  Avatar,
+  Badge,
+  Button,
+  Group,
+  Paper,
+  Stack,
+  Table,
+  Text,
+  Title,
+  Tooltip,
+} from '@mantine/core';
 import { useState, type ReactNode } from 'react';
-import { useRetryWorkstream } from '../../daemon/queries';
+import { useCloseTask, useRetryWorkstream } from '../../daemon/queries';
 import { ProjectTile } from '../../shell/project-tile';
 import { failureLine } from '../board/task-state';
 import { joinNames } from '../inbox/route-line';
 import type { FailureCause } from './factory-summary';
 import { lastMoment } from './live-groups';
 import { shortAgo } from './short-ago';
-import { StatusDot } from './status-dot';
-import { LineTone, RunMark, TaskLine, WaitRing } from './task-line';
+import { FailureDot } from './failure-card';
+import { failedAt, TaskLine } from './task-line';
 
 const KIND_LABELS: Readonly<Record<InboxKind, string>> = {
   [InboxKind.Question]: 'Question',
@@ -22,6 +34,9 @@ const KIND_LABELS: Readonly<Record<InboxKind, string>> = {
   [InboxKind.PlaybookMoveReport]: 'Report',
   [InboxKind.Acceptance]: 'Acceptance',
 };
+
+/** A question or a plan to approve reads yellow; any other kind of card is gray. */
+const YELLOW_KINDS: ReadonlySet<InboxKind> = new Set([InboxKind.Question, InboxKind.Plan]);
 
 /** A run waiting on the builder, with the Inbox card that asks, when there is one. */
 export interface WaitingRun {
@@ -46,55 +61,71 @@ export interface NeedsYouProps {
   readonly now: number;
   readonly nameOf: (id: ProjectId) => string;
   readonly canRetry: (ws: WorkstreamDto) => boolean;
+  readonly canClose: (ws: WorkstreamDto) => boolean;
   readonly onOpen: (ws: WorkstreamDto) => void;
   readonly onOpenInbox: (projectId: ProjectId) => void;
   readonly onOpenPass: (projectId: ProjectId) => void;
 }
 
-/** One row of the panel: its mark, what kind of ask and its title over one dim line, the project, when, actions. */
+const KindColor = { You: 'yellow', Failed: 'red', Other: 'gray' } as const;
+type KindColor = (typeof KindColor)[keyof typeof KindColor];
+
+/**
+ * One row of the panel: what kind of ask as a badge, which is the row's mark, then its title over one dim
+ * line, the project, when, and the actions. Every title starts at the same edge.
+ */
 function Need({
-  mark,
   kind,
-  tone,
+  color,
+  avatar,
   title,
   sub,
-  subTitle,
+  subTip,
   project,
   when,
   children,
 }: {
-  readonly mark: ReactNode;
   readonly kind: string;
-  readonly tone: 'you' | 'failed' | 'other';
+  readonly color: KindColor;
+  /** A person's avatar inside the badge, for a question out with them. */
+  readonly avatar?: string | undefined;
   readonly title: string;
   readonly sub: string;
-  readonly subTitle?: string | undefined;
+  /** The dim line's tooltip, such as what a failure means and what Retry does. */
+  readonly subTip?: string | undefined;
   readonly project: string;
   readonly when: string;
   readonly children: ReactNode;
 }) {
   return (
     <Table.Tr>
-      <Table.Td w={28} ta="center">
-        {mark}
+      <Table.Td w={120} style={{ verticalAlign: 'top' }}>
+        <Badge
+          size="xs"
+          variant="light"
+          color={color}
+          maw="100%"
+          mt={3}
+          // A person's name keeps its own case.
+          tt={avatar === undefined ? undefined : 'none'}
+          leftSection={
+            avatar === undefined ? undefined : (
+              <Avatar size={12} radius="xl" color="gray" name={avatar} />
+            )
+          }
+        >
+          {kind}
+        </Badge>
       </Table.Td>
       <Table.Td style={{ maxWidth: 0 }}>
-        <Group gap={8} wrap="nowrap" align="baseline">
-          <Text
-            fz={11}
-            fw={600}
-            c={tone === 'you' ? 'yellow' : tone === 'failed' ? 'red' : 'dimmed'}
-            style={{ flex: 'none' }}
-          >
-            {kind}
-          </Text>
-          <Text size="sm" fw={500} c="bright" truncate>
-            {title}
-          </Text>
-        </Group>
-        <Text size="xs" c="dimmed" truncate title={subTitle}>
-          {sub}
+        <Text size="sm" fw={500} c="bright" truncate>
+          {title}
         </Text>
+        <Tooltip label={subTip} disabled={subTip === undefined} multiline maw={420} withArrow>
+          <Text size="xs" c="dimmed" truncate mt={2}>
+            {sub}
+          </Text>
+        </Tooltip>
       </Table.Td>
       <Table.Td w={160}>
         <Group gap={6} wrap="nowrap">
@@ -113,13 +144,19 @@ function Need({
           {when}
         </Text>
       </Table.Td>
-      <Table.Td w={170}>
+      <Table.Td w={200}>
         <Group gap={6} justify="flex-end" wrap="nowrap">
           {children}
         </Group>
       </Table.Td>
     </Table.Tr>
   );
+}
+
+/** The agent's own reason, cut to its first sentence. */
+function firstSentence(text: string): string {
+  const match = /^[\s\S]*?[.!?](?=\s|$)/.exec(text.trim());
+  return match === null ? text.trim() : match[0];
 }
 
 function titlesOf(runs: readonly WorkstreamDto[]): string {
@@ -134,11 +171,15 @@ function Cause({
   props,
   retrying,
   onRetry,
+  closing,
+  onClose,
 }: {
   readonly cause: FailureCause;
   readonly props: NeedsYouProps;
   readonly retrying: boolean;
   readonly onRetry: (runs: readonly WorkstreamDto[]) => void;
+  readonly closing: boolean;
+  readonly onClose: (run: WorkstreamDto) => void;
 }) {
   const [shown, setShown] = useState(false);
   const [first] = cause.runs;
@@ -146,16 +187,15 @@ function Cause({
   const retryable = cause.runs.filter(props.canRetry);
   const project = props.nameOf(cause.projectId);
   const when = shortAgo(lastMoment(first), props.now);
-  const mark = <StatusDot color="red" />;
   if (cause.runs.length === 1) {
+    const line = failureLine(first, retryable.length > 0);
     return (
       <Need
-        mark={mark}
         kind="Failed"
-        tone="failed"
+        color={KindColor.Failed}
         title={first.taskTitle}
-        sub={failureLine(first, retryable.length > 0)}
-        subTitle={first.failureReason ?? undefined}
+        sub={first.failureReason === null ? line : firstSentence(first.failureReason)}
+        subTip={first.failureReason === null ? undefined : line}
         project={project}
         when={when}
       >
@@ -180,15 +220,26 @@ function Cause({
             Retry
           </Button>
         ) : null}
+        {props.canClose(first) ? (
+          <Button
+            size="compact-xs"
+            variant="default"
+            loading={closing}
+            onClick={() => {
+              onClose(first);
+            }}
+          >
+            Close
+          </Button>
+        ) : null}
       </Need>
     );
   }
   return (
     <>
       <Need
-        mark={mark}
         kind={`${String(cause.runs.length)} tasks`}
-        tone="failed"
+        color={KindColor.Failed}
         title={failureLine(first, false)}
         sub={titlesOf(cause.runs)}
         project={project}
@@ -220,29 +271,53 @@ function Cause({
       {shown ? (
         <Table.Tr>
           <Table.Td />
-          <Table.Td colSpan={4}>
+          <Table.Td colSpan={4} pt={0}>
             <Stack gap={0} role="group" aria-label={`${String(cause.runs.length)} failed tasks`}>
               {cause.runs.map((run) => (
                 <TaskLine
                   key={run.id}
-                  mark={<RunMark color="red" />}
+                  mark={
+                    <FailureDot
+                      run={run}
+                      canRetry={props.canRetry(run)}
+                      canClose={props.canClose(run)}
+                      onOpen={() => {
+                        props.onOpen(run);
+                      }}
+                    />
+                  }
                   title={run.taskTitle}
-                  detail={run.failureReason ?? 'Failed'}
-                  tone={LineTone.Failed}
+                  detail={
+                    run.failureReason === null ? failedAt(run) : firstSentence(run.failureReason)
+                  }
                   when={shortAgo(lastMoment(run), props.now)}
                   action={
-                    props.canRetry(run) ? (
-                      <Button
-                        size="compact-xs"
-                        variant="default"
-                        loading={retrying}
-                        onClick={() => {
-                          onRetry([run]);
-                        }}
-                      >
-                        Retry
-                      </Button>
-                    ) : undefined
+                    <>
+                      {props.canRetry(run) ? (
+                        <Button
+                          size="compact-xs"
+                          variant="default"
+                          loading={retrying}
+                          onClick={() => {
+                            onRetry([run]);
+                          }}
+                        >
+                          Retry
+                        </Button>
+                      ) : null}
+                      {props.canClose(run) ? (
+                        <Button
+                          size="compact-xs"
+                          variant="default"
+                          loading={closing}
+                          onClick={() => {
+                            onClose(run);
+                          }}
+                        >
+                          Close
+                        </Button>
+                      ) : null}
+                    </>
                   }
                   onOpen={() => {
                     props.onOpen(run);
@@ -264,6 +339,7 @@ function Cause({
  */
 export function NeedsYouPanel(props: NeedsYouProps) {
   const retry = useRetryWorkstream();
+  const closeTask = useCloseTask();
   const [retryingKey, setRetryingKey] = useState<string | null>(null);
   const { waiting, passes, causes, others, now, nameOf } = props;
   const failed = causes.reduce((n, c) => n + c.runs.length, 0);
@@ -291,7 +367,7 @@ export function NeedsYouPanel(props: NeedsYouProps) {
     .join(' · ');
 
   return (
-    <Stack component="section" aria-label="Needs you and waiting on others" gap={8}>
+    <Stack component="section" aria-label="Needs you and waiting on others" gap={12}>
       {asks + failed > 0 ? (
         <Group gap={8} align="baseline">
           <Title order={2} fz={14} fw={600} c="bright">
@@ -302,6 +378,18 @@ export function NeedsYouPanel(props: NeedsYouProps) {
           </Text>
         </Group>
       ) : null}
+      {closeTask.error === null ? null : (
+        <Alert
+          color="red"
+          title="Couldn't close the task"
+          withCloseButton
+          onClose={() => {
+            closeTask.reset();
+          }}
+        >
+          {closeTask.error.message}
+        </Alert>
+      )}
       {retry.error === null ? null : (
         <Alert
           color="red"
@@ -315,19 +403,18 @@ export function NeedsYouPanel(props: NeedsYouProps) {
         </Alert>
       )}
       {asks + failed > 0 ? (
-        <Paper
-          radius="md"
-          bg="var(--tendb-color-panel)"
-          style={{ '--ring-gap': 'var(--tendb-color-panel)' }}
-        >
-          <Table verticalSpacing={12} horizontalSpacing="md" layout="fixed">
+        <Paper radius="md" bg="var(--tendb-color-panel)">
+          <Table verticalSpacing={14} horizontalSpacing="md" layout="fixed">
             <Table.Tbody>
               {waiting.map(({ run, card }) => (
                 <Need
                   key={run.id}
-                  mark={<WaitRing />}
                   kind={card === undefined ? 'Waiting on you' : KIND_LABELS[card.kind]}
-                  tone="you"
+                  color={
+                    card === undefined || YELLOW_KINDS.has(card.kind)
+                      ? KindColor.You
+                      : KindColor.Other
+                  }
                   title={card?.title ?? run.taskTitle}
                   sub={card === undefined ? 'Open the task to see what it asks' : run.taskTitle}
                   project={nameOf(run.projectId)}
@@ -356,9 +443,8 @@ export function NeedsYouPanel(props: NeedsYouProps) {
               {passes.map((pass) => (
                 <Need
                   key={pass.key}
-                  mark={<WaitRing />}
                   kind="UI Workbench"
-                  tone="you"
+                  color={KindColor.Other}
                   title={pass.title}
                   sub={`${String(pass.pages)} ${pass.pages === 1 ? 'page' : 'pages'} waiting on you`}
                   project={nameOf(pass.projectId)}
@@ -382,7 +468,15 @@ export function NeedsYouPanel(props: NeedsYouProps) {
                   props={props}
                   retrying={retryingKey === cause.key}
                   onRetry={(runs) => {
+                    closeTask.reset();
                     void retryAll(cause.key, runs);
+                  }}
+                  closing={
+                    closeTask.isPending && cause.runs.some((r) => r.taskId === closeTask.variables)
+                  }
+                  onClose={(run) => {
+                    retry.reset();
+                    closeTask.mutate(run.taskId);
                   }}
                 />
               ))}
@@ -391,7 +485,7 @@ export function NeedsYouPanel(props: NeedsYouProps) {
         </Paper>
       ) : null}
       {others.length === 0 ? null : (
-        <Stack gap={8} mt={asks + failed > 0 ? 'md' : 0}>
+        <Stack gap={12} mt={asks + failed > 0 ? 'lg' : 0}>
           <Group gap={8} align="baseline">
             <Title order={2} fz={14} fw={600} c="bright">
               Waiting on others
@@ -401,16 +495,16 @@ export function NeedsYouPanel(props: NeedsYouProps) {
             </Text>
           </Group>
           <Paper radius="md" px="xs" withBorder bg="transparent">
-            <Table verticalSpacing={12} horizontalSpacing="md" layout="fixed">
+            <Table verticalSpacing={14} horizontalSpacing="md" layout="fixed">
               <Table.Tbody>
                 {others.map(({ run, card }) => {
                   const names = run.waitingOn?.names ?? [];
                   return (
                     <Need
                       key={run.id}
-                      mark={<Avatar size={20} radius="xl" color="gray" name={names[0] ?? '?'} />}
+                      avatar={names[0] ?? '?'}
                       kind={joinNames(names)}
-                      tone="other"
+                      color={KindColor.Other}
                       title={card?.title ?? 'A question about this task'}
                       sub={run.taskTitle}
                       project={nameOf(run.projectId)}
