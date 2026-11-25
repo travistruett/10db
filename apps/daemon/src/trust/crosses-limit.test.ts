@@ -312,14 +312,18 @@ describe('readLimitAnswers', () => {
 
 describe('preExistingNamed', () => {
   const repo = '/w/repo';
-  const preExisting = ['.env', 'data/', 'app/data/', 'notes.txt', 'build/'];
+  const preExisting = ['.env', 'data/', 'app/data/', 'notes.txt', 'build/', 'app/.venv/'];
   it.each<[string, string, string, string[]]>([
     ['a path names its entry', 'rm notes.txt', repo, ['notes.txt']],
     ['an absolute path inside the checkout', 'rm /w/repo/.env', repo, ['.env']],
-    ['a folder holding entries', 'rm -rf app', repo, ['app/data/']],
+    ['a folder holding entries', 'rm -rf app', repo, ['app/data/', 'app/.venv/']],
     ['a path inside an entry', 'rm data/db.sqlite3', repo, ['data/']],
     ['a path read from where the call runs', 'rm -rf data', '/w/repo/app', ['app/data/']],
-    ['a path after a cd ends an entry', 'cd app && rm -rf data', repo, ['data/', 'app/data/']],
+    ['a cd reaches every entry', 'cd app && rm -rf data', repo, preExisting],
+    ['a variable reaches every entry', 'rm -rf "$DIR"', repo, preExisting],
+    ['a substitution reaches every entry', 'rm -rf $(cat list)', repo, preExisting],
+    ['xargs reaches every entry', 'cat list | xargs rm', repo, preExisting],
+    ['a dot-folder tail names its entry', 'rm -rf .venv', '/w/repo/app', ['app/.venv/']],
     ['a pattern reaches every entry', 'rm -f *.txt', repo, preExisting],
     ['the checkout reaches every entry', 'rm -rf .', repo, preExisting],
     ['git clean reaches every entry', 'git clean -fdx', repo, preExisting],

@@ -143,6 +143,11 @@ const likely = (at: { readonly limit: LimitName; readonly p: number }): string =
 /** A delete that names no path of its own, or names many by a pattern: it may reach any untracked entry. */
 const BROAD_DELETE = /\bgit\s+clean\b|\bfind\b[^|;&]*\s-(?:delete|exec\s+rm)\b/;
 const PATTERN = /[*?[]/;
+/**
+ * Where the paths a command acts on can't be read from its text: a variable, a substitution, a list fed through
+ * `xargs` or a redirect, or a change of folder. The call is then taken to reach every entry.
+ */
+const UNREADABLE_TARGETS = /[$`<]|\b(?:xargs|pushd|popd|cd)\b/;
 
 /** A path relative to the checkout, without `.` or `..` steps; null when it lies outside the checkout. */
 function insideCheckout(path: string, checkout: string): string | null {
@@ -168,12 +173,15 @@ export function preExistingNamed(
     return fromCwd === null ? [] : [fromCwd];
   });
   const broad =
-    BROAD_DELETE.test(input) || tokens.some((t) => PATTERN.test(t)) || paths.includes('');
-  // A relative path may be read from a folder an earlier `cd` in the command moved to: it also names any entry it ends.
+    BROAD_DELETE.test(input) ||
+    UNREADABLE_TARGETS.test(input) ||
+    tokens.some((t) => PATTERN.test(t)) ||
+    paths.includes('');
+  // A relative path may name an entry from a folder below the checkout: it also names any entry it ends.
   const tails = tokens
     .filter((t) => !t.startsWith('/'))
     .map((t) => t.replace(/^(?:\.\/)+/, '').replace(/\/+$/, ''))
-    .filter((t) => t !== '' && !t.startsWith('.'));
+    .filter((t) => t !== '' && t !== '.' && t !== '..' && !t.startsWith('../'));
   const reached = (entry: string): boolean => {
     if (broad) return true;
     const path = entry.replace(/\/+$/, '');
