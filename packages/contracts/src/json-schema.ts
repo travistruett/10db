@@ -311,6 +311,8 @@ import {
   SystemCheckDto,
 } from './system';
 import { AgentCapabilitiesDto } from './agent-capabilities';
+import { FocusHitsDto } from './focus-hit';
+import { EffectiveFocusesDto, ProjectFocuses, YourFocuses } from './focuses';
 import {
   InstalledPluginDto,
   ProjectTrustDto,
@@ -423,6 +425,10 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'inbox-card-context-dto': InboxCardContextDto,
   'inbox-item-dto': InboxItemDto,
   'system-check-dto': SystemCheckDto,
+  'focus-hits-dto': FocusHitsDto,
+  'effective-focuses-dto': EffectiveFocusesDto,
+  'your-focuses': YourFocuses,
+  'project-focuses': ProjectFocuses,
   'keep-awake-status': KeepAwakeStatus,
   'events-head': EventsHead,
   'keep-awake-input': KeepAwakeInput,

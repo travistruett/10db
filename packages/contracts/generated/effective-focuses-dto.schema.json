@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "key": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
+      "label": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80
+      },
+      "why": {
+        "type": "string",
+        "maxLength": 400
+      },
+      "globs": {
+        "minItems": 1,
+        "maxItems": 64,
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "guidance": {
+        "type": "string",
+        "maxLength": 2000
+      },
+      "loudness": {
+        "type": "string",
+        "enum": [
+          "show",
+          "ask",
+          "hold"
+        ]
+      },
+      "starter": {
+        "default": null,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "from": {
+        "type": "string",
+        "enum": [
+          "you",
+          "project",
+          "override"
+        ]
+      }
+    },
+    "required": [
+      "key",
+      "label",
+      "why",
+      "globs",
+      "guidance",
+      "loudness",
+      "from"
+    ]
+  }
+}

@@ -29,6 +29,30 @@
         }
       ]
     },
+    "focusNotes": {
+      "description": "Review and QA steps only: one entry per focus file you checked, { path, note } with the note starting ✓ when it holds up or ⚠ when it does not, and why, at most 400 characters. Leave it out of a plan or plan review.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400
+          }
+        },
+        "required": [
+          "path",
+          "note"
+        ]
+      }
+    },
     "followUps": {
       "default": [],
       "description": "Review, plan review and QA steps only: real problems that should not reject the work (on a later round, ones that are new and not caused by the fix). 10db files each as a task in the Icebox column and names it in your result.",

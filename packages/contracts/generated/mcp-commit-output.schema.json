@@ -8,6 +8,30 @@
     },
     "alreadyCommitted": {
       "type": "boolean"
+    },
+    "focusNotes": {
+      "default": [],
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400
+          }
+        },
+        "required": [
+          "path",
+          "note"
+        ]
+      }
     }
   },
   "required": [
