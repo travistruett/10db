@@ -6,6 +6,7 @@ import { OWNS_ESCAPE_ATTRIBUTE } from '../../conversation/escape';
 import { usePatchChat } from '../../daemon/chat-queries';
 import { TitleRow } from '../../shell/title-row';
 import { canOpenTerminal } from './can-open-terminal';
+import { FullAccessBadge, FullAccessConfirm } from './full-access';
 import { SessionMenuItems, type SessionActions } from './session-menu';
 import { TerminalButton } from './terminal-button';
 
@@ -116,6 +117,9 @@ export function SessionTitle({
 }: SessionTitleProps) {
   const [typing, setEditing] = useState(false);
   const [askedHere, setAskedHere] = useState(false);
+  // Mock-up only: held in the view until the chat row carries it.
+  const [fullAccess, setFullAccess] = useState(false);
+  const [confirmingFullAccess, setConfirmingFullAccess] = useState(false);
   const editing = typing || renaming;
   // Only a session the agent can take to a terminal, and not one in it already or sealed.
   const offersTerminal = projectPath !== null && canOpenTerminal(conversation);
@@ -135,6 +139,24 @@ export function SessionTitle({
       }
       actions={
         <>
+          <FullAccessConfirm
+            opened={confirmingFullAccess}
+            agent={conversation.capabilities.label}
+            onCancel={() => {
+              setConfirmingFullAccess(false);
+            }}
+            onConfirm={() => {
+              setConfirmingFullAccess(false);
+              setFullAccess(true);
+            }}
+          />
+          {fullAccess ? (
+            <FullAccessBadge
+              onTurnOff={() => {
+                setFullAccess(false);
+              }}
+            />
+          ) : null}
           {plan === undefined ? null : (
             <Tooltip label={plan.open ? 'Close Plan' : 'Show Plan'}>
               <Button
@@ -175,6 +197,11 @@ export function SessionTitle({
                   ...actions,
                   onRename: () => {
                     setEditing(true);
+                  },
+                  fullAccess,
+                  onToggleFullAccess: () => {
+                    if (fullAccess) setFullAccess(false);
+                    else setConfirmingFullAccess(true);
                   },
                   // Open in Terminal is the terminal button beside this menu, so the menu leaves it out.
                 }}
