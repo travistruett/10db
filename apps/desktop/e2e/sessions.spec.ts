@@ -192,6 +192,10 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await page.keyboard.press('Meta+j');
   await expect(page).toHaveURL(/\/sessions\?chat=/);
   await page.getByRole('navigation').getByRole('link', { name: 'Inbox' }).click();
+  // The list has loaded (a row, or the empty state) before the absence of the chat's card means anything.
+  await expect(
+    page.getByRole('listbox').or(page.getByText('Nothing needs you')).first(),
+  ).toBeVisible();
   await expect(page.getByRole('option', { name: /Remove “Hold the line”\?/ })).toHaveCount(0);
   await page
     .getByRole('navigation')

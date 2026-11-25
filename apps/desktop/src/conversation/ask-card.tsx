@@ -82,10 +82,15 @@ export function AskCard({
     const option = item.options[Number(event.key) - 1];
     if (option === undefined) return;
     event.preventDefault();
-    send(option.label, '');
+    send(option.label, note);
   };
   if (answer.isSuccess) return null;
   const call = detailText(item, 'summary');
+  // The command is in the block above; the body's own paragraph that repeats it is left out.
+  const rest = item.body
+    .split('\n\n')
+    .filter((paragraph) => paragraph !== call)
+    .join('\n\n');
   return (
     <Paper
       {...{ [WAITING_CARD_ATTRIBUTE]: true }}
@@ -133,9 +138,9 @@ export function AskCard({
             {call}
           </Box>
         )}
-        {item.body === '' || item.body === call ? null : (
+        {rest === '' ? null : (
           <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-line' }}>
-            {item.body}
+            {rest}
           </Text>
         )}
         <Group gap="xs">
@@ -153,7 +158,7 @@ export function AskCard({
                 disabled={answer.isPending}
                 rightSection={<Kbd size="xs">{String(index + 1)}</Kbd>}
                 onClick={() => {
-                  send(option.label, '');
+                  send(option.label, note);
                 }}
               >
                 {buttonLabel(item, option)}

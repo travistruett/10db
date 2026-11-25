@@ -1,6 +1,6 @@
-import type { InboxItemDto } from '@10db/contracts';
+import { InboxListState, type InboxItemDto } from '@10db/contracts';
 import { useOpenChats } from '../../daemon/chat-queries';
-import { useInbox } from '../../daemon/queries';
+import { useInboxRows } from '../../daemon/inbox-queries';
 
 /** The detail key the daemon writes on a card a conversation's session asked. */
 const CONVERSATION_DETAIL_KEY = 'conversationId';
@@ -18,8 +18,13 @@ export function useInOpenChat(): (item: InboxItemDto) => boolean {
   };
 }
 
-/** How many open cards the Inbox leaves out because their chat is open in a tab. */
-export function useCardsInOpenChats(): number {
+/**
+ * How many open rows the Inbox leaves out: those whose every card belongs to a chat open in a tab, which is
+ * what the Inbox page hides, so the badge subtracts exactly what the page does not show.
+ */
+export function useRowsInOpenChats(): number {
   const inOpenChat = useInOpenChat();
-  return (useInbox().data ?? []).filter((item) => item.state === 'OPEN' && inOpenChat(item)).length;
+  return useInboxRows({ state: InboxListState.Open }).rows.filter((row) =>
+    row.items.every(inOpenChat),
+  ).length;
 }
