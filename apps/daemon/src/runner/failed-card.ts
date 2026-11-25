@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { CardTier, flagCard, withdrawCard } from '../inbox';
 
 /** A task has one failed card: a later run's failure folds into it. */
-export const failedCardKey = (taskId: TaskId): string => `failed:${taskId}`;
+const failedCardKey = (taskId: TaskId): string => `failed:${taskId}`;
 
 /** The detail key counting the runs of the task whose failures the card has stood for. */
 const FAILED_RUNS = 'failedRuns';
