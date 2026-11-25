@@ -196,9 +196,11 @@ describe('the guard’s asks, answered for a lane nobody watches', () => {
     toolInput: Record<string, unknown>,
     judge: JudgeKind = JudgeKind.Rules,
     approvedKeys: readonly string[] = [],
+    linearRead = false,
   ) {
     const verdict = judgePreToolUse({
       judge,
+      linearRead,
       coveredByAllowRule: false,
       toolName,
       toolInput,
@@ -312,6 +314,21 @@ describe('the guard’s asks, answered for a lane nobody watches', () => {
   it('an approved key for an unknown tool on rules is allowed', () => {
     expect(unattended('mcp__docs__search', {}, JudgeKind.Rules, ['k']).verdict).toEqual({
       decision: 'allow',
+    });
+  });
+
+  it('runs a read of the builder’s Linear settled, and still skips a Linear write as sending data out', () => {
+    const read = { id: 'AMP-6', includeRelations: true };
+    for (const judge of [JudgeKind.Native, JudgeKind.Tendb, JudgeKind.Rules]) {
+      const answer = unattended('mcp__linear__get_issue', read, judge, [], true);
+      expect.soft(answer.verdict.decision, judge).toBe('allow');
+      expect.soft(answer.verdict, judge).toHaveProperty('settled');
+      expect.soft(answer.skip, judge).toBeNull();
+    }
+    const write = { issueId: 'AMP-6', body: 'The diff, pasted.' };
+    expect(unattended('mcp__linear__save_comment', write, JudgeKind.Native).skip).toMatchObject({
+      kind: 'web_or_mcp',
+      limit: 'sends_data_out',
     });
   });
 });
