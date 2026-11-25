@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createTestStore, seedProject } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createTempRepo, isolatedGitEnv, type TempDir } from '../../test/fixtures';
+import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from '../../test/fixtures';
 import { createEventBus, createStateStore } from '../events';
 import { createGit } from '../git';
 import { silentLogger } from '../log';
@@ -145,5 +145,34 @@ describe('evals service', () => {
     const detail = await evals.suite(project.id, repo.path, 'chat.answer', undefined);
     expect(detail.runs.map((r) => r.passed)).toEqual([false, true]);
     expect(detail.coveredPaths).toEqual(['src/**']);
+  });
+
+  it('does not read a results folder that links out of the checkout', async () => {
+    repo = createTempRepo();
+    const outside = tempDir('evals-outside');
+    try {
+      mkdirSync(join(outside.path, 'chat.answer'), { recursive: true });
+      writeFileSync(
+        join(outside.path, 'chat.answer', '20261001T100000000000Z.json'),
+        gateReport(true, 0.9),
+      );
+      mkdirSync(join(repo.path, 'evals/chat'), { recursive: true });
+      writeFileSync(join(repo.path, 'evals/chat/answer.py'), '# eval\n');
+      symlinkSync(outside.path, join(repo.path, 'evals/reports'));
+      writeFileSync(join(repo.path, '.gitignore'), 'evals/reports\n');
+      git(repo.path, 'add', '.gitignore', 'evals/chat/answer.py');
+      git(repo.path, 'commit', '-q', '-m', 'evals');
+      const { store, close } = createTestStore();
+      closeStore = close;
+      const project = seedProject(store, { name: 'p', repoPath: repo.path });
+      const evals = createEvalsService({
+        state: createStateStore(store, createEventBus()),
+        git: createGit({ worktreeRoot: join(repo.path, '..', 'unused') }),
+        logger: silentLogger,
+      });
+      expect((await evals.read(project.id, repo.path)).suites).toEqual([]);
+    } finally {
+      outside.cleanup();
+    }
   });
 });

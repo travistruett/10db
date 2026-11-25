@@ -64,6 +64,6 @@ describe('eval markers', () => {
       ['vendor/model', 'SMART@medium', 0.25],
       ['same', null, null],
     ]);
-    expect(run.cases).toEqual([{ name: 'a', trials: 2, failed: 1 }]);
+    expect(run.cases).toEqual([{ name: 'a (vendor/model)', trials: 2, failed: 1 }]);
   });
 });

@@ -1,11 +1,16 @@
-import { EvalResultFormat } from '@10db/contracts';
+import {
+  EvalModelResultDto,
+  EvalResultFormat,
+  EvalRunSummaryDto,
+  EvalSuiteKey,
+} from '@10db/contracts';
 import type { Git } from '../git';
 import type { Logger } from '../log';
 import { GateReport, gateReportTask, parseGateReport } from './gate-report';
 import { LanePipelineReport, parseLanePipeline } from './lane-pipeline';
 import { findEvalMarkers, type EvalMarkers } from './markers';
 import { evalsDirs, findResultFiles } from './result-files';
-import type { ParsedRun } from './run-summary';
+import { runCost, type ParsedRun } from './run-summary';
 
 /** One suite's runs, as read from the result files that name it. */
 export interface FoundSuite {
@@ -35,8 +40,23 @@ function parseJson(text: string): unknown {
   }
 }
 
+/** Whether a run and its suite key will pass the contracts they are answered under. */
+function fitsContracts(key: string, run: ParsedRun): boolean {
+  return (
+    EvalSuiteKey.safeParse(key).success &&
+    run.models.every((m) => EvalModelResultDto.safeParse(m).success) &&
+    EvalRunSummaryDto.safeParse({
+      path: run.path,
+      at: run.at,
+      passed: run.passed,
+      costUsd: runCost(run.models),
+      models: run.models.map((m) => m.model),
+    }).success
+  );
+}
+
 /**
- * Reads a repository's eval result files at HEAD through git's object store: a file that fails its
+ * Reads a repository's eval files at HEAD (the tracked list) and its result files from the checkout: a file that fails its
  * format's schema is counted and left out, never thrown. Null when git won't read the repository.
  */
 export async function readEvals(
@@ -66,6 +86,11 @@ export async function readEvals(
   }
   const runs = new Map<string, { format: EvalResultFormat; runs: ParsedRun[] }>();
   const add = (key: string, format: EvalResultFormat, run: ParsedRun): void => {
+    if (!fitsContracts(key, run)) {
+      skipped += 1;
+      logger.debug({ path: run.path }, 'eval result file does not fit the contracts');
+      return;
+    }
     const suite = runs.get(key) ?? { format, runs: [] };
     suite.runs.push(run);
     runs.set(key, suite);

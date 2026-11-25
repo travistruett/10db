@@ -54,7 +54,9 @@ export function findEvalMarkers(tracked: readonly string[]): EvalMarkers {
   for (const path of tracked) {
     const report = REPORT.exec(path);
     if (report !== null) {
-      reports.push({ path, folder: report[1] ?? '', at: reportTime(report) });
+      const at = reportTime(report);
+      // A name that is no real time (month 99) is no report.
+      if (new Date(at).toISOString() === at) reports.push({ path, folder: report[1] ?? '', at });
       continue;
     }
     const baseline = BASELINE.exec(path);

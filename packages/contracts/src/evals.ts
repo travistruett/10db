@@ -166,6 +166,19 @@ export const EvalManifest = z
     suites: z.array(EvalManifestSuite).max(500),
     gaps: z.array(EvalGapDto).max(200),
   })
+  .superRefine((m, ctx) => {
+    const seen = new Set<string>();
+    for (const [index, suite] of m.suites.entries()) {
+      if (seen.has(suite.key)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `the suite key ${suite.key} is named twice`,
+          path: ['suites', index, 'key'],
+        });
+      }
+      seen.add(suite.key);
+    }
+  })
   .refine((m) => m.suites.reduce((n, s) => n + s.coveredPaths.length, 0) <= 200, {
     message: 'a manifest covers at most 200 globs in all',
   });

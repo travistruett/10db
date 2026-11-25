@@ -1,3 +1,4 @@
+import { EvalSuiteKey } from '@10db/contracts';
 import type {
   EvalFlakyCaseDto,
   EvalManifestSuite,
@@ -32,6 +33,7 @@ function candidates(found: FoundEvals, manifest: StoredEvalManifest | null): Can
   }
   for (const [dir, paths] of found.markers.promptCases) {
     const key = `plugin-eval:${dir}`;
+    if (!EvalSuiteKey.safeParse(key).success) continue;
     out.set(key, { key, format: null, runs: [], definitionPaths: [...paths].sort() });
   }
   for (const suite of manifest?.manifest.suites ?? []) {

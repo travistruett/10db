@@ -1,5 +1,5 @@
-import { lstat, readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
+import { join, sep } from 'node:path';
 
 /** The most result files looked at, bytes of one, and bytes of all. */
 const MAX_FILES = 2_000;
@@ -31,34 +31,67 @@ export function evalsDirs(tracked: readonly string[]): string[] {
   return [...dirs].sort();
 }
 
-/** Real files and folders only: a symlink is never followed out of the checkout. */
-async function walk(root: string, rel: string, out: string[], depth: number): Promise<void> {
-  const entries = await readdir(join(root, rel), { withFileTypes: true }).catch(() => []);
+/** The most files collected before sorting, so a huge folder is not listed whole. */
+const MAX_COLLECTED = 10_000;
+
+/** Real `.json` files and folders only: a symlink inside a root is never followed. */
+async function walk(
+  real: string,
+  rel: string,
+  out: Map<string, string>,
+  depth: number,
+): Promise<boolean> {
+  const entries = await readdir(real, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
     const path = `${rel}/${entry.name}`;
-    if (entry.isFile() && entry.name.endsWith('.json')) out.push(path);
-    else if (entry.isDirectory() && depth < 2) await walk(root, path, out, depth + 1);
+    if (entry.isFile() && entry.name.endsWith('.json')) {
+      if (out.size >= MAX_COLLECTED) return true;
+      out.set(path, join(real, entry.name));
+    } else if (entry.isDirectory() && depth < 2) {
+      if (await walk(join(real, entry.name), path, out, depth + 1)) return true;
+    }
   }
+  return false;
+}
+
+/** A root counts only when its real location, links resolved, is inside the checkout's. */
+async function realRoot(repoReal: string, rel: string): Promise<string | null> {
+  const real = await realpath(join(repoReal, rel)).catch(() => null);
+  return real !== null && (real === repoReal || real.startsWith(`${repoReal}${sep}`)) ? real : null;
 }
 
 /**
  * The result files under each `evals/reports` and `evals/lane-pipeline/baselines` of the checkout's
- * working tree: they are a project's local output, often kept out of git. Nothing is written.
+ * working tree: they are a project's local output, often kept out of git. A root that is a link out of
+ * the checkout is skipped. The newest files are kept when a cap bites. Nothing is written.
  */
 export async function findResultFiles(
   repoPath: string,
   dirs: readonly string[],
 ): Promise<ResultFiles> {
-  const found: string[] = [];
-  for (const dir of dirs)
-    for (const sub of RESULT_ROOTS) await walk(repoPath, `${dir}/${sub}`, found, 0);
-  found.sort();
-  let skipped = Math.max(0, found.length - MAX_FILES);
+  const repoReal = await realpath(repoPath).catch(() => null);
+  const found = new Map<string, string>();
+  let skipped = 0;
+  if (repoReal !== null) {
+    for (const dir of dirs) {
+      for (const sub of RESULT_ROOTS) {
+        const rel = `${dir}/${sub}`;
+        const real = await realRoot(repoReal, rel);
+        if (real !== null && (await walk(real, rel, found, 0))) skipped += 1;
+      }
+    }
+  }
+  // File names lead with a UTC time, so the newest sort first.
+  const ordered = [...found.keys()].sort(
+    (a, b) =>
+      (b.split('/').at(-1) ?? '').localeCompare(a.split('/').at(-1) ?? '') || a.localeCompare(b),
+  );
+  skipped += Math.max(0, ordered.length - MAX_FILES);
   const paths: string[] = [];
   const sizes = new Map<string, number>();
   let newest = 0;
-  for (const path of found.slice(0, MAX_FILES)) {
-    const stat = await lstat(join(repoPath, path)).catch(() => null);
+  for (const path of ordered.slice(0, MAX_FILES)) {
+    const stat = await lstat(found.get(path) ?? '').catch(() => null);
     if (stat === null || !stat.isFile() || stat.size > MAX_FILE_BYTES) {
       skipped += 1;
       continue;
@@ -75,7 +108,7 @@ export async function findResultFiles(
     async read(path) {
       total += sizes.get(path) ?? 0;
       if (total > MAX_TOTAL_BYTES) return null;
-      return readFile(join(repoPath, path), 'utf8').catch(() => null);
+      return readFile(found.get(path) ?? '', 'utf8').catch(() => null);
     },
   };
 }

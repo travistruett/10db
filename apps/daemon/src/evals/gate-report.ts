@@ -26,7 +26,10 @@ const Slot = z
     passed: z.boolean(),
     trials: z.number().nullish(),
     gates: z.record(z.string(), Gate),
-    cost: z.object({ total: z.string().nullish() }).loose().nullish(),
+    cost: z
+      .object({ total: z.union([z.string(), z.number()]).nullish() })
+      .loose()
+      .nullish(),
     latency_ms: z.object({ p50: z.number().nullish() }).loose().nullish(),
     cases: z.array(Trial).nullish(),
   })
@@ -48,7 +51,10 @@ const unit = (n: number): number => Math.min(1, Math.max(0, n));
 
 function modelOf(slot: z.infer<typeof Slot>): EvalModelResultDto {
   const total = slot.cost?.total;
-  const cost = total === null || total === undefined ? Number.NaN : Number(total);
+  const cost =
+    total === null || total === undefined || String(total).trim() === ''
+      ? Number.NaN
+      : Number(total);
   return {
     model: slot.slug,
     slot:
@@ -73,12 +79,12 @@ function modelOf(slot: z.infer<typeof Slot>): EvalModelResultDto {
 const trialFailed = (trial: z.infer<typeof Trial>): boolean =>
   trial.failed === true || Object.values(trial.assertions ?? {}).some((held) => held === false);
 
-/** Trials counted per source case, across every slot of the report. */
+/** Trials counted per source case and model, so a case flaky on one model shows under it. */
 function casesOf(report: GateReport): CaseTrials[] {
   const byName = new Map<string, { trials: number; failed: number }>();
   for (const slot of report.slots) {
     for (const trial of slot.cases ?? []) {
-      const name = trial.source_case ?? trial.name;
+      const name = `${trial.source_case ?? trial.name} (${slot.slug})`;
       const seen = byName.get(name) ?? { trials: 0, failed: 0 };
       seen.trials += 1;
       if (trialFailed(trial)) seen.failed += 1;

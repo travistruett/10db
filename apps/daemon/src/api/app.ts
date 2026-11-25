@@ -84,6 +84,7 @@ import {
   PersonaInput,
   PersonaPatch,
   EvalManifest,
+  EvalSuiteKey,
   EvalSuiteQuery,
   PersonInput,
   PickSize,
@@ -1500,7 +1501,7 @@ export function createApp(deps: ApiDeps) {
         c.json(
           await deps.services.evalSuite(
             ProjectId.parse(c.req.param('projectId')),
-            c.req.param('suiteKey'),
+            EvalSuiteKey.parse(c.req.param('suiteKey')),
             c.req.valid('query').run,
           ),
         ),

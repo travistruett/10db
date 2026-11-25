@@ -68,7 +68,7 @@ function untrackedIn(manifest: EvalManifest, found: FoundEvals): string[] {
 }
 
 /**
- * A project's committed eval results at HEAD, read through git's object store and never run, with the
+ * A project's eval files at HEAD and its result files from the checkout, never run, with the
  * manifest an agent recorded laid over them. The parsed results are kept per checkout while HEAD stays put.
  */
 export function createEvalsService(deps: EvalsDeps): EvalsService {
