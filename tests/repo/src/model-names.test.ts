@@ -28,9 +28,9 @@ interface Allowed {
 const ALLOWED: readonly Allowed[] = [
   {
     file: 'packages/contracts/src/judge.ts',
-    names: ['claude-haiku-5.5'],
+    names: ['claude-haiku-5.5', 'claude-sonnet-5.5'],
     reason:
-      'the second opinion on limits starts on the model a replay showed settles them; a tier on an OpenRouter account can resolve to one that lets a production migration through',
+      'each second opinion starts on a model a replay showed settles it (limits, acceptance); a tier on an OpenRouter account can resolve to one that lets a production migration through',
   },
   {
     file: 'apps/daemon/src/shape/confinement.ts',
