@@ -346,6 +346,7 @@ import {
 } from '../test-value';
 import {
   BlockedRun,
+  gateTimeoutFor,
   type GateRequest,
   type GateResult,
   type GateRunner,
@@ -4696,7 +4697,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       command: gateCommand,
       copyId,
       logPath,
-      timeoutMs: opts.limits.gateTimeoutMs,
+      timeoutMs: gateTimeoutFor(db, project.id, gateCommand, opts.limits.gateTimeoutMs),
       // The project env: the login shell without billing switches, and never the account's credentials.
       env: opts.launcher.projectEnv(),
       // The hosts and read paths the lane's own sandbox opens.
@@ -4805,6 +4806,8 @@ export function createRunner(opts: RunnerOptions): Runner {
           entityId: id,
           data: {
             run,
+            projectId: project.id,
+            command: gateCommand,
             exitCode: result.exitCode,
             durationMs: result.durationMs,
             aborted: result.aborted,

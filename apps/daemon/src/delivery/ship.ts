@@ -12,6 +12,7 @@ import {
   LEFT_OUT_NOTICE_KEY,
   McpToolName,
   McpToolOutputs,
+  EventType,
   shipReadiness,
   ShipReadiness,
   StepRole,
@@ -67,7 +68,7 @@ import {
 import { commitAdaptsMerge, insertPlannedWorkstream, revertOfRun } from '../team';
 import { raiseGateHostCards, withdrawCard } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
-import { BlockedRun, type GateResult, type GateRunner } from '../verify';
+import { BlockedRun, gateTimeoutFor, type GateResult, type GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 import { BATCH_CARD_DETAIL, type KeptRevert } from './batch-card';
 import { settleBranch } from './branch-cleanup';
@@ -400,7 +401,7 @@ export async function runGate(
     command: gateCommand,
     copyId: copyIdForBatch(deps.state.db, batch.id),
     logPath,
-    timeoutMs: deps.limits.gateTimeoutMs,
+    timeoutMs: gateTimeoutFor(deps.state.db, project.id, gateCommand, deps.limits.gateTimeoutMs),
     env: deps.sessionEnv(project),
     // The batch spans tasks, so only the project's own hosts and read paths open.
     rules: listPermissionRules(deps.state.db, project.id, null),
@@ -432,13 +433,27 @@ export async function runGate(
     },
     'gate finished',
   );
-  deps.state.write((w) =>
+  deps.state.write((w) => {
     patchBatch(w, batch.id, {
       gatePid: null,
       gatePidStart: null,
       ...(result.aborted ? {} : { gateExitCode: result.exitCode, gateLogPath: result.logPath }),
-    }),
-  );
+    });
+    // The record a later gate's timeout reads: how long this command takes in this project.
+    if (!result.aborted)
+      w.emit({
+        type: EventType.GateFinished,
+        entityType: 'batch',
+        entityId: batch.id,
+        data: {
+          projectId: project.id,
+          command: gateCommand,
+          exitCode: result.exitCode,
+          durationMs: result.durationMs,
+          aborted: false,
+        },
+      });
+  });
   // Shutdown killed the gate: record nothing; the batch stays SHIPPING and recovery re-runs it.
   if (result.aborted) return null;
   // A host the sandbox blocked is the builder's to allow; the card names it and the gate's tail says so.
@@ -1184,7 +1199,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         batch,
         shipCards.gateTimedOut(
           batch,
-          deps.limits.gateTimeoutMs,
+          gateTimeoutFor(deps.state.db, project.id, check.command, deps.limits.gateTimeoutMs),
           first.gate.logPath,
           cardNote(first),
           name,
@@ -1236,7 +1251,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
           batch,
           shipCards.gateTimedOut(
             batch,
-            deps.limits.gateTimeoutMs,
+            gateTimeoutFor(deps.state.db, project.id, check.command, deps.limits.gateTimeoutMs),
             second.gate.logPath,
             cardNote(second),
             name,
