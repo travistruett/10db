@@ -45,7 +45,7 @@ export function createTailscaleRun(cli: string): TailscaleRun {
             return;
           }
           // execFile's callback error carries `code` (an exit status or a spawn error name) and `killed`.
-          const failure = error as NodeJS.ErrnoException & { killed?: boolean };
+          const failure = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string };
           resolve({
             code: typeof failure.code === 'number' ? failure.code : null,
             stdout,
