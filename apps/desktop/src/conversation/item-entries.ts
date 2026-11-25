@@ -56,6 +56,8 @@ function answeredWords(card: InboxItemDto): string | null {
       return 'You allowed this for the session';
     case PermissionChoice.AllowProject:
       return 'You allowed this in the project';
+    case PermissionChoice.AllowChat:
+      return 'You allowed this command in this chat';
     case PermissionChoice.Deny:
       return 'You denied this';
     default:

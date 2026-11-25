@@ -19,6 +19,7 @@ export const PERMISSION_LABELS: Readonly<Record<PermissionChoice, string>> = {
   [PermissionChoice.AllowOnce]: 'Allow Once',
   [PermissionChoice.AllowWorkstream]: 'Allow for This Workstream',
   [PermissionChoice.AllowProject]: 'Always Allow in This Project',
+  [PermissionChoice.AllowChat]: 'For this command in this chat',
   // A card names its server (`permissionWords`); this is the reading when it does not.
   [PermissionChoice.AllowMcpServer]: 'Always allow every tool of this server in this project',
   [PermissionChoice.AlwaysInProject]: 'Always in This Project',

@@ -177,6 +177,7 @@ const ALLOWING: readonly string[] = [
   PermissionChoice.AllowOnce,
   PermissionChoice.AllowWorkstream,
   PermissionChoice.AllowProject,
+  PermissionChoice.AllowChat,
   PermissionChoice.AllowMcpServer,
   PermissionChoice.AlwaysInProject,
 ];
