@@ -1,8 +1,7 @@
 import { lstat, readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import type { ProjectDto } from '@10db/contracts';
 import type { Git } from '../git';
-import { within } from './make-rules';
 
 /** The most of a file `readCommitted` reads, from the base and from the checkout. */
 export const MAX_COMMITTED_BYTES = 256 * 1024;
@@ -84,8 +83,9 @@ export function readCommitted(
   maxBytes: number = MAX_COMMITTED_BYTES,
 ): CommittedReader {
   return async (path) => {
-    const inside = within('', path);
-    if (inside === null || inside === '') return { kind: 'differs' };
+    const inside = posix.normalize(path);
+    if (path.startsWith('/') || inside === '.' || inside === '..' || inside.startsWith('../'))
+      return { kind: 'differs' };
     try {
       const [base, here] = await Promise.all([
         inBase(git, project, inside, maxBytes),

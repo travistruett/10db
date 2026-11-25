@@ -1,14 +1,7 @@
 import { posix } from 'node:path';
-import {
-  MAKEFILE_NAMES,
-  parseRules,
-  within,
-  withoutComments,
-  type CommittedFile,
-  type CommittedReader,
-  type MakeRule,
-} from '../folders';
+import type { CommittedFile, CommittedReader } from '../folders';
 import { leadingWords, parseShell } from '../guard';
+import { MAKEFILE_NAMES, parseRules, within, withoutComments, type MakeRule } from './make-rules';
 
 /** What a call runs, as committed on the base: a make target's rule, or a repository script whole. */
 export type RunText =

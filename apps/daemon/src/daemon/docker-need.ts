@@ -1,7 +1,7 @@
 import { posix } from 'node:path';
 import type { ProjectDto } from '@10db/contracts';
-import { parseRules, within, withoutComments, type MakeRule, type ReadRepoFile } from '../folders';
 import type { Git } from '../git';
+import { parseRules, within, withoutComments, type MakeRule, type ReadRepoFile } from '../trust';
 
 /** The most of a Makefile or script read from the base to see whether a gate calls docker. */
 export const MAX_DOCKER_SCAN_BYTES = 256 * 1024;

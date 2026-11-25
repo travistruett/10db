@@ -20,6 +20,14 @@ export {
 } from './crosses-limit';
 export { callRuns, type CallRuns, type RunText } from './call-runs';
 export {
+  MAKEFILE_NAMES,
+  parseRules,
+  within,
+  withoutComments,
+  type MakeRule,
+  type ReadRepoFile,
+} from './make-rules';
+export {
   grantCallSummary,
   grantTargetOf,
   isGrantedCall,

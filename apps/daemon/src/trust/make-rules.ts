@@ -19,7 +19,7 @@ export function withoutComments(text: string): string {
     .join('\n');
 }
 
-/** `rel` under `dir`, or null when it leaves the repository or is absolute. */
+/** `rel` under `dir`, or null when it leaves the repository or is absolute; the root itself is `''`. */
 export function within(dir: string, rel: string): string | null {
   if (rel.startsWith('/')) return null;
   const joined = posix.normalize(posix.join(dir, rel));
