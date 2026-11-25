@@ -6,11 +6,14 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   ConflictError,
+  SkipKind,
+  SkipSource,
   TaskStatus,
   WorkstreamState,
   type BatchId,
@@ -34,6 +37,7 @@ import {
   transitionBatch,
   releaseClaims,
   seedProject,
+  recordSkip,
   setTaskStatus,
   transitionWorkstream,
 } from '@10db/db';
@@ -171,6 +175,58 @@ describe('watcher', () => {
       targets: [{ workstreamId: workstream.id, sessionId: null }],
     });
     expect(open[0]?.detail).toMatchObject({ path: 'docs/stray.md', candidates: [workstream.id] });
+  });
+
+  // Value: protects=a stray card names the run that left the file; fails_when=a failed run's leftover is pinned
+  // on whichever lanes are running; why_new=escaped bug: a Diagnostic run's .proof file carded two other lanes;
+  // no_claim=a run that never named the file is found
+  it('names the failed run whose skipped call named a leftover file, not the lanes running now', async () => {
+    const lane = running();
+    const left = seedWorkstream(base, { project, title: 'Diagnostic', areas: ['api'] });
+    const named = ['docs/notes.md.proof', 'docs/later.md'];
+    base.write((ctx) => {
+      transitionWorkstream(ctx, left.workstream.id, { to: WorkstreamState.Starting, fence: null });
+      transitionWorkstream(ctx, left.workstream.id, { to: WorkstreamState.Running, fence: null });
+      transitionWorkstream(ctx, left.workstream.id, { to: WorkstreamState.Failed, fence: null });
+      named.forEach((rel, i) =>
+        recordSkip(ctx, {
+          workstreamId: left.workstream.id,
+          sessionId: null,
+          toolName: 'apply_patch',
+          toolUseId: `call-${String(i)}`,
+          callKey: null,
+          summary: `Delete ${repo.path}/${rel}.`,
+          kind: SkipKind.Classifier,
+          limit: null,
+          reason: 'deletes a file',
+          source: SkipSource.TendbJudge,
+        }),
+      );
+    });
+    watcher.sync();
+    const hour = 3600;
+    const now = Date.now() / 1000;
+    for (const [rel, at] of [
+      ['docs/notes.md.proof', now - hour],
+      ['docs/notes.md', now - hour],
+      // Written after the run failed: a running lane's write, whatever the run said.
+      ['docs/later.md', now + hour],
+    ] as const) {
+      touch(rel);
+      utimesSync(join(repo.path, rel), at, at);
+      emit(rel);
+    }
+    await watcher.flush();
+
+    const byPath = new Map(flags().map((card) => [card.detail?.['path'], card]));
+    expect(byPath.get('docs/notes.md.proof')).toMatchObject({
+      body: 'docs/notes.md.proof\nLeft by the failed run of "Diagnostic", which named it',
+      targets: [{ workstreamId: left.workstream.id, sessionId: null }],
+      detail: { candidates: [left.workstream.id, lane.workstream.id] },
+    });
+    // A path the run named only as part of a longer name is not its.
+    expect(byPath.get('docs/notes.md')?.detail?.['candidates']).toEqual([lane.workstream.id]);
+    expect(byPath.get('docs/later.md')?.detail?.['candidates']).toEqual([lane.workstream.id]);
   });
 
   describe('a stray card with nothing left to do', () => {
