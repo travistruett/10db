@@ -24,6 +24,7 @@ import {
   ProposalId,
   ProposalListQuery,
   RigorFiguresQuery,
+  AcceptanceFiguresQuery,
   ProposalVerdictAccept,
   ProposalVerdictReject,
   EventsHead,
@@ -1250,6 +1251,17 @@ export function createApp(deps: ApiDeps) {
       (c) =>
         c.json(
           deps.services.rigorFigures(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('query').days,
+          ),
+        ),
+    )
+    .get(
+      '/projects/:projectId/acceptance-figures',
+      validator('query', (value): AcceptanceFiguresQuery => AcceptanceFiguresQuery.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.acceptanceFigures(
             ProjectId.parse(c.req.param('projectId')),
             c.req.valid('query').days,
           ),

@@ -10,6 +10,7 @@ import { ProjectTile } from '../../shell/project-tile';
 import { useSelectedProject } from '../../shell/selected-project';
 import { TitleRow } from '../../shell/title-row';
 import { ActivityButton } from './activity-drawer';
+import { AcceptancePanel } from './acceptance-panel';
 import { AdmissionNote } from './admission-note';
 import { BenchmarkSyncNote } from './benchmark-sync-note';
 import { CardTypesPanel } from './card-types-panel';
@@ -124,6 +125,7 @@ function Metrics({ shown }: { readonly shown: readonly ProjectViewDto[] }) {
   }
   return (
     <>
+      <AcceptancePanel projectId={only.id} />
       <RigorPanel projectId={only.id} />
       <HumanTouchPanel projectId={only.id} />
       <CardTypesPanel projectId={only.id} />
