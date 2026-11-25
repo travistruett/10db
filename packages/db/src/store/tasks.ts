@@ -31,7 +31,6 @@ import {
   type BatchId,
   type GoalId,
   type KindDto,
-  type BatchId,
   type BoardColumnId,
   type CiStopped,
   type PassId,
@@ -757,8 +756,7 @@ export function dependencyWaits(db: DbReader, taskId: TaskId): DependencyWait[] 
     .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.dependsOnId))
     .where(eq(schema.taskDeps.taskId, taskId))
     .all();
-<<<<<<< 63b1abc5bdf1135ca399512ba179617bde29b2cc
-  if (deps.length === 0) return true;
+  if (deps.length === 0) return [];
   const ownBatchId =
     db
       .select({ batchId: schema.workstreams.batchId })
@@ -767,20 +765,10 @@ export function dependencyWaits(db: DbReader, taskId: TaskId): DependencyWait[] 
       .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
       .limit(1)
       .get()?.batchId ?? null;
-  return deps.every(({ id, status }) =>
-    status === TaskStatus.Done
-      ? !waitsForLanding(db, id, ownBatchId)
-      : mergedDespiteFailure(db, id),
-  );
-||||||| 5b82f944f
-  return deps.every(({ id, status }) =>
-    status === TaskStatus.Done ? !waitsForLanding(db, id) : mergedDespiteFailure(db, id),
-  );
-=======
   return deps.flatMap(({ id, status, title }): DependencyWait[] => {
     const base = { taskId: id, title, landing: false, landingBatchId: null, failedRunId: null };
     if (status === TaskStatus.Done) {
-      const landing = landingBatch(db, id);
+      const landing = landingBatch(db, id, ownBatchId);
       return landing === null
         ? []
         : [{ ...base, landing: true, landingBatchId: landing, ended: null }];
@@ -793,23 +781,18 @@ export function dependencyWaits(db: DbReader, taskId: TaskId): DependencyWait[] 
       return [{ ...base, ended: 'failed', failedRunId: latest.id }];
     return [{ ...base, ended: null }];
   });
->>>>>>> ebdc72e777fcf1caeda87223730d270c1e50dece
 }
 
-<<<<<<< 63b1abc5bdf1135ca399512ba179617bde29b2cc
 /**
- * Whether the task's latest run is in a separate copy whose batch has not shipped, unless that copy
- * is the dependent's own (`dependentBatchId`): the dependency's work is already on its branch and the
- * copy lands them together.
+ * The batch of the task's latest run when it is a separate copy that has not shipped, else null. A copy
+ * that is the dependent's own (`dependentBatchId`) is no landing to wait for: the dependency's work is
+ * already on its branch and the copy lands them together.
  */
-function waitsForLanding(db: DbReader, taskId: TaskId, dependentBatchId: BatchId | null): boolean {
-||||||| 5b82f944f
-/** Whether the task's latest run is in a separate copy whose batch has not shipped. */
-function waitsForLanding(db: DbReader, taskId: TaskId): boolean {
-=======
-/** The batch of the task's latest run when it is a separate copy that has not shipped, else null. */
-function landingBatch(db: DbReader, taskId: TaskId): BatchId | null {
->>>>>>> ebdc72e777fcf1caeda87223730d270c1e50dece
+function landingBatch(
+  db: DbReader,
+  taskId: TaskId,
+  dependentBatchId: BatchId | null,
+): BatchId | null {
   const latest = db
     .select({ batchId: schema.workstreams.batchId, batchState: schema.batches.state })
     .from(schema.workstreams)
@@ -818,16 +801,8 @@ function landingBatch(db: DbReader, taskId: TaskId): BatchId | null {
     .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
     .limit(1)
     .get();
-<<<<<<< 63b1abc5bdf1135ca399512ba179617bde29b2cc
-  return (
-    latest?.batchId != null &&
-    latest.batchId !== dependentBatchId &&
-||||||| 5b82f944f
-  return (
-    latest?.batchId != null &&
-=======
   return latest?.batchId != null &&
->>>>>>> ebdc72e777fcf1caeda87223730d270c1e50dece
+    latest.batchId !== dependentBatchId &&
     latest.batchState !== BatchState.Shipped &&
     isLocalCopy(db, latest.batchId)
     ? latest.batchId
