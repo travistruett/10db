@@ -4,11 +4,8 @@ import type { Logger } from '../log';
 import { GateReport, gateReportTask, parseGateReport } from './gate-report';
 import { LanePipelineReport, parseLanePipeline } from './lane-pipeline';
 import { findEvalMarkers, type EvalMarkers } from './markers';
+import { evalsDirs, findResultFiles } from './result-files';
 import type { ParsedRun } from './run-summary';
-
-/** The most bytes of one result file and of all of them. */
-const MAX_FILE_BYTES = 1_000_000;
-const MAX_TOTAL_BYTES = 32_000_000;
 
 /** One suite's runs, as read from the result files that name it. */
 export interface FoundSuite {
@@ -28,7 +25,7 @@ export interface FoundEvals {
   readonly skipped: number;
 }
 
-type SurveyGit = Pick<Git, 'survey' | 'surveyTexts' | 'commitAt'>;
+type SurveyGit = Pick<Git, 'survey' | 'commitAt'>;
 
 function parseJson(text: string): unknown {
   try {
@@ -50,18 +47,24 @@ export async function readEvals(
 ): Promise<FoundEvals | null> {
   const commit = await git.commitAt(repoPath, 'HEAD').catch(() => null);
   if (commit === null) return null;
-  const cached = cache.get(repoPath, commit);
-  if (cached !== undefined) return cached;
   const survey = await git.survey(repoPath, 0);
   if ('refused' in survey) return null;
-  const markers = findEvalMarkers(survey.files);
-  const wanted = [...markers.reports.map((r) => r.path), ...markers.baselines.map((b) => b.path)];
-  const { texts } = await git.surveyTexts(repoPath, wanted, {
-    maxBytes: MAX_FILE_BYTES,
-    maxTotalBytes: MAX_TOTAL_BYTES,
-  });
+  const results = await findResultFiles(repoPath, evalsDirs(survey.files));
+  const cached = cache.get(repoPath, `${commit}:${results.signature}`);
+  if (cached !== undefined) return cached;
+  const tracked = findEvalMarkers(survey.files);
+  const onDisk = findEvalMarkers(results.paths);
+  const markers: EvalMarkers = { ...tracked, reports: onDisk.reports, baselines: onDisk.baselines };
+  let skipped = results.skipped;
+  const texts = new Map<string, string>();
+  for (const path of results.paths) {
+    const text = await results.read(path);
+    if (text === null) {
+      skipped += 1;
+      logger.debug({ path }, 'eval result file not read');
+    } else texts.set(path, text);
+  }
   const runs = new Map<string, { format: EvalResultFormat; runs: ParsedRun[] }>();
-  let skipped = 0;
   const add = (key: string, format: EvalResultFormat, run: ParsedRun): void => {
     const suite = runs.get(key) ?? { format, runs: [] };
     suite.runs.push(run);
@@ -99,25 +102,25 @@ export async function readEvals(
     runs: suite.runs.sort((a, b) => a.at.localeCompare(b.at) || a.path.localeCompare(b.path)),
   }));
   const found = { commit, tracked: new Set(survey.files), markers, suites, skipped };
-  cache.set(repoPath, found);
+  cache.set(repoPath, `${commit}:${results.signature}`, found);
   return found;
 }
 
-/** The last result read per checkout, kept while HEAD stays where it was read. */
+/** The last result read per checkout, kept while HEAD and the result files stay as they were read. */
 export interface EvalsCache {
-  get(repoPath: string, commit: string): FoundEvals | undefined;
-  set(repoPath: string, found: FoundEvals): void;
+  get(repoPath: string, key: string): FoundEvals | undefined;
+  set(repoPath: string, key: string, found: FoundEvals): void;
 }
 
 export function createEvalsCache(): EvalsCache {
-  const held = new Map<string, FoundEvals>();
+  const held = new Map<string, { key: string; found: FoundEvals }>();
   return {
-    get: (repoPath, commit) => {
-      const found = held.get(repoPath);
-      return found?.commit === commit ? found : undefined;
+    get: (repoPath, key) => {
+      const entry = held.get(repoPath);
+      return entry?.key === key ? entry.found : undefined;
     },
-    set: (repoPath, found) => {
-      held.set(repoPath, found);
+    set: (repoPath, key, found) => {
+      held.set(repoPath, { key, found });
     },
   };
 }

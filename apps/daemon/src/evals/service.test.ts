@@ -73,7 +73,10 @@ describe('evals service', () => {
       mkdirSync(dirname(join(repo.path, rel)), { recursive: true });
       writeFileSync(join(repo.path, rel), text);
     }
-    git(repo.path, 'add', ...Object.keys(files));
+    // Reports are local output: written to disk, never committed.
+    writeFileSync(join(repo.path, '.gitignore'), 'evals/reports/\n');
+    const tracked = Object.keys(files).filter((p) => !p.startsWith('evals/reports/'));
+    git(repo.path, 'add', '.gitignore', ...tracked);
     git(repo.path, 'commit', '-q', '-m', 'evals');
 
     const { store, close } = createTestStore();

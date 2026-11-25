@@ -1,10 +1,13 @@
 # apps/daemon/src/evals
 
-- `evals/` reads a registered project's committed eval results and shows them. 10db defines no eval format: it
-  reads each project's own, runs no eval and calls no model. Everything is read at HEAD through `Git.survey` (the
-  tracked list) and `Git.surveyTexts` (object store, size-capped, nothing the repository configures runs), never the
-  working tree. A result file that is not committed is not seen (ampsio's `evals/reports/` is gitignored, so its
-  reports show only once the project commits them).
+- `evals/` reads a registered project's eval results and shows them. 10db defines no eval format: it reads each
+  project's own, runs no eval, calls no model and writes nothing. Definitions and the manifest's path checks are read
+  at HEAD through `Git.survey` (the tracked list). Results are read from the checkout's working tree
+  (`result-files.ts`), because projects keep them out of git (ampsio's `evals/reports/` is gitignored): only
+  `.json` files under each tracked `X/evals/reports` and `X/evals/lane-pipeline/baselines`, found with `readdir`
+  entries that are real files (a symlink is never followed), at most 2,000 files, 1 MB each and 32 MB in all; past a
+  cap the rest are counted as skipped. The cache key is HEAD plus the result files' count and newest mtime, so a new
+  local report shows on the next open.
 - `markers.ts` is the rule table over tracked paths: gate reports (`evals/reports/<task>/<UTC time>.json`),
   lane-pipeline baselines (`evals/lane-pipeline/baselines/<rigor>.json`), definition files by name (listed as
   unlinked until a manifest links them) and `claude plugin eval` cases (`<evals dir>/<case>/prompt.md`, one suite per

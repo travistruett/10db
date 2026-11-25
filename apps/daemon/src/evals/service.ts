@@ -32,7 +32,7 @@ export interface EvalsService {
 
 export interface EvalsDeps {
   readonly state: StateStore;
-  readonly git: Pick<Git, 'survey' | 'surveyTexts' | 'commitAt'>;
+  readonly git: Pick<Git, 'survey' | 'commitAt'>;
   readonly logger: Logger;
 }
 
@@ -45,14 +45,26 @@ function globHolds(glob: string, tracked: ReadonlySet<string>): boolean {
   return false;
 }
 
+/** The most untracked names reported before the check stops. */
+const MAX_REPORTED = 20;
+
 /** What a manifest names that HEAD does not track: a definition path, or a glob that holds no file. */
 function untrackedIn(manifest: EvalManifest, found: FoundEvals): string[] {
-  const out: string[] = [];
+  const out = new Set<string>();
+  const checked = new Set<string>();
   for (const suite of manifest.suites) {
-    for (const path of suite.definitionPaths) if (!found.tracked.has(path)) out.push(path);
-    for (const glob of suite.coveredPaths) if (!globHolds(glob, found.tracked)) out.push(glob);
+    for (const path of suite.definitionPaths) {
+      if (!found.tracked.has(path)) out.add(path);
+      if (out.size >= MAX_REPORTED) return [...out];
+    }
+    for (const glob of suite.coveredPaths) {
+      if (checked.has(glob)) continue;
+      checked.add(glob);
+      if (!globHolds(glob, found.tracked)) out.add(glob);
+      if (out.size >= MAX_REPORTED) return [...out];
+    }
   }
-  return [...new Set(out)];
+  return [...out];
 }
 
 /**
