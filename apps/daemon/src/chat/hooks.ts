@@ -105,6 +105,7 @@ import { chatRoot, withWorktreeOnDisk } from './work-root';
 import { JUDGED_CHAT_TOOLS } from './git-rule';
 import type { ChatLiveSessions } from './live-sessions';
 import { chatSystemPrompt } from './prompt';
+import { startsBackground } from './background-start';
 import { couldChange } from './first-change';
 
 // Sessions spec §7.1, trust line §5: a chat as an owner of the explore engine. Its session is the
@@ -611,6 +612,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       // How many calls that could change something this session has let through: a command the builder allowed
       // to run again outside the sandbox lasts only until this moves, or a background task runs.
       let changes = 0;
+      let backgrounded = false;
       const asksOutside = full === null && !fullCodex && launch.account.harness === Provider.Claude;
       const shapeId = planOfConversation(state.db, conv.id);
       const plan = deps.plan;
@@ -643,6 +645,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                   changes += 1;
                 },
                 background: () => runningNow(),
+                remembers: () => !backgrounded,
               },
             }
           : {}),
@@ -927,7 +930,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               reviewTurns,
             );
             const settled = readsNow()?.preToolUse(req, verdict) ?? verdict;
-            if (settled.decision !== 'deny' && couldChange(chatCallOf(req))) changes += 1;
+            if (settled.decision !== 'deny') {
+              if (couldChange(chatCallOf(req))) changes += 1;
+              // From a background start on, the session can change things unseen: nothing is remembered.
+              if (startsBackground(chatCallOf(req))) backgrounded = true;
+            }
             return settled;
           },
           ...(plan === undefined

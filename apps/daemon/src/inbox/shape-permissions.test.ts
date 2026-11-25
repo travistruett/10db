@@ -393,6 +393,7 @@ describe("a chat's command outside the sandbox", () => {
   let refusal: string | null;
   let changes = 0;
   let background = false;
+  let backgrounded = false;
 
   function chatBroker(owner: ReturnType<typeof conversation>) {
     return createPermissionBroker(
@@ -416,6 +417,7 @@ describe("a chat's command outside the sandbox", () => {
               changes += 1;
             },
             background: () => background,
+            remembers: () => !backgrounded,
           },
         },
       },
@@ -426,6 +428,7 @@ describe("a chat's command outside the sandbox", () => {
     refusal = null;
     changes = 0;
     background = false;
+    backgrounded = false;
   });
 
   it('asks with three answers, remembers only the exact command for the session, and stores no rule', async () => {
@@ -468,6 +471,21 @@ describe("a chat's command outside the sandbox", () => {
     inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
     await whileRunning;
     background = false;
+    // Once the session has started something in the background, nothing is remembered: the same call asks
+    // again, and its card offers no chat answer.
+    backgrounded = true;
+    const afterBackground = broker(outside('pnpm test'));
+    expect(onlyOpenCard().options.map((o) => o.label)).toEqual([
+      PermissionChoice.AllowOnce,
+      PermissionChoice.Deny,
+    ]);
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowOnce });
+    await afterBackground;
+    backgrounded = false;
+    // What was remembered before is gone for good, not only hidden.
+    const forgotten = broker(outside('pnpm test'));
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    await forgotten;
     const elsewhere = broker({ ...outside('pnpm test'), cwd: '/other' });
     inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny });
     await elsewhere;

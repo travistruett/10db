@@ -153,6 +153,8 @@ type BrokerContext = BrokerOwner & {
       readonly bump: () => void;
       /** Whether a background task or job is running now, which may still write. */
       readonly background: () => boolean;
+      /** False once the session started something in the background: no command is remembered after that. */
+      readonly remembers: () => boolean;
     };
     /**
      * Where an allowed Read of the checkout's secret is served from (`LaneSession.secretReadsDir`):
@@ -619,6 +621,7 @@ export function createPermissionBroker(
       const key = chatCallKey(req.toolName, ask.summary, req.cwd);
       const seen = chatAllowed.get(key);
       const outside = ctx.sandbox?.unsandboxed;
+      if (outside?.remembers() === false) chatAllowed.clear();
       // Anything that may have changed since (a change, another command allowed to run outside, a job still
       // running) makes the same command ask again.
       const unchanged = seen !== undefined && seen === outside?.changes();
@@ -674,7 +677,11 @@ export function createPermissionBroker(
     const noteNeeded = judged && !onceOnly && grantTargetOf(null, grantCall, req.toolName) === null;
     // A once-only call offers no rule to store, Always in this project included.
     const options = chatOnce
-      ? [...CHAT_ONCE_OPTIONS]
+      ? CHAT_ONCE_OPTIONS.filter(
+          (o) =>
+            o.label !== PermissionChoice.AllowChat ||
+            ctx.sandbox?.unsandboxed?.remembers() !== false,
+        )
       : onceOnly
         ? ONCE_OPTIONS
         : judged
@@ -729,7 +736,12 @@ export function createPermissionBroker(
         if (refusal !== null) return { behavior: 'deny', message: refusal, by: DeniedBy.TenDb };
         // A command allowed now may change anything, so what was remembered before it asks again.
         ctx.sandbox?.unsandboxed?.bump();
-        if (result.choice === PermissionChoice.AllowChat)
+        const outside = ctx.sandbox?.unsandboxed;
+        if (
+          result.choice === PermissionChoice.AllowChat &&
+          outside?.remembers() !== false &&
+          outside?.background() !== true
+        )
           chatAllowed.set(
             chatCallKey(req.toolName, summary, req.cwd),
             ctx.sandbox?.unsandboxed?.changes() ?? 0,

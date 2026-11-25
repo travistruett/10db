@@ -404,6 +404,7 @@ export function createShapePreparer(
                     changes: input.unsandboxedAsk.changes,
                     bump: input.unsandboxedAsk.bump,
                     background: input.unsandboxedAsk.background,
+                    remembers: input.unsandboxedAsk.remembers,
                   },
                 }),
           },

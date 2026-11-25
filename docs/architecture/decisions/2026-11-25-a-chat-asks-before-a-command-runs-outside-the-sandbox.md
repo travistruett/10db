@@ -21,6 +21,8 @@
   session restarts, and only until the chat changes something (an edit, another command, an MCP tool, a subagent's
   call), so an edited script is asked about again; it is never stored as a rule or a decision. No stored rule, carried allowance, project grant or
   judge allows a flagged call.
+- Once the chat's session has started anything in the background (`run_in_background`, `&`, `nohup`, `setsid`), nothing is
+  remembered for the rest of that session: what was is forgotten and the card offers only Allow once and Deny.
 - The denial a chat reads after No invites another approach and carries the builder's note.
 - A Codex chat has no such flag, so its sandbox refuses as before and its instructions say to suggest Full access.
 - A chat's permission and question cards do not show in the Inbox while the chat is open in a tab; a chat with no

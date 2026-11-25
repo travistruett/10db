@@ -142,7 +142,7 @@ const DETACHERS: ReadonlySet<string> = new Set(['nohup', 'setsid', 'disown']);
  * Whether a command puts a job in the background, nested scripts included: a planning session's
  * process is not watched as a lane's is, so nothing it starts may outlive the command.
  */
-function startsBackgroundJob(command: string): boolean {
+export function startsBackgroundJob(command: string): boolean {
   return splitCommand(command).some(
     (segment) => segment.separator === '&' || DETACHERS.has(segment.words[0] ?? ''),
   );

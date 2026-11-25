@@ -93,6 +93,8 @@ export interface ShapePrepareInput {
     readonly bump: () => void;
     /** Whether a background task or job is running now, which may still write. */
     readonly background: () => boolean;
+    /** False once the session started something in the background: no command is remembered after that. */
+    readonly remembers: () => boolean;
   };
 }
 
