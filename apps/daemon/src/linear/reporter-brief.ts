@@ -18,11 +18,11 @@ import {
   listEvidence,
   listLinearPosts,
   listSkipsForWorkstream,
-  listTaskScreens,
   listWorkstreamCommitShas,
   listWorkstreams,
   type DbReader,
 } from '@10db/db';
+import type { ReporterPicture } from './reporter-pictures';
 import { reporterSettings } from './reporter-settings';
 import { linearLinkOf } from './task-link';
 
@@ -65,7 +65,7 @@ interface WorkstreamFacts {
   readonly missing: readonly string[];
 }
 
-/** The task, its link, the project's note, the rows, and per workstream its report, verdicts, findings, evidence, gaps, PR and screens. */
+/** The task, its link, the project's note, the rows, and per workstream its report, verdicts, findings, evidence, gaps, PR and pictures. */
 export interface ReporterFacts {
   readonly task: {
     readonly title: string;
@@ -89,7 +89,8 @@ export interface ReporterFacts {
   readonly recorded: readonly RecordedRow[];
   readonly workstreams: readonly WorkstreamFacts[];
   readonly prUrl: string | null;
-  readonly screens: readonly { readonly id: string }[];
+  /** The before and after pictures this run may upload into its `ended` comment. */
+  readonly pictures: readonly ReporterPicture[];
 }
 
 function cap(text: string): Capped {
@@ -113,6 +114,7 @@ export function readReporterFacts(
   db: DbReader,
   taskId: TaskId,
   posts: readonly LinearPostDto[],
+  pictures: readonly ReporterPicture[],
 ): ReporterFacts {
   const task = getTask(db, taskId);
   const linked = linearLinkOf(db, taskId);
@@ -183,7 +185,7 @@ export function readReporterFacts(
       })),
     workstreams,
     prUrl: taskPrUrl(db, taskId),
-    screens: listTaskScreens(db, taskId).map((s) => ({ id: s.id })),
+    pictures,
   };
 }
 
@@ -306,9 +308,14 @@ export function reporterBrief(facts: ReporterFacts): string {
     out.push(lines.join('\n'));
   }
   out.push(
-    facts.screens.length === 0
-      ? 'Screenshots: none.'
-      : `Screenshots exist (${String(facts.screens.length)}), but screenshots are not posted.`,
+    facts.pictures.length === 0
+      ? 'Pictures: none to post.'
+      : [
+          'Pictures for the `ended` comment, each a PNG. Upload them before you write that comment. For each one in turn, call `prepare_file_upload` with its file name, contentType `image/png` and its size, then at once `upload_linear_picture` with its id and the returned `uploadRequest` url and headers, exactly as returned. Finish one before preparing the next: a signed URL lasts 60 seconds. When an upload succeeds, put the returned markdown in the comment under a line naming what it shows. When one fails, prepare it again once; if it fails again, leave it out and say the pictures are in the pull request.',
+          ...facts.pictures.map(
+            (p) => `- ${p.id}: ${p.label}, file name \`${p.name}\`, size ${String(p.size)}`,
+          ),
+        ].join('\n'),
   );
   return out.join('\n\n');
 }

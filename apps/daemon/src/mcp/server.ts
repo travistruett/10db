@@ -148,7 +148,7 @@ function chatTools(deps: McpDeps, session: SessionRow, chat: ChatSession): Regis
   }));
 }
 
-/** The Linear reporter's tool, held to the session whose conversation is its own. */
+/** The Linear reporter's tools, held to the session whose conversation is its own. */
 function reporterTools(deps: McpDeps, session: SessionRow): RegisteredTool[] | null {
   const { reporter } = deps;
   if (reporter === undefined) return null;
@@ -164,6 +164,16 @@ function reporterTools(deps: McpDeps, session: SessionRow): RegisteredTool[] | n
             sessionId,
             ReporterToolInputs[ReporterToolName.ReportLinearPost].parse(input),
           ),
+        ),
+    },
+    {
+      name: ReporterToolName.UploadLinearPicture,
+      description: REPORTER_TOOL_DESCRIPTIONS[ReporterToolName.UploadLinearPicture],
+      schema: ReporterToolInputs[ReporterToolName.UploadLinearPicture],
+      run: (input) =>
+        reporter.uploadPicture(
+          sessionId,
+          ReporterToolInputs[ReporterToolName.UploadLinearPicture].parse(input),
         ),
     },
   ];
