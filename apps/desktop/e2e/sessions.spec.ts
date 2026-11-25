@@ -271,6 +271,21 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await expect(sessionRow(page, /Login fails after sleep/)).toBeVisible();
   await scan(page, [480], 'the conversation at 480');
 
+  // Full access: on from the ⋯ menu after its confirmation, the badge survives a reload, off from the badge.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByRole('button', { name: 'More session actions' }).click();
+  await page.getByRole('menuitem', { name: 'Turn On Full Access…' }).click();
+  await expect(
+    page.getByText('This project’s own settings, hooks and MCP servers load and run too.'),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Turn On Full Access' }).click();
+  await expect(page.getByRole('button', { name: 'Full access' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Full access' })).toBeVisible();
+  await page.getByRole('button', { name: 'Full access' }).click();
+  await page.getByRole('menuitem', { name: 'Turn Off Full Access' }).click();
+  await expect(page.getByRole('button', { name: 'Full access' })).toHaveCount(0);
+
   // Archive, from the ⋯ menu: the row is gone.
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole('button', { name: 'More session actions' }).click();

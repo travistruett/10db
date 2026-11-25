@@ -16,6 +16,7 @@ import type {
   ChatWorkStateDto,
   ChatId,
   ChatModelsDto,
+  FullAccessPreviewDto,
   ChatPatchInput,
   ProjectFileMatchDto,
   SessionsSettingsDto,
@@ -778,6 +779,8 @@ export interface ApiServices extends PlanRecordServices {
   /** Who holds the project's checkout now, and the branch it is on. */
   projectFolder(projectId: ProjectId): Promise<FolderDto>;
   chatModels(projectId: ProjectId): ChatModelsDto;
+  /** What the Full access confirmation says of where the chat's setup comes from. */
+  fullAccessPreview(id: ChatId): FullAccessPreviewDto;
   sessionsSettings(): SessionsSettingsDto;
   setSessionsSettings(input: SessionsSettingsDto): SessionsSettingsDto;
   /** Sets the fields given and keeps the rest. */

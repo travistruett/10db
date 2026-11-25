@@ -9,6 +9,11 @@ export interface SessionActions {
   /** The agent offers Open in Terminal and the session can go there now. */
   readonly onOpenInTerminal?: () => void;
   readonly onMakeTask?: () => void;
+  /** Turns Full access on or off; the item reads "Turn Off Full Access" while `fullAccess`. */
+  readonly onToggleFullAccess?: () => void;
+  readonly fullAccess?: boolean;
+  /** A turn is running, so the change waits for it to end. */
+  readonly fullAccessBusy?: boolean;
   readonly onArchive?: () => void;
   readonly onClose: () => void;
 }
@@ -30,6 +35,15 @@ export function SessionMenuItems({ actions }: { readonly actions: SessionActions
       )}
       {actions.onMakeTask === undefined ? null : (
         <Menu.Item onClick={actions.onMakeTask}>Make a Board Task…</Menu.Item>
+      )}
+      {actions.onToggleFullAccess === undefined ? null : (
+        <Menu.Item disabled={actions.fullAccessBusy === true} onClick={actions.onToggleFullAccess}>
+          {actions.fullAccessBusy === true
+            ? 'Waits for the Turn to End'
+            : actions.fullAccess === true
+              ? 'Turn Off Full Access'
+              : 'Turn On Full Access…'}
+        </Menu.Item>
       )}
       {actions.onArchive === undefined ? null : (
         <Menu.Item onClick={actions.onArchive}>Archive</Menu.Item>

@@ -86,7 +86,11 @@ function described(seen: SeenAccount): string {
  * Whether Claude Code bills the credential the kind needs. Only values a real session has shown are
  * accepted so a renamed variable fails loudly instead of billing someone else.
  */
-function credentialsMatch(kind: SupportedAccountKind, seen: SeenAccount): boolean {
+function credentialsMatch(
+  kind: SupportedAccountKind,
+  seen: SeenAccount,
+  viaKeyHelper: boolean,
+): boolean {
   switch (kind) {
     case AccountKind.ClaudeSubscription:
       // A plan's name is never compared.
@@ -97,7 +101,11 @@ function credentialsMatch(kind: SupportedAccountKind, seen: SeenAccount): boolea
         seen.tokenSource !== 'ANTHROPIC_AUTH_TOKEN'
       );
     case AccountKind.AnthropicApiKey:
-      return seen.apiKeySource === 'ANTHROPIC_API_KEY' && seen.apiProvider === 'firstParty';
+      // A Full access chat reads the key through the Keychain helper, which Claude Code names as its source.
+      return viaKeyHelper
+        ? seen.apiKeySource === 'apiKeyHelper' &&
+            (seen.apiProvider === undefined || seen.apiProvider === 'firstParty')
+        : seen.apiKeySource === 'ANTHROPIC_API_KEY' && seen.apiProvider === 'firstParty';
     case AccountKind.Bedrock:
       return seen.apiProvider === 'bedrock';
     case AccountKind.CodexSignin:
@@ -124,7 +132,11 @@ export function loginIdentity(kind: SupportedAccountKind, seen: SeenAccount): st
 const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** Before the prompt (accounts spec §5): who the agent is, and the credential it bills. */
-export function checkAccount(expect: AccountExpectation, seen: SeenAccount): AccountRefusal | null {
+export function checkAccount(
+  expect: AccountExpectation,
+  seen: SeenAccount,
+  viaKeyHelper = false,
+): AccountRefusal | null {
   const who = `account "${expect.label}"`;
   // A third-party provider reports no email or plan either, and signing in cannot fix
   // that: only a first-party report with nothing in it is a signed-out directory.
@@ -145,7 +157,7 @@ export function checkAccount(expect: AccountExpectation, seen: SeenAccount): Acc
       message: `${tool} is not signed in for ${who}`,
       seenIdentity: null,
     };
-  if (!credentialsMatch(expect.kind, seen))
+  if (!credentialsMatch(expect.kind, seen, viaKeyHelper))
     return {
       problem: AccountProblem.WrongCredentials,
       message: `${who} needs ${NEEDS[expect.kind]} but ${tool} reported ${described(seen)}`,
@@ -247,9 +259,10 @@ export function checkInitCredentials(
   expect: AccountExpectation,
   apiKeySource: string | undefined,
   preflight: SeenAccount,
+  viaKeyHelper = false,
 ): AccountRefusal | null {
   const seen = { ...preflight, apiKeySource };
-  return credentialsMatch(expect.kind, seen)
+  return credentialsMatch(expect.kind, seen, viaKeyHelper)
     ? null
     : {
         problem: AccountProblem.WrongCredentials,

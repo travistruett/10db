@@ -886,6 +886,9 @@ export function createApp(deps: ApiDeps) {
     .post('/chats/:chatId/plan', (c) =>
       c.json(deps.services.showChatPlan(ChatId.parse(c.req.param('chatId')))),
     )
+    .get('/chats/:chatId/full-access/preview', (c) =>
+      c.json(deps.services.fullAccessPreview(ChatId.parse(c.req.param('chatId')))),
+    )
     .get('/projects/:projectId/chat-models', (c) =>
       c.json(deps.services.chatModels(ProjectId.parse(c.req.param('projectId')))),
     )

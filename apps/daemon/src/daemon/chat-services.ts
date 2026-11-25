@@ -39,6 +39,7 @@ export type ChatApiServices = Pick<
   | 'stopChatWaiting'
   | 'projectFolder'
   | 'chatModels'
+  | 'fullAccessPreview'
   | 'sessionsSettings'
   | 'setSessionsSettings'
   | 'patchSessionsSettings'
@@ -121,6 +122,7 @@ export function createChatApiServices(deps: {
       );
     },
     chatModels: (projectId) => chat.models(projectId),
+    fullAccessPreview: (id) => chat.fullAccessPreview(id),
     sessionsSettings: () => sessionsSettings(state.db),
     setSessionsSettings: (input) => setSessionsSettings(state, input),
     patchSessionsSettings: (input) => patchSessionsSettings(state, input),

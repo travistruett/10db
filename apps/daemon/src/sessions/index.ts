@@ -1,7 +1,8 @@
 export { markOnboarded } from './claude-onboarding';
 export { codexHomeProviderOf, codexHomes } from './codex-home';
 export { createClaudeAdapter } from './claude-adapter';
-export { claudeTakeoverNotes } from './claude-takeover';
+export { claudeTakeoverNotes, keyHelper as apiKeyHelperCommand } from './claude-takeover';
+export { fullAccessSettings } from './full-access';
 export { claudeTakeoverMcp, codexTakeoverServers } from './takeover-servers';
 export { tomlString } from './codex-takeover';
 export { setupPromptText } from './setup-prompt';
@@ -46,6 +47,7 @@ export type {
   AgentAdapter,
   ExploreProfile,
   ExploreSessionSpec,
+  FullAccessSettings,
   LaneSessionSpec,
   McpSignIn,
   SessionEvent,

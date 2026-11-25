@@ -1835,6 +1835,8 @@ export const chats = sqliteTable(
     baseHead: text('base_head'),
     /** When a refused first change last asked the builder where to work. */
     workAskedAt: text('work_asked_at'),
+    /** Whether the builder turned Full access on: the chat runs as Claude Code does in a terminal, outside the sandbox. */
+    fullAccess: integer('full_access', { mode: 'boolean' }).notNull().default(false),
   },
   (t) => [
     index('chats_project_idx').on(t.projectId),

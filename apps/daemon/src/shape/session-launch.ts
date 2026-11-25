@@ -28,6 +28,21 @@ export interface ShapeLaunch {
   readonly access: Omit<ShapeAccess, 'filesDir'>;
   /** The Agent tool aliases the account takes, which the prompt names and the hook allows; none runs agents on the session's model. */
   readonly agentModels: readonly string[];
+  /**
+   * What a Full access chat's Claude session needs of the account: read only when the chat has Full access,
+   * since reading it checks a keyed account's secret.
+   */
+  readonly fullAccess?: () => FullAccessLaunch;
+}
+
+/** How the project's account reaches Claude Code when a chat runs outside the sandbox. */
+export interface FullAccessLaunch {
+  /** The Keychain command that reads an API key, or null where the account has none. */
+  readonly apiKeyHelper: string | null;
+  /** A key sits in the session's env: a Bedrock key. */
+  readonly keyInEnv: boolean;
+  /** The account's config folder is the builder's own, so Claude Code loads their setup itself. */
+  readonly defaultConfigDir: boolean;
 }
 
 /**

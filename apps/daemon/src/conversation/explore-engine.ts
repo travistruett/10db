@@ -104,6 +104,8 @@ export interface ExploreEngine {
   /** Lets parked starters run; whether a turn began, which it doesn't when nothing waits or the update hold is on. */
   releaseStarts(id: ConversationId): boolean;
   view(id: ConversationId): ConversationDto;
+  /** How many background tasks the open session reports running; 0 with no session. */
+  backgroundTaskCount(id: ConversationId): number;
   live(id: ConversationId): ConversationLiveDto;
   /**
    * Conversations `starting`, `running`, `waiting_card` or `stopping`: what an update drain waits for. A
@@ -743,6 +745,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       rt.held = false;
       return release(rt);
     },
+    backgroundTaskCount: (id) => runtimeOf(id).session?.open.backgroundTasks().length ?? 0,
     view(id) {
       const rt = runtimeOf(id);
       const conv = conversation(id);

@@ -29,6 +29,7 @@ import {
   type ArchivePreviewDto,
   type ArchiveRequest,
   type ChatPatchInput,
+  type FullAccessPreviewDto,
   type ConversationId,
   type ConversationItemId,
   type ProjectId,
@@ -59,6 +60,7 @@ import {
   recentChats,
   searchChats,
   ensurePlanOfChat,
+  setChatFullAccess,
   setChatTitle,
   setChatWork,
   touchChat,
@@ -79,6 +81,7 @@ import type { FolderHold, ServeResult } from '../folder-hold';
 import type { Logger } from '../log';
 import type { PendingOpens } from '../pass';
 import { chatFolder } from './hooks';
+import type { ChatWorkService } from './work-service';
 import { chatWorkCardKey } from './work-card';
 
 // Sessions spec §7.1, §10: a chat's life on the daemon. It is made with its conversation on the
@@ -120,6 +123,8 @@ export const PENDING_OPEN_FOR_CHAT = 'A pass is waiting to open for this chat; C
 export const HANDED_TASK_RUNNING = 'The task this session was handed to is still running';
 /** What a model change while a turn runs is refused with. */
 export const CHANGE_MODEL_BETWEEN_TURNS = 'Change the model between turns.';
+/** What a Full access change while a turn runs is refused with. */
+export const CHANGE_FULL_ACCESS_BETWEEN_TURNS = 'Waits for the turn to end.';
 /** What a model the account doesn't offer is refused with. */
 export const MODEL_NOT_OFFERED = 'Not available on this account';
 
@@ -167,6 +172,8 @@ export interface ChatService {
   recent(projectId: ProjectId, limit?: number): ChatDto[];
   search(query: ChatSearchQuery): ChatSearchPage;
   patch(id: ChatId, input: ChatPatchInput): Promise<ChatDto>;
+  /** The setup lines of the Full access confirmation: where this chat's settings, plugins and servers come from. */
+  fullAccessPreview(id: ChatId): FullAccessPreviewDto;
   models(projectId: ProjectId): ChatModelsDto;
   /**
    * Archives the chat. On a branch with a worktree the request carries the files the builder was warned Archive
@@ -190,6 +197,11 @@ export interface ChatService {
   stop(conversationId: ConversationId): Promise<void>;
   /** Runs what waits for Your folder now, reading only. Refused with the engine's words when nothing waits. */
   sendNow(conversationId: ConversationId): void;
+  /**
+   * A turn that needs Your folder found it taken as it began: its starters park, and run once the folder can be
+   * the chat's, as a blocked Here send's do.
+   */
+  parkForFolder(chatId: ChatId): void;
   /** Stops waiting for Your folder: the queue runs reading only. A chat that waits for nothing is left as it is. */
   stopWaiting(chatId: ChatId): void;
   /** Whether the conversation's message waits for Your folder. */
@@ -252,6 +264,10 @@ export interface ChatServiceDeps {
   readonly takeover?: () => ArchiveTakeover | null;
   /** The worktrees of sessions on their own branch; absent where nothing makes one. */
   readonly worktrees?: ChatWorktrees;
+  /** Records a reading or choosing session as Here, read when Full access is turned on (made after this service). */
+  readonly work?: () => Pick<ChatWorkService, 'enterHere'>;
+  /** What the confirmation says of a project's account: how its agent gets the builder's setup under Full access. */
+  readonly fullAccessNotes: (projectId: ProjectId) => string[];
   /** Remakes the worktree of a branch session that has none, once it is open again. */
   readonly reopenBranch?: (chatId: ChatId) => Promise<void>;
   /** Told of each builder message a chat takes, for what listens to a plan's talk (Jev's shadow); it never throws. */
@@ -311,6 +327,29 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       deps.log.warn({ err: error, chatId }, 'a reopened session’s worktree could not be remade');
     });
   };
+  // Full access applies from the next turn: stored, then the warm session closes so the next start reads it.
+  // Turning it on while the session only reads records Here first, as Open in Terminal does.
+  const refuseFullAccessChange = (chat: ReturnType<typeof getChat>, on: boolean): void => {
+    const conv = getConversation(state.db, chat.conversationId);
+    if (conv.state !== null && BUSY.has(conv.state))
+      throw new ConflictError(CHANGE_FULL_ACCESS_BETWEEN_TURNS);
+    if (chat.workPlace === WorkPlace.Moving) throw new ConflictError(MOVING_WORDS);
+    if (
+      on &&
+      (conv.state === ConversationState.TakenOver || conv.state === ConversationState.Sealed)
+    )
+      throw new ConflictError(
+        'Full access isn’t available while the session is in your terminal or handed off.',
+      );
+  };
+  const changeFullAccess = async (chat: ReturnType<typeof getChat>, on: boolean): Promise<void> => {
+    if (on) deps.work?.().enterHere(chat.id);
+    state.write((ctx) => {
+      setChatFullAccess(ctx, chat.id, on);
+    });
+    await engine.relocate(chat.conversationId);
+  };
+
   const refuseWhileDoing = (chatId: ChatId): void => {
     if (stoppedForOpen.has(chatId)) throw new ConflictError(PASS_OPENING);
   };
@@ -389,6 +428,12 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     async patch(id, input) {
       const chat = getChat(state.db, id);
+      // Refused before anything is applied, so a patch that carries a model and Full access never half-applies.
+      const fullAccess =
+        input.fullAccess !== undefined && input.fullAccess !== chat.fullAccess
+          ? input.fullAccess
+          : undefined;
+      if (fullAccess !== undefined) refuseFullAccessChange(chat, fullAccess);
       if (input.model !== undefined || input.effort !== undefined) {
         const conv = getConversation(state.db, chat.conversationId);
         if (conv.state !== null && BUSY.has(conv.state))
@@ -413,6 +458,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
           }
         }
       }
+      if (fullAccess !== undefined) await changeFullAccess(chat, fullAccess);
       const wasClosed = getChat(state.db, id).tabPosition === null;
       state.write((ctx) => {
         if (input.title !== undefined) setChatTitle(ctx, id, input.title, ChatTitleSource.Builder);
@@ -422,6 +468,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       // is already open, and its worktree was tried when it opened.
       if (wasClosed && input.tabPosition !== undefined && input.tabPosition !== null) reopen(id);
       return dtoOf(id);
+    },
+
+    fullAccessPreview(id) {
+      return { notes: deps.fullAccessNotes(getChat(state.db, id).projectId) };
     },
 
     models(projectId) {
@@ -548,7 +598,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       deps.folderHold.cancelWait(chat.id);
       await engine.stop(conversationId);
       engine.releaseStarts(conversationId);
-      const wait = folder !== undefined && mustWait(chat);
+      const wait =
+        (folder !== undefined || getChat(state.db, chat.id).fullAccess) && mustWait(chat);
       if (wait) engine.holdStarts(conversationId);
       const edit = await engine.redo(conversationId, () => post(conversationId, input));
       if (wait) watchFolder(chat);
@@ -592,6 +643,12 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       };
     },
 
+    parkForFolder(chatId) {
+      const chat = getChat(state.db, chatId);
+      engine.holdStarts(chat.conversationId);
+      watchFolder(chat);
+    },
+
     watchFolder: (conversationId) => {
       watchFolder(requireChat(conversationId));
     },
@@ -604,8 +661,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     folder: FolderWhileHeld | undefined,
   ): boolean {
     const waiting = deps.folderHold.waiting(chat.id);
-    // A request to read only (an old client's) is read as wait.
-    const parks = folder !== undefined && (waiting || mustWait(chat));
+    // A request to read only (an old client's) is read as wait, and a Full access chat never runs read-only.
+    const choice =
+      folder ?? (getChat(state.db, chat.id).fullAccess ? FolderWhileHeld.Wait : undefined);
+    const parks = choice !== undefined && (waiting || mustWait(chat));
     if (!parks && waiting) deps.folderHold.cancelWait(chat.id);
     // Starts are held before the queue is asked, so the message parks.
     if (parks) engine.holdStarts(conversationId);
@@ -624,7 +683,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   /** Whether a turn of this chat can't take Your folder now: something other than an attended chat holds it. */
   function mustWait(chat: ChatRow): boolean {
     // Only a session working in the checkout takes the hold; one that reads, or has its own branch, never waits.
-    if (getChat(state.db, chat.id).workPlace !== WorkPlace.Here) return false;
+    // A Full access chat takes it wherever it works, so it waits wherever it works.
+    const row = getChat(state.db, chat.id);
+    if (row.workPlace !== WorkPlace.Here && !(row.fullAccess && row.workPlace !== WorkPlace.Moving))
+      return false;
     return (
       !deps.folderHold.holdsTurn(chat.id) &&
       deps.folderHold.blockers(chat.projectId, { kind: FolderAsker.ChatTurn, chatId: chat.id })

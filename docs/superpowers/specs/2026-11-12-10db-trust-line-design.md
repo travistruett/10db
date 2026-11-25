@@ -198,6 +198,7 @@ and the `rules` floor. Its other refusals stop applying where a judge runs:
   the limit and its target in prose ("deploys to staging with vercel"), in the project's grants. Each judge gets
   the project's grants as allow lines: auto mode's `allow` and 10db's judge's prompt **(call)**.
 - Anything else runs without a card.
+- **A chat the builder turned Full access on for** is judged by its agent's own checks: Claude Code's auto mode (or `default` mode, where each ask is a card) on Claude, and 10db's judge on Codex, which does not start without one (`decisions/2026-11-24-a-chat-the-builder-turns-full-access-on-for-runs-as-claude-code-does.md`). 10db adds no `soft_deny` lines and no hook judge on Claude there.
 
 ## 6. What comes along
 

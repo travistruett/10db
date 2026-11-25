@@ -303,9 +303,27 @@ export function preToolUseHook(hook: {
   };
 }
 
-/** A tool can write the project's settings mid-session, where no billing check would look again. */
+/** The settings files whose change mid-session is checked again: a lane's is the project's only. */
+export type SettingsSource = 'user_settings' | 'project_settings' | 'local_settings';
+
+/** Both sets of hooks: for each event the two sets share, the first's list then the second's. */
+export function mergeHooks(
+  first: NonNullable<Options['hooks']>,
+  second: NonNullable<Options['hooks']>,
+): NonNullable<Options['hooks']> {
+  return {
+    ...first,
+    ...second,
+    PostToolUse: [...(first.PostToolUse ?? []), ...(second.PostToolUse ?? [])],
+    PostToolUseFailure: [...(first.PostToolUseFailure ?? []), ...(second.PostToolUseFailure ?? [])],
+    ConfigChange: [...(first.ConfigChange ?? []), ...(second.ConfigChange ?? [])],
+  };
+}
+
+/** A tool can write the loaded settings mid-session, where no billing check would look again. */
 export function settingsRecheckHooks(
   recheck: (what: string) => HookJSONOutput,
+  sources: readonly SettingsSource[] = ['project_settings'],
 ): NonNullable<Options['hooks']> {
   return {
     PostToolUse: [{ hooks: [() => Promise.resolve(recheck('A tool changed'))] }],
@@ -317,7 +335,7 @@ export function settingsRecheckHooks(
           (hookInput) =>
             Promise.resolve(
               hookInput.hook_event_name === 'ConfigChange' &&
-                hookInput.source === 'project_settings'
+                sources.some((source) => source === hookInput.source)
                 ? recheck('Something changed')
                 : {},
             ),

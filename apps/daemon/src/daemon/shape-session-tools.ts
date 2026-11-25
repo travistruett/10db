@@ -462,6 +462,76 @@ export function createShapePreparer(
   };
 }
 
+/** What a Full access chat's session is prepared with, beyond a sandboxed chat's. */
+export interface FullAccessPrepareInput extends ShapePrepareInput {
+  /**
+   * Bring the builder's plugins, instructions and servers as a sandboxed chat has them: a Codex session, and
+   * a Claude one whose config folder isn't the builder's own, where Claude Code would find none of them.
+   */
+  readonly relay: boolean;
+}
+
+/**
+ * Prepares a Full access chat's session: no sandbox and no kernel profile around its commands, and a permission
+ * broker with no file access, so every call Claude Code's own mode escalates is a card. Where the builder's setup
+ * is relayed the sandbox is still built, only to launch their servers and copy their plugins, and it goes with the
+ * session. A Claude session never takes the repo's servers over `setMcpServers`: Claude Code reads `.mcp.json` itself.
+ */
+export function createFullAccessPreparer(
+  deps: Omit<SessionReadDeps, 'laneSandbox'> & { readonly laneSandbox: LaneSandbox | null },
+): (input: FullAccessPrepareInput) => Promise<ShapePrepared> {
+  const { state, inbox, logger } = deps;
+  const { laneSandbox } = deps;
+  const relayed = laneSandbox === null ? null : createShapePreparer({ ...deps, laneSandbox });
+  const nothing = (): Promise<void> => Promise.resolve();
+  return async (input) => {
+    const claude = input.harness === Provider.Claude;
+    let base: ShapePrepared | null = null;
+    let relayNote: string | null = null;
+    if (input.relay && relayed !== null) {
+      try {
+        base = await relayed({ ...input, writes: true });
+      } catch (error) {
+        // The session starts without the builder's setup rather than not at all.
+        logger.warn(
+          { err: error, projectId: input.projectId },
+          'a Full access relay could not be built',
+        );
+        relayNote = `Note from 10db: your plugins, instructions and MCP servers could not be brought into this session (${error instanceof Error ? error.message : String(error)}), so it runs without them.`;
+      }
+    }
+    const broker = createPermissionBroker(
+      { state, inbox, git: deps.git, logger },
+      {
+        projectId: input.projectId,
+        workstreamId: null,
+        conversationId: input.conversationId,
+        ...(input.shapeId === undefined ? {} : { shapeId: input.shapeId }),
+        sessionId: input.sessionId,
+        observer: input.observer,
+        signal: input.signal,
+        mcpApproved: {},
+        ...(input.limits === undefined ? {} : { limits: input.limits }),
+      },
+    );
+    return {
+      sandbox: null,
+      projectMcpServers: claude ? {} : (base?.projectMcpServers ?? {}),
+      yourMcpServers: base?.yourMcpServers ?? {},
+      claudeConnectors: base?.claudeConnectors ?? false,
+      note: base?.note ?? relayNote,
+      credentialsExpireAt: base?.credentialsExpireAt ?? null,
+      instructions: base?.instructions ?? null,
+      setup: base?.setup ?? EMPTY_SETUP,
+      canUseTool: claude || base === null ? broker : (req) => base.canUseTool(req),
+      trackProcesses: () => undefined,
+      markOwn: () => undefined,
+      endJobs: nothing,
+      release: base === null ? nothing : () => base.release(),
+    };
+  };
+}
+
 /**
  * Prepares a Linear reporter's session: the account's `mcp.linear.app` servers as a session plans them, and,
  * where there is a sandbox, a read-only one with no repo server, so a Codex session's shell reads at most. No

@@ -469,6 +469,9 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 9007199254740991
+    },
+    "fullAccess": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -489,6 +492,7 @@
     "tasksFiled",
     "work",
     "planId",
-    "planWaiting"
+    "planWaiting",
+    "fullAccess"
   ]
 }

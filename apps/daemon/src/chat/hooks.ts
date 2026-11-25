@@ -22,6 +22,7 @@ import {
   type Effort,
   type ProjectDto,
   type ProjectId,
+  type TrustPolicy,
   type ChatId,
   WorkPlace,
 } from '@10db/contracts';
@@ -62,7 +63,13 @@ import { principlesBrief } from '../knowledge';
 import type { Logger } from '../log';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import { TOOL_PICTURES_CAPTION, type ToolImages } from '../mcp';
-import type { ExploreProfile, SessionHandle, ShapeToolRequest } from '../sessions';
+import {
+  fullAccessSettings,
+  type ExploreProfile,
+  type FullAccessSettings,
+  type SessionHandle,
+  type ShapeToolRequest,
+} from '../sessions';
 import {
   owedPlanningRules,
   PLANNING_STUB,
@@ -79,6 +86,7 @@ import {
   buildTrustPolicy,
   FloorReason,
   floorNoticeText,
+  floorWhy,
   judgeForCall,
   projectGrantLines,
   projectLiveSystems,
@@ -86,7 +94,7 @@ import {
   startingJudge,
 } from '../trust';
 import { digestText } from './brief';
-import { judgeChatCall, type ChatPlace } from './confinement';
+import { judgeChatCall, judgeFullAccessCall, type ChatPlace } from './confinement';
 import { workNote } from './work-note';
 import { chatRoot, withWorktreeOnDisk } from './work-root';
 import { JUDGED_CHAT_TOOLS } from './git-rule';
@@ -125,6 +133,27 @@ function withDeadline<T>(work: Promise<T>, clock: Clock, ms: number): Promise<T>
 
 /** The share of the context window past which a chat moves to a fresh session. */
 export const CHAT_FRESH_AT_CONTEXT_PCT = 70;
+
+/** What a Full access launch reads when the launch names no account facts: the builder's own folder, no key. */
+const FULL_ACCESS_DEFAULTS = {
+  apiKeyHelper: null,
+  keyInEnv: false,
+  defaultConfigDir: true,
+} as const;
+
+/**
+ * A Codex chat's Full access as the spec carries it. Claude's mode, key helper and scrub mean nothing to Codex,
+ * which reads only that the chat is Full access; its judge stays 10db's.
+ */
+const CODEX_FULL_ACCESS = {
+  permissionMode: 'default',
+  apiKeyHelper: null,
+  scrub: false,
+  ownSetup: false,
+} as const;
+
+/** How often a Full access turn's end looks for background tasks still running. */
+export const BACKGROUND_POLL_MS = 1_000;
 
 /** What a chat's session that has no sandbox answers a call it would have asked about. */
 const NOTHING_TO_ASK = 'This chat has no sandbox, so it runs no command and asks for nothing.';
@@ -201,6 +230,17 @@ export interface ChatHooksDeps {
   /** Resolves a project's launch on `model` or, with null, on the `plan` role's, at `effort` or the model's own. */
   launch(projectId: ProjectId, model: string | null, effort: Effort | null): ShapeLaunch;
   readonly prepare?: (input: ShapePrepareInput) => Promise<ShapePrepared>;
+  /**
+   * Prepares a Full access chat's session: no sandbox, a broker with no file access, and, where `relay` is set,
+   * the builder's setup as a sandboxed chat has it. Absent, such a session can ask for nothing.
+   */
+  readonly prepareFullAccess?: (
+    input: ShapePrepareInput & { readonly relay: boolean },
+  ) => Promise<ShapePrepared>;
+  /** Parks the turn that is starting until Your folder can be the chat's; a Full access turn never runs without it. */
+  readonly parkForFolder?: (chatId: ChatId) => void;
+  /** Whether the SDK reports a background task still running for the conversation's open session. */
+  readonly backgroundRunning?: (conversationId: ConversationId) => boolean;
   /** What a chat adds to its session for planning: its folder and agents always, and its prompt, intake and read budget once it has a plan. */
   readonly plan?: PlanParts;
   /** Whether the agent on an account and model runs Plan's agents (`capabilities.subagents`). */
@@ -383,6 +423,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     });
   };
 
+  /** Whether the chat's turn takes Your folder: Here, or any place while Full access is on. */
+  const takesHold = (chat: ChatRow): boolean =>
+    chat.workPlace === WorkPlace.Here || (chat.fullAccess && chat.workPlace !== WorkPlace.Moving);
+
   // Whether the chat's session can write now: Here, while its turn holds the checkout; a branch, in its worktree.
   // A branch with no worktree has nowhere to write, and never falls back to the checkout.
   const writesNow = (chat: ChatRow, repoPath: string): boolean =>
@@ -400,13 +444,19 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         pendingReleases.delete(chat.id);
       }
       // Only a session working in the builder's checkout takes the hold. One that reads or is being asked holds
-      // nothing, and one on its own branch writes its own worktree.
-      if (chat.workPlace !== WorkPlace.Here) {
+      // nothing, and one on its own branch writes its own worktree. A Full access chat has no kernel to keep
+      // its shell in its worktree, so it takes the hold wherever it works.
+      if (!takesHold(chat)) {
         notices.set(chat.id, []);
         return { writes: writesNow(chat, getProject(state.db, conv.projectId).repoPath) };
       }
       const taken = deps.folderHold.takeTurn(conv.projectId, chat.id);
       if (!taken.taken) {
+        if (chat.fullAccess) {
+          // No kernel keeps its shell out of the checkout, so it waits for the hold instead of running read-only.
+          deps.parkForFolder?.(chat.id);
+          return { writes: false };
+        }
         notices.set(chat.id, [readOnlyNotice(taken.blockers)]);
         return { writes: false };
       }
@@ -495,7 +545,32 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       const judge = startingJudge(deps.judgeOf(launch.account, launch.modelId), true, tendbReady);
       const project = getProject(state.db, conv.projectId);
       const { root } = chatRoot(withWorktreeOnDisk(chat), { repoPath: launch.cwd });
-      const writable = writesNow(chat, launch.cwd);
+      // Full access runs on a Claude account as Claude Code does in a terminal (a Codex chat's side is its own).
+      const fullInputs =
+        chat.fullAccess && launch.account.harness === Provider.Claude
+          ? (launch.fullAccess?.() ?? FULL_ACCESS_DEFAULTS)
+          : null;
+      const full: FullAccessSettings | null =
+        fullInputs === null
+          ? null
+          : fullAccessSettings({
+              kind: launch.account.kind,
+              autoModeRuns: deps.judgeOf(launch.account, launch.modelId) === JudgeKind.Native,
+              apiKeyHelper: fullInputs.apiKeyHelper,
+              defaultConfigDir: fullInputs.defaultConfigDir,
+              keyInEnv: fullInputs.keyInEnv,
+            });
+      // A Codex chat runs Codex's own full-access mode, still under 10db's guard hook and judge.
+      const fullCodex = chat.fullAccess && launch.account.harness === Provider.Codex;
+      const fullAgent = full !== null ? 'claude' : fullCodex ? 'codex' : null;
+      // Codex's judge is 10db's alone, so a Full access turn it can't judge never starts: the builder reads why
+      // in the thread and turns Full access off to go on in the sandbox.
+      if (fullCodex && (deps.judge === undefined || judge === JudgeKind.Rules))
+        throw new InvalidError(
+          `Full access on Codex needs 10db’s judge, and it is off: ${floorWhy(FloorReason.NoJudge)} Turn Full access off to continue in the sandbox.`,
+        );
+      // A Full access session can write wherever its turn holds the folder, which every one of its turns does.
+      const writable = full !== null || fullCodex || writesNow(chat, launch.cwd);
       const folder: ChatPlace = {
         get place() {
           return getChat(state.db, chat.id).workPlace;
@@ -503,6 +578,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         holds: () => {
           const place = getChat(state.db, chat.id).workPlace;
           const current = holdingSession.get(chat.id) === start.sessionId;
+          if (full !== null || fullCodex) return current && deps.folderHold.holdsTurn(chat.id);
           if (place === WorkPlace.Here) return current && deps.folderHold.holdsTurn(chat.id);
           if (place === WorkPlace.Branch)
             return (
@@ -531,23 +607,30 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       const planFiles = plan?.filesDir(shapeId ?? planIdOfChat(chat.id));
       const limitNotes = createLimitNotes();
       const ending = new AbortController();
-      const ready =
-        deps.prepare === undefined
-          ? null
-          : await deps.prepare({
-              projectId: conv.projectId,
-              conversationId: conv.id,
-              sessionId: start.sessionId,
-              harness: launch.account.harness,
-              env: launch.env,
-              resumeProviderSessionId: start.resume,
-              writes: writable,
-              ...(planFiles === undefined ? {} : { planFiles }),
-              ...(root === launch.cwd ? {} : { checkout: root }),
-              signal: ending.signal,
-              observer: start.observer,
-              limits: limitNotes,
-            });
+      const prepareInput: ShapePrepareInput = {
+        projectId: conv.projectId,
+        conversationId: conv.id,
+        sessionId: start.sessionId,
+        harness: launch.account.harness,
+        env: launch.env,
+        resumeProviderSessionId: start.resume,
+        writes: writable,
+        ...(planFiles === undefined ? {} : { planFiles }),
+        ...(root === launch.cwd ? {} : { checkout: root }),
+        signal: ending.signal,
+        observer: start.observer,
+        limits: limitNotes,
+      };
+      let ready: ShapePrepared | null;
+      if (full !== null || fullCodex)
+        // Where Claude Code finds the builder's own setup (their default config folder) nothing is relayed;
+        // Codex's home is 10db's own, so its instructions and servers always are.
+        ready =
+          (await deps.prepareFullAccess?.({
+            ...prepareInput,
+            relay: !full?.ownSetup,
+          })) ?? null;
+      else ready = deps.prepare === undefined ? null : await deps.prepare(prepareInput);
       // A session that starts with no plan is owed the planning rules once it has one. A session that has its
       // plan at start, resumed or not, holds the rules in its system prompt (a resumed Codex thread's
       // developer instructions are configuration overrides for it), so it is owed nothing.
@@ -588,7 +671,30 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           : {}),
       });
       holdingSession.set(chat.id, start.sessionId);
-      const endJobs = ready === null ? undefined : () => ready.endJobs();
+      // A read that fails counts as still running: the deadline then closes the session and gives the folder back.
+      const runningNow = (): boolean => {
+        try {
+          return deps.backgroundRunning?.(conv.id) === true;
+        } catch (error) {
+          log.warn({ err: error, conversationId: conv.id }, 'background tasks could not be read');
+          return true;
+        }
+      };
+      // A Full access turn's folder goes back once the SDK reports no background task running.
+      const backgroundGone = (): Promise<void> =>
+        new Promise<void>((resolve) => {
+          const look = (): void => {
+            if (ending.signal.aborted || !runningNow()) resolve();
+            else deps.clock.setTimeout(look, BACKGROUND_POLL_MS);
+          };
+          look();
+        });
+      const endJobs =
+        full !== null || fullCodex
+          ? backgroundGone
+          : ready === null
+            ? undefined
+            : () => ready.endJobs();
       if (endJobs !== undefined) sessionJobs.set(conv.id, endJobs);
       let marked = false;
       let released: Promise<void> | null = null;
@@ -596,7 +702,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         released ??= (async () => {
           ending.abort();
           if (sessionJobs.get(conv.id) === endJobs) sessionJobs.delete(conv.id);
-          if (sessionClosers.get(conv.id) === release) sessionClosers.delete(conv.id);
+          if (sessionClosers.get(conv.id) === closer) sessionClosers.delete(conv.id);
           if (holdingSession.get(chat.id) === start.sessionId) holdingSession.delete(chat.id);
           if (owedRules.get(conv.id)?.sessionId === start.sessionId) owedRules.delete(conv.id);
           if (reviewing.get(conv.id)?.sessionId === start.sessionId) reviewing.delete(conv.id);
@@ -612,7 +718,12 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         })();
         return released;
       };
-      sessionClosers.set(conv.id, release);
+      // A Full access session's commands run outside any sandbox, so closing it is what stops them.
+      const closer = async (): Promise<void> => {
+        if (full !== null || fullCodex) await opened?.stop();
+        await release();
+      };
+      sessionClosers.set(conv.id, closer);
       const setup = ready?.setup ?? null;
       // A branch session reads and runs in its own worktree, so that is the checkout its reads are judged against.
       const access: ShapeAccess = {
@@ -635,30 +746,34 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         (ready?.claudeConnectors ?? false) &&
         launch.account.kind === AccountKind.ClaudeSubscription;
       // As the session's sandbox is built: Docker for a session that writes, loopback by the project's switch.
-      const open = sessionDevAccess(project, {
-        sandboxed: (ready?.sandbox ?? null) !== null,
-        writes: writable,
-      });
-      const policy = buildTrustPolicy({
-        surface: TrustSurface.Chat,
-        projectName: project.name,
-        checkout: root,
-        gateCommand: project.gateCommand,
-        liveSystems: projectLiveSystems(state.db, project.id, (stored) => {
-          log.warn(
-            { stored },
-            'the stored live systems are not a list 10db reads, so it reads none',
-          );
-        }),
-        switches,
-        grants: projectGrantLines(state.db, project.id),
-        yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
-        claudeConnectors,
-        devAccess: {
-          ...open,
-          compose: open.docker ? await deps.composeServices(project) : null,
-        },
-      });
+      // A Full access Codex session has no sandbox, so Docker and loopback are open to it, as they are to its shell.
+      const open = fullCodex
+        ? { docker: true, localhost: true }
+        : sessionDevAccess(project, {
+            sandboxed: (ready?.sandbox ?? null) !== null,
+            writes: writable,
+          });
+      const policyOf = (compose: ComposeServices | null): TrustPolicy =>
+        buildTrustPolicy({
+          surface: TrustSurface.Chat,
+          projectName: project.name,
+          checkout: root,
+          gateCommand: project.gateCommand,
+          liveSystems: projectLiveSystems(state.db, project.id, (stored) => {
+            log.warn(
+              { stored },
+              'the stored live systems are not a list 10db reads, so it reads none',
+            );
+          }),
+          switches,
+          grants: projectGrantLines(state.db, project.id),
+          yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
+          claudeConnectors,
+          devAccess: { ...open, compose: open.docker ? compose : null },
+        });
+      // A Claude Full access session is judged by Claude Code, which reads no policy: it is built only if read.
+      const policy =
+        full === null ? policyOf(open.docker ? await deps.composeServices(project) : null) : null;
       // The thread says once per session that 10db's judge stopped answering.
       let saidUnavailable = false;
       const webOn =
@@ -708,22 +823,30 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         spec: {
           sessionId: start.sessionId,
           conversationId: conv.id,
-          policy,
+          get policy() {
+            return policy ?? policyOf(null);
+          },
           profile: {
             kind: 'explore',
             judge,
             systemPrompt:
               plan === undefined
-                ? chatSystemPrompt(webOn)
-                : `${chatSystemPrompt(webOn)}\n\n${
+                ? chatSystemPrompt(webOn, fullAgent)
+                : `${chatSystemPrompt(webOn, fullAgent)}\n\n${
                     shapeId === null
                       ? PLANNING_STUB
                       : plan.systemPrompt(launch.agentModels, subagents, web)
                   }`,
-            ...chatProfile(ready?.commands !== undefined),
+            ...chatProfile(full !== null || fullCodex || ready?.commands !== undefined),
             ...(plan === undefined
               ? {}
-              : { agents: plan.agents(ready?.commands !== undefined, subagents, web) }),
+              : {
+                  agents: plan.agents(
+                    full !== null || fullCodex || ready?.commands !== undefined,
+                    subagents,
+                    web,
+                  ),
+                }),
           },
           cwd: root,
           instructions: ready?.instructions ?? null,
@@ -746,6 +869,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000,
           },
           hookWaitMs: (project.humanWaitMinutes + 5) * 60_000,
+          ...(full === null ? {} : { fullAccess: full }),
+          ...(fullCodex ? { fullAccess: CODEX_FULL_ACCESS } : {}),
           sandbox: ready?.sandbox ?? null,
           projectMcpServers: ready?.projectMcpServers ?? {},
           yourMcpServers: ready?.yourMcpServers ?? {},
@@ -756,6 +881,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               : ready.canUseTool(req),
           // Each call by its own judge: a native session's call outside auto mode has no classifier behind it.
           preToolUse: (req) => {
+            if (full !== null || fullCodex) {
+              const verdict = judgeFullAccessCall(chatCallOf(req), root, folder, reviewTurns);
+              return readsNow()?.preToolUse(req, verdict) ?? verdict;
+            }
             // The first command marks what the session runs, so the jobs its commands start can be told apart.
             if (req.toolName === 'Bash' && !marked) {
               marked = true;
@@ -782,7 +911,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                   readsNow()?.toolFailed(req);
                 },
               }),
-          ...(deps.judge === undefined || judge === JudgeKind.Rules
+          ...(full !== null || deps.judge === undefined || judge === JudgeKind.Rules
             ? {}
             : {
                 judgeCall: createHookJudge(
@@ -799,7 +928,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                       preExisting: [],
                       setupReads: access.setupReads ?? [],
                     },
-                    policy,
+                    policy: policy ?? policyOf(null),
                     allowLines: () => projectGrantLines(state.db, project.id),
                     // A chat is no run, so it has no Retry or Send back notes.
                     builderNotes: [],

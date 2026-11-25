@@ -2,7 +2,7 @@ import type { Options } from '@anthropic-ai/claude-agent-sdk';
 import type { LaneSandboxSpec } from '../sandbox';
 import type { ClaudeAutoModeSettings } from './claude-auto-mode';
 import { setupPromptText } from './setup-prompt';
-import type { LanePermissionMode, ShapeAgentDefinition } from './types';
+import type { FullAccessSettings, LanePermissionMode, ShapeAgentDefinition } from './types';
 
 /** What the builder's setup adds to a session (trust line §6): its instructions and plugin dirs. */
 export interface ClaudeProfileSetup {
@@ -169,6 +169,57 @@ function exploreOptions(
     // Claude Code forces default mode while the scrub is on, so auto mode turns it off; in default mode
     // it keeps the processes outside the sandbox free of the session's variables.
     sandboxEnv: sandbox ? sandboxEnv(sandbox, mode) : {},
+  };
+}
+
+/**
+ * A Full access chat's options: Claude Code as the builder's terminal runs it. Every settings file loads
+ * (`user`, `project`, `local`), Claude Code reads the MCP config, plugins and hooks itself, and its own
+ * checks decide what to ask, in auto mode where it runs and in `default` where a key is in the env. There is
+ * no sandbox and no ask rule; Claude Code's default tools stay. Only an account whose config folder is not
+ * the builder's own gets 10db's relay of the builder's plugins and instructions, since `user` is then the
+ * account's folder and holds none of them.
+ */
+export function fullAccessOptions(
+  profile: Extract<ClaudeProfile, { kind: 'explore' }>,
+  full: FullAccessSettings,
+): ClaudeProfileOptions {
+  const setupAppend = full.ownSetup
+    ? null
+    : setupPromptText(profile.setup.instructions, profile.setup.plugins);
+  return {
+    settingSources: ['user', 'project', 'local'],
+    strictMcpConfig: false,
+    settings: {
+      autoCompactEnabled: true,
+      ...(full.apiKeyHelper === null ? {} : { apiKeyHelper: full.apiKeyHelper }),
+    },
+    systemPrompt: {
+      type: 'preset',
+      preset: 'claude_code',
+      append:
+        setupAppend === null ? profile.systemPrompt : `${profile.systemPrompt}\n\n${setupAppend}`,
+    },
+    ...(full.ownSetup || profile.setup.plugins.length === 0
+      ? {}
+      : { plugins: localPlugins(profile.setup.plugins) }),
+    enableFileCheckpointing: true,
+    allowedTools: [...profile.allowedTools],
+    disallowedTools: [...profile.disallowedTools],
+    agents: Object.fromEntries(
+      Object.entries(profile.agents).map(([name, agent]) => [
+        name,
+        {
+          description: agent.description,
+          prompt: agent.prompt,
+          tools: [...agent.tools],
+          model: agent.model ?? 'inherit',
+        },
+      ]),
+    ),
+    permissionMode: full.permissionMode,
+    includePartialMessages: true,
+    sandboxEnv: full.scrub ? { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' } : {},
   };
 }
 
