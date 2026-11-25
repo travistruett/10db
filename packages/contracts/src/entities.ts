@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AcceptanceDetail } from './acceptance';
 import { USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN } from './accounts';
 import { AllowedCommands } from './allowed-commands';
 import { ModelSetting } from './catalogue';
@@ -993,7 +994,12 @@ export const NextAction = z.discriminatedUnion('kind', [
     inboxId: InboxItemId,
     providerSessionId: z.string().min(1).nullable(),
   }),
-  z.object({ kind: z.literal('fix'), evidenceId: EvidenceId }),
+  z.object({
+    kind: z.literal('fix'),
+    evidenceId: EvidenceId,
+    /** The provider session to resume for the fix; null runs it fresh. A stored action without it reads null. */
+    providerSessionId: z.string().min(1).nullable().default(null),
+  }),
   /**
    * A builder message from the task's thread to act on: the provider session is resumed and handed
    * it, or, with none, a fresh session starts from the thread's digest and then the message.
@@ -1407,6 +1413,8 @@ export const NetworkHostInput = z.object({ host: z.string() });
 export type NetworkHostInput = z.infer<typeof NetworkHostInput>;
 
 const EvidenceBase = {
+  /** The acceptance check's reading; null on every other kind. */
+  detail: AcceptanceDetail.nullable(),
   id: EvidenceId,
   workstreamId: WorkstreamId,
   summary: z.string(),
@@ -1450,6 +1458,12 @@ export const EvidenceDto = z.discriminatedUnion('kind', [
     command: z.null(),
     exitCode: z.null(),
     screenId: TaskScreenId,
+  }),
+  z.object({
+    ...EvidenceBase,
+    kind: z.literal(EvidenceKind.Acceptance),
+    command: z.null(),
+    exitCode: z.null(),
   }),
 ]);
 export type EvidenceDto = z.infer<typeof EvidenceDto>;

@@ -131,9 +131,14 @@ export function countSendBack(
   return steps.map((s, i) => (i === from ? { ...s, sentBack: s.sentBack + 1, reviewRounds } : s));
 }
 
-/** A retry starts the attempts over, so no earlier send-back counts any more; the rounds stay. */
+/** A retry starts the attempts over, so no earlier send-back counts any more, the acceptance check's included; the rounds stay. */
 export function clearSendBacks(steps: readonly WorkstreamStep[]): WorkstreamStep[] {
-  return steps.map((s) => (s.sentBack === 0 ? s : { ...s, sentBack: 0 }));
+  return steps.map((s) => {
+    if (s.sentBack === 0 && s.acceptanceSentBack === undefined) return s;
+    const cleared: WorkstreamStep = { ...s, sentBack: 0 };
+    delete cleared.acceptanceSentBack;
+    return cleared;
+  });
 }
 
 /** Marks the current step failed when its workstream fails. */

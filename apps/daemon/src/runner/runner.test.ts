@@ -2474,6 +2474,30 @@ describe('flows', () => {
       expect(sessions[3]?.model).toBe('claude-opus-5-5');
       expect(step(workstream.id, 0)).toMatchObject({ fixFresh: 'done', model: 'claude-opus-5-5' });
     });
+
+    it('steps the model up once, for the gate, when a gate fails after a resumed fix finished', async () => {
+      const gate = 'test ! -f src/api/bad.txt || test -f src/api/ok.txt';
+      engine = await createTestEngine(
+        {
+          Alpha: [
+            implement('op-fixby-0031'),
+            [reject('op-fixby-0032'), turn],
+            [write('src/api/bad.txt'), commit('op-fixby-0033', ['src/api/bad.txt']), turn],
+            [write('src/api/ok.txt'), commit('op-fixby-0034', ['src/api/ok.txt']), turn],
+            [approve('op-fixby-0035'), turn],
+          ],
+        },
+        { delivery: 'local', gateCommand: gate, changedCheckCommand: gate },
+      );
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+      expect(ws(workstream.id).state).toBe('DONE');
+      const sessions = listSessions(engine.store.db, workstream.id);
+      // The gate's own step-up is the only one: the fix after it is not a resume that fell back to fresh.
+      expect(sessions[3]?.model).toBe('claude-opus-5-5');
+      expect(step(workstream.id, 0)?.reason).not.toContain('acceptance check');
+      expect(step(workstream.id, 0)?.reason.match(/escalated/g) ?? []).toHaveLength(1);
+    });
   });
 
   it('hands the reviewer the current attempt of a verification-only build report, after a send-back too', async () => {
@@ -6106,7 +6130,7 @@ describe('without a gate command', () => {
         state: 'QUEUED',
         currentSessionId: null,
         attempt: before.attempt + 1,
-        nextAction: { kind: 'fix', evidenceId: evidence?.id },
+        nextAction: { kind: 'fix', evidenceId: evidence?.id, providerSessionId: null },
       });
       expect(checkCards().map((c) => c.state)).toEqual(['RESOLVED']);
       expect(activeClaims(engine.store.db, workstream.id).length).toBeGreaterThan(0);
@@ -6146,7 +6170,11 @@ describe('without a gate command', () => {
         });
       });
       await recover();
-      expect(ws(workstream.id).nextAction).toEqual({ kind: 'fix', evidenceId: evidence?.id });
+      expect(ws(workstream.id).nextAction).toEqual({
+        kind: 'fix',
+        evidenceId: evidence?.id,
+        providerSessionId: null,
+      });
 
       // The fix prompt carries the note, and the fixed work comes back for a check.
       await runToWait(workstream.id);
@@ -6211,7 +6239,11 @@ describe('without a gate command', () => {
           });
         });
         await recover();
-        expect(ws(workstream.id).nextAction).toEqual({ kind: 'fix', evidenceId: evidence?.id });
+        expect(ws(workstream.id).nextAction).toEqual({
+          kind: 'fix',
+          evidenceId: evidence?.id,
+          providerSessionId: null,
+        });
       });
     });
 

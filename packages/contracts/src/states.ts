@@ -30,6 +30,8 @@ export const InboxKind = {
   Plan: 'plan',
   /** What the move to the playbook could not carry over for a project; the builder reads it and dismisses it. */
   PlaybookMoveReport: 'playbook_move_report',
+  /** A criterion the acceptance check could not settle, on a run that shipped; the builder accepts it or sends it back. */
+  Acceptance: 'acceptance',
 } as const;
 export type InboxKind = ValueOf<typeof InboxKind>;
 
@@ -256,6 +258,8 @@ export const EvidenceKind = {
   NoRevert: 'no_revert',
   /** A picture a lane's own browser took of the running app, kept as the run's evidence. */
   Browser: 'browser',
+  /** The acceptance check's reading of each criterion of a finished run. */
+  Acceptance: 'acceptance',
 } as const;
 export type EvidenceKind = ValueOf<typeof EvidenceKind>;
 

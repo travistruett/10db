@@ -28,7 +28,9 @@
               "task_kinds",
               "crosses_limit",
               "crosses_limit_second",
-              "test_value"
+              "test_value",
+              "acceptance",
+              "acceptance_second"
             ]
           },
           "calls": {

@@ -1,4 +1,10 @@
-import { getWorkstream, listTasks, patchJudgeConfig } from '@10db/db';
+import {
+  getWorkstream,
+  listEvidence,
+  listEventsAfter,
+  listTasks,
+  patchJudgeConfig,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 
@@ -108,5 +114,93 @@ describe('the test-value judge at the end of an implement step', () => {
     expect(ws(workstream.id).state).toBe('DONE');
     expect(world.asked).toEqual([]);
     expect(followUps()).toEqual([]);
+  });
+});
+
+/** A fake OpenRouter whose nth call answers `answers[n]`, a probability of yes per question id. */
+function openRouterReading(answers: readonly Record<string, number>[]) {
+  const asked: string[][] = [];
+  const fetchFake: typeof fetch = (_input, init) => {
+    const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
+      questions?: Record<string, unknown>;
+    };
+    const ids = Object.keys(body.questions ?? {});
+    asked.push(ids);
+    const given = answers[asked.length - 1] ?? {};
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          model: 'typesafe/jev-1.13-20260917',
+          answers: Object.fromEntries(
+            ids.map((id) => [id, { type: 'noul', noul: given[id] ?? 0.99 }]),
+          ),
+          usage: { input_tokens: 10, output_tokens: 2, cost: 0 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+  };
+  return { asked, openRouter: { fetch: fetchFake } };
+}
+
+describe('the acceptance check at the end of an implement step', () => {
+  it('sends a run back once for a criterion the second opinion reads as not met, then goes on to Review', async () => {
+    const world = openRouterReading([
+      { met_0: 0.95, met_1: 0.5, unasked: 0.05 },
+      { met_1: 0.1, unasked: 0.05 },
+      { met_0: 0.95, met_1: 0.95, unasked: 0.05 },
+    ]);
+    const approve = {
+      do: 'mcp' as const,
+      tool: 'complete_step',
+      args: { opId: 'op-acc-review', summary: 'Looks right.', verdict: 'approve' },
+    };
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          implement('op-acc-0001'),
+          [write('src/api/b.txt', 'b'), commit('op-acc-0002', ['src/api/b.txt']), turn],
+          [approve, turn],
+        ],
+      },
+      { delivery: 'local', gateCommand: 'true', changedCheckCommand: 'true' },
+      {},
+      { openRouter: world.openRouter },
+    );
+    engine.state.write((ctx) =>
+      patchJudgeConfig(ctx, {
+        decisions: {
+          test_value: { enabled: false },
+          acceptance: { enabled: true },
+          acceptance_second: { enabled: true, model: 'typesafe/jev-1.13' },
+        },
+      }),
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard', criteria: 2 });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      stepIndex: 0,
+      nextAction: { kind: 'fix' },
+    });
+    const fix = ws(workstream.id).nextAction;
+    expect(fix.kind === 'fix' ? typeof fix.providerSessionId : null).toBe('string');
+    const sentBack = listEventsAfter(engine.store.db, 0, 10_000).filter(
+      (e) => e.type === 'step.changed' && e.data['sentBackBy'] === 'acceptance',
+    );
+    expect(sentBack).toHaveLength(1);
+    expect(ws(workstream.id).steps[0]?.acceptanceSentBack).toBe(1);
+
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', stepIndex: 1 });
+    const read = listEvidence(engine.store.db, workstream.id).filter(
+      (e) => e.kind === 'acceptance',
+    );
+    expect(read.map((e) => e.detail?.sentBack)).toEqual([true, false]);
+    expect(read[1]?.detail?.criteria.map((c) => c.verdict)).toEqual(['met', 'met']);
+    expect(world.asked).toHaveLength(3);
   });
 });

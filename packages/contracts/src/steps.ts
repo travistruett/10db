@@ -128,6 +128,8 @@ export const WorkstreamStep = z.object({
    * the follow-up task 10db filed for the findings that stayed open. Absent otherwise.
    */
   shippedAtLimit: ShippedAtLimit.optional(),
+  /** Times the acceptance check sent this build step's work back; absent until it has. */
+  acceptanceSentBack: z.int().min(0).optional(),
 });
 export type WorkstreamStep = z.infer<typeof WorkstreamStep>;
 

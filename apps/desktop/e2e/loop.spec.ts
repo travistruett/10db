@@ -251,6 +251,19 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(
     page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),
   ).toBeVisible();
+  // The header counts the week's acceptance work: the finished task raised no card. The e2e daemon runs
+  // with the judge off, so nothing is checking and the line says why.
+  await expect(page.getByRole('button', { name: 'Completed 1' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sent back 0' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sent to you 0' })).toBeVisible();
+  await expect(
+    page.getByText("Acceptance isn't checking: no account can answer decisions"),
+  ).toBeVisible();
+  // The number opens Factory's Acceptance panel, which lists the task behind it.
+  await page.getByRole('button', { name: 'Completed 1' }).click();
+  await expect(
+    page.getByRole('table', { name: 'Completed runs' }).getByRole('button', { name: TASK }),
+  ).toBeVisible();
   // Factory lists every project's runs by what they need: the finished task is under Done Today, and with
   // no goals anywhere there is no Goals section to read about.
   await open(page, 'Factory');

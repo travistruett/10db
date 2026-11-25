@@ -51,6 +51,11 @@
       "minimum": 0,
       "maximum": 9007199254740991
     },
+    "acceptance": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
     "cards": {
       "type": "integer",
       "minimum": 0,
@@ -92,6 +97,7 @@
     "check",
     "plan",
     "moveReport",
+    "acceptance",
     "cards",
     "tasksRan",
     "cardsPerTask",

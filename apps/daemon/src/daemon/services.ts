@@ -3,8 +3,11 @@ import { join } from 'node:path';
 import {
   ACTIVE_STATES,
   AreaRole,
+  JudgeDecision,
   JudgeOutcome,
   RigorSource,
+  powersDecisions,
+  type AcceptanceFigures,
   TaskKindSource,
   type Rigor,
   type TaskDto,
@@ -74,6 +77,9 @@ import {
   humanTouchDays,
   inboxCardTypes,
   rigorFigures,
+  acceptanceFigures,
+  findAccountRow,
+  getJudgeConfig,
   latestWorkstreamOf,
   openGoalDigest,
   listAaModels,
@@ -778,6 +784,23 @@ export function createServices(deps: {
     rigorFigures: (projectId, days) => {
       getProject(db, projectId);
       return rigorFigures(db, projectId, deps.clock.now(), days);
+    },
+    acceptanceFigures: (projectId, days) => {
+      getProject(db, projectId);
+      const counts = acceptanceFigures(db, projectId, days, deps.clock.now());
+      const config = getJudgeConfig(db);
+      const account = config.accountId === null ? undefined : findAccountRow(db, config.accountId);
+      const answers =
+        !deps.openRouterOff &&
+        account !== undefined &&
+        !account.archived &&
+        powersDecisions(account.kind);
+      const checking: AcceptanceFigures['checking'] = !answers
+        ? { on: false, reason: 'no_account' }
+        : !config.enabled || !config.decisions[JudgeDecision.Acceptance].enabled
+          ? { on: false, reason: 'off' }
+          : { on: true };
+      return { days, ...counts, checking };
     },
     // The view mark advances in the same transaction that reads the window it closes.
     openGoalDigest: (goalId) => deps.state.write((ctx) => openGoalDigest(ctx, goalId)),

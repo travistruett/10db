@@ -20,13 +20,13 @@ export function nextActionAfterCrash(
     : { kind: 'start' };
   switch (previous.kind) {
     case 'verify':
-    case 'fix':
     case 'uncommitted':
     case 'merge':
     case 'builder_review':
     case 'plan_approval':
     case 'pass_review':
       return previous;
+    case 'fix':
     case 'revise':
       // A resumed fix that crashed starts a fresh session; one that was fresh already stays as it is.
       return { ...previous, providerSessionId: null };
@@ -62,14 +62,14 @@ export function nextActionOnAnotherAccount(
     case 'answer':
     case 'feedback':
     case 'revise':
+    case 'fix':
       return { ...previous, providerSessionId: null };
     case 'resume':
       return failedGate
-        ? { kind: 'fix', evidenceId: failedGate }
+        ? { kind: 'fix', evidenceId: failedGate, providerSessionId: null }
         : nextActionAfterCrash(previous, null, latest);
     case 'start':
     case 'continue_from_handoff':
-    case 'fix':
     case 'uncommitted':
     case 'merge':
     case 'verify':
@@ -137,10 +137,10 @@ export function resumedSessionOf(action: NextAction): string | null {
     case 'answer':
     case 'feedback':
     case 'revise':
+    case 'fix':
       return action.providerSessionId;
     case 'start':
     case 'continue_from_handoff':
-    case 'fix':
     case 'uncommitted':
     case 'merge':
     case 'verify':

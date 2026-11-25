@@ -1,3 +1,4 @@
+import { applyAcceptanceAnswer } from '../acceptance';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -1136,6 +1137,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       const signOffPage = startPageSignOff;
       if (!runner || !signOffPage) throw new RunnerNotStartedError();
       return applyCheckAnswer(runner, ctx, item, answer, signOffPage);
+    },
+    onAcceptanceAnswer: (ctx, item, answer) => {
+      applyAcceptanceAnswer(ctx, item, answer);
     },
     onPlanAnswer: (ctx, item, answer) => {
       if (!runner) throw new RunnerNotStartedError('plan');
