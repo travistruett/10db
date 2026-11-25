@@ -291,6 +291,7 @@ function Cause({
                     run.failureReason === null ? failedAt(run) : firstSentence(run.failureReason)
                   }
                   when={shortAgo(lastMoment(run), props.now)}
+                  compact
                   action={
                     <>
                       {props.canRetry(run) ? (

@@ -1,26 +1,30 @@
-import { Box, Group, Text, UnstyledButton, type MantineColor } from '@mantine/core';
+import { Box, Text, UnstyledButton, type MantineColor } from '@mantine/core';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { useId, useRef, type KeyboardEvent, type ReactNode } from 'react';
+import classes from './factory-overview.module.css';
 import { StatusDot } from './status-dot';
 
 export interface GoalRowProps {
   readonly title: string;
   /** The one-line verdict beside the title. */
   readonly line: string;
-  /** The plain-text news that ends the line, such as "· 3 new since 3h ago". */
+  /** The plain-text news at the row's right edge, such as "3 new since 3h ago". */
   readonly news?: string | undefined;
   /** The status dot's color; a row that is not a goal's status (the Done line) has none. */
   readonly color?: MantineColor;
-  /** A small bar of where the goal's tasks stand, between the title and the line. */
+  /** A small bar of where the goal's tasks stand, in the bar column between the title and the line. */
   readonly bar?: ReactNode;
   readonly expanded: boolean;
+  /** The region's rows are goal rows themselves (the Done line), so it keeps the card's columns: no inset. */
+  readonly flush?: boolean;
   readonly onToggle: () => void;
   /** The region under the row; rendered only while the row is open. */
   readonly children: ReactNode;
 }
 
 /**
- * One row of the goal list: a button that opens and closes the region under it, with no border or
+ * One row of the goal list, on the project card's shared columns (chevron, dot, title, bar, the line, the
+ * news), so its edges match the task lines under it: a button that opens and closes the region under it, with no border or
  * shadow of its own. Rows are separated by hairlines, and the open row's whole area takes the
  * control background. Escape inside the open region closes it and returns to the button.
  */
@@ -31,6 +35,7 @@ export function GoalRow({
   color,
   bar,
   expanded,
+  flush = false,
   onToggle,
   children,
 }: GoalRowProps) {
@@ -61,8 +66,8 @@ export function GoalRow({
       <UnstyledButton
         ref={button}
         w="100%"
-        px="sm"
-        py="xs"
+        py={10}
+        className={classes['cols']}
         aria-expanded={expanded}
         aria-controls={regionId}
         onClick={() => {
@@ -72,25 +77,38 @@ export function GoalRow({
         }}
         style={{ borderRadius: 'var(--mantine-radius-md)' }}
       >
-        <Group gap="sm" wrap="nowrap" align="baseline">
-          <Chevron
-            size={16}
-            stroke={1.5}
-            aria-hidden
-            style={{ alignSelf: 'center', flex: 'none' }}
-          />
+        <Chevron size={16} stroke={1.5} aria-hidden />
+        <Box style={{ display: 'inline-flex', justifySelf: 'center' }}>
           {color ? <StatusDot color={color} /> : null}
-          <Text id={titleId} fw={600} size="sm" style={{ flex: 'none' }}>
-            {title}
+        </Box>
+        <Text id={titleId} fw={600} size="sm" truncate>
+          {title}
+        </Text>
+        <Box>{bar}</Box>
+        <Text
+          size="sm"
+          c="dimmed"
+          truncate
+          className={classes['goalStatus']}
+          data-news={news === undefined ? undefined : true}
+        >
+          {line}
+        </Text>
+        {news === undefined ? null : (
+          <Text size="xs" c="dimmed" truncate className={classes['goalNews']}>
+            {news}
           </Text>
-          {bar}
-          <Text size="sm" c="dimmed" style={{ minWidth: 0 }}>
-            {news ? `${line} ${news}` : line}
-          </Text>
-        </Group>
+        )}
       </UnstyledButton>
       {expanded ? (
-        <Box id={regionId} role="region" aria-labelledby={titleId} px="md" pt="xs" pb="md">
+        <Box
+          id={regionId}
+          role="region"
+          aria-labelledby={titleId}
+          px={flush ? 0 : 'md'}
+          pt={flush ? 0 : 'xs'}
+          pb={flush ? 0 : 'md'}
+        >
           {children}
         </Box>
       ) : null}
