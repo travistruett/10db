@@ -251,7 +251,8 @@ export function createWatcher(deps: {
     readonly candidates: readonly WorkstreamId[];
   }
   const heldStrays = new Map<string, Map<string, HeldStray>>();
-  const strayTimers = new Set<Timer>();
+  // Each checkout's one timer that reads its held strays again when the first of them is due.
+  const strayTimers = new Map<string, Timer>();
   // Each checkout's config files (`.git/config`, a worktree's `config.worktree`): the text as the builder
   // last decided it (`baseline`), and the text its open card showed (`carded`), so a change is told from
   // what git itself writes and a repeat write to a carded config still names the keys of the first.
@@ -282,6 +283,8 @@ export function createWatcher(deps: {
     watched.delete(root);
     pending.delete(root);
     heldStrays.delete(root);
+    strayTimers.get(root)?.cancel();
+    strayTimers.delete(root);
     seenConfigs.delete(root);
   }
 
@@ -1209,7 +1212,6 @@ export function createWatcher(deps: {
     const strays = new Set(rels);
     for (const rel of batchRels) if (!strays.has(rel)) held.delete(rel);
     const due: string[] = [];
-    const waiting: string[] = [];
     for (const rel of rels) {
       if (
         isSensitivePath(rel) ||
@@ -1221,25 +1223,44 @@ export function createWatcher(deps: {
       }
       const seen = held.get(rel) ?? { seenAt: now, candidates };
       if (now - seen.seenAt < strayWaitMs) {
-        if (!held.has(rel)) waiting.push(rel);
         held.set(rel, seen);
         continue;
       }
       held.delete(rel);
       if (anyCouldOwn(project.id, new Set(seen.candidates))) due.push(rel);
     }
-    if (waiting.length > 0) {
-      const timer = deps.clock.setTimeout(() => {
-        strayTimers.delete(timer);
-        if (stopped) return;
-        const set = pending.get(site.root) ?? new Set<string>();
-        for (const rel of waiting) set.add(rel);
-        pending.set(site.root, set);
-        void flush();
-      }, strayWaitMs);
-      strayTimers.add(timer);
-    }
+    recheckStrays(site.root);
     return due;
+  }
+
+  /**
+   * Sets the checkout's timer for its first held stray to come due, replacing any set before. When it
+   * fires, every held path is read again, and the timer is set afresh for what still waits, whatever
+   * that batch did: a path the clock says is not due yet is read again when it is. One already due
+   * waited out a batch that failed, and is read again after another wait.
+   */
+  function recheckStrays(root: string): void {
+    strayTimers.get(root)?.cancel();
+    strayTimers.delete(root);
+    const held = heldStrays.get(root);
+    if (stopped || held === undefined || held.size === 0) return;
+    const now = deps.clock.now().getTime();
+    const first = Math.min(...[...held.values()].map((h) => h.seenAt + strayWaitMs));
+    const timer = deps.clock.setTimeout(
+      () => {
+        strayTimers.delete(root);
+        const still = heldStrays.get(root);
+        if (stopped || still === undefined) return;
+        const set = pending.get(root) ?? new Set<string>();
+        for (const rel of still.keys()) set.add(rel);
+        pending.set(root, set);
+        void flush().then(() => {
+          recheckStrays(root);
+        });
+      },
+      Math.max(first > now ? first - now : strayWaitMs, batchMs),
+    );
+    strayTimers.set(root, timer);
   }
 
   /**
@@ -1384,6 +1405,9 @@ export function createWatcher(deps: {
       entry.root,
       withoutBookkeeping(projectId, entry.root, allPaths),
     );
+    // A held path that is bookkeeping or 10db's own write now is no stray to wait on.
+    const kept = new Set(paths);
+    for (const rel of allPaths) if (!kept.has(rel)) heldStrays.get(entry.root)?.delete(rel);
     if (paths.length === 0) return;
     // Only what git still sees as changed now. This drops ignored files and directories. It also drops files
     // already committed through 10db's claim-checked commit, whose claims may have been released since the write.
@@ -1689,7 +1713,7 @@ export function createWatcher(deps: {
       unsubscribe();
       timer?.cancel();
       timer = null;
-      for (const strayTimer of strayTimers) strayTimer.cancel();
+      for (const strayTimer of strayTimers.values()) strayTimer.cancel();
       strayTimers.clear();
       for (const root of [...watched.keys()]) unwatch(root);
     },

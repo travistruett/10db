@@ -214,7 +214,18 @@ describe('watcher', () => {
     clock.advance(3 * 60_000 - 1_000);
     await watcher.flush();
     expect(flags()).toHaveLength(1);
-    clock.advance(1_000);
+    // The batch that reads the held write again fails, as git can't read the checkout: the write still
+    // waits, and is read again after another wait.
+    const gitDir = join(repo.path, '.git');
+    chmodSync(gitDir, 0o000);
+    try {
+      clock.advance(1_000);
+      await watcher.flush();
+    } finally {
+      chmodSync(gitDir, 0o755);
+    }
+    expect(flags()).toHaveLength(1);
+    clock.advance(3 * 60_000);
     await watcher.flush();
     expect(flags().map((c) => c.body)).toEqual(['.mcp.json', 'docs/stray.md']);
   });
