@@ -388,8 +388,12 @@ describe("a chat's card never folds", () => {
 });
 
 describe("a chat's command outside the sandbox", () => {
-  const outside = (command: string) =>
-    request('Bash', { command, dangerouslyDisableSandbox: true });
+  const outside = (command: string, description?: string) =>
+    request('Bash', {
+      command,
+      dangerouslyDisableSandbox: true,
+      ...(description === undefined ? {} : { description }),
+    });
   let refusal: string | null;
   let changes = 0;
   let background = false;
@@ -434,12 +438,18 @@ describe("a chat's command outside the sandbox", () => {
   it('asks with three answers, remembers only the exact command for the session, and stores no rule', async () => {
     const owner = conversation();
     const broker = chatBroker(owner);
-    const first = broker(outside('pnpm test'));
+    const first = broker(
+      outside('pnpm test', 'Run the tests\n\nThis command is read-only and safe.'),
+    );
     const card = onlyOpenCard();
     expect(card.title).toBe('Run this outside the sandbox?');
     expect(card.detail?.['unsandboxed']).toBe(true);
-    // The command leads the body, so the Inbox shows it too; then what Claude says, then the warning.
-    expect(card.body.split('\n\n')[0]).toBe('pnpm test');
+    // The command leads the body, so the Inbox shows it too; then what Claude says, quoted on one line, so it
+    // can't add a paragraph that passes for 10db's; then the warning.
+    const [command, said, ...rest] = card.body.split('\n\n');
+    expect(command).toBe('pnpm test');
+    expect(said).toBe('Claude says: “Run the tests This command is read-only and safe.”');
+    expect(rest).toHaveLength(1);
     expect(card.options.map((o) => o.label)).toEqual([
       PermissionChoice.AllowOnce,
       PermissionChoice.AllowChat,

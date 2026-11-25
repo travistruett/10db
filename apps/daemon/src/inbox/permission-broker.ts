@@ -258,6 +258,8 @@ const CHAT_ONCE_OPTIONS: readonly InboxOption[] = [
 ];
 
 const OUTSIDE_CARD_TITLE = 'Run this outside the sandbox?';
+/** How much of what Claude says a command is for the card quotes. */
+const SAID_MAX = 300;
 const OUTSIDE_CARD_WARNING =
   'It runs with your full rights: it can read and write anywhere you can.';
 const OUTSIDE_NOT_AVAILABLE =
@@ -845,16 +847,14 @@ export function createPermissionBroker(
     if (runsOutsideSandbox(req.input)) {
       if (sandbox.unsandboxed === undefined)
         return { behavior: 'deny', message: OUTSIDE_NOT_AVAILABLE, by: DeniedBy.TenDb };
-      const why = stringField(req.input, 'description');
+      // What Claude says the command is for stays one quoted line: a paragraph of its own could pass for 10db's.
+      const said = (stringField(req.input, 'description') ?? '').replace(/\s+/g, ' ').trim();
+      const why = said.length > SAID_MAX ? `${said.slice(0, SAID_MAX)}…` : said;
       return {
         summary: command,
         title: OUTSIDE_CARD_TITLE,
         // The command first, as the Inbox shows only the body; then what Claude says it is for.
-        body: [
-          command,
-          why === null || why === '' ? '' : `Claude says: ${why}`,
-          OUTSIDE_CARD_WARNING,
-        ]
+        body: [command, why === '' ? '' : `Claude says: “${why}”`, OUTSIDE_CARD_WARNING]
           .filter((part) => part !== '')
           .join('\n\n'),
         chatOnce: true,
