@@ -22,8 +22,8 @@ function newsOf(summary: GoalSummaryDto, now: number): string | undefined {
   if (summary.newItems === 0) return undefined;
   const since = summary.digest.since;
   return since === null
-    ? `· ${String(summary.newItems)} new`
-    : `· ${String(summary.newItems)} new since ${shortAgo(since, now)}`;
+    ? `${String(summary.newItems)} new`
+    : `${String(summary.newItems)} new since ${shortAgo(since, now)}`;
 }
 
 /**
@@ -108,6 +108,7 @@ export function GoalList({
           title="Done"
           line={done.length === 1 ? '1 goal' : `${String(done.length)} goals`}
           expanded={doneShown}
+          flush
           onToggle={() => {
             setDoneShown(!doneShown);
           }}
