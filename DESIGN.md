@@ -106,9 +106,9 @@ favors legibility and calm over decoration.
   the Board's In review column: a task whose pull request is open is in review, never done. Green is only
   for work that has merged: a goal with open pull requests is Shipping, in blue, never green. A goal's
   Decisions are those its own tasks recorded, not every decision in the project.
-- **Factory is one live list, not a section per project:** every project's runs in sections by what they need (Needs You, Failed, Running, In Review, Waiting, Done Today), each row a dot, the task, what it is doing, its project's tile and name and how long ago, a section with nothing in it left out (`decisions/2026-11-19-factory-is-a-live-list-across-projects.md`). Goals are a section under it, each project's under its name, only while a project has one; Metrics, a switch in the title row, holds Rigor, Human touch and Card types for one project. Within a project, goals are rows of one list separated by hairline dividers, and the open
+- **Factory leads with what needs the builder, then each project as a bar:** five figures at a glance (needs you, failed and in how many causes, running of the Mac's lanes, pull requests open, merged today); a Needs you panel on the raised tone, one row per ask or per failure cause (several failures with one cause are one row with Retry All), then, apart and unlit, a Waiting on others table naming each question out with someone else by its person and its own words; then Projects, one separated accordion card each (the Board card's tone, `xs` shadow and `md` radius): chevron, tile, name, a bar split by where the work stands (green merged, blue running, striped blue in review, yellow needs you, red failed, `bg_2` waiting) and one line saying the same in words (`decisions/2026-11-25-factory-leads-with-needs-you-then-projects.md`). The bar is decorative; the line carries the meaning. A project that needs the builder or runs work starts open; an idle one is folded. Opened, it holds its goals, then its work in no goal: needs you, failed, running (with step progress) and waiting lines, then one line each for its open pull requests and today's merges, which opens them. Metrics, a switch in the title row, holds Rigor, Human touch and Card types for one project. Within a project, goals are rows of one list separated by hairline dividers, and the open
   goal's area takes the `bg_1` fill. Rows take no borders and no shadows; cards stay the Board's draggable
-  things. Each row is a button (`aria-expanded`) over a `role="region"`: title, status dot and one line, collapsed
+  things. Each row is a button (`aria-expanded`) over a `role="region"`: title, status dot, a small bar and one line, collapsed
   until opened, one open at a time. Order: failed, waiting on you, waiting on someone, paused, running,
   shipping, idle, not started, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
   no badge and no color.
@@ -128,6 +128,12 @@ favors legibility and calm over decoration.
   (work in no goal is the Factory's live list).
 - **"Since you last looked"** holds the window's deviations and decisions, one clamped line each: session ids
   are dropped from the line and kept in its tooltip, and Show Earlier adds the rest.
+- **Content width:** a view's content grows to one of two widths, then centres in the content area: **Reading**
+  (720 px) for prose and conversation (a session, the Inbox's card, a Plan's record, the Workbench setup) and
+  **Page** (1080 px) for pages of rows, tables and figures (Factory, Settings, Knowledge). A workspace whose
+  content is the work (the Board, an open Workbench pass) takes neither and fills the window. A view says
+  `<Container size={ContentWidth.Page}>`; the widths are set once, in `shell/content-width.ts`, which the theme
+  maps onto Mantine's `Container`, and a flex column that can't be a `Container` reads the same map.
 - **Radius:** `md` everywhere.
 - **Motion:** short eases, 150–200 ms, of opacity, color or shadow, for what appears as a side effect
   (an edge fade, a hint, a scroll shadow) and for drag feedback (the column a card would land in).
@@ -196,7 +202,7 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   with an orange warning icon for a warning, opening in a drawer with no answer and no Dismiss.
 - **Inbox content:** the selected card opens with its title (16 / 600) on a line of its own and one dim meta line
   under it: the kind's icon and name, the project, how many identical cards and how long ago (`card-header.tsx`).
-  Its text keeps a 760 px measure. An answered card's buttons (a flag's, a question's, a permission's) are a bar held at the foot
+  Its text keeps the Reading width (see Content width). An answered card's buttons (a flag's, a question's, a permission's) are a bar held at the foot
   of the content, a hairline above (`card-actions.tsx`), so Dismiss and Send Answer stay in one place however long
   the card is; check, plan, drafted-question, 10db and pass cards keep their own buttons in their flow. A field's label
   never says "(optional)": the placeholder says Optional.

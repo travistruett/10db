@@ -20,7 +20,13 @@ export default defineConfig({
   expect: { timeout: 20_000 },
   reporter: [['list']],
   outputDir: resolve(DESKTOP_DIR, 'test-results'),
-  use: { baseURL: uiUrl, colorScheme: 'dark', trace: 'retain-on-failure' },
+  // Reduced motion mounts every dialog at rest, so no click lands on one still sliding in.
+  use: {
+    baseURL: uiUrl,
+    colorScheme: 'dark',
+    reducedMotion: 'reduce',
+    trace: 'retain-on-failure',
+  },
   // WebKit, because the shipped app renders in WKWebView.
   projects: [{ name: 'webkit', use: { ...devices['Desktop Safari'] } }],
   webServer: [

@@ -40,6 +40,8 @@ describe('openWebLink in a browser', () => {
     renderWithTheme(<LinkConfirmHost />);
     const done = openWebLink('https://ok.example/a');
     await screen.findByText('Open ok.example in your browser?');
+    // getByRole throws unless a button is named Close: an unnamed close button fails the e2e accessibility scan.
+    screen.getByRole('button', { name: 'Close' });
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     await done;
     expect(open).not.toHaveBeenCalled();

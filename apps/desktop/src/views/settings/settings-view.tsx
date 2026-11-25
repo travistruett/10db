@@ -1,5 +1,6 @@
 import { Stack } from '@mantine/core';
 import { useParams } from '@tanstack/react-router';
+import { CONTENT_WIDTH_PX, ContentWidth } from '../../shell/content-width';
 import { Panel } from '../../shell/panel';
 import { useSelectedProject } from '../../shell/selected-project';
 import { SettingsNav } from './settings-nav';
@@ -22,7 +23,7 @@ export function SettingsView() {
       </Panel>
       {/* The page fills the content area, so its save bar sits at the bottom edge and content that loads
           in above it never moves the bar under a pointer. */}
-      <Stack ref={ref} flex="1 0 auto">
+      <Stack ref={ref} flex="1 0 auto" w="100%" maw={CONTENT_WIDTH_PX[ContentWidth.Page]} mx="auto">
         {/* A page's edits are its own: another page starts with none. A page is keyed by its project, so
             its fields leave the bar when the project changes. */}
         <SettingsDrafts key={key}>

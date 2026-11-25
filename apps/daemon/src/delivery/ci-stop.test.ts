@@ -88,6 +88,25 @@ const hasStopKey = (root: BatchDto): boolean =>
 const alphaStatus = (): string | undefined =>
   listTasks(h.store.db, h.project.id).find((t) => t.title === 'Alpha')?.boardStatus;
 
+/**
+ * The head's failure that `step` reads (`first`) is run again once, with no fix and no card; the
+ * next round reads the rerun's own failure, `again`.
+ */
+async function failsAfterRerun(
+  w: PrWatch,
+  prUrl: string,
+  step: () => Promise<void>,
+  first: RequiredCheckJobDto,
+  again: RequiredCheckJobDto,
+): Promise<void> {
+  const before = h.gh.reruns.length;
+  fails(prUrl, first);
+  await step();
+  expect(h.gh.reruns.length).toBe(before + 1);
+  fails(prUrl, again);
+  await round(w);
+}
+
 /** The fix ends having changed nothing, as a session that found nothing to fix does. */
 async function finishFix(fix: BatchDto): Promise<void> {
   const ws = h.only(listWorkstreams(h.store.db, { batchId: fix.id }));
@@ -111,20 +130,20 @@ describe('stopping after fixes that did not help', () => {
   it('stops after two fixes: Blocked, and one card naming the job, its link and a Retry', async () => {
     const { batch: root } = await shipped(h);
     const prUrl = root.prUrl ?? '';
-    fails(prUrl, job('build'));
-    h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
+    for (const id of ['77', '78']) h.gh.setJobLog(id, { kind: 'ready', log: 'boom\n' });
     const w = watcher();
-    await begin(w);
+    await failsAfterRerun(w, prUrl, () => begin(w), job('build', '76'), job('build'));
     await finishFix(h.only(fixBatches(root)));
     pushedHead(root, 'one.txt');
-    await round(w);
+    // Each new head is run again once too.
+    await failsAfterRerun(w, prUrl, () => round(w), job('build'), job('build', '78'));
     expect(fixBatches(root)).toHaveLength(2);
     await finishFix(fixBatches(root).find((b) => b.state === 'OPEN') ?? root);
     pushedHead(root, 'two.txt');
     expect(getBatch(h.store.db, root.id).ciStopped).toBeNull();
     expect(stopCards()).toEqual([]);
 
-    await round(w);
+    await failsAfterRerun(w, prUrl, () => round(w), job('build', '78'), job('build'));
 
     expect(fixBatches(root)).toHaveLength(2);
     expect(getBatch(h.store.db, root.id).ciStopped).toBe('limit');
@@ -140,10 +159,9 @@ describe('stopping after fixes that did not help', () => {
 
   it('stops when a fix changed nothing, and starts no more however many rounds pass', async () => {
     const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
     const w = watcher();
-    await begin(w);
+    await failsAfterRerun(w, root.prUrl ?? '', () => begin(w), job('build', '76'), job('build'));
     await finishFix(h.only(fixBatches(root)));
 
     await round(w);
@@ -217,10 +235,9 @@ describe('clearing a stop', () => {
 describe('a pull request that merges or closes while a fix runs', () => {
   async function fixing(): Promise<{ root: BatchDto; fix: BatchDto; w: PrWatch }> {
     const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
     const w = watcher();
-    await begin(w);
+    await failsAfterRerun(w, root.prUrl ?? '', () => begin(w), job('build', '76'), job('build'));
     const fix = h.only(fixBatches(root));
     const ws = h.only(listWorkstreams(h.store.db, { batchId: fix.id }));
     h.running.add(ws.id);

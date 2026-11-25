@@ -154,12 +154,15 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await expect(page.getByText(/searched/i).first()).toBeVisible();
   await scan(page, [1280], 'the conversation');
 
-  // A link asks first, in the builder's words, and Cancel leaves the page alone.
+  // A link asks first, in the builder's words, and Cancel leaves the page alone. The dialog's enter animation
+  // moves Cancel for its first frames, so Cancel is clicked once the dialog is fully opaque. Its title blanks as
+  // it closes, so the wait is for the dialog to unmount, not for a locator by its name to stop matching.
   await reply.getByRole('link', { name: 'the retry notes' }).click();
   const confirm = page.getByRole('dialog', { name: 'Open example.com in your browser?' });
   await expect(confirm).toBeVisible();
+  await expect(confirm).toHaveCSS('opacity', '1');
   await confirm.getByRole('button', { name: 'Cancel' }).click();
-  await expect(confirm).toBeHidden();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 
   // The builder asks for the tasks in words: the task row, its start row, then the judge's card for the builder's own task.
   await sendLine(page, 'File the work we agreed on as tasks on the Board.');
@@ -618,8 +621,9 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   }, projectId);
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  // ⌘⇧N from the Board opens a new session with its Plan open in the rail's project, then the title's switcher opens a second
-  // New Session, whose Plan toggle opens it before the first message: each has the Plan panel open and empty.
+  // ⌘⇧N from the Board opens a new session with its Plan open in the rail's project, then the title's switcher's
+  // New Session opens that same fresh tab with the Plan off, and its Plan toggle opens it before the first message:
+  // each has the Plan panel open and empty.
   await page.goto('/board');
   await expect(page.getByRole('button', { name: /^Project: sessions-plan/ })).toBeVisible();
   await page.keyboard.press('Meta+Shift+n');
@@ -812,6 +816,9 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
       ).json(),
     );
   await panel.getByRole('button', { name: 'Accept', exact: true }).click();
+  await expect(
+    dialog.getByRole('status').filter({ hasText: /start now|wait for a lane/ }),
+  ).toBeVisible();
   await dialog.getByRole('button', { name: 'Accept', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(goalRow.getByText('On the Board · 2 ready', { exact: true })).toBeVisible();
@@ -914,13 +921,12 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
     await page.getByRole('menuitem', { name: 'Archive' }).click();
     await expect(page).not.toHaveURL(was);
   };
+  // Archive may land on the project's fresh tab, which ⌘T opens again, so the wait is for a fresh tab.
   const newTab = async (): Promise<void> => {
-    const was = page.url();
     await expect(async () => {
       await page.keyboard.press('Meta+t');
-      await expect(page).not.toHaveURL(was, { timeout: 2000 });
+      await expect(page).toHaveURL(/\/sessions\?fresh=/, { timeout: 2000 });
     }).toPass();
-    await expect(page).toHaveURL(/\/sessions\?fresh=/);
   };
   const chatId = (): string => new URL(page.url()).searchParams.get('chat') ?? '';
   const plan = async (): Promise<string | null | undefined> =>

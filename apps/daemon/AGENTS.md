@@ -59,6 +59,10 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
 - `src/api/` is typechecked by the desktop app too (it imports `AppType`). Code there must not import
   `node:*` modules or `@10db/db`; receive services through the `ApiServices` interface (passed in `ApiDeps`).
 - The package entry (`src/index.ts`) exports types only.
+- `pnpm --filter @10db/daemon seed:factory "$PWD/.dev/window-data/10db.sqlite"` (from the checkout root, daemon
+  stopped; `.dev/data` for `pnpm dev`) seeds three demo projects with goals and tasks in every Factory state
+  (`scripts/seed-factory-demo.ts`). Their account is paused with no end, so nothing runs; startup recovery
+  re-queues the runs seeded as running.
 - Listen on `127.0.0.1` only.
 - Browser origins: only the Tauri webview's are built in. `TENDB_DEV_UI_ORIGIN` opts one loopback http origin in
   (`decisions/2026-10-29-dev-ui-over-the-factory.md`); a launcher of a daemon a browser UI talks to sets it.

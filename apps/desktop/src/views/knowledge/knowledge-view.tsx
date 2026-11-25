@@ -4,7 +4,17 @@ import {
   type PrincipleId,
   type ProjectViewDto,
 } from '@10db/contracts';
-import { Badge, Button, Group, Paper, Stack, Tabs, Text, VisuallyHidden } from '@mantine/core';
+import {
+  Badge,
+  Button,
+  Container,
+  Group,
+  Paper,
+  Stack,
+  Tabs,
+  Text,
+  VisuallyHidden,
+} from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
@@ -32,6 +42,7 @@ import {
 } from './record-actions';
 import { itemOf, ProvenanceDrawer } from './provenance-drawer';
 import { scopeAreas } from './knowledge-areas';
+import { ContentWidth } from '../../shell/content-width';
 
 /** Long enough to skip a request per keystroke, short enough to feel live. */
 const SEARCH_DEBOUNCE_MS = 250;
@@ -304,13 +315,19 @@ export function KnowledgeView() {
   const { project } = useSelectedProject();
   const { principle } = useSearch({ from: '/knowledge' });
   return (
-    <Stack>
-      {project ? (
-        // Keyed by project so filters, tab and an open provenance never carry into another one.
-        <ProjectKnowledge key={project.id} project={project} linkedPrinciple={principle ?? null} />
-      ) : (
-        <KnowledgeHeader />
-      )}
-    </Stack>
+    <Container size={ContentWidth.Page} w="100%">
+      <Stack>
+        {project ? (
+          // Keyed by project so filters, tab and an open provenance never carry into another one.
+          <ProjectKnowledge
+            key={project.id}
+            project={project}
+            linkedPrinciple={principle ?? null}
+          />
+        ) : (
+          <KnowledgeHeader />
+        )}
+      </Stack>
+    </Container>
   );
 }

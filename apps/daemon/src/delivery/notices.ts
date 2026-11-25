@@ -70,6 +70,12 @@ export const NOTICE_KEY = {
    * ends in `:` and the head; its record says since when and which checks, so a restart keeps the wait.
    */
   checksWaitingOnBase: 'checks-waiting-on-base',
+  /**
+   * A required check failed on the pull request's head, the base passing it, and 10db ran it again
+   * once before fixing it. The key ends in `:` and the head; its record says which runs and jobs were
+   * run and how the rerun came out, so a restart never runs the head's checks a second time.
+   */
+  checksFailedRerun: 'checks-failed-rerun',
   /** A task started over from a failed attempt whose commits are still on the batch's branch. */
   supersededAttempt: 'superseded-attempt',
   /** The install before a gate left the copy broken, and 10db removed node_modules and installed again. */
@@ -824,6 +830,100 @@ export const noRunnerNotices = {
       tone: state === 'ran' ? 'info' : 'warning',
       line,
       body: `GitHub cancelled ${one ? 'a job' : 'jobs'} that the base branch requires because no hosted runner picked ${it} up: a runner shortage, not a test failure, and nothing in the code is wrong. ${tail} 10db reruns a job like this up to ${String(limit)} times for each head of the pull request. This notice goes when the pull request merges, closes or gets a new commit.`,
+      record: JSON.stringify(record),
+    };
+  },
+};
+
+/** The key of the failed-check rerun notice for one pull request head. */
+export const failedRerunKey = (head: string): string => `${NOTICE_KEY.checksFailedRerun}:${head}`;
+
+/** The head a stored notice key records a failed-check rerun for; null for any other key. */
+export function failedRerunHead(key: string): string | null {
+  const prefix = `${NOTICE_KEY.checksFailedRerun}:`;
+  return key.startsWith(prefix) ? key.slice(prefix.length) : null;
+}
+
+/**
+ * How a failed-check rerun on one head came out. `rerun`: GitHub took it and it is still to settle.
+ * `failed`: a check failed again, so the failure is the change's. `flaked`: the checks passed on the
+ * rerun. `refused`: GitHub would not run them again.
+ */
+export const FailedRerunOutcome = {
+  Rerun: 'rerun',
+  Failed: 'failed',
+  Flaked: 'flaked',
+  Refused: 'refused',
+} as const;
+export type FailedRerunOutcome = (typeof FailedRerunOutcome)[keyof typeof FailedRerunOutcome];
+
+/** What 10db ran again of a head's failing required checks, and how it came out. */
+export interface FailedRerunRecord {
+  /** The Actions runs GitHub took a rerun of. */
+  readonly runs: readonly string[];
+  /** The failing jobs (by job id) at the rerun: GitHub lists them for a while after it, and a new id is the rerun's. */
+  readonly jobs: readonly string[];
+  /** The names of the checks that were run again. */
+  readonly names: readonly string[];
+  /** Epoch milliseconds of the rerun. */
+  readonly at: number;
+  readonly outcome: FailedRerunOutcome;
+}
+
+const FailedRerunRecordSchema = z.object({
+  runs: z.array(z.string()),
+  jobs: z.array(z.string()),
+  names: z.array(z.string()),
+  at: z.number(),
+  outcome: z.enum([
+    FailedRerunOutcome.Rerun,
+    FailedRerunOutcome.Failed,
+    FailedRerunOutcome.Flaked,
+    FailedRerunOutcome.Refused,
+  ]),
+});
+
+/** Reads a stored failed-check rerun notice's record; null when it has none or cannot be read. */
+export function failedRerunRecord(notice: Notice): FailedRerunRecord | null {
+  if (notice.record === undefined) return null;
+  try {
+    const parsed = FailedRerunRecordSchema.safeParse(JSON.parse(notice.record));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What delivery shows on a shipped batch's tasks when 10db ran a failed required check again once. */
+export const failedRerunNotices = {
+  /** `detail`: GitHub's words, for a rerun it refused. */
+  of: (head: string, record: FailedRerunRecord, detail = ''): Notice => {
+    const names = record.names.map((n) => `"${n}"`).join(', ');
+    const one = record.names.length === 1;
+    const what = `Required ${one ? 'check' : 'checks'} ${names}`;
+    const it = one ? 'it' : 'them';
+    const short = head.slice(0, 7);
+    const line = {
+      [FailedRerunOutcome.Rerun]: `${what} failed; 10db ran ${it} again once before fixing ${it}`,
+      [FailedRerunOutcome.Failed]: `${what} failed again on ${one ? 'its' : 'their'} rerun, so ${one ? 'it counts' : 'they count'} as the change's`,
+      [FailedRerunOutcome.Flaked]: `${what} failed on ${short}, then passed when 10db ran ${it} again: a flaky check`,
+      [FailedRerunOutcome.Refused]: `${what} failed and 10db could not run ${it} again: ${detail.slice(0, 300)}`,
+    }[record.outcome];
+    const tail = {
+      [FailedRerunOutcome.Rerun]: `10db ran ${it} again once before starting a CI fix or asking you: a check that passes on the rerun was flaky, and one that fails again is the change's.`,
+      [FailedRerunOutcome.Failed]: `${one ? 'It' : 'They'} failed again, so the failure is the change's, and 10db fixes it as it would any failing check.`,
+      [FailedRerunOutcome.Flaked]: `${one ? 'It' : 'They'} passed when 10db ran ${it} again, so the pull request went on to merge. A "Flaky check" card names ${it}.`,
+      [FailedRerunOutcome.Refused]: `GitHub refused the rerun, so 10db treats the failure as the change's.`,
+    }[record.outcome];
+    return {
+      key: failedRerunKey(head),
+      tone:
+        record.outcome === FailedRerunOutcome.Flaked ||
+        record.outcome === FailedRerunOutcome.Refused
+          ? 'warning'
+          : 'info',
+      line,
+      body: `${what} failed on the pull request's head (${head}), and the base branch does not fail ${it}. ${tail} 10db runs a head's failed checks again only once. This notice goes when the pull request gets a new commit.`,
       record: JSON.stringify(record),
     };
   },
