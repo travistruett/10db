@@ -22,5 +22,10 @@
   quoted data, never as the brief's words (`brief.ts`).
 - `brief.ts` builds the build brief's section (the watchpoints that overlap the task's areas, all when it has none, and the
   instruction to give `watchpointNotes` per covered file) and the Review and QA first round's section.
-- The pull request's "For you" section is built from the PR's runs' newest readings (`delivery/pr-watchpoints.ts`,
-  `delivery/pr-text.ts`, `ship.ts`); `GET /workstreams/:id/watchpoint-hits` is `delivery/watchpoint-hits.ts`.
+- The pull request's "For you" section (`delivery/pr-text.ts` `forYouSection`, `prBody`'s `watchpoints` input) is built
+  in `ship.ts` from the batch members' newest readings (`delivery/pr-watchpoints.ts`), after "What and why", between
+  `<!-- 10db:for-you -->` and `<!-- /10db:for-you -->`. A later ship into the same open pull request replaces only
+  the text between the markers (`addWatchpointsTo`, `bodyWithForYou`) through `prEditBody`; a body whose markers were
+  removed is left alone. `GET /workstreams/:id/watchpoint-hits` is `delivery/watchpoint-hits.ts` (`canOpenDiff` is
+  whether `workstreamChanges` could still read the checkout). `diffOfRanges` takes `paths.only` to read only some
+  files' text.
