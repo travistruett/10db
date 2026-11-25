@@ -8,20 +8,13 @@ import { CONVERSATION_WIDTH } from '../../conversation/conversation-layout';
 import { composerPhase } from '../../conversation/composer-phase';
 import { applyDraftChange, hasContent, type DraftChange } from '../../conversation/drafts';
 import { ModelMenu } from '../../conversation/model-menu';
-import {
-  useChatModels,
-  useCreateChat,
-  useRecentChats,
-  useSessionStarts,
-} from '../../daemon/chat-queries';
+import { useChatModels, useCreateChat } from '../../daemon/chat-queries';
 import { useUploadShapeFile } from '../../daemon/shape-queries';
 import { dropNotes } from './plan/drop-notes';
 import { PlanSide } from './plan/plan-side';
 import { planChoice, usePlanOpen } from './plan/plan-choice';
 import type { FreshTab as FreshTabState } from './fresh-tabs';
-import { RecentSessions } from './recent-sessions';
 import { draftKey, sessionDrafts, useSessionDraft, type SendRequest } from './session-drafts';
-import { StartFrom } from './start-from';
 
 // Sessions UI spec §6.2: a tab that is not yet a chat. The chat is made at the first `@` or
 // the first send, whichever comes first, and the tab is then replaced by it. A send that fails after the
@@ -43,7 +36,6 @@ export interface FreshTabProps {
   readonly onModel: (model: string | null, effort: Effort | null) => void;
   /** The chat exists: the screen replaces this tab with it and, when `send` is set, sends the draft there. */
   readonly onChatMade: (chat: ChatDto, send: SendRequest | null) => void;
-  readonly onOpenRecent: (chat: ChatDto) => void;
 }
 
 export function FreshTab({
@@ -53,7 +45,6 @@ export function FreshTab({
   onProject,
   onModel,
   onChatMade,
-  onOpenRecent,
 }: FreshTabProps) {
   const project = projects.find((p) => p.id === tab.projectId);
   const name = project?.name ?? 'this project';
@@ -62,10 +53,6 @@ export function FreshTab({
   const narrow = width > 0 && width < NARROW_PX;
   const [draft, setDraft] = useSessionDraft(draftKey.fresh(tab.id));
   const models = useChatModels(tab.projectId);
-  // An agent that can't search the web (`capabilities.webSearch`) is never said to.
-  const web = models.data?.webSearch === true;
-  const starts = useSessionStarts(tab.projectId);
-  const recent = useRecentChats(tab.projectId);
   const create = useCreateChat();
   const upload = useUploadShapeFile();
   const [createError, setCreateError] = useState<string | null>(null);
@@ -164,14 +151,12 @@ export function FreshTab({
   const conversation = (
     <Box style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto' }}>
       <Box maw={CONVERSATION_WIDTH} mx="auto" px="md" pt="12vh" pb="xl">
-        <Text size="sm" c="dimmed" mb="md">
-          {tab.plan
-            ? `Plan in ${name}: talk it through, or drop a document. The plan fills in beside the conversation.`
-            : web
-              ? `A chat reads ${name}, runs commands and searches the web.`
-              : `A chat reads ${name} and runs commands.`}
-        </Text>
-        <Group gap="sm" mb={4} wrap="wrap">
+        {tab.plan ? (
+          <Text size="sm" c="dimmed" mb="md">
+            {`Plan in ${name}: talk it through, or drop a document. The plan fills in beside the conversation.`}
+          </Text>
+        ) : null}
+        <Group gap="sm" mb="sm" wrap="wrap">
           <Select
             aria-label="Project"
             placeholder="Find a project"
@@ -188,11 +173,6 @@ export function FreshTab({
             }}
           />
         </Group>
-        <Text size="xs" c="dimmed" mb="sm">
-          {web
-            ? `Uses ${name}'s account. Reads the code, runs commands and searches the web. Asks before anything that crosses a limit.`
-            : `Uses ${name}'s account. Reads the code and runs commands. Asks before anything that crosses a limit.`}
-        </Text>
         <Box mx="calc(var(--mantine-spacing-md) * -1)">
           <Composer
             draft={draft}
@@ -252,22 +232,6 @@ export function FreshTab({
               </Button>
             </Group>
           </Alert>
-        )}
-        {tab.plan ? null : (
-          <>
-            <Box mt="md">
-              <StartFrom
-                starts={starts}
-                onPick={(text) => {
-                  setDraft({ ...draft, text });
-                  input.current?.focus();
-                }}
-              />
-            </Box>
-            <Box mt="lg">
-              <RecentSessions chats={recent} onOpen={onOpenRecent} />
-            </Box>
-          </>
         )}
       </Box>
     </Box>

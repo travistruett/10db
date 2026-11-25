@@ -12,6 +12,7 @@ import {
   type VariantColorsResolver,
 } from '@mantine/core';
 import segmented from './segmented-control.module.css';
+import tooltip from './tooltip.module.css';
 import {
   SelenizedDark,
   SelenizedLight,
@@ -130,18 +131,7 @@ export const theme = createTheme({
     MultiSelect: MultiSelect.extend({ defaultProps: { checkIconPosition: 'right' } }),
     Switch: Switch.extend({ defaultProps: { withThumbIndicator: false } }),
     SegmentedControl: SegmentedControl.extend({ classNames: segmented }),
-    // A tooltip is the bright ink on the base tone in both schemes, small and tight.
-    Tooltip: Tooltip.extend({
-      styles: {
-        tooltip: {
-          background: 'var(--mantine-color-bright)',
-          color: 'var(--mantine-color-body)',
-          fontSize: 12,
-          padding: '3px 8px',
-          borderRadius: 6,
-        },
-      },
-    }),
+    Tooltip: Tooltip.extend({ classNames: tooltip }),
     NavLink: NavLink.extend({
       styles: (_theme, props) => ({
         // Dense rows, as a sidebar of a dozen links reads at a glance.

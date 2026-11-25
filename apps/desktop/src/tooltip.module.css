@@ -1,0 +1,15 @@
+/* Every tooltip: the raised tone of the palette with bright ink and the hairline border, so it reads as part
+   of the app in both schemes rather than an inverted chip. The arrow takes the same fill and border. */
+.tooltip.tooltip {
+  --tooltip-bg: light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-4));
+  --tooltip-color: var(--mantine-color-bright);
+  border: 1px solid var(--mantine-color-default-border);
+  box-shadow: var(--mantine-shadow-sm);
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+.arrow.arrow {
+  border: 1px solid var(--mantine-color-default-border);
+}

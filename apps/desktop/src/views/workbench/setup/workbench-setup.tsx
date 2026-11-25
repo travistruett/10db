@@ -1,8 +1,10 @@
 import { AreaRole, setupAreasProblem, type ProjectDto, type SettingField } from '@10db/contracts';
+import { EmptyState } from '../../../shell/empty-state';
 import { TitleRow } from '../../../shell/title-row';
 import { Anchor, Button, Checkbox, Group, Loader, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { IconMap2, IconTools } from '@tabler/icons-react';
 import { useState } from 'react';
 import { setupKeys, useWorkbenchSetup } from '../../../daemon/pass-queries';
 import { usePatchProject } from '../../../daemon/queries';
@@ -40,6 +42,7 @@ export interface WorkbenchSetupProps {
  */
 export function WorkbenchSetup({ project, onCancel, onApplied }: WorkbenchSetupProps) {
   const read = useWorkbenchSetup(project.id);
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const apply = usePatchProject(project.id);
   // The builder's ticks on the new pages, over the default that a page left out before starts unticked.
@@ -130,13 +133,25 @@ export function WorkbenchSetup({ project, onCancel, onApplied }: WorkbenchSetupP
   };
   if (!offered && setup.settings.length === 0)
     return (
-      <Stack gap="md" maw={720}>
-        {heading}
-        <Text size="sm">Nothing to set up.</Text>
-        <Group gap="md">
-          <SettingsLink />
-          {back}
-        </Group>
+      <Stack gap="md">
+        {onCancel === undefined ? <TitleRow title="UI Workbench" /> : null}
+        <EmptyState
+          icon={IconTools}
+          title="No pages found"
+          action={{
+            label: 'Open Areas and Hazards',
+            icon: IconMap2,
+            onClick: () => {
+              void navigate({
+                to: '/settings/$section',
+                params: { section: SettingsSectionKey.Areas },
+              });
+            },
+          }}
+        >
+          {`10db read ${project.name} and found no routes to work through. A page is an area with a route.`}
+        </EmptyState>
+        {back === null ? null : <Group justify="flex-end">{back}</Group>}
       </Stack>
     );
 
