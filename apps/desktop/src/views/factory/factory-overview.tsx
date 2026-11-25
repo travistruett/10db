@@ -1,10 +1,13 @@
 import {
+  InboxKind,
   InboxState,
   passHoldsTasks,
+  WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamState,
   type GoalId,
   type ProjectId,
   type ProjectViewDto,
+  type TaskId,
   type WorkstreamDto,
 } from '@10db/contracts';
 import { Alert, Container, Stack } from '@mantine/core';
@@ -12,6 +15,7 @@ import { ContentWidth } from '../../shell/content-width';
 import { IconBuildingFactory2, IconPlus } from '@tabler/icons-react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
+import { useState } from 'react';
 import { useAdmission } from '../../daemon/admission-queries';
 import { goalsQueryOptions } from '../../daemon/goal-queries';
 import { livePassesOptions } from '../../daemon/pass-queries';
@@ -26,6 +30,8 @@ import { EmptyState } from '../../shell/empty-state';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useNow } from '../../shell/relative';
 import { useSelectedProject } from '../../shell/selected-project';
+import { CancelRunModal } from '../board/cancel-run-modal';
+import { ProjectTaskDrawer } from '../board/project-task-drawer';
 import { canCloseRun, canRetryRun } from '../board/task-state';
 import { useNewPlan } from '../sessions/start-fresh-tab';
 import { pageStatus } from '../workbench/page-status';
@@ -46,15 +52,21 @@ export function FactoryOverview({
   projects,
   filter,
   linkedGoalId,
+  openTaskId,
 }: {
   readonly projects: readonly ProjectViewDto[];
   readonly filter: ProjectId | null;
   readonly linkedGoalId: GoalId | undefined;
+  /** The task whose drawer is open over the page, from the link's `task`. */
+  readonly openTaskId: TaskId | undefined;
 }) {
   const now = useNow();
   const { client } = useDaemon();
   const { select } = useSelectedProject();
   const navigate = useNavigate();
+  const here = useNavigate({ from: '/factory' });
+  // The run the builder is being asked to confirm cancelling, from the open task's drawer.
+  const [cancelling, setCancelling] = useState<WorkstreamDto | null>(null);
   const newPlan = useNewPlan();
   const shown = filter === null ? projects : projects.filter((p) => p.id === filter);
   const runs = useWorkstreams({ active: false });
@@ -116,10 +128,23 @@ export function FactoryOverview({
   // Close, as the task drawer offers it: the daemon closes a failed run's task and refuses any other.
   const canClose = (ws: WorkstreamDto): boolean =>
     canCloseRun(ws, ws.batchId === null ? undefined : batches.get(ws.batchId));
+  // A task opens in its drawer over Factory; the link keeps it, so Back and a shared URL work.
   const open = (ws: WorkstreamDto): void => {
-    select(ws.projectId);
-    void navigate({ to: '/board', search: { task: ws.taskId } });
+    void here({ search: (prev) => ({ ...prev, task: ws.taskId }) });
   };
+  const closeTask = (): void => {
+    void here({
+      search: (prev) => ({
+        ...(prev.goal === undefined ? {} : { goal: prev.goal }),
+        ...(prev.project === undefined ? {} : { project: prev.project }),
+        ...(prev.view === undefined ? {} : { view: prev.view }),
+      }),
+      replace: true,
+    });
+  };
+  const openTask = openTaskId === undefined ? undefined : tasks.get(openTaskId);
+  const openProject =
+    openTask === undefined ? undefined : projects.find((p) => p.id === openTask.projectId);
   const openPass = (projectId: ProjectId): void => {
     select(projectId);
     void navigate({ to: '/workbench' });
@@ -162,9 +187,21 @@ export function FactoryOverview({
     rows.filter((r) => r.group === group).map((r) => r.run);
   const needsYou = of(LiveGroup.NeedsYou);
   const failed = of(LiveGroup.Failed);
-  const causes = failureCauses(failed);
   const waiting = of(LiveGroup.Waiting);
   const openCards = inbox.filter((card) => card.state === InboxState.Open);
+  // A failed run whose task's failed card is open shows once, as that card's row, never also in a cause.
+  const failedCardOf = (ws: WorkstreamDto) =>
+    openCards.find(
+      (card) =>
+        card.kind === InboxKind.Flag &&
+        card.title.startsWith(WORKSTREAM_FAILED_TITLE_PREFIX) &&
+        card.targets.some((t) => t.workstreamId === ws.id),
+    );
+  const carded = failed.flatMap((run) => {
+    const card = failedCardOf(run);
+    return card === undefined ? [] : [{ run, card }];
+  });
+  const causes = failureCauses(failed.filter((run) => failedCardOf(run) === undefined));
   // The card the run waits on names it: its next action's, else the first open card that targets it.
   const cardFor = (ws: WorkstreamDto) => {
     const action = ws.nextAction;
@@ -180,7 +217,7 @@ export function FactoryOverview({
           figures={{
             needsYou: needsYou.length + waitingPasses.length,
             failed: failed.length,
-            causes: causes.length,
+            causes: carded.length + causes.length,
             // Across every project the figure is the Mac's lanes in use, out of its cap; for one project, its runs.
             running:
               filter === null && admission !== undefined
@@ -196,6 +233,7 @@ export function FactoryOverview({
           waiting={needsYou.map((run) => ({ run, card: cardFor(run) }))}
           passes={waitingPasses}
           causes={causes}
+          carded={carded}
           others={waiting.filter(waitsOnSomeoneElse).map((run) => ({ run, card: cardFor(run) }))}
           now={now}
           nameOf={nameOf}
@@ -227,6 +265,28 @@ export function FactoryOverview({
           onOpenPass={openPass}
         />
       </Stack>
+      {openTask && openProject ? (
+        <ProjectTaskDrawer
+          key={openTask.id}
+          project={openProject}
+          taskId={openTask.id}
+          onCancelRun={setCancelling}
+          onOpenWorkbench={() => {
+            openPass(openProject.id);
+          }}
+          onOpenBoard={() => {
+            select(openProject.id);
+            void navigate({ to: '/board', search: { task: openTask.id } });
+          }}
+          onClose={closeTask}
+        />
+      ) : null}
+      <CancelRunModal
+        run={cancelling}
+        onClose={() => {
+          setCancelling(null);
+        }}
+      />
     </Container>
   );
 }

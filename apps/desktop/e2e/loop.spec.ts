@@ -226,26 +226,6 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await sheet.getByRole('button', { name: 'Start 1 task' }).click();
   await expect(sheet).toBeHidden();
 
-  // A Board task nobody watches is never asked anything: the agent's question is answered at once,
-  // and the run's Inbox item lists it once the run is done.
-  await open(page, 'Inbox');
-  // The fake's first probe recorded the default account's identity and said so in a card. That card
-  // offers Record again, so it is a question the daemon acts on; it sits above the run's item and is
-  // the open row, so the item's row is opened by selecting it.
-  await expect(page.getByText('Claude plan runs as builder@example.com').first()).toBeVisible();
-  const away = page.getByRole('option', {
-    name: new RegExp(`Skipped while you were away: ${TASK}`),
-  });
-  await away.click();
-  // The row's own second line quotes the card's first words, so the card is read in the content beside it.
-  const content = page.getByRole('main');
-  await expect(content.getByText('Questions It Would Have Asked:')).toBeVisible();
-  await expect(content.getByText(QUESTION)).toBeVisible();
-  await expectAccessible(page, 'inbox, skipped while away, dark');
-  await page.getByRole('radio', { name: /Dismiss/ }).check();
-  await page.getByRole('button', { name: 'Send Answer' }).click();
-  await expect(page.getByText(QUESTION)).toBeHidden();
-
   // The work went on, committed, passed 10db's gate and is DONE.
   await open(page, 'Board');
   await expect(
@@ -274,17 +254,23 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(project.getByRole('group', { name: /goals$/ })).toHaveCount(0);
   await project.getByRole('button', { name: /merged today/ }).click();
   await expectAccessible(page, 'factory, projects, dark');
-  // A line opens its task on the Board.
+  // A line opens its task's drawer over Factory, and the link keeps it.
   await project
     .getByRole('button', { name: new RegExp(TASK) })
     .first()
     .click();
   const taskDrawer = page.getByRole('dialog', { name: 'Task' });
   await expect(taskDrawer).toBeVisible();
+  await expect(page).toHaveURL(/\/factory\?.*task=/);
   // What the build wrote last is on the card under its own phase, apart from the review's verdict.
   const report = taskDrawer.getByTestId('task-report');
   await expect(report.getByText('Implementation Report')).toBeVisible();
   await expect(report.getByText('Wrote src/greeting/hello.txt and committed it.')).toBeVisible();
+  // A Board task nobody watches is never asked anything: the agent's question was answered at once. The
+  // task is done, so the drawer lists it and the Inbox raised no card for it.
+  await expect(
+    taskDrawer.getByRole('list', { name: 'Questions It Would Have Asked' }).getByText(QUESTION),
+  ).toBeVisible();
   await taskDrawer.getByRole('tab', { name: /Reviews/ }).click();
   await expect(taskDrawer.getByTestId('review-phase').first()).toHaveText('Review');
 

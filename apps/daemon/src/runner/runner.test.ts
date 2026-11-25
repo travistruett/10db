@@ -49,6 +49,7 @@ import {
   getWorkstream,
   getWorkstreamRow,
   insertBatch,
+  insertWorkstream,
   insertInboxItem,
   insertKind,
   insertPrinciple,
@@ -3296,6 +3297,60 @@ describe('a step that ends with changes in its claims', () => {
     expect(ws(workstream.id).state).toBe('DONE');
     expect(repoGit('rev-parse', 'HEAD')).toBe(builders);
     expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[own]]);
+  });
+
+  // Value: protects=a task's failures show as one Inbox card that speaks for its newest run;
+  // fails_when=each failed run of a task raises a card of its own, or a later run's success leaves it open;
+  // why_new=escaped bug: one Ampsio task showed three "Workstream failed" cards, one per run;
+  // no_claim=the card's answers act correctly on the newest run (batch-card tests cover those)
+  it("folds every failed run of a task into the task's one failed card, which closes when a later run finishes", async () => {
+    const blocked = [
+      // Skipped, sent out to the network, so the step can say it was blocked.
+      { do: 'tool' as const, toolName: 'Bash', input: { command: 'curl -s https://example.com' } },
+      {
+        do: 'mcp' as const,
+        tool: 'report_blocked',
+        args: { reason: 'The checks could not start.' },
+      },
+      turn,
+    ];
+    // Each run's first session reads the book's first script, so the book changes before the run that works.
+    const book: FakeScriptBook = { Alpha: [blocked] };
+    engine = await createTestEngine(book);
+    const failedCards = () =>
+      listInbox(engine.store.db, { states: ['OPEN'] }).filter((i) =>
+        i.title.startsWith('Workstream failed'),
+      );
+    const { task, workstream } = engine.addTask('Alpha');
+    // A run that a start left behind: a new workstream of the same task.
+    const later = () =>
+      engine.state.write((ctx) =>
+        insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      );
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('FAILED');
+    const second = later();
+    engine.launch(second.id);
+    await engine.runner.idle();
+    const third = later();
+    engine.launch(third.id);
+    await engine.runner.idle();
+    expect(ws(third.id).state).toBe('FAILED');
+
+    const [card, ...more] = failedCards();
+    expect(more).toEqual([]);
+    expect(card).toMatchObject({
+      title: 'Workstream failed: Alpha (3 runs)',
+      targets: [{ workstreamId: third.id, sessionId: null }],
+    });
+
+    book['Alpha'] = [[write('src/api/a.txt'), commit('op-fold-0001', ['src/api/a.txt']), turn]];
+    const fourth = later();
+    engine.launch(fourth.id);
+    await engine.runner.idle();
+    expect(ws(fourth.id).state).toBe('DONE');
+    expect(failedCards()).toEqual([]);
   });
 
   it('keeps its retry limit while the builder keeps adding files its sessions leave', async () => {

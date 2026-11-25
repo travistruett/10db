@@ -12,7 +12,7 @@ import {
   skipFollowUpOf,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
-import { raiseSkippedCard, SKIPPED_DETAIL, SkippedChoice } from '../src/delivery';
+import { raiseSkippedCard, runSkippedCalls, SKIPPED_DETAIL, SkippedChoice } from '../src/delivery';
 import { createGit } from '../src/git';
 import { subscribeLinearEvents } from '../src/linear';
 import { silentLogger } from '../src/log';
@@ -106,11 +106,8 @@ describe('Run these now', () => {
         source: 'broker',
       }),
     );
-    await raiseSkippedCard(
-      { state: engine.state, git: createGit(), log: silentLogger },
-      workstream.id,
-    );
-    engine.inbox.answer(openSkipped().id, { choice: SkippedChoice.RunTheseNow });
+    // The task is done, so Run These Now is the drawer's.
+    engine.state.write((ctx) => runSkippedCalls(ctx, workstream.id));
     const follow = followUpsOf(workstream.id);
     if (!follow) throw new Error('no follow-up');
     const lines = getTask(engine.store.db, follow.taskId).description.split('\n');

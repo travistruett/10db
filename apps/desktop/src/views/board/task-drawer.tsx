@@ -21,6 +21,7 @@ import {
   type WorkstreamDto,
 } from '@10db/contracts';
 import {
+  ActionIcon,
   Alert,
   Anchor,
   Badge,
@@ -84,7 +85,7 @@ import { placementOpen } from './placement';
 import { PlacementBadge } from './placement-badge';
 import { PlacementChoice } from './placement-choice';
 import { ExternalLink, PullRequestLink } from './pull-request-link';
-import { IconExternalLink, IconListCheck } from '@tabler/icons-react';
+import { IconExternalLink, IconLayoutKanban, IconListCheck } from '@tabler/icons-react';
 import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
 import { QuestionRoutesLine } from './question-routes-line';
@@ -153,6 +154,8 @@ export interface TaskDrawerProps {
   readonly offersPlanSession?: boolean;
   /** Opens the Workbench, from a task waiting for the pass that holds Your folder. */
   readonly onOpenWorkbench?: () => void;
+  /** Opens the task on the Board, for the drawer opened over another view. */
+  readonly onOpenBoard?: () => void;
   readonly onClose: () => void;
 }
 
@@ -175,6 +178,7 @@ export function TaskDrawer({
   areaNames,
   offersPlanSession,
   onOpenWorkbench,
+  onOpenBoard,
   onClose,
 }: TaskDrawerProps) {
   const patch = usePatchTask();
@@ -307,7 +311,23 @@ export function TaskDrawer({
       onClose={requestClose}
       label="Task"
       closeOnClickOutside
-      actions={<TaskLinks task={task} batch={batch} batches={batches} />}
+      actions={
+        <>
+          {onOpenBoard === undefined ? null : (
+            <Tooltip label="Open on Board" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                aria-label="Open on Board"
+                onClick={onOpenBoard}
+              >
+                <IconLayoutKanban size={18} stroke={1.5} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          <TaskLinks task={task} batch={batch} batches={batches} />
+        </>
+      }
     >
       <Stack gap="md">
         <StatusLine
@@ -429,7 +449,14 @@ export function TaskDrawer({
                 label={<SectionLabel>Implementation Report</SectionLabel>}
               />
               <TaskPictures taskId={task.id} />
-              <TaskSkips workstreamId={workstream?.id} />
+              <TaskSkips workstream={workstream} />
+              {/* An earlier run's skips stay here, each with its own Run These Now, once its card is gone. */}
+              {workstreams
+                .filter((w) => w.taskId === task.id && w.id !== workstream?.id)
+                .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+                .map((w) => (
+                  <TaskSkips key={w.id} workstream={w} earlier />
+                ))}
               <TaskSizeLine taskId={task.id} />
               <PlanContextDisclosure taskId={task.id} />
               {offersPlanSession === true ? <OpenPlanSession target={{ taskId: task.id }} /> : null}
