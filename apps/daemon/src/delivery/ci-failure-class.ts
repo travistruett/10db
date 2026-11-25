@@ -4,7 +4,8 @@ import type { RequiredCheckJobDto } from '@10db/contracts';
  * Where a failing required check comes from, which decides what is done about it:
  * - `Base`: the same check also fails on the pull request's base branch, so fixing the pull request
  *   cannot help; it waits, and the base's own failure is raised once.
- * - `Change`: the base passes it, so the pull request's change broke it and a fix starts.
+ * - `Change`: the base passes it, so the pull request's change broke it. Its Actions job is run again
+ *   once first (`ciRerunStep`): one that passes then was flaky, and one that fails again gets a fix.
  * A job GitHub cancelled for want of a runner is neither: `followNoRunner` reruns it before this runs.
  */
 export const CiFailureClass = { Base: 'base', Change: 'change' } as const;

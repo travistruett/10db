@@ -21,3 +21,4 @@
   goes through `post` or `postIn`.
 - `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`).
 - A check red on the base too waits, not fixes: `ci-failure-class.ts`, `decisions/2026-11-24-a-red-base-is-one-fix-not-a-fix-per-pull-request.md`.
+- A check the change failed is rerun once per head before a fix or the card (`ci-rerun.ts`, `followFailedRerun`; record `checks-failed-rerun:<head>`): `decisions/2026-11-25-a-failed-required-check-is-rerun-once-before-a-fix.md`.

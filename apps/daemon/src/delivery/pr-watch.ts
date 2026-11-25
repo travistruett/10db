@@ -40,6 +40,7 @@ import {
 import { prCardKey, prCards, detailOf } from './cards';
 import { classifyCiFailures } from './ci-failure-class';
 import { startCiFix } from './ci-fix';
+import { CHECKS_START_MS, ciRerunStep } from './ci-rerun';
 import { queuePassSettle, settleClosedPass } from './pass-settle';
 import { recordPassPullRequest, watchedAsPass } from './pass-watch';
 import { clearCiStop, endFixesOfEndedPullRequests, type FixEnds } from './ci-stop';
@@ -51,6 +52,10 @@ import {
   cancelledNotices,
   ciNotices,
   EMPTY_NO_RUNNER,
+  FailedRerunOutcome,
+  failedRerunHead,
+  failedRerunNotices,
+  failedRerunRecord,
   NOTICE_KEY,
   noRunnerNoticeHead,
   noRunnerNotices,
@@ -62,6 +67,7 @@ import {
   waitingOnBaseNotice,
   waitingOnBaseRecord,
   type CancelledWhy,
+  type FailedRerunRecord,
   type NoRunnerRecord,
   type RerunRuns,
   type WaitingOnBaseRecord,
@@ -70,11 +76,6 @@ import {
 /** How often the watch reads every followed pull request. */
 const PR_WATCH_INTERVAL_MS = 2 * 60_000;
 
-/**
- * How long a head may have no check, while GitHub waits for a required one, before 10db takes the
- * runs for lost. A workflow starts within seconds of a push, so this leaves room for a busy queue.
- */
-const CHECKS_START_MS = 10 * 60_000;
 /** GitHub's refusal of `gh run rerun` on a run still in progress ("This workflow is already running"). */
 const RUN_STILL_RUNNING = /already running/i;
 
@@ -1082,16 +1083,167 @@ export function createPrWatch(input: {
     }
     if (required.state !== 'passing' || known?.head !== read.headSha) return;
     failedOnHead.delete(root.id);
+    const head = read.headSha;
+    // A head whose failed checks 10db ran again is `followFailedRerun`'s: it says which flaked.
+    if (getBatch(ctx.state.db, root.id).notices.some((n) => failedRerunHead(n.key) === head))
+      return;
     ctx.state.write((write) => {
-      for (const name of known.names) {
-        const open = findOpenByFoldKey(write.tx, root.projectId, prCardKey.flakyCheck(name));
-        const seen = open?.detail?.['occurrences'];
-        const before = typeof seen === 'number' ? seen : 0;
-        const card = prCards.flakyCheck(name, before + 1);
-        if (open === undefined) raiseIn(write, root.projectId, card);
-        else rewriteIn(write, root.projectId, card);
-      }
+      for (const name of known.names) countFlaky(write, root, name, head);
     });
+  }
+
+  /** Raises the flaky-check card for `name`, or counts one more time on the open one, in the caller's write. */
+  function countFlaky(write: WriteContext, root: BatchDto, name: string, head: string): void {
+    const open = findOpenByFoldKey(write.tx, root.projectId, prCardKey.flakyCheck(name));
+    const seen = open?.detail?.['occurrences'];
+    const before = typeof seen === 'number' ? seen : 0;
+    const card = prCards.flakyCheck(name, before + 1, { head, prUrl: root.prUrl });
+    if (open === undefined) raiseIn(write, root.projectId, card);
+    else rewriteIn(write, root.projectId, card);
+  }
+
+  /** Takes off the failed-check rerun notices for any head but `keepHead`: a new commit starts over. */
+  function clearFailedRerun(rootId: BatchId, keepHead: string): void {
+    const stale = getBatch(ctx.state.db, rootId).notices.filter((n) => {
+      const head = failedRerunHead(n.key);
+      return head !== null && head !== keepHead;
+    });
+    if (stale.length === 0) return;
+    ctx.state.write((write) => {
+      for (const n of stale) clearBatchNotice(write, rootId, n.key);
+    });
+  }
+
+  /**
+   * Runs a head's failing required checks again once, before a fix starts or the checks card is
+   * raised, when the base does not fail them: a flaky test fails one run and passes the next. A check
+   * that fails again on the rerun is the change's, as before; one that passes was flaky, and a card
+   * names it with the head. The record is stored on the batch as soon as GitHub takes each run, so a
+   * restart never runs the head's checks a second time. Returns the names of the checks that wait on
+   * the rerun: no fix starts for the pull request and the card leaves them out. Only for a pull
+   * request 10db fixes: open, not a fix's, out of the merge queue, with no conflict. A check the base
+   * failed, which waited on it, is never rerun here: the wait asks for its run itself. Throws gh's
+   * failure only when gh itself is down.
+   */
+  async function followFailedRerun(
+    root: BatchDto,
+    read: PullRequestStatus | null,
+    required: RequiredChecks | null,
+    queue: boolean | null,
+    reads: Map<string, Promise<ReadonlySet<string> | null>>,
+    signal: AbortSignal,
+  ): Promise<ReadonlySet<string>> {
+    const held = new Set<string>();
+    const repo = root.repo;
+    if (
+      ciFix === undefined ||
+      read?.state !== PrState.Open ||
+      root.ciFixOf !== null ||
+      required === null ||
+      queue !== false ||
+      read.mergeBlocked === MergeBlocked.Conflicts ||
+      read.mergeable === PrMergeable.Conflicting ||
+      repo === null
+    )
+      return held;
+    const head = read.headSha;
+    const branch = read.baseRef;
+    if (head === null || branch == null) return held;
+    clearFailedRerun(root.id, head);
+    const notices = getBatch(ctx.state.db, root.id).notices;
+    const stored = notices.find((n) => failedRerunHead(n.key) === head);
+    const record = stored === undefined ? null : failedRerunRecord(stored);
+    // A record that can't be read still says the head was run again: it never is a second time.
+    if (stored !== undefined && record === null) return held;
+    let change: RequiredCheckJobDto[] = [];
+    if (record === null && required.state === 'failing') {
+      const waited = notices.find((n) => waitingOnBaseHead(n.key) === head);
+      const onBase = new Set(
+        waited === undefined ? [] : (waitingOnBaseRecord(waited)?.checks ?? []),
+      );
+      const base = await readBase(repo, branch, reads, signal);
+      // Only an Actions job is run again: its new job id is what says the rerun failed too.
+      change = classifyCiFailures(requiredOf(required).failing, base).change.filter(
+        (job) => job.runId !== null && job.jobId !== null && !onBase.has(job.name),
+      );
+    }
+    const step = ciRerunStep({
+      record,
+      change,
+      failing: required.failing,
+      pending: required.pending,
+      now: clock.now().getTime(),
+    });
+    const store = (next: FailedRerunRecord, detail?: string): void => {
+      ctx.state.write((write) => {
+        setBatchNotice(write, root.id, failedRerunNotices.of(head, next, detail));
+      });
+    };
+    switch (step.kind) {
+      case 'none':
+        return held;
+      case 'hold':
+        return new Set(step.names);
+      case 'failedAgain':
+        if (record !== null) store({ ...record, outcome: FailedRerunOutcome.Failed });
+        return held;
+      case 'flaked':
+        if (record === null) return held;
+        ctx.state.write((write) => {
+          setBatchNotice(
+            write,
+            root.id,
+            failedRerunNotices.of(head, { ...record, outcome: FailedRerunOutcome.Flaked }),
+          );
+          for (const name of step.names) countFlaky(write, root, name, head);
+        });
+        return held;
+      case 'rerun':
+        break;
+    }
+    const at = clock.now().getTime();
+    const taken: string[] = [];
+    const ofTaken = (): FailedRerunRecord => {
+      const jobs = change.filter((job) => job.runId !== null && taken.includes(job.runId));
+      return {
+        runs: [...taken],
+        jobs: jobs.flatMap((job) => (job.jobId === null ? [] : [job.jobId])),
+        names: [...new Set(jobs.map((job) => job.name))],
+        at,
+        outcome: FailedRerunOutcome.Rerun,
+      };
+    };
+    for (const runId of step.runs) {
+      try {
+        await ctx.gh.rerunFailed({ repo, runId }, ghCall(ctx, signal));
+      } catch (error) {
+        if (controller.signal.aborted || ghDown(error)) throw error;
+        // The run is still going (a job gh doesn't list as required, say): ask again next round.
+        if (RUN_STILL_RUNNING.test(detailOf(error))) {
+          if (taken.length === 0) return new Set(change.map((job) => job.name));
+          break;
+        }
+        logger.warn({ batchId: root.id, err: detailOf(error) }, 'could not rerun a failed check');
+        // Refused outright: the failure goes on as the change's, and the head is never asked again.
+        if (taken.length === 0) {
+          store(
+            {
+              runs: [],
+              jobs: [],
+              names: [...new Set(change.map((job) => job.name))],
+              at,
+              outcome: FailedRerunOutcome.Refused,
+            },
+            detailOf(error),
+          );
+          return held;
+        }
+        break;
+      }
+      taken.push(runId);
+      store(ofTaken());
+    }
+    return new Set(ofTaken().names);
   }
 
   /**
@@ -1359,6 +1511,19 @@ export function createPrWatch(input: {
       // A pull request the queue removed reads as a failed required check.
       required = followQueue(root, read, required, queue);
       noteFlaky(root, read, required);
+      // The failing checks 10db ran again once and waits on: no fix, and no card names them yet.
+      let held: ReadonlySet<string> = new Set();
+      try {
+        held = await followFailedRerun(root, read, required, queue, baseReads, signal);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        logger.warn({ batchId: root.id, err: detailOf(error) }, 'could not rerun a failed check');
+        if (ghDown(error)) {
+          ended = { error, at: root.id };
+          // Not run yet: the next round runs them, so this one names them on no card.
+          held = new Set(required?.failing.map((job) => job.name) ?? []);
+        }
+      }
       // Whether this round withdrew the catch-up card: the stored sign that the merge is still to ask.
       let catchUpCardWasOpen = false;
       // A failure the base has too is the base's card (`prCards.baseRed`), not one per pull request.
@@ -1390,6 +1555,9 @@ export function createPrWatch(input: {
           if (ghDown(error)) ended = { error, at: root.id };
         }
       }
+      // An empty list holds the card back: it is raised if the rerun fails again.
+      if (held.size > 0)
+        cardChecks = (cardChecks ?? read?.failingChecks ?? []).filter((c) => !held.has(c.name));
       ctx.state.write((write) => {
         for (const batch of members) {
           record(write, batch, answer(batch, read), batch.id === root.id, cardChecks);
@@ -1464,7 +1632,8 @@ export function createPrWatch(input: {
             baseReads,
             signal,
           );
-          if (own !== null)
+          // A check run again once waits for its rerun before any fix.
+          if (own !== null && held.size === 0)
             await startCiFix({
               ctx,
               dataDir: ciFix.dataDir,
