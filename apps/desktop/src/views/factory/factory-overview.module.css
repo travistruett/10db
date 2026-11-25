@@ -1,11 +1,7 @@
 /* Factory under Live. Mantine draws the parts; this module lays out the task lines' fixed columns. */
-.clip {
+.when {
   overflow: hidden;
   white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.when {
   text-align: right;
   font-size: var(--mantine-font-size-xs);
   font-variant-numeric: tabular-nums;
@@ -15,12 +11,18 @@
 /*
  * The columns every row inside a project card shares, so goal rows and task lines line up and the eye can run
  * down one edge: chevron, dot, title, bar, a flexible middle, step progress, state, model, when. A goal row
- * fills them directly; a task line's button takes them through a subgrid.
+ * fills them directly; a task line's button takes them through a subgrid. Every column between the marks and
+ * the time shrinks from its width to zero, so a narrow card squeezes the columns rather than pushing the time
+ * past its edge; the flexible middle gives up its room first. The title keeps at least a quarter of the row, so
+ * a goal's name is the last thing cut.
  */
 .cols {
   display: grid;
-  grid-template-columns: 16px 16px 220px 140px minmax(0, 1fr) 120px 160px 150px 56px;
-  column-gap: 10px;
+  grid-template-columns:
+    16px 16px minmax(min(220px, 25%), 220px) minmax(0, 140px) minmax(0, 1fr) minmax(0, 120px)
+    minmax(0, 160px)
+    minmax(0, 150px) 56px;
+  column-gap: 20px;
   align-items: center;
   padding-inline: 8px;
 }
@@ -61,7 +63,7 @@
   display: grid;
   grid-template-columns: subgrid;
   align-items: center;
-  font-size: var(--mantine-font-size-sm);
+  font-size: var(--mantine-font-size-xs);
   border-radius: var(--mantine-radius-sm);
 }
 
@@ -80,6 +82,11 @@
 
 .lineState {
   grid-column: 5;
+}
+
+/* A line with no step progress and no model: its state takes their columns too. */
+.lineState[data-wide] {
+  grid-column: 4 / 7;
 }
 
 .lineModel {
