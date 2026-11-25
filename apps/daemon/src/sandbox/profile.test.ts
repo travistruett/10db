@@ -91,6 +91,12 @@ describe('buildLaneProfile', () => {
         autoAllowBashIfSandboxed: false,
       });
     expect
+      .soft(
+        buildLaneProfile({ ...given, allowUnsandboxedCommands: true }).allowUnsandboxedCommands,
+        'a chat session lets a command ask to leave the sandbox',
+      )
+      .toBe(true);
+    expect
       .soft(profile.network.allowedDomains, 'allowedDomains')
       .toEqual(['github.com', '*.npmjs.org']);
     expect.soft(profile.network.allowMachLookup, 'allowMachLookup').toEqual(['com.apple.FSEvents']);

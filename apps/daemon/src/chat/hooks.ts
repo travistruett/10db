@@ -94,12 +94,19 @@ import {
   startingJudge,
 } from '../trust';
 import { digestText } from './brief';
-import { judgeChatCall, judgeFullAccessCall, type ChatPlace } from './confinement';
+import {
+  judgeChatCall,
+  judgeFullAccessCall,
+  outsideSandboxRefusal,
+  type ChatPlace,
+} from './confinement';
 import { workNote } from './work-note';
 import { chatRoot, withWorktreeOnDisk } from './work-root';
 import { JUDGED_CHAT_TOOLS } from './git-rule';
 import type { ChatLiveSessions } from './live-sessions';
 import { chatSystemPrompt } from './prompt';
+import { startsBackground } from './background-start';
+import { couldChange } from './first-change';
 
 // Sessions spec §7.1, trust line §5: a chat as an owner of the explore engine. Its session is the
 // explore profile as the attended one: Plan's read-only sandbox and read tools, commands judged, the
@@ -599,6 +606,14 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         checkout: launch.cwd,
         firstChange: () => deps.firstChange?.(chat.id),
       };
+      // A Claude chat's sandbox lets one command ask to run outside it, each judged by the hook and then the
+      // builder; Full access has no sandbox, and Codex runs with approvals off.
+      const codexChat = launch.account.harness === Provider.Codex;
+      // How many calls that could change something this session has let through: a command the builder allowed
+      // to run again outside the sandbox lasts only until this moves, or a background task runs.
+      let changes = 0;
+      let backgrounded = false;
+      const asksOutside = full === null && !fullCodex && launch.account.harness === Provider.Claude;
       const shapeId = planOfConversation(state.db, conv.id);
       const plan = deps.plan;
       // Every chat has its plan's folder, derived from the chat until a plan exists. Made before the sandbox,
@@ -620,6 +635,20 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         signal: ending.signal,
         observer: start.observer,
         limits: limitNotes,
+        chat: true,
+        ...(asksOutside
+          ? {
+              unsandboxedAsk: {
+                mayRun: () => outsideSandboxRefusal(folder),
+                changes: () => changes,
+                bump: () => {
+                  changes += 1;
+                },
+                background: () => runningNow(),
+                remembers: () => !backgrounded,
+              },
+            }
+          : {}),
       };
       let ready: ShapePrepared | null;
       if (full !== null || fullCodex)
@@ -733,6 +762,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         ...(planFiles === undefined ? {} : { planFilesDir: planFiles }),
         agentModels: launch.agentModels,
         judge,
+        ...(asksOutside ? { unsandboxed: 'ask' as const } : {}),
         ...(setup === null || setup.reads.length === 0
           ? {}
           : {
@@ -831,8 +861,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             judge,
             systemPrompt:
               plan === undefined
-                ? chatSystemPrompt(webOn, fullAgent)
-                : `${chatSystemPrompt(webOn, fullAgent)}\n\n${
+                ? chatSystemPrompt(webOn, fullAgent, codexChat)
+                : `${chatSystemPrompt(webOn, fullAgent, codexChat)}\n\n${
                     shapeId === null
                       ? PLANNING_STUB
                       : plan.systemPrompt(launch.agentModels, subagents, web)
@@ -899,7 +929,13 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               folder,
               reviewTurns,
             );
-            return readsNow()?.preToolUse(req, verdict) ?? verdict;
+            const settled = readsNow()?.preToolUse(req, verdict) ?? verdict;
+            if (settled.decision !== 'deny') {
+              if (couldChange(chatCallOf(req))) changes += 1;
+              // From a background start on, the session can change things unseen: nothing is remembered.
+              if (startsBackground(chatCallOf(req))) backgrounded = true;
+            }
+            return settled;
           },
           ...(plan === undefined
             ? {}

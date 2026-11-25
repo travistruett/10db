@@ -340,6 +340,7 @@ export function createShapePreparer(
         mcpServers: servers.stdio,
         yourMcpServers: yours.stdio,
         readOnly: input.writes !== true,
+        ...(input.unsandboxedAsk === undefined ? {} : { allowUnsandboxedCommands: true }),
         ...(input.planFiles === undefined ? {} : { planFiles: input.planFiles }),
         // The agent that runs the session, and a ChatGPT session's temp root, as its lane's would be.
         provider: input.harness,
@@ -390,7 +391,23 @@ export function createShapePreparer(
           observer: input.observer,
           signal: input.signal,
           mcpApproved: projectMcp.configHashes,
-          sandbox: { fileAccess: sandboxed.fileAccess, hazards: [], commandsAsk: true },
+          ...(input.chat === true ? { chat: true as const } : {}),
+          sandbox: {
+            fileAccess: sandboxed.fileAccess,
+            hazards: [],
+            commandsAsk: true,
+            ...(input.unsandboxedAsk === undefined
+              ? {}
+              : {
+                  unsandboxed: {
+                    mayRun: input.unsandboxedAsk.mayRun,
+                    changes: input.unsandboxedAsk.changes,
+                    bump: input.unsandboxedAsk.bump,
+                    background: input.unsandboxedAsk.background,
+                    remembers: input.unsandboxedAsk.remembers,
+                  },
+                }),
+          },
           ...(input.limits === undefined ? {} : { limits: input.limits }),
         },
       );

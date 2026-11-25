@@ -21,6 +21,7 @@ export {
 } from './proposal-task';
 export { createParkAnswers } from './park-answer';
 export { createPermissionBroker, type WaitObserver } from './permission-broker';
+export { withdrawStaleConversationCards } from './conversation-cards';
 export { cardsResolvedByEvent, resolveStaleCards } from './resolve-cards';
 export {
   createInboxService,

@@ -705,6 +705,33 @@ describe('judgeShapeCall in the read-only sandbox', () => {
     expect(judgeShapeCall(make(), sandboxed).decision).toBe('allow');
   });
 
+  // A chat's session may ask the builder about one command outside the sandbox: after the guard every
+  // command meets, and only for a command that runs in the foreground.
+  const OUTSIDE: readonly (readonly [string, () => ShapeCall, 'ask' | 'deny'])[] = [
+    ['a command that is not read-only', () => bash('pnpm test', {}, outside), 'ask'],
+    ['a read-only command', () => bash('git log -3', {}, outside), 'ask'],
+    ['a push', () => bash('git push origin HEAD', {}, outside), 'deny'],
+    [
+      'a flagged background run',
+      () => bash('pnpm dev', {}, { ...outside, run_in_background: true }),
+      'deny',
+    ],
+    ['a job put in the background with &', () => bash('pnpm dev &', {}, outside), 'deny'],
+    ['a job handed to nohup', () => bash('nohup node server.js', {}, outside), 'deny'],
+  ];
+  const outside = { dangerouslyDisableSandbox: true };
+
+  it.each(OUTSIDE)(
+    'a command outside the sandbox, with the ask on: %s',
+    (_name, make, decision) => {
+      expect(judgeShapeCall(make(), { ...sandboxed, unsandboxed: 'ask' }).decision).toBe(decision);
+    },
+  );
+
+  it('a command outside the sandbox is refused without the ask, though the same command runs inside it', () => {
+    expect(judgeShapeCall(bash('pnpm test', {}, outside), sandboxed).decision).toBe('deny');
+  });
+
   it('launches an agent in the foreground whatever the call asks, so none runs past its turn', () => {
     const verdict = judgeShapeCall(
       call('Agent', {
