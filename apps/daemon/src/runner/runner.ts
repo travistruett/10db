@@ -905,6 +905,9 @@ const NUDGES: Readonly<
   },
 };
 
+/** What `acceptanceAfter` answers when a stop cut its calls short. */
+const ACCEPTANCE_STOPPED = 'stopped';
+
 interface Control {
   readonly fence: number;
   readonly projectId: ProjectId;
@@ -916,6 +919,11 @@ interface Control {
   requestHandoff: ((cause: HandoffCause, reason: string) => void) | null;
   /** Set while the gate runs; aborting it kills the gate's process group. */
   gateAbort: AbortController | null;
+  /**
+   * The acceptance check's calls. A stop ends them, a pause excepted: the decisions account's judge is not the
+   * build account whose limit paused the run.
+   */
+  acceptAbort: AbortController | null;
   /** Set while the lane waits for an overloaded Mac to calm down before it starts a session. */
   holdAbort: AbortController | null;
   /** True while the lane waits for the hold (a session's or the gate's) to clear: it has begun nothing. */
@@ -1588,7 +1596,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     row: WorkstreamRow,
     checkout: string,
     gate: { command: string; summary: string },
-  ): Promise<Omit<AcceptanceDetail, 'sentBack'> | null> {
+  ): Promise<Omit<AcceptanceDetail, 'sentBack'> | typeof ACCEPTANCE_STOPPED | null> {
     const now = withCurrentPlan(db, id, ctl.accountId);
     const task = getTask(db, row.taskId);
     if (
@@ -1599,14 +1607,16 @@ export function createRunner(opts: RunnerOptions): Runner {
       row.baseHead === null
     )
       return null;
+    // With the decision off or no account to answer it, there is nothing to ask: no git work either.
+    if (!(await opts.judge.ready(JudgeDecision.Acceptance))) return null;
     const reading = new AbortController();
-    ctl.holdAbort = reading;
-    if (ctl.stopReason !== null) reading.abort();
+    ctl.acceptAbort = reading;
+    if (ctl.stopReason !== null && ctl.stopReason !== 'paused') reading.abort();
     try {
       const { ranges } = await ownWork(row, checkout, row.baseHead);
       const diff = await diffOfRanges(opts.git, checkout, ranges, ACCEPTANCE_DIFF_CAP * 4);
       const decisions = getJudgeConfig(db).decisions;
-      return await checkAcceptance(
+      const read = await checkAcceptance(
         {
           judge: opts.judge,
           floors: {
@@ -1625,6 +1635,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         },
         reading.signal,
       );
+      // A call a stop cut short read nothing: the run must not go on as if it had.
+      return reading.signal.aborted ? ACCEPTANCE_STOPPED : read;
     } catch (error) {
       opts.logger.warn(
         { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
@@ -1632,7 +1644,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       );
       return null;
     } finally {
-      ctl.holdAbort = null;
+      ctl.acceptAbort = null;
     }
   }
 
@@ -5116,7 +5128,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         return;
       }
       // Shutdown stopped it: record nothing, and recovery runs the gate again.
-      if (stopRequested(ctl) === 'shutdown') return;
+      // An acceptance check a stop cut short is the same: stay Verifying, and the gate and the check run again.
+      if (stopRequested(ctl) === 'shutdown' || acceptance === ACCEPTANCE_STOPPED) return;
       opts.state.write((ctx) => {
         insertEvidence(ctx, evidence);
         // Planned again first, and the move chosen from those steps: a rigor changed while the gate ran
@@ -5456,6 +5469,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         handle: null,
         requestHandoff: null,
         gateAbort: null,
+        acceptAbort: null,
         holdAbort: null,
         parked: false,
         endWaits: null,
@@ -5484,7 +5498,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (!ctl) return;
       ctl.stopReason = reason;
       // A pause only stops sessions; a running gate doesn't use the provider, so let it finish.
-      if (reason !== 'paused') ctl.gateAbort?.abort();
+      if (reason !== 'paused') {
+        ctl.gateAbort?.abort();
+        ctl.acceptAbort?.abort();
+      }
       ctl.holdAbort?.abort();
       // Waits end before the process does, so an answer during a slow exit reaches the card.
       ctl.endWaits?.();
