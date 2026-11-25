@@ -449,7 +449,14 @@ export function TaskDrawer({
                 label={<SectionLabel>Implementation Report</SectionLabel>}
               />
               <TaskPictures taskId={task.id} />
-              <TaskSkips workstreamId={workstream?.id} />
+              <TaskSkips workstream={workstream} />
+              {/* An earlier run's skips stay here, each with its own Run These Now, once its card is gone. */}
+              {workstreams
+                .filter((w) => w.taskId === task.id && w.id !== workstream?.id)
+                .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+                .map((w) => (
+                  <TaskSkips key={w.id} workstream={w} earlier />
+                ))}
               <TaskSizeLine taskId={task.id} />
               <PlanContextDisclosure taskId={task.id} />
               {offersPlanSession === true ? <OpenPlanSession target={{ taskId: task.id }} /> : null}
