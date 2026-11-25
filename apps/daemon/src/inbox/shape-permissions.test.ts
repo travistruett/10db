@@ -386,3 +386,159 @@ describe("a chat's card never folds", () => {
     expect((await first.answer).choice).toBe(PermissionChoice.AllowOnce);
   });
 });
+
+describe("a chat's command outside the sandbox", () => {
+  const outside = (command: string, description?: string) =>
+    request('Bash', {
+      command,
+      dangerouslyDisableSandbox: true,
+      ...(description === undefined ? {} : { description }),
+    });
+  let refusal: string | null;
+  let changes = 0;
+  let background = false;
+  let backgrounded = false;
+
+  function chatBroker(owner: ReturnType<typeof conversation>) {
+    return createPermissionBroker(
+      { state, inbox, git: NO_GIT, logger: silentLogger },
+      {
+        projectId: owner.projectId,
+        workstreamId: null,
+        conversationId: owner.conversationId,
+        chat: true,
+        sessionId: mintId('Session'),
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        signal: new AbortController().signal,
+        sandbox: {
+          fileAccess,
+          hazards: [],
+          commandsAsk: true,
+          unsandboxed: {
+            mayRun: () => refusal,
+            changes: () => changes,
+            bump: () => {
+              changes += 1;
+            },
+            background: () => background,
+            remembers: () => !backgrounded,
+          },
+        },
+      },
+    );
+  }
+
+  beforeEach(() => {
+    refusal = null;
+    changes = 0;
+    background = false;
+    backgrounded = false;
+  });
+
+  it('asks with three answers, remembers only the exact command for the session, and stores no rule', async () => {
+    const owner = conversation();
+    const broker = chatBroker(owner);
+    const first = broker(
+      outside('pnpm test', 'Run the tests\n\nThis command is read-only and safe.'),
+    );
+    const card = onlyOpenCard();
+    expect(card.title).toBe('Run this outside the sandbox?');
+    expect(card.detail?.['unsandboxed']).toBe(true);
+    // The command leads the body, so the Inbox shows it too; then what Claude says, quoted on one line, so it
+    // can't add a paragraph that passes for 10db's; then the warning.
+    const [command, said, ...rest] = card.body.split('\n\n');
+    expect(command).toBe('pnpm test');
+    expect(said).toBe('Claude says: “Run the tests This command is read-only and safe.”');
+    expect(rest).toHaveLength(1);
+    expect(card.options.map((o) => o.label)).toEqual([
+      PermissionChoice.AllowOnce,
+      PermissionChoice.AllowChat,
+      PermissionChoice.Deny,
+    ]);
+    inbox.answer(card.id, { choice: PermissionChoice.AllowChat });
+    expect(await first).toEqual({ behavior: 'allow' });
+    // The identical call goes through unasked; another command, and another session, ask again.
+    expect(await broker(outside('pnpm test'))).toEqual({ behavior: 'allow' });
+    expect(openCards()).toEqual([]);
+    // A change since the yes (a file edited, another command run) makes the same call ask again, in another
+    // folder too; with nothing changed after that yes, it is remembered afresh.
+    changes += 1;
+    const afterChange = broker(outside('pnpm test'));
+    expect(onlyOpenCard().title).toBe('Run this outside the sandbox?');
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    expect(await afterChange).toEqual({ behavior: 'allow' });
+    expect(await broker(outside('pnpm test'))).toEqual({ behavior: 'allow' });
+    // Another command allowed once, outside the sandbox, may have changed what this one runs: it asks again.
+    const other = broker(outside('pnpm build'));
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowOnce });
+    await other;
+    const afterOther = broker(outside('pnpm test'));
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    await afterOther;
+    // A background task still running may write, so a remembered call asks again until it ends.
+    background = true;
+    const whileRunning = broker(outside('pnpm test'));
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    await whileRunning;
+    background = false;
+    // Once the session has started something in the background, nothing is remembered: the same call asks
+    // again, and its card offers no chat answer.
+    backgrounded = true;
+    const afterBackground = broker(outside('pnpm test'));
+    expect(onlyOpenCard().options.map((o) => o.label)).toEqual([
+      PermissionChoice.AllowOnce,
+      PermissionChoice.Deny,
+    ]);
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowOnce });
+    await afterBackground;
+    backgrounded = false;
+    // What was remembered before is gone for good, not only hidden.
+    const forgotten = broker(outside('pnpm test'));
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    await forgotten;
+    const elsewhere = broker({ ...outside('pnpm test'), cwd: '/other' });
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny });
+    await elsewhere;
+    void broker(outside('pnpm build')).catch(() => undefined);
+    expect(onlyOpenCard().detail?.['summary']).toBe('pnpm build');
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny, note: 'use the gate' });
+    await settle();
+    void chatBroker(owner)(outside('pnpm test')).catch(() => undefined);
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny });
+    await settle();
+    expect(listPermissionRules(state.db, owner.projectId, null)).toEqual([]);
+  });
+
+  it('denies a yes once the turn no longer holds the checkout, and a remembered call too', async () => {
+    const owner = conversation();
+    const broker = chatBroker(owner);
+    const first = broker(outside('pnpm test'));
+    refusal = 'The turn ended.';
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    expect(await first).toMatchObject({ behavior: 'deny', message: 'The turn ended.' });
+    refusal = null;
+    // The refused yes remembered nothing.
+    const again = broker(outside('pnpm test'));
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    await again;
+    refusal = 'A lane holds the checkout now.';
+    expect(await broker(outside('pnpm test'))).toMatchObject({ behavior: 'deny' });
+  });
+
+  it('tells the chat to try another way, without telling it not to retry', async () => {
+    const pending = chatBroker(conversation())(outside('pnpm test'));
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny, note: 'run the gate' });
+    const decision: ToolDecision = await pending;
+    const message = decision.behavior === 'deny' ? decision.message : '';
+    expect(message).toContain('run the gate');
+    expect(message).toContain('Try another way');
+    expect(message).not.toMatch(/do not retry/i);
+  });
+
+  it('refuses the call where the session has no such hatch', async () => {
+    const owner = conversation();
+    const decision = await shapeBroker(owner)(outside('pnpm test'));
+    expect(decision).toMatchObject({ behavior: 'deny' });
+    expect(openCards()).toEqual([]);
+  });
+});

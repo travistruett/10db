@@ -33,6 +33,7 @@ import {
   hazardHit,
   passGitCall,
   runsInBackground,
+  runsOutsideSandbox,
   startsEndlessBackgroundLoop,
   stringField,
   unreadableHazard,
@@ -106,6 +107,8 @@ type BrokerOwner =
     };
 
 type BrokerContext = BrokerOwner & {
+  /** A chat's session: the builder's no reaches it as a chat's denial text. */
+  readonly chat?: true;
   readonly projectId: ProjectId;
   readonly sessionId: SessionId;
   readonly observer: WaitObserver;
@@ -137,6 +140,22 @@ type BrokerContext = BrokerOwner & {
      * read-only commands are settled by its PreToolUse hook, and anything else is the builder's call.
      */
     readonly commandsAsk?: boolean;
+    /**
+     * Present for an attended chat that may run one command outside its sandbox (`dangerouslyDisableSandbox`):
+     * the builder is asked about that exact command. `mayRun` says why it may not run now (null: it may), at
+     * the call and again at the builder's yes. Absent, such a call is refused.
+     */
+    readonly unsandboxed?: {
+      readonly mayRun: () => string | null;
+      /** The session's count of calls that could change something: a remembered command lasts until it moves. */
+      readonly changes: () => number;
+      /** Counts a command the builder allowed to run outside the sandbox: it may have changed anything. */
+      readonly bump: () => void;
+      /** Whether a background task or job is running now, which may still write. */
+      readonly background: () => boolean;
+      /** False once the session started something in the background: no command is remembered after that. */
+      readonly remembers: () => boolean;
+    };
     /**
      * Where an allowed Read of the checkout's secret is served from (`LaneSession.secretReadsDir`):
      * Claude Code's deny rule on the secret stays, so the Read runs on a copy there instead.
@@ -177,6 +196,7 @@ const ALLOWING: readonly string[] = [
   PermissionChoice.AllowOnce,
   PermissionChoice.AllowWorkstream,
   PermissionChoice.AllowProject,
+  PermissionChoice.AllowChat,
   PermissionChoice.AllowMcpServer,
   PermissionChoice.AlwaysInProject,
 ];
@@ -227,6 +247,24 @@ const ONCE_OPTIONS: readonly InboxOption[] = permissionOptions(false).filter(
   (o) => o.label === PermissionChoice.AllowOnce || o.label === PermissionChoice.Deny,
 );
 
+/** A chat's card for a command outside the sandbox: allow once, for this exact command in this chat, or deny. */
+const CHAT_ONCE_OPTIONS: readonly InboxOption[] = [
+  { label: PermissionChoice.AllowOnce, description: 'Run this command outside the sandbox once' },
+  {
+    label: PermissionChoice.AllowChat,
+    description: 'Again in this chat, until Claude changes a file or runs another command',
+  },
+  { label: PermissionChoice.Deny, description: 'Deny; your note is passed to the agent' },
+];
+
+const OUTSIDE_CARD_TITLE = 'Run this outside the sandbox?';
+/** How much of what Claude says a command is for the card quotes. */
+const SAID_MAX = 300;
+const OUTSIDE_CARD_WARNING =
+  'It runs with your full rights: it can read and write anywhere you can.';
+const OUTSIDE_NOT_AVAILABLE =
+  'A command outside the sandbox is not available in this session. Run it inside the sandbox.';
+
 const NETWORK_TOOL = 'SandboxNetworkAccess';
 const READ_FAMILY: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS']);
 const EDIT_FAMILY: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -251,6 +289,15 @@ function passGitCardBody(call: Extract<PassGitCall, { kind: 'run' }>): string {
 
 const LOOP_CARD_BODY =
   'This command runs something that never ends (a loop with no exit, `yes`, or the like) in the background, behind an `&` or the Bash tool’s own background flag: the lane goes on working while it holds a core, until something stops it. Behind an `&` it also outlives the command and the session that started it. 10db tries to stop what a session leaves when the session ends, but it cannot promise to find all of it (a job that leaves the command’s process tree and group within a second, with no file open in the lane’s temp dir, escapes), and until then a loop like this holds the Mac busy and makes gates and tests fail on timeouts. Allowing it covers this call only: the next one is asked about again.';
+
+/** What a chat is told when the builder says no: it invites another way, and carries their note. */
+function chatDenialMessage(toolName: string, summary: string, note: string | undefined): string {
+  const call = summary.length > 300 ? `${summary.slice(0, 300)}…` : summary;
+  const parts = [`The builder said no to this ${toolName} call: ${call}`];
+  if (note) parts.push(`Note from the builder: ${note}`);
+  parts.push('Try another way, or ask them.');
+  return parts.join('\n');
+}
 
 /**
  * What a lane is told when the builder denies a call. It names the call and says the denial covers
@@ -291,6 +338,13 @@ interface Ask {
   readonly onceOnly?: boolean;
   /** What an unattended lane records it as, when it is skipped. */
   readonly kind?: SkipKind;
+  /** The card's title, where the default `Allow <tool>?` doesn't say it. */
+  readonly title?: string;
+  /**
+   * A chat's command outside the sandbox: only the builder answers it, so no stored rule, carried allowance or
+   * project grant does. The one yes that is remembered is this exact call, for this session.
+   */
+  readonly chatOnce?: boolean;
 }
 
 /** Why an unattended lane skipped what would have been a card, by kind; null where the kind says it. */
@@ -351,6 +405,10 @@ function unlessTooDeep<T>(read: () => T, fallback: T): T {
   }
 }
 
+/** The key a chat's remembered command is looked up by: the tool and the call as the card shows it. */
+const chatCallKey = (toolName: string, summary: string, cwd: string | undefined): string =>
+  `${toolName}\u0000${cwd ?? ''}\u0000${summary}`;
+
 function summarize(req: ToolRequest): string {
   return grantCallSummary(req.toolName, req.input);
 }
@@ -388,6 +446,17 @@ export function createPermissionBroker(
   ctx: BrokerContext,
 ): (req: ToolRequest) => Promise<ToolDecision> {
   let allowOnce = ctx.allowOnce ?? null;
+  // The commands outside the sandbox the builder allowed for this session: forgotten when it ends.
+  // Each with the session's change count when it was last allowed.
+  const chatAllowed = new Map<string, number>();
+  const isChat = ctx.chat === true;
+  /** Why the chat's command may not run outside the sandbox now; null when it may. */
+  const outsideRefusal = (): string | null => {
+    const outside = ctx.sandbox?.unsandboxed;
+    return outside === undefined ? OUTSIDE_NOT_AVAILABLE : outside.mayRun();
+  };
+  const denied = (toolName: string, summary: string, note: string | undefined): string =>
+    isChat ? chatDenialMessage(toolName, summary, note) : denialMessage(toolName, summary, note);
   const owner: BrokerOwner =
     ctx.workstreamId === null
       ? {
@@ -545,8 +614,25 @@ export function createPermissionBroker(
   async function askPermission(
     req: ToolRequest,
     ask: Ask | null = null,
-    noted?: LimitAt,
+    notedIn?: LimitAt,
   ): Promise<ToolDecision> {
+    const chatOnce = ask?.chatOnce === true;
+    // A command outside the sandbox is the builder's alone, whatever a limit note says about it.
+    const noted = chatOnce ? undefined : notedIn;
+    if (chatOnce) {
+      const key = chatCallKey(req.toolName, ask.summary, req.cwd);
+      const outside = ctx.sandbox?.unsandboxed;
+      const remembers = outside?.remembers() !== false;
+      if (!remembers) chatAllowed.clear();
+      const seen = chatAllowed.get(key);
+      // Anything that may have changed since (a change, another command allowed to run outside, a job started
+      // or still running) makes the same command ask again.
+      const unchanged = remembers && seen !== undefined && seen === outside?.changes();
+      const remembered = unchanged && !outside.background();
+      const refusal = outsideRefusal();
+      if (refusal !== null) return { behavior: 'deny', message: refusal, by: DeniedBy.TenDb };
+      if (remembered) return { behavior: 'allow' };
+    }
     const rules = listPermissionRules(deps.state.db, ctx.projectId, ctx.workstreamId);
     const paths = ask?.realPaths === undefined ? undefined : { realPaths: ask.realPaths };
     const onceOnly = ask?.onceOnly === true;
@@ -556,12 +642,18 @@ export function createPermissionBroker(
     if (
       !judged &&
       !onceOnly &&
+      !chatOnce &&
       unlessTooDeep(() => matchPermissionRule(req, rules, paths, ctx.mcpApproved), undefined)
     ) {
       return { behavior: 'allow' };
     }
     const summary = ask?.summary ?? summarize(req);
-    if (!judged && allowOnce?.toolName === req.toolName && allowOnce.summary === summary) {
+    if (
+      !judged &&
+      !chatOnce &&
+      allowOnce?.toolName === req.toolName &&
+      allowOnce.summary === summary
+    ) {
       const { cardId } = allowOnce;
       allowOnce = null;
       if (cardId !== undefined) recordAllowedWrite(cardId, req, ask);
@@ -571,6 +663,7 @@ export function createPermissionBroker(
     if (
       judged &&
       !onceOnly &&
+      !chatOnce &&
       isGrantedCall(projectGrantedCalls(deps.state.db, ctx.projectId), req.toolName, req.input)
     )
       return { behavior: 'allow' };
@@ -586,17 +679,23 @@ export function createPermissionBroker(
     const grantCall = grantCallSummary(req.toolName, req.input);
     const noteNeeded = judged && !onceOnly && grantTargetOf(null, grantCall, req.toolName) === null;
     // A once-only call offers no rule to store, Always in this project included.
-    const options = onceOnly
-      ? ONCE_OPTIONS
-      : judged
-        ? limitOptions(noteNeeded)
-        : optionsFor(storable);
+    const options = chatOnce
+      ? CHAT_ONCE_OPTIONS.filter(
+          (o) =>
+            o.label !== PermissionChoice.AllowChat ||
+            ctx.sandbox?.unsandboxed?.remembers() !== false,
+        )
+      : onceOnly
+        ? ONCE_OPTIONS
+        : judged
+          ? limitOptions(noteNeeded)
+          : optionsFor(storable);
     const { item, answer } = deps.inbox.ask({
       projectId: ctx.projectId,
       ...owner,
       sessionId: ctx.sessionId,
       kind: 'permission',
-      title: noted === undefined ? `Allow ${req.toolName}?` : limitCardTitle(noted),
+      title: ask?.title ?? (noted === undefined ? `Allow ${req.toolName}?` : limitCardTitle(noted)),
       body: noted === undefined ? (ask?.body ?? summary) : summary,
       // The service refuses a choice the card does not offer, so a once-only card stores no rule.
       options:
@@ -615,6 +714,7 @@ export function createPermissionBroker(
         ...(judged && !onceOnly ? { [GRANT_CALL_DETAIL]: grantCall } : {}),
         ...(grant === null ? {} : { [MCP_TOOL_GRANT_DETAIL]: grant }),
         ...editDetail(req, ask),
+        ...(chatOnce ? { unsandboxed: true } : {}),
         ...(req.escalated ? { [ESCALATED_KEY]: true } : {}),
         ...(noted?.limit == null ? {} : { [LIMIT_DETAIL]: noted.limit }),
         ...(noteNeeded ? { [NOTE_NEEDED_DETAIL]: true } : {}),
@@ -633,12 +733,29 @@ export function createPermissionBroker(
     const result = await waitOrWithdraw(item, answer, cardGoesWith(req));
     // inbox.answer has already written any rule this choice implies, in the answer's transaction.
     if (ALLOWING.includes(result.choice)) {
+      if (chatOnce) {
+        // The turn may have ended or the checkout moved while the card waited: the yes is read again.
+        const refusal = outsideRefusal();
+        if (refusal !== null) return { behavior: 'deny', message: refusal, by: DeniedBy.TenDb };
+        // A command allowed now may change anything, so what was remembered before it asks again.
+        ctx.sandbox?.unsandboxed?.bump();
+        const outside = ctx.sandbox?.unsandboxed;
+        if (
+          result.choice === PermissionChoice.AllowChat &&
+          outside?.remembers() !== false &&
+          outside?.background() !== true
+        )
+          chatAllowed.set(
+            chatCallKey(req.toolName, summary, req.cwd),
+            ctx.sandbox?.unsandboxed?.changes() ?? 0,
+          );
+      }
       recordAllowedWrite(item.id, req, ask);
       return { behavior: 'allow' };
     }
     return {
       behavior: 'deny',
-      message: denialMessage(req.toolName, summary, result.note),
+      message: denied(req.toolName, summary, result.note),
       // The builder answered the card with Deny: the one refusal that is theirs.
       by: DeniedBy.Builder,
     };
@@ -727,6 +844,22 @@ export function createPermissionBroker(
   ): ToolDecision | Ask {
     const command = req.input['command'];
     if (typeof command !== 'string') return { summary: summarize(req) };
+    if (runsOutsideSandbox(req.input)) {
+      if (sandbox.unsandboxed === undefined)
+        return { behavior: 'deny', message: OUTSIDE_NOT_AVAILABLE, by: DeniedBy.TenDb };
+      // What Claude says the command is for stays one quoted line: a paragraph of its own could pass for 10db's.
+      const said = (stringField(req.input, 'description') ?? '').replace(/\s+/g, ' ').trim();
+      const why = said.length > SAID_MAX ? `${said.slice(0, SAID_MAX)}…` : said;
+      return {
+        summary: command,
+        title: OUTSIDE_CARD_TITLE,
+        // The command first, as the Inbox shows only the body; then what Claude says it is for.
+        body: [command, why === '' ? '' : `Claude says: “${why}”`, OUTSIDE_CARD_WARNING]
+          .filter((part) => part !== '')
+          .join('\n\n'),
+        chatOnce: true,
+      };
+    }
     let hit: ReturnType<typeof hazardHit>;
     let unread: ReturnType<typeof firstUnread>;
     let unreadable: string | null;

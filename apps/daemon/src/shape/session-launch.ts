@@ -79,6 +79,23 @@ export interface ShapePrepareInput {
   readonly checkout?: string;
   /** The limits 10db's judge stopped calls at, which the broker asks with the trust line's three answers. */
   readonly limits?: LimitNotes;
+  /** A chat's session: the builder's no reaches it as a chat's denial text, which invites another way. */
+  readonly chat?: true;
+  /**
+   * Set only by a chat that is not Full access: its sandbox lets a command ask to run outside it, the
+   * broker asks the builder, and `mayRun` says why the call may not (null: it may) at the call and at the yes.
+   */
+  readonly unsandboxedAsk?: {
+    readonly mayRun: () => string | null;
+    /** Counts the calls let through that could change something; a remembered command lasts until it moves. */
+    readonly changes: () => number;
+    /** Counts a command the builder allowed to run outside the sandbox: it may have changed anything. */
+    readonly bump: () => void;
+    /** Whether a background task or job is running now, which may still write. */
+    readonly background: () => boolean;
+    /** False once the session started something in the background: no command is remembered after that. */
+    readonly remembers: () => boolean;
+  };
 }
 
 /** A session's read-only sandbox, the project's approved MCP servers and its permission broker. */
