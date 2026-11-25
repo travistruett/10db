@@ -1,4 +1,5 @@
 export * from './accounts';
+export * from './acceptance';
 export * from './activity';
 export * from './allowed-commands';
 export * from './batch-workflow';

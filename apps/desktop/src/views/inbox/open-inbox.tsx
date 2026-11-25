@@ -258,6 +258,7 @@ export function OpenInbox({
       !selected ||
       selected.kind === InboxKind.Check ||
       selected.kind === InboxKind.Plan ||
+      selected.kind === InboxKind.Acceptance ||
       answer.isPending
     )
       return;
@@ -297,7 +298,10 @@ export function OpenInbox({
   useInboxKeys({
     count: shown.length,
     optionCount:
-      selected?.kind === InboxKind.Check || selected?.kind === InboxKind.Plan || previewing
+      selected?.kind === InboxKind.Check ||
+      selected?.kind === InboxKind.Plan ||
+      selected?.kind === InboxKind.Acceptance ||
+      previewing
         ? 0
         : (selected?.options.length ?? 0),
     onMove: (delta) => {

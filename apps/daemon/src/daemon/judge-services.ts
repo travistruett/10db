@@ -82,9 +82,15 @@ interface ModelTest {
 
 /** The limits decisions ask yes/no questions; every other decision asks a choice. */
 function testKind(decision: string): JudgeTestKind {
-  return decision === JudgeDecision.CrossesLimit || decision === JudgeDecision.CrossesLimitSecond
-    ? JudgeTestKind.Nouls
-    : JudgeTestKind.Choice;
+  switch (decision) {
+    case JudgeDecision.CrossesLimit:
+    case JudgeDecision.CrossesLimitSecond:
+    case JudgeDecision.Acceptance:
+    case JudgeDecision.AcceptanceSecond:
+      return JudgeTestKind.Nouls;
+    default:
+      return JudgeTestKind.Choice;
+  }
 }
 
 function distinctTests(tests: readonly ModelTest[]): ModelTest[] {

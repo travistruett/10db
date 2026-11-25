@@ -1,0 +1,1 @@
+ALTER TABLE `evidence` ADD `detail` text;

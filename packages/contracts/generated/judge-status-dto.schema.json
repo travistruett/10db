@@ -346,6 +346,60 @@
                 "model",
                 "floor"
               ]
+            },
+            "acceptance": {
+              "default": {
+                "enabled": false,
+                "model": "typesafe/jev-1.13",
+                "floor": 0.8
+              },
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "floor": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "enabled",
+                "model",
+                "floor"
+              ]
+            },
+            "acceptance_second": {
+              "default": {
+                "enabled": false,
+                "model": "anthropic/claude-sonnet-5.5",
+                "floor": 0.7
+              },
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "floor": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "enabled",
+                "model",
+                "floor"
+              ]
             }
           }
         }

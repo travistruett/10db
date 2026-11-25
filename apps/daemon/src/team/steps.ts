@@ -159,7 +159,9 @@ export function insertJoinedWorkstream(
   const [first] = plan.steps;
   if (revert === null || !first) return ws;
   const note = insertBuilderNote(ctx, ws.id, revertedWorkNote(revert, first));
-  patchWorkstream(ctx, ws.id, null, { nextAction: { kind: 'fix', evidenceId: note.id } });
+  patchWorkstream(ctx, ws.id, null, {
+    nextAction: { kind: 'fix', evidenceId: note.id, providerSessionId: null },
+  });
   return getWorkstream(ctx.tx, ws.id);
 }
 
@@ -193,7 +195,7 @@ export function actionEntering(ctx: WriteContext, row: WorkstreamRow, to: number
   );
   if (told) return { kind: 'start' };
   const note = insertBuilderNote(ctx, row.id, revertedWorkNote(revert, step));
-  return { kind: 'fix', evidenceId: note.id };
+  return { kind: 'fix', evidenceId: note.id, providerSessionId: null };
 }
 
 /** Starts a task in local delivery: its plan, then its workstream. */
@@ -354,11 +356,11 @@ export function retryWorkstream(
       .filter((part) => part !== '')
       .join('\n\n');
     const evidence = text === '' ? null : insertBuilderNote(ctx, id, text);
-    // The fix a restarted step keeps, unless it is the note of a revert that is gone.
+    // The fix a restarted step keeps, fresh as a retried revise is, unless it is the note of a revert that is gone.
     const keptFix =
       row.nextAction.kind === 'fix' &&
       !(noRevert && revertCommitIn(getEvidence(ctx.tx, row.nextAction.evidenceId).summary) !== null)
-        ? row.nextAction
+        ? { ...row.nextAction, providerSessionId: null }
         : null;
     if (reworkAt !== null && reworked) {
       // A reviewer's rejection used the attempts up: the step that did the work runs again, as when
@@ -381,7 +383,7 @@ export function retryWorkstream(
           model: reworked.model,
           effort: reworked.effort,
           nextAction: evidence
-            ? { kind: 'fix', evidenceId: evidence.id }
+            ? { kind: 'fix', evidenceId: evidence.id, providerSessionId: null }
             : { kind: 'revise', reviewStep: row.stepIndex, providerSessionId: null },
         },
         reason: 'retried by the builder',
@@ -414,7 +416,7 @@ export function retryWorkstream(
         // A new note is the fix; otherwise work the builder sent back that ran out of attempts keeps
         // its note, and a gate failure its output, for the restarted step.
         nextAction: evidence
-          ? { kind: 'fix', evidenceId: evidence.id }
+          ? { kind: 'fix', evidenceId: evidence.id, providerSessionId: null }
           : (keptFix ??
             (latest ? { kind: 'continue_from_handoff', handoffId: latest.id } : { kind: 'start' })),
       },

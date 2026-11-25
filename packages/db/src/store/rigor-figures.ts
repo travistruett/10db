@@ -26,6 +26,8 @@ const DAY_MS = 86_400_000;
 
 /** What `step.changed` records as `sentBackBy` when the builder, not a reviewer, sent the work back. */
 const BUILDER_SENT_BACK = 'builder';
+/** What it records when the acceptance check sent the work back: not a reviewer's send-back either. */
+const ACCEPTANCE_SENT_BACK = 'acceptance';
 
 /** What one done task took. */
 interface TaskWork {
@@ -125,7 +127,7 @@ function workOf(db: DbReader, tasks: readonly TaskDto[]): TaskWork[] {
   const reviewerSendBacks = new Map<string, number>();
   for (const event of stepEvents) {
     const by = event.data['sentBackBy'];
-    if (typeof by === 'string' && by !== BUILDER_SENT_BACK)
+    if (typeof by === 'string' && by !== BUILDER_SENT_BACK && by !== ACCEPTANCE_SENT_BACK)
       reviewerSendBacks.set(event.entityId, (reviewerSendBacks.get(event.entityId) ?? 0) + 1);
   }
   const batchIds = workstreams.flatMap((w) => (w.batchId === null ? [] : [w.batchId]));

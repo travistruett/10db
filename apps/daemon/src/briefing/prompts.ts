@@ -1,4 +1,6 @@
 import {
+  AcceptanceVerdict,
+  EvidenceKind,
   findingNotes,
   JudgeKind,
   REVIEW_ROLES,
@@ -86,6 +88,11 @@ export interface PromptInput {
    * reviewer, not a finding. Absent or null when there is nothing to say.
    */
   readonly testValue?: string | null;
+  /**
+   * What the acceptance check could not settle, for a review's first round: the criteria it read as unclear and
+   * what the change does that the task didn't ask for. Input to the reviewer, not a finding.
+   */
+  readonly acceptance?: string | null;
   readonly revisedBy: {
     readonly role: StepRole;
     readonly personaName: string;
@@ -809,15 +816,29 @@ function failedStepsSection(output: string): string {
   return `Failing steps; rerun only these while you fix them:\n${bullets(lines)}`;
 }
 
+/** What the acceptance check sends a run back with: each criterion it read as not met, and why. */
+function acceptanceSendBack(evidence: EvidenceDto, tools: ToolAccess): string {
+  const notMet = (evidence.detail?.criteria ?? [])
+    .filter((c) => c.verdict === AcceptanceVerdict.NotMet)
+    .map((c) => `${c.criterion} (${c.note})`);
+  return `10db's acceptance check read these criteria as not met:\n${bullets(notMet)}\n${
+    tools === ToolAccess.Edit
+      ? 'Make each one true, commit, and end your turn.'
+      : 'Take them into account, then call mcp__10db__complete_step.'
+  }`;
+}
+
 /** A read-only step (one a retry restarted with the builder's note) has nothing to commit. */
 const gateFailure = (evidence: EvidenceDto, tools: ToolAccess): string =>
-  evidence.command === null
-    ? `The builder sent the work back: ${evidence.summary}\n${
-        tools === ToolAccess.Edit
-          ? 'Address it, commit, and end your turn.'
-          : 'Take it into account, then call mcp__10db__complete_step.'
-      }`
-    : `The gate failed (exit ${String(evidence.exitCode)} from \`${evidence.command}\`).\n${failedStepsSection(evidence.summary)}\nFix the cause, commit, and end your turn; 10db runs the gate again.\n\nGate output (end):\n\`\`\`\n${evidence.summary}\n\`\`\``;
+  evidence.kind === EvidenceKind.Acceptance
+    ? acceptanceSendBack(evidence, tools)
+    : evidence.command === null
+      ? `The builder sent the work back: ${evidence.summary}\n${
+          tools === ToolAccess.Edit
+            ? 'Address it, commit, and end your turn.'
+            : 'Take it into account, then call mcp__10db__complete_step.'
+        }`
+      : `The gate failed (exit ${String(evidence.exitCode)} from \`${evidence.command}\`).\n${failedStepsSection(evidence.summary)}\nFix the cause, commit, and end your turn; 10db runs the gate again.\n\nGate output (end):\n\`\`\`\n${evidence.summary}\n\`\`\``;
 
 /** What a session is told when 10db merged the base into its branch and left conflict markers. */
 function mergeSection(base: string, paths: readonly string[]): string {
@@ -918,7 +939,9 @@ function actionSection(input: PromptInput): string {
         ? gateFailure(input.evidence, input.step.tools)
         : "The gate failed and 10db kept no output from it. Run the changed packages' tests, typecheck and lint, fix the cause, commit, and end your turn; 10db runs the gate again.";
       // A fix session that was cut off left a handoff after the failure; the next one starts from it.
-      return input.handoff && briefedFromHandoff(input.action, input.handoff, input.evidence)
+      return input.action.providerSessionId === null &&
+        input.handoff &&
+        briefedFromHandoff(input.action, input.handoff, input.evidence)
         ? `${fromHandoff(input.handoff)}\n\n${gate}`
         : gate;
     }
@@ -1059,6 +1082,8 @@ function stepSection(input: PromptInput): string[] {
   const firstRound = !input.earlierResults.some((r) => r.verdict === Verdict.Reject);
   if (step.role === StepRole.Review && firstRound && input.testValue)
     lines.push('', input.testValue);
+  if (step.role === StepRole.Review && firstRound && input.acceptance)
+    lines.push('', input.acceptance);
   return lines;
 }
 

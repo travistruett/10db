@@ -534,7 +534,9 @@ describe('recoverOnStartup', () => {
       const { nextAction } = getWorkstream(state.db, ws.workstream.id);
       expect.soft(nextAction.kind, row.name).toBe(row.kind);
       if (row.kind === 'fix')
-        expect.soft(nextAction, row.name).toEqual({ kind: 'fix', evidenceId: gates[0]?.id });
+        expect
+          .soft(nextAction, row.name)
+          .toEqual({ kind: 'fix', evidenceId: gates[0]?.id, providerSessionId: null });
     }
 
     // A next action that carries builder input is kept.
@@ -548,8 +550,8 @@ describe('recoverOnStartup', () => {
       },
       {
         name: 'keeps a fix with its gate evidence',
-        before: { kind: 'fix', evidenceId },
-        expected: { kind: 'fix', evidenceId },
+        before: { kind: 'fix', evidenceId, providerSessionId: null },
+        expected: { kind: 'fix', evidenceId, providerSessionId: null },
       },
     ];
     for (const row of inputRows) {

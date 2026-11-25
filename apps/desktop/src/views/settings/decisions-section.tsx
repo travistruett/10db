@@ -35,12 +35,12 @@ import { SettingRow } from './setting-row';
 const ASK_A_MODEL = 'Let a Model Make These Calls';
 
 /**
- * Every decision 10db still asks a model, in the order the contract lists them, but the second opinion on limits:
+ * Every decision 10db still asks a model, in the order the contract lists them, but the second opinions:
  * it runs on a stronger model than the rest, so one model for every decision leaves it where it is.
  */
 const EVERY_DECISION: readonly AskedDecision[] = Object.values(JudgeDecision)
   .filter(isAskedDecision)
-  .filter((d) => d !== JudgeDecision.CrossesLimitSecond);
+  .filter((d) => d !== JudgeDecision.CrossesLimitSecond && d !== JudgeDecision.AcceptanceSecond);
 
 const DecisionsTab = { Decisions: 'decisions', Recent: 'recent' } as const;
 type DecisionsTab = (typeof DecisionsTab)[keyof typeof DecisionsTab];

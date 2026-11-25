@@ -199,9 +199,11 @@ export async function recoverOnStartup(opts: {
       report.parked.push(ws.id);
       continue;
     }
-    // A check or plan card is not an agent's question: it is answered by its own handler.
+    // A check, plan or acceptance card is not an agent's question: it is answered by its own handler.
     const open = waiting
-      ? openItemsForWorkstream(db, ws.id).find((i) => i.kind !== 'check' && i.kind !== 'plan')
+      ? openItemsForWorkstream(db, ws.id).find(
+          (i) => i.kind !== 'check' && i.kind !== 'plan' && i.kind !== 'acceptance',
+        )
       : undefined;
     if (open) {
       const nextAction: NextAction = { kind: 'answer', inboxId: open.id, providerSessionId };
@@ -229,7 +231,7 @@ export async function recoverOnStartup(opts: {
       row.state === S.Verifying || row.nextAction.kind === 'verify'
         ? { kind: 'verify' }
         : failedGate
-          ? { kind: 'fix', evidenceId: failedGate }
+          ? { kind: 'fix', evidenceId: failedGate, providerSessionId: null }
           : nextActionAfterCrash(row.nextAction, providerSessionId, latestHandoffForStep(db, row));
     const nextAction = pass
       ? withUndelivered(crashAction, untakenMessages(db, row.taskId)[0] ?? null, providerSessionId)

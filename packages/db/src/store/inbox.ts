@@ -441,6 +441,27 @@ export function openItemsForWorkstream(db: DbReader, workstreamId: WorkstreamId)
     .map((row) => toInboxItemDto(db, row));
 }
 
+/** The cards of one kind that target the workstream and that the builder answered, oldest first. */
+export function answeredItemsForWorkstream(
+  db: DbReader,
+  workstreamId: WorkstreamId,
+  kind: InboxKind,
+): InboxItemDto[] {
+  return db
+    .select()
+    .from(schema.inboxItems)
+    .where(
+      and(
+        inArray(schema.inboxItems.state, ANSWERED_STATES),
+        eq(schema.inboxItems.kind, kind),
+        sql`EXISTS (SELECT 1 FROM json_each(${schema.inboxItems.targets}) WHERE json_extract(value, '$.workstreamId') = ${workstreamId})`,
+      ),
+    )
+    .orderBy(asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
+    .all()
+    .map((row) => toInboxItemDto(db, row));
+}
+
 /** A card the builder answered, as a reviewer of its task is shown it. */
 export interface AnsweredCard {
   readonly id: InboxItemId;
