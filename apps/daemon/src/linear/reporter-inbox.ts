@@ -13,7 +13,7 @@ import { BY_ANSWER, CardTier, type InboxService } from '../inbox';
 import { linearLinkOf } from './task-link';
 
 // The project's one Inbox card for Linear updates that need the builder:
-// what waits on a retry, failed for good or was withheld by the secret scan.
+// what is held for a Linear sign-in, waits on a retry, failed for good or was withheld by the secret scan.
 
 /** The detail key that marks a card as the reporter's, holding the project id. */
 const REPORTER_DETAIL = 'linearReporter';
@@ -42,12 +42,13 @@ export function refreshReporterCard(
   deps: { readonly state: StateStore; readonly inbox: InboxService },
   projectId: ProjectId,
 ): void {
-  const { waiting, failed, withheld } = linearPostCounts(deps.state.db, projectId);
-  if (waiting + failed + withheld === 0) {
+  const { waiting, held, failed, withheld } = linearPostCounts(deps.state.db, projectId);
+  if (waiting + held + failed + withheld === 0) {
     const open = findOpenByFoldKey(deps.state.db, projectId, linearReporterFoldKey(projectId));
     if (open !== undefined) deps.inbox.withdraw(open.id);
     return;
   }
+  // Held rows come first, so with any held the first row's reason names the account that needs a Linear sign-in.
   const problems = linearPostProblems(deps.state.db, projectId, LISTED_ROWS + 1);
   const latest = problems[0] ?? null;
   const reason =
@@ -56,6 +57,7 @@ export function refreshReporterCard(
       : (latest.lastError ??
         (latest.withheldPattern === null ? null : `held back: ${latest.withheldPattern}`));
   const counts = [
+    held > 0 ? `${String(held)} held for a Linear sign-in` : null,
     waiting > 0 ? `${String(waiting)} waiting` : null,
     failed > 0 ? `${String(failed)} failed` : null,
     withheld > 0
@@ -70,7 +72,9 @@ export function refreshReporterCard(
     workstreamId: null,
     title: 'Linear Updates Need You',
     body: [
-      reason === null ? counts.join(', ') : `${counts.join(', ')}. Latest: ${reason}`,
+      reason === null
+        ? counts.join(', ')
+        : `${counts.join(', ')}. ${held > 0 ? reason : `Latest: ${reason}`}`,
       ...problemLines(deps.state.db, problems),
     ].join('\n'),
     detail: { [REPORTER_DETAIL]: projectId },

@@ -126,6 +126,7 @@ import {
   reporterHooks,
   reporterSettings,
   subscribeLinearEvents,
+  type LinearReporter,
 } from '../linear';
 import { createServiceConnector } from './connect-service';
 import { createLinearSignIns } from './linear-sign-ins';
@@ -1705,6 +1706,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // Built after the moves, which tell it when a project moved.
   let accountLimits: AccountLimits | null = null;
+  // Built later; a move wakes it, so the project's updates held for a Linear sign-in go out on the new account.
+  let movedLinearReporter: Pick<LinearReporter, 'wake'> | null = null;
   const moveBack = createMoveBack({
     state,
     clock,
@@ -1727,6 +1730,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onMoved: (projectId) => {
       accountLimits?.forget(projectId);
       scheduler?.requestTick();
+      movedLinearReporter?.wake(projectId);
     },
   });
   accountLimits = createAccountLimits({
@@ -2811,6 +2815,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     signIns: linearSignIns,
     inbox,
   });
+  movedLinearReporter = linearReporter;
   /** Each service's own next step once it works for a project. Linear: the project reports to it. */
   const whenConnectedWorks: Record<ConnectableService, (projectId: ProjectId) => void> = {
     linear: (projectId) => {

@@ -4,6 +4,8 @@ import {
   EventType,
   InboxItemId,
   LinearEventKind,
+  McpSignInChangedData,
+  McpSignInState,
   PullRequestState,
   WorkstreamId,
   WorkstreamState,
@@ -18,6 +20,7 @@ import {
   getTask,
   getWorkstream,
   getWorkstreamRow,
+  listActiveProjects,
   listLinearPosts,
   listWorkstreams,
   pendingLinearPosts,
@@ -244,7 +247,8 @@ function readFor(db: DbReader, event: DaemonEvent): LinearEventRead {
 
 /**
  * Turns the events of a linked task into owed updates: one `state.write` makes the rows, then the reporter is
- * poked. A project that is not reporting, and a task that is not a Linear link, make none. The listener is
+ * poked. A project that is not reporting, and a task that is not a Linear link, make none. An account's MCP
+ * sign-in that turns signed in wakes the projects on it, so their held updates go out. The listener is
  * synchronous, like the ship trigger's.
  */
 export function subscribeLinearEvents(
@@ -252,13 +256,20 @@ export function subscribeLinearEvents(
   deps: {
     state: StateStore;
     clock: Clock;
-    reporter: { poke(taskId: TaskId): void };
+    reporter: { poke(taskId: TaskId): void; wake(projectId: ProjectId): void };
     log: Logger;
   },
 ): () => void {
   const { state, clock, reporter, log } = deps;
   return bus.subscribe((event) => {
     try {
+      if (event.type === EventType.McpSignInChanged) {
+        const changed = McpSignInChangedData.safeParse(event.data);
+        if (!changed.success || changed.data.state !== McpSignInState.SignedIn) return;
+        for (const project of listActiveProjects(state.db))
+          if (project.accountId === changed.data.accountId) reporter.wake(project.id);
+        return;
+      }
       const drafts = linearRowOf(event, readFor(state.db, event));
       if (drafts.length === 0) return;
       const blocked = new Map<ProjectId, string | null>();

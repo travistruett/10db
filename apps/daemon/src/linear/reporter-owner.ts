@@ -122,6 +122,7 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
       const { posts, run } = deps.runs.begin({
         conversationId: conv.id,
         sessionId: start.sessionId,
+        accountId: launch.account.accountId,
         linearPrefixes: linearToolPrefixes({
           connector,
           entries: Object.keys(prepared.yourMcpServers),

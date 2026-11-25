@@ -3,7 +3,9 @@ import {
   ConversationItemAuthor,
   ConversationItemKind,
   ConversationState,
+  harnessOf,
   LinearVia,
+  type AccountId,
   type ConversationId,
   type LinearPostDto,
   type LinearPostId,
@@ -18,8 +20,10 @@ import {
 import {
   dropPendingLinearPosts,
   failLinearPosts,
+  getAccount,
   getProject,
   getTask,
+  holdLinearPosts,
   insertItem,
   lastItems,
   listItems,
@@ -27,6 +31,7 @@ import {
   recordLinearPosts,
   setAppSetting,
   takeLinearPosts,
+  wakeHeldLinearPosts,
   type ConversationRow,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
@@ -40,6 +45,7 @@ import { refreshReporterCard } from './reporter-inbox';
 import { taskPrUrl } from './reporter-brief';
 import { judgeReporterCall, type ReporterRun } from './reporter-guard';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
+import { signInNeeded } from './sign-in-needed';
 import {
   SNAPSHOT_FIRST_LINE,
   SNAPSHOT_MAX_READS,
@@ -60,6 +66,11 @@ export const SNAPSHOT_DEADLINE_MS = 3 * 60_000;
 export const BACKOFF_MS = { first: 5 * 60_000, max: 6 * 60 * 60_000 } as const;
 /** A row that fails this many times is failed for good. */
 export const MAX_TRIES = 5;
+/**
+ * How long a row held for a Linear sign-in waits before it is tried again, and how long an account a run found
+ * signed out is taken as signed out. A wake (a move, a sign-in, Linear switched on) ends the wait at once.
+ */
+export const HOLD_RETRY_MS = 30 * 60_000;
 
 /** The line that starts a run; only a trigger, the brief carries what to do. */
 export const REPORTER_STARTER = 'Report the pending Linear updates.';
@@ -74,6 +85,11 @@ export interface LinearReporter {
   stop(): Promise<void>;
   /** A row was enqueued. */
   poke(taskId: TaskId): void;
+  /**
+   * The project's way to Linear may have changed (it moved, its account signed in, Linear was switched on): its
+   * held rows are due now and its account is no longer taken as signed out.
+   */
+  wake(projectId: ProjectId): void;
   /** `report_linear_post`, from a reporter session only. */
   reportPost(sessionId: SessionId, input: ReportLinearPostInput): { ok: true };
   /**
@@ -98,6 +114,8 @@ export interface LinearReporterRuns {
   begin(input: {
     readonly conversationId: ConversationId;
     readonly sessionId: SessionId;
+    /** The account the session runs on: the one a run that reaches no Linear names. */
+    readonly accountId: AccountId;
     readonly linearPrefixes: readonly string[];
   }): { readonly posts: readonly LinearPostDto[]; readonly run: Readonly<ReporterRun> };
   /** The session could not be made (its launch, sandbox or sign-in check threw): the run fails with this reason. */
@@ -125,6 +143,10 @@ interface Flight {
   readonly projectId: ProjectId;
   readonly conversationId: ConversationId;
   sessionId: SessionId | null;
+  /** The account the session runs on, once it has begun. */
+  accountId: AccountId | null;
+  /** An allowed Linear call was made: the session's agent is signed in to Linear. */
+  reachedLinear: boolean;
   /** The rows due when the run was triggered: what fails when the session never takes any. */
   readonly due: ReadonlySet<LinearPostId>;
   taken: ReadonlySet<LinearPostId>;
@@ -164,9 +186,46 @@ export function createLinearReporter(
   const afters = new Set<Timer>();
   /** Snapshots waiting for a task's run to finish; each is woken with whether the task went idle. */
   const idleWaiters = new Map<TaskId, Set<(idle: boolean) => void>>();
+  /** Accounts a run found signed out of Linear: their rows are held without a session until `until`. */
+  const signedOut = new Map<AccountId, { readonly reason: string; readonly until: number }>();
   let stopped = false;
   /** Read again after an await, where the compiler has narrowed `stopped`. */
   const halted = (): boolean => stopped;
+
+  /** The line naming the account that needs a Linear sign-in, and how. */
+  const signInReason = (accountId: AccountId): string => {
+    const account = getAccount(state.db, accountId);
+    return signInNeeded(account.label, harnessOf(account));
+  };
+
+  /** Holds rows whose account can't reach Linear: no try is spent, and they are due again at `until`. */
+  const hold = (
+    rows: readonly LinearPostDto[],
+    found: { readonly reason: string; readonly until: number },
+  ): void => {
+    if (rows.length === 0) return;
+    state.write((ctx) => {
+      holdLinearPosts(
+        ctx,
+        rows.map((p) => p.id),
+        found.reason,
+        new Date(found.until).toISOString(),
+      );
+    });
+  };
+
+  /**
+   * The account was found signed out of Linear: it is taken as signed out for the hold, so the other tasks on it
+   * hold without a session of their own until the next one finds out again.
+   */
+  const foundSignedOut = (accountId: AccountId): { reason: string; until: number } => {
+    const found = {
+      reason: signInReason(accountId),
+      until: clock.now().getTime() + HOLD_RETRY_MS,
+    };
+    signedOut.set(accountId, found);
+    return found;
+  };
 
   const fail = (rows: readonly LinearPostDto[], error: string): void => {
     const now = clock.now().getTime();
@@ -250,13 +309,17 @@ export function createLinearReporter(
       arm(taskId);
       return;
     }
-    // An unchecked row is a maybe (after a restart) and goes ahead.
-    if (row?.via === LinearVia.None && !row.unchecked) {
-      fail(
-        due,
-        row.note ??
-          "This account's agent has no Linear. Connect Linear under Settings › Integrations.",
-      );
+    // An account a run lately found signed out holds without a session; an unchecked row is a maybe (after a
+    // restart) and goes ahead.
+    const known = signedOut.get(accountId);
+    const found =
+      known !== undefined && known.until > now
+        ? known
+        : row?.via === LinearVia.None && !row.unchecked
+          ? foundSignedOut(accountId)
+          : null;
+    if (found !== null) {
+      hold(due, found);
       refreshCard(task.projectId);
       arm(taskId);
       return;
@@ -276,6 +339,8 @@ export function createLinearReporter(
       projectId,
       conversationId,
       sessionId: null,
+      accountId: null,
+      reachedLinear: false,
       due: new Set(due.map((p) => p.id)),
       snapshot,
       reads: 0,
@@ -327,8 +392,9 @@ export function createLinearReporter(
   };
 
   /**
-   * Ends the run once: its taken rows still pending become withheld when the guard withheld a write, and
-   * fail otherwise. The conversation is retired, and the task re-armed, off the engine's effect chain.
+   * Ends the run once: its taken rows still pending become withheld when the guard withheld a write, are held
+   * when a completed session never reached Linear, and fail otherwise. The conversation is retired, and the task
+   * re-armed, off the engine's effect chain.
    */
   const settle = (flight: Flight, reason: string, complete = false): void => {
     // A stopped reporter leaves every row as it is, for the next start to pick up.
@@ -340,7 +406,7 @@ export function createLinearReporter(
         snapshotOf(flight, flight.snapshot, flight.error ?? reason, complete),
       );
     } else {
-      settleRows(flight, reason);
+      settleRows(flight, reason, complete);
     }
     if (flight.sessionId !== null) bySession.delete(flight.sessionId);
     // The task stays in flight until its conversation is retired, so nothing starts on a conversation still closing.
@@ -373,7 +439,11 @@ export function createLinearReporter(
     return { kind: 'missing', reason };
   };
 
-  const settleRows = (flight: Flight, reason: string): void => {
+  /** The run's session never reached Linear: its account's agent is taken as not signed in to it. */
+  const missedLinear = (flight: Flight): flight is Flight & { accountId: AccountId } =>
+    flight.guard !== null && flight.accountId !== null && !flight.reachedLinear;
+
+  const settleRows = (flight: Flight, reason: string, complete: boolean): void => {
     try {
       const guard = flight.guard;
       // What the session took; when it never got that far, what was due when the run was triggered.
@@ -390,6 +460,8 @@ export function createLinearReporter(
             { state: 'withheld', pattern },
           );
         });
+      // A session whose turn completed without one Linear call had no Linear: a sign-in, not a retry, fixes it.
+      else if (complete && missedLinear(flight)) hold(open, foundSignedOut(flight.accountId));
       else fail(open, flight.error ?? reason);
       refreshCard(flight.projectId);
     } catch (error) {
@@ -435,6 +507,18 @@ export function createLinearReporter(
       waiters.add(wake);
     });
 
+  /** The project's held rows are due now, its account is no longer taken as signed out, and its tasks re-arm. */
+  const wake = (projectId: ProjectId): void => {
+    if (stopped) return;
+    signedOut.delete(getProject(state.db, projectId).accountId);
+    const now = clock.now().toISOString();
+    state.write((ctx) => {
+      wakeHeldLinearPosts(ctx, projectId, now);
+    });
+    const tasks = new Set(pendingLinearPosts(state.db, { projectId }).map((p) => p.taskId));
+    for (const taskId of tasks) arm(taskId);
+  };
+
   const runOf = (sessionId: SessionId): { flight: Flight; guard: ReporterRun } => {
     const flight = bySession.get(sessionId);
     if (flight === undefined || flight.settled || flight.guard === null)
@@ -465,6 +549,8 @@ export function createLinearReporter(
     },
 
     poke: arm,
+
+    wake,
 
     async snapshot(taskId) {
       const missing = (reason: string): LinearSnapshot => ({ kind: 'missing', reason });
@@ -514,6 +600,7 @@ export function createLinearReporter(
           withheld: new Set(),
         };
         flight.sessionId = input.sessionId;
+        flight.accountId = input.accountId;
         flight.guard = guard;
         bySession.set(input.sessionId, flight);
         return { posts: [], run: guard };
@@ -539,6 +626,7 @@ export function createLinearReporter(
         withheld: new Set(),
       };
       flight.sessionId = input.sessionId;
+      flight.accountId = input.accountId;
       flight.taken = new Set(posts.map((p) => p.id));
       flight.guard = guard;
       bySession.set(input.sessionId, flight);
@@ -597,7 +685,14 @@ export function createLinearReporter(
         const rows = pendingLinearPosts(state.db, { taskId: flight.taskId }).filter(
           (p) => input.postIds.includes(p.id) && !flight.failedByAgent.has(p.id),
         );
-        fail(rows, outcome.reason);
+        // A session that never reached Linear is reporting that it has none: the rows wait for a sign-in.
+        if (missedLinear(flight)) {
+          log.info(
+            { taskId: flight.taskId, reason: outcome.reason },
+            'a reporter run without Linear held its updates',
+          );
+          hold(rows, foundSignedOut(flight.accountId));
+        } else fail(rows, outcome.reason);
         for (const row of rows) flight.failedByAgent.add(row.id);
         refreshCard(flight.projectId);
         return { ok: true };
@@ -623,6 +718,12 @@ export function createLinearReporter(
       }
       const judged = judgeReporterCall(flight.guard, { toolName: req.toolName, input: req.input });
       if (judged.withheld !== undefined) flight.guard.withheld.add(judged.withheld);
+      // Only a call the rule allows counts: a signed-out server's sign-in tool is refused, so it does not.
+      if (
+        judged.verdict.decision === 'allow' &&
+        flight.guard.linearPrefixes.some((prefix) => req.toolName.startsWith(prefix))
+      )
+        flight.reachedLinear = true;
       // An allowed call is an explicit allow, so neither auto mode's classifier nor a judge sees it.
       return judged.verdict.decision === 'allow'
         ? { decision: 'allow', settled: ALLOWED_BY_RULE }
@@ -641,6 +742,8 @@ export function createLinearReporter(
         setAppSetting(ctx, reporterSettingsKey(projectId), input);
         if (!input.on) dropPendingLinearPosts(ctx, { projectId });
       });
+      // Linear switched on, Connect Linear among the ways, may have signed the account in.
+      if (input.on) wake(projectId);
       refreshCard(projectId);
     },
   };
