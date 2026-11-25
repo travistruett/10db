@@ -1,6 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import {
+  accessSync,
+  constants,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -45,10 +47,18 @@ const SEATBELT = process.platform === 'darwin' && process.env['TENDB_SANDBOX'] !
 // The standalone Tailscale app's local API: a port link (to a bare number, so it dangles) and a
 // same-user proof any admin user can read.
 const TAILSCALE = '/Library/Tailscale';
-const tailscaleProof =
-  SEATBELT && existsSync(TAILSCALE)
-    ? readdirSync(TAILSCALE).find((name) => name.startsWith('sameuserproof-'))
-    : undefined;
+// Only where the builder can read the proof outside the sandbox does a denial inside it prove anything.
+const readable = (path: string): boolean => {
+  try {
+    accessSync(path, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const tailscaleProof = (SEATBELT && existsSync(TAILSCALE) ? readdirSync(TAILSCALE) : []).find(
+  (name) => name.startsWith('sameuserproof-') && readable(join(TAILSCALE, name)),
+);
 
 const listen = (server: Server, at: string | number): Promise<void> =>
   new Promise((resolve, reject) => {

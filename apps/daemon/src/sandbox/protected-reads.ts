@@ -17,7 +17,9 @@ export function isEqualOrUnder(path: string, root: string): boolean {
  * Tailscale's local API: the standalone app's port link and same-user proof (readable by every admin
  * user) and the open-source daemon's socket. A command holding the proof, with localhost on, could
  * drive `tailscale serve` or Funnel and put this Mac's ports on the internet. The App Store app keeps
- * its proof under the home directory, which lanes can't read already.
+ * its proof under the home directory, which lanes can't read, with its token in the file's name; what
+ * keeps that name from a lane is the sandbox's `process-info` limit to its own processes, which hides
+ * the Tailscale extension's open files from `lsof`, so that limit must stay.
  */
 const TAILSCALE_LOCAL_API = [
   '/Library/Tailscale',
