@@ -4,18 +4,19 @@ import {
   ConversationItemKind,
   ConversationState,
   harnessOf,
-  LinearVia,
   type AccountId,
   type ConversationId,
   type LinearPostDto,
   type LinearPostId,
   type LinearReporterSettings,
+  type LinearSignInRowDto,
   type LinearSignInsDto,
   type ProjectId,
   parseItemBody,
   type ReportLinearPostInput,
   type SessionId,
   type TaskId,
+  type ToolCallView,
   type UploadLinearPictureInput,
 } from '@10db/contracts';
 import {
@@ -46,8 +47,9 @@ import { refreshReporterCard } from './reporter-inbox';
 import { taskPrUrl } from './reporter-brief';
 import { judgeReporterCall, type ReporterRun } from './reporter-guard';
 import { reporterPictures, uploadPicture } from './reporter-pictures';
+import { checkSaysSignedOut, reachOutcome } from './reporter-reach';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
-import { signInNeeded } from './sign-in-needed';
+import { noLinearCall, signInNeeded } from './sign-in-needed';
 import {
   SNAPSHOT_FIRST_LINE,
   SNAPSHOT_MAX_READS,
@@ -76,6 +78,9 @@ export const HOLD_RETRY_MS = 30 * 60_000;
 
 /** The line that starts a run; only a trigger, the brief carries what to do. */
 export const REPORTER_STARTER = 'Report the pending Linear updates.';
+
+/** How many of the conversation's newest items a settle reads for the run's and the earlier Linear calls. */
+const CALLS_READ = 200;
 
 const ALLOWED_BY_RULE = "10db's reporter rule allows this call.";
 const SESSION_OVER = 'This reporter run is over; nothing it calls is recorded.';
@@ -153,6 +158,10 @@ interface Flight {
   accountId: AccountId | null;
   /** An allowed Linear call was made: the session's agent is signed in to Linear. */
   reachedLinear: boolean;
+  /** The account's Linear sign-in check, as the trigger read it; null when it has no row. */
+  readonly signIn: LinearSignInRowDto | null;
+  /** The conversation's last item before the run's starter: what came after it is the run's own. */
+  readonly afterSeq: number;
   /** The rows due when the run was triggered: what fails when the session never takes any. */
   readonly due: ReadonlySet<LinearPostId>;
   taken: ReadonlySet<LinearPostId>;
@@ -315,13 +324,13 @@ export function createLinearReporter(
       arm(taskId);
       return;
     }
-    // An account a run lately found signed out holds without a session; an unchecked row is a maybe (after a
-    // restart) and goes ahead.
+    // An account a run lately found signed out holds without a session, as does one whose check says signed out;
+    // an unchecked row is a maybe (after a restart) and goes ahead.
     const known = signedOut.get(accountId);
     const found =
       known !== undefined && known.until > now
         ? known
-        : row?.via === LinearVia.None && !row.unchecked
+        : checkSaysSignedOut(row)
           ? foundSignedOut(accountId)
           : null;
     if (found !== null) {
@@ -330,7 +339,7 @@ export function createLinearReporter(
       arm(taskId);
       return;
     }
-    trigger(taskId, task.projectId, due, null);
+    trigger(taskId, task.projectId, due, null, row ?? null);
   };
 
   const trigger = (
@@ -338,6 +347,7 @@ export function createLinearReporter(
     projectId: ProjectId,
     due: readonly LinearPostDto[],
     snapshot: Flight['snapshot'],
+    signIn: LinearSignInRowDto | null,
   ): void => {
     const conversationId = deps.conversations.reporterOf(taskId, projectId);
     const flight: Flight = {
@@ -347,6 +357,8 @@ export function createLinearReporter(
       sessionId: null,
       accountId: null,
       reachedLinear: false,
+      signIn,
+      afterSeq: lastItems(state.db, conversationId, 1)[0]?.seq ?? -1,
       due: new Set(due.map((p) => p.id)),
       snapshot,
       reads: 0,
@@ -445,9 +457,59 @@ export function createLinearReporter(
     return { kind: 'missing', reason };
   };
 
-  /** The run's session never reached Linear: its account's agent is taken as not signed in to it. */
-  const missedLinear = (flight: Flight): flight is Flight & { accountId: AccountId } =>
-    flight.guard !== null && flight.accountId !== null && !flight.reachedLinear;
+  /** The tool calls of the conversation's newest items: the run's own, and those before its starter. */
+  const callsOf = (flight: Flight): { runCalls: ToolCallView[]; earlierCalls: ToolCallView[] } => {
+    const runCalls: ToolCallView[] = [];
+    const earlierCalls: ToolCallView[] = [];
+    for (const item of lastItems(state.db, flight.conversationId, CALLS_READ)) {
+      if (item.kind !== ConversationItemKind.ToolCall) continue;
+      try {
+        const call = parseItemBody(ConversationItemKind.ToolCall, item.body);
+        (item.seq > flight.afterSeq ? runCalls : earlierCalls).push(call);
+      } catch {
+        // A body that isn't a call's shows nothing either way.
+      }
+    }
+    return { runCalls, earlierCalls };
+  };
+
+  /**
+   * Settles rows a begun run left open without recording them: held for a sign-in only on evidence that the
+   * account's Linear needs one (`reachOutcome`), failed with `reason` when the run reached Linear, and failed with
+   * why it isn't a sign-in when the account's Linear works but the run never called it. That last one never takes
+   * the account as signed out, so the other tasks on it still run.
+   */
+  const settleUnreported = (
+    flight: Flight & { accountId: AccountId; guard: ReporterRun },
+    rows: readonly LinearPostDto[],
+    reason: string,
+    /** The reason the session gave when it reported the rows failed itself. */
+    said: string | null = null,
+  ): void => {
+    const reach = reachOutcome({
+      reachedLinear: flight.reachedLinear,
+      linearPrefixes: flight.guard.linearPrefixes,
+      signIn: flight.signIn,
+      ...callsOf(flight),
+    });
+    switch (reach.kind) {
+      case 'sign_in':
+        hold(rows, foundSignedOut(flight.accountId));
+        return;
+      case 'retry': {
+        const why = noLinearCall(getAccount(state.db, flight.accountId).label, reach.evidence);
+        fail(rows, said === null ? why : `${why} The session said: ${said}`);
+        return;
+      }
+      case 'reached':
+        fail(rows, reason);
+        return;
+    }
+  };
+
+  /** The run's session began: it has an account and a guard. */
+  const begun = (flight: Flight): flight is Flight & { accountId: AccountId; guard: ReporterRun } =>
+    flight.guard !== null && flight.accountId !== null;
 
   const settleRows = (flight: Flight, reason: string, complete: boolean): void => {
     try {
@@ -466,10 +528,10 @@ export function createLinearReporter(
             { state: 'withheld', pattern },
           );
         });
-      // A session whose turn completed without one Linear call had no Linear: a sign-in, not a retry, fixes it.
-      // A run that left no row open (it recorded them all) shows nothing about the account.
-      else if (complete && open.length > 0 && missedLinear(flight))
-        hold(open, foundSignedOut(flight.accountId));
+      // A completed turn that left rows open is held only on evidence of a missing sign-in. A run that left no
+      // row open (it recorded them all) shows nothing about the account.
+      else if (complete && open.length > 0 && begun(flight))
+        settleUnreported(flight, open, flight.error ?? reason);
       else fail(open, flight.error ?? reason);
       refreshCard(flight.projectId);
     } catch (error) {
@@ -571,7 +633,7 @@ export function createLinearReporter(
         const accountId = getProject(state.db, task.projectId).accountId;
         const row = (await deps.signIns.list()).rows.find((r) => r.accountId === accountId);
         // An unchecked row is a maybe and goes ahead.
-        if (row?.via === LinearVia.None && !row.unchecked)
+        if (row !== undefined && checkSaysSignedOut(row))
           return missing(
             row.note ??
               "This account's agent has no Linear. Connect Linear under Settings › Integrations.",
@@ -584,7 +646,7 @@ export function createLinearReporter(
         const conversationId = deps.conversations.reporterOf(taskId, task.projectId);
         const afterSeq = lastItems(state.db, conversationId, 1)[0]?.seq ?? -1;
         return await new Promise<LinearSnapshot>((resolve) => {
-          trigger(taskId, task.projectId, [], { resolve, afterSeq });
+          trigger(taskId, task.projectId, [], { resolve, afterSeq }, row ?? null);
         });
       } catch (error) {
         log.warn({ err: error, taskId }, 'the Linear snapshot could not be read');
@@ -693,13 +755,14 @@ export function createLinearReporter(
         const rows = pendingLinearPosts(state.db, { taskId: flight.taskId }).filter(
           (p) => input.postIds.includes(p.id) && !flight.failedByAgent.has(p.id),
         );
-        // A session that never reached Linear is reporting that it has none: the rows wait for a sign-in.
-        if (rows.length > 0 && missedLinear(flight)) {
+        // A session that never reached Linear may be reporting that it has none: the rule decides whether the
+        // rows wait for a sign-in.
+        if (rows.length > 0 && begun(flight)) {
           log.info(
             { taskId: flight.taskId, reason: outcome.reason },
-            'a reporter run without Linear held its updates',
+            'a reporter run reported its updates failed',
           );
-          hold(rows, foundSignedOut(flight.accountId));
+          settleUnreported(flight, rows, outcome.reason, outcome.reason);
         } else fail(rows, outcome.reason);
         for (const row of rows) flight.failedByAgent.add(row.id);
         refreshCard(flight.projectId);
@@ -738,8 +801,11 @@ export function createLinearReporter(
       if (
         judged.verdict.decision === 'allow' &&
         flight.guard.linearPrefixes.some((prefix) => req.toolName.startsWith(prefix))
-      )
+      ) {
         flight.reachedLinear = true;
+        // The account reached Linear: an earlier finding that it was signed out no longer holds its other tasks.
+        if (flight.accountId !== null) signedOut.delete(flight.accountId);
+      }
       // An allowed call is an explicit allow, so neither auto mode's classifier nor a judge sees it.
       return judged.verdict.decision === 'allow'
         ? { decision: 'allow', settled: ALLOWED_BY_RULE }

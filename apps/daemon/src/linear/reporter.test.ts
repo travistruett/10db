@@ -350,6 +350,44 @@ describe('the Linear reporter', () => {
     expect(card()).toBeUndefined();
   });
 
+  it('spends a try on a run that made no Linear call after Linear answered in the conversation, and posts next time', async () => {
+    book[`Chat: ${SNAPSHOT_STARTER}`] = [
+      [
+        { do: 'tool', toolName: `${PREFIX}get_issue`, input: { id: ISSUE }, result: '{}' },
+        { do: 'say', text: `${SNAPSHOT_FIRST_LINE}\nAMP-1: Add search.` },
+        { do: 'turn_complete' },
+      ],
+    ];
+    await expect(reporter.snapshot(task.id)).resolves.toMatchObject({ kind: 'read' });
+    const id = oweOne();
+    // The posting turn right after the snapshot ends without a call, as the one on 2026-11-25 did.
+    book[KEY] = [[{ do: 'turn_complete' }], recordingScript(id)];
+    clock.advance(30_000);
+    await expect
+      .poll(
+        () => {
+          clock.advance(0);
+          return rows()[0]?.tries;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(1);
+    expect(rows()[0]?.state).toBe(LinearPostState.Pending);
+    expect(rows()[0]?.lastError).toContain('without calling Linear');
+    expect(rows()[0]?.lastError).not.toContain("isn't signed in");
+    // The account is not taken as signed out: the retry gets a session, and its write and report tools.
+    clock.advance(5 * 60_000);
+    await expect
+      .poll(
+        () => {
+          clock.advance(0);
+          return rows()[0]?.state;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(LinearPostState.Recorded);
+  });
+
   it('does not take the account as signed out when a run that made no Linear call left nothing to hold', async () => {
     const first = oweOne();
     // The run records its row without a call the guard counts as Linear's, so nothing is left to hold.
