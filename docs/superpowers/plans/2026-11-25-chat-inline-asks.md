@@ -76,7 +76,7 @@ interface LaneProfileInput { /* existing */ readonly allowUnsandboxedCommands?: 
 interface LaneSessionInput { /* existing */ readonly allowUnsandboxedCommands?: boolean } // passed to buildLaneProfile
 
 // apps/daemon/src/shape/session-launch.ts
-interface ShapePrepareInput { /* existing */ readonly unsandboxedAsk?: { readonly mayRun: () => string | null } } // set only by a chat, not Full access; passed to the broker's sandbox.unsandboxed
+interface ShapePrepareInput { /* existing */ readonly unsandboxedAsk?: { readonly mayRun: () => string | null; readonly changes: () => number } } // set only by a chat, not Full access; passed to the broker's sandbox.unsandboxed
 
 // apps/daemon/src/shape/confinement.ts (ShapeAccess)
 readonly unsandboxed?: 'ask'; // absent: a flagged command is denied, as today
@@ -87,7 +87,7 @@ export function firstChangeOf(call: Pick<ChatCall, 'toolName' | 'input'>): 'edit
 // apps/daemon/src/inbox/permission-broker.ts
 interface Ask { /* existing */ readonly title?: string; readonly chatOnce?: boolean }
 // BrokerContext.sandbox gains:
-readonly unsandboxed?: { readonly mayRun: () => string | null }; // null: may run; else the refusal
+readonly unsandboxed?: { readonly mayRun: () => string | null; readonly changes: () => number }; // null: may run; else the refusal. changes: calls let through that could change something; a remembered call lasts until it moves
 
 // apps/desktop/src/conversation/ask-card.tsx
 export function AskCard(props: {

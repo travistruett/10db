@@ -391,6 +391,7 @@ describe("a chat's command outside the sandbox", () => {
   const outside = (command: string) =>
     request('Bash', { command, dangerouslyDisableSandbox: true });
   let refusal: string | null;
+  let changes = 0;
 
   function chatBroker(owner: ReturnType<typeof conversation>) {
     return createPermissionBroker(
@@ -406,7 +407,7 @@ describe("a chat's command outside the sandbox", () => {
           fileAccess,
           hazards: [],
           commandsAsk: true,
-          unsandboxed: { mayRun: () => refusal },
+          unsandboxed: { mayRun: () => refusal, changes: () => changes },
         },
       },
     );
@@ -414,6 +415,7 @@ describe("a chat's command outside the sandbox", () => {
 
   beforeEach(() => {
     refusal = null;
+    changes = 0;
   });
 
   it('asks with three answers, remembers only the exact command for the session, and stores no rule', async () => {
@@ -433,6 +435,17 @@ describe("a chat's command outside the sandbox", () => {
     // The identical call goes through unasked; another command, and another session, ask again.
     expect(await broker(outside('pnpm test'))).toEqual({ behavior: 'allow' });
     expect(openCards()).toEqual([]);
+    // A change since the yes (a file edited, another command run) makes the same call ask again, in another
+    // folder too; with nothing changed after that yes, it is remembered afresh.
+    changes += 1;
+    const afterChange = broker(outside('pnpm test'));
+    expect(onlyOpenCard().title).toBe('Run this outside the sandbox?');
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    expect(await afterChange).toEqual({ behavior: 'allow' });
+    expect(await broker(outside('pnpm test'))).toEqual({ behavior: 'allow' });
+    const elsewhere = broker({ ...outside('pnpm test'), cwd: '/other' });
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny });
+    await elsewhere;
     void broker(outside('pnpm build')).catch(() => undefined);
     expect(onlyOpenCard().detail?.['summary']).toBe('pnpm build');
     inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny, note: 'use the gate' });

@@ -18,7 +18,8 @@
   the hold is read again at the builder's yes. A lost hold denies with the reason.
 - The card shows the exact command and says it runs with the builder's full rights. It offers Allow once, "For this
   command in this chat" (`allow_chat`) and Deny. `allow_chat` allows that exact command again until the chat's
-  session restarts; it is never stored as a rule or a decision. No stored rule, carried allowance, project grant or
+  session restarts, and only until the chat changes something (an edit, another command, an MCP tool, a subagent's
+  call), so an edited script is asked about again; it is never stored as a rule or a decision. No stored rule, carried allowance, project grant or
   judge allows a flagged call.
 - The denial a chat reads after No invites another approach and carries the builder's note.
 - A Codex chat has no such flag, so its sandbox refuses as before and its instructions say to suggest Full access.

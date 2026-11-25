@@ -397,7 +397,12 @@ export function createShapePreparer(
             commandsAsk: true,
             ...(input.unsandboxedAsk === undefined
               ? {}
-              : { unsandboxed: { mayRun: input.unsandboxedAsk.mayRun } }),
+              : {
+                  unsandboxed: {
+                    mayRun: input.unsandboxedAsk.mayRun,
+                    changes: input.unsandboxedAsk.changes,
+                  },
+                }),
           },
           ...(input.limits === undefined ? {} : { limits: input.limits }),
         },

@@ -105,6 +105,7 @@ import { chatRoot, withWorktreeOnDisk } from './work-root';
 import { JUDGED_CHAT_TOOLS } from './git-rule';
 import type { ChatLiveSessions } from './live-sessions';
 import { chatSystemPrompt } from './prompt';
+import { couldChange } from './first-change';
 
 // Sessions spec §7.1, trust line §5: a chat as an owner of the explore engine. Its session is the
 // explore profile as the attended one: Plan's read-only sandbox and read tools, commands judged, the
@@ -607,6 +608,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       // A Claude chat's sandbox lets one command ask to run outside it, each judged by the hook and then the
       // builder; Full access has no sandbox, and Codex runs with approvals off.
       const codexChat = launch.account.harness === Provider.Codex;
+      // How many calls that could change something this session has let through: a command the builder allowed
+      // to run again outside the sandbox lasts only until this moves (`changesFiles`).
+      let changes = 0;
       const asksOutside = full === null && !fullCodex && launch.account.harness === Provider.Claude;
       const shapeId = planOfConversation(state.db, conv.id);
       const plan = deps.plan;
@@ -629,7 +633,14 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         signal: ending.signal,
         observer: start.observer,
         limits: limitNotes,
-        ...(asksOutside ? { unsandboxedAsk: { mayRun: () => outsideSandboxRefusal(folder) } } : {}),
+        ...(asksOutside
+          ? {
+              unsandboxedAsk: {
+                mayRun: () => outsideSandboxRefusal(folder),
+                changes: () => changes,
+              },
+            }
+          : {}),
       };
       let ready: ShapePrepared | null;
       if (full !== null || fullCodex)
@@ -910,7 +921,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               folder,
               reviewTurns,
             );
-            return readsNow()?.preToolUse(req, verdict) ?? verdict;
+            const settled = readsNow()?.preToolUse(req, verdict) ?? verdict;
+            if (settled.decision !== 'deny' && couldChange(chatCallOf(req))) changes += 1;
+            return settled;
           },
           ...(plan === undefined
             ? {}
