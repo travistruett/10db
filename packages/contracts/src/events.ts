@@ -106,7 +106,11 @@ export const EventType = {
   PlanAnchorChecked: 'plan.anchor_checked',
   /** A workstream's gate holds its slot and starts (Shape spec §8: lane time counts from here). */
   GateStarted: 'gate.started',
-  /** The gate that `gate.started` began has ended, with its exit code. */
+  /**
+   * A gate has ended, with its exit code and duration. A lane's gate (`entityType: 'workstream'`)
+   * follows its `gate.started`; a batch's shipping gate (`entityType: 'batch'`) has no start event.
+   * `data.projectId` and `data.command` let a later gate's timeout read how long a pass takes.
+   */
   GateFinished: 'gate.finished',
   /** Who holds a project's checkout changed (`entityType: 'project'`, `entityId` the project). */
   FolderHoldChanged: 'folder_hold.changed',

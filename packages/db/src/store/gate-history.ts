@@ -1,4 +1,4 @@
-import { EventType, type ProjectId } from '@10db/contracts';
+import { EventType, type BatchId, type ProjectId, type WorkstreamId } from '@10db/contracts';
 import { and, desc, eq, isNotNull, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader } from './store';
@@ -35,7 +35,7 @@ export function passingGateDurations(
 /** A gate process that is running now: whose it is, for a line that says what an update waits for. */
 export interface RunningGate {
   readonly kind: 'task' | 'batch';
-  readonly id: string;
+  readonly id: WorkstreamId | BatchId;
   readonly title: string;
 }
 

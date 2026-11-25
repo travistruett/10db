@@ -3128,7 +3128,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         shapeTurns: () => shape.runningTurns(),
         gates: () =>
           listRunningGates(state.db).map((gate) => ({
-            label: `${gate.kind === 'batch' ? 'batch' : 'task'} “${gate.title}”`,
+            label: `${gate.kind} “${gate.title}”`,
           })),
         waitLimitMs: () => selfUpdateWaitMinutes(state.db) * 60_000,
         drain: {

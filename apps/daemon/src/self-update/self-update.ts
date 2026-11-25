@@ -840,6 +840,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     if (deps.midSession() > 0 && !drainedPastLimit()) return waitOrDrain();
     if (deps.midSession() > 0 && gateHoldsInstall()) return TickResult.Draining;
     releaseShapeHold();
+    releaseGateHold();
     return install(runningCommit, { head: build.head, commit: build.commit }, build);
   }
 
