@@ -356,11 +356,11 @@ export function retryWorkstream(
       .filter((part) => part !== '')
       .join('\n\n');
     const evidence = text === '' ? null : insertBuilderNote(ctx, id, text);
-    // The fix a restarted step keeps, unless it is the note of a revert that is gone.
+    // The fix a restarted step keeps, fresh as a retried revise is, unless it is the note of a revert that is gone.
     const keptFix =
       row.nextAction.kind === 'fix' &&
       !(noRevert && revertCommitIn(getEvidence(ctx.tx, row.nextAction.evidenceId).summary) !== null)
-        ? row.nextAction
+        ? { ...row.nextAction, providerSessionId: null }
         : null;
     if (reworkAt !== null && reworked) {
       // A reviewer's rejection used the attempts up: the step that did the work runs again, as when
