@@ -6,6 +6,7 @@
   the one rule every caller, a lane, a pass, a chat and the reporter, takes them from, so a chat that writes has
   Docker as its sandbox does) and, with Docker open, names the project's compose services, read by `folders/dev-services.ts` from
   `origin/<base>` only, never the lane-writable checkout (`decisions/2026-11-24-judges-know-the-projects-dev-containers.md`).
+  A session in a separate copy (`TrustPolicyInput.copyId`) gets a `Separate copy:` line naming what the copy owns, the databases and stack its id's commands scope to, and what stays shared; `LIMIT_QUESTIONS`' DestroysData "no" counts what the session lines name as its own, which outside a copy is nothing (`decisions/2026-11-25-the-judge-takes-a-copys-project-commands-as-the-copys-own.md`).
   `scripts/crosses-limit-replay.ts` replays the commands the judge skipped in the builder's own history, and controls, through the judge by hand.
 - 10db's judge: `fast-path.ts` (`fastPathAllows`, `namesSecret`; its `JUDGED_OWN_TOOLS`, a chat's push, pull request and merge, are never fast) answers the calls that can't cross a limit
   with no model, a shell command only when every segment is in `read-allowlist.ts` (each read command with the
