@@ -4,12 +4,13 @@ import {
   type DecisionRecording,
   type InboxItemDto,
 } from '@10db/contracts';
-import { Box, Stack, Text } from '@mantine/core';
+import { Box, Button, Group, Stack } from '@mantine/core';
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { DaemonRequestError } from '../daemon/client';
 import { useAnswerInbox, useInbox } from '../daemon/queries';
 import { cardAnswer, recommended } from '../views/inbox/card-answer';
 import { InboxCard } from '../views/inbox/inbox-card';
+import { AskCard } from './ask-card';
 import { defaultRecording } from '../views/inbox/record-decision';
 import { WAITING_CARD_ATTRIBUTE } from './escape';
 
@@ -129,14 +130,18 @@ function Request({
         onDismiss={() => undefined}
         shortcuts
       />
-      <Text size="xs" c="dimmed" pt={4}>
-        Also in your Inbox.
-      </Text>
     </Box>
   );
 }
 
-/** The cards a conversation waits on, each drawn keyed by its item so no draft passes to the next. */
+const isAsk = (item: InboxItemDto): boolean => item.kind === InboxKind.Permission;
+
+/** The permission cards, oldest first: the first docks, the others wait behind it. */
+export function pendingAsks(items: readonly InboxItemDto[]): InboxItemDto[] {
+  return items.filter(isAsk).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/** The question cards a conversation waits on, each keyed by its item so no draft passes to the next. */
 export function PermissionRequest({
   items,
   onAnswered,
@@ -144,7 +149,8 @@ export function PermissionRequest({
   readonly items: readonly InboxItemDto[];
   readonly onAnswered?: () => void;
 }) {
-  if (items.length === 0) return null;
+  const questions = items.filter((item) => !isAsk(item));
+  if (questions.length === 0) return null;
   return (
     <Stack
       component="section"
@@ -154,9 +160,46 @@ export function PermissionRequest({
       pb="xs"
       style={{ flex: 'none', maxHeight: '50%', overflowY: 'auto' }}
     >
-      {items.map((item) => (
+      {questions.map((item) => (
         <Request key={item.id} item={item} onAnswered={onAnswered} />
       ))}
+    </Stack>
+  );
+}
+
+/** The oldest permission card, docked in the composer's place; Stop stays on its row. */
+export function DockedAsk({
+  items,
+  onStop,
+  onAnswered,
+}: {
+  readonly items: readonly InboxItemDto[];
+  readonly onStop: () => void;
+  readonly onAnswered?: () => void;
+}) {
+  const asks = pendingAsks(items);
+  const first = asks[0];
+  if (first === undefined) return null;
+  return (
+    <Stack
+      component="section"
+      aria-label="Waiting for your answer"
+      gap={4}
+      px="md"
+      pb="xs"
+      style={{ flex: 'none' }}
+    >
+      <AskCard
+        key={first.id}
+        item={first}
+        queued={asks.length - 1}
+        {...(onAnswered === undefined ? {} : { onAnswered })}
+      />
+      <Group justify="flex-end">
+        <Button size="compact-xs" variant="subtle" color="gray" onClick={onStop}>
+          Stop
+        </Button>
+      </Group>
     </Stack>
   );
 }

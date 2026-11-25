@@ -2,6 +2,7 @@ import {
   ActionIcon,
   Box,
   Button,
+  Code,
   CopyButton,
   Divider,
   Group,
@@ -15,6 +16,7 @@ import {
   IconChevronRight,
   IconCopy,
   IconAlertTriangle,
+  IconX,
   IconInfoCircle,
 } from '@tabler/icons-react';
 import type { ConversationEntry } from './entry';
@@ -127,13 +129,39 @@ export function ConversationEntryView({ entry }: { readonly entry: ConversationE
     case 'reasoning':
       return <Reasoning entry={entry} />;
     case 'notice': {
-      // A failure the builder must act on is red with a warning triangle; anything else is dim with an info icon.
-      const failed = entry.tone === 'error';
-      const Icon = failed ? IconAlertTriangle : IconInfoCircle;
+      // A failure the builder must act on is red with a warning triangle; an answered ask is a quiet line
+      // with a green check or a red cross; anything else is dim with an info icon.
+      const Icon =
+        entry.tone === 'error'
+          ? IconAlertTriangle
+          : entry.tone === 'allowed'
+            ? IconCheck
+            : entry.tone === 'refused'
+              ? IconX
+              : IconInfoCircle;
+      const iconColor =
+        entry.tone === 'allowed' ? 'green' : entry.tone === 'refused' ? 'red' : undefined;
       return (
-        <Text size="xs" c={failed ? 'red' : 'dimmed'} style={{ overflowWrap: 'anywhere' }}>
-          <Icon size={14} stroke={1.5} aria-hidden="true" style={{ verticalAlign: '-2px' }} />{' '}
+        <Text
+          fz={entry.tone === 'allowed' || entry.tone === 'refused' ? 13 : 'xs'}
+          c={entry.tone === 'error' ? 'red' : 'dimmed'}
+          style={{ overflowWrap: 'anywhere' }}
+        >
+          <Icon
+            size={14}
+            stroke={1.5}
+            aria-hidden="true"
+            color={iconColor === undefined ? undefined : `var(--mantine-color-${iconColor}-6)`}
+            style={{ verticalAlign: '-2px' }}
+          />{' '}
           {entry.text}
+          {entry.call === undefined ? null : (
+            <>
+              {' '}
+              <Code>{entry.call}</Code>
+            </>
+          )}
+          {entry.tail}
         </Text>
       );
     }

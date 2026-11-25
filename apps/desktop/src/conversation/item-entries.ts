@@ -45,23 +45,41 @@ export interface ItemEntryOptions {
 
 const plural = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
 
-/** What the builder answered on a card, in words. */
-function answeredWords(card: InboxItemDto): string | null {
+/** What a permission card asked about: the call when it has one, else its title without the question mark. */
+function askedOf(card: InboxItemDto): string {
+  const summary = card.detail?.['summary'];
+  return typeof summary === 'string' && summary !== '' ? summary : card.title.replace(/\?$/, '');
+}
+
+/** What the builder answered on a card: words, the call it was about, and what follows it. */
+function answeredLine(card: InboxItemDto): {
+  text: string;
+  call?: string;
+  tail?: string;
+  tone: 'info' | 'allowed' | 'refused';
+} | null {
   const choice = card.answer?.choice;
   if (choice === undefined) return null;
+  const note = card.answer?.note;
+  const call = askedOf(card);
   switch (choice) {
     case PermissionChoice.AllowOnce:
-      return 'You allowed this once';
+      return { text: 'You allowed', call, tone: 'allowed' };
     case PermissionChoice.AllowWorkstream:
-      return 'You allowed this for the session';
+      return { text: 'You allowed', call, tail: ' for the session', tone: 'allowed' };
     case PermissionChoice.AllowProject:
-      return 'You allowed this in the project';
+      return { text: 'You allowed', call, tail: ' in the project', tone: 'allowed' };
     case PermissionChoice.AllowChat:
-      return 'You allowed this command in this chat';
+      return { text: 'You allowed', call, tail: ' in this chat', tone: 'allowed' };
     case PermissionChoice.Deny:
-      return 'You denied this';
+      return {
+        text: 'You said no to',
+        call,
+        ...(note === undefined ? {} : { tail: `: ${note}` }),
+        tone: 'refused',
+      };
     default:
-      return `You answered: ${choice}`;
+      return { text: `You answered: ${choice}`, tone: 'info' };
   }
 }
 
@@ -138,8 +156,8 @@ export function itemEntry(
     case 'card': {
       const card = opts.cards.find((c) => c.id === item.inboxItemId);
       if (card === undefined || card.state === InboxState.Open) return null;
-      const words = answeredWords(card);
-      return words === null ? null : { kind: 'notice', id, text: words, tone: 'info' };
+      const line = answeredLine(card);
+      return line === null ? null : { kind: 'notice', id, ...line };
     }
     case 'plan':
       return {
