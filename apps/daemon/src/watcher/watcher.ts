@@ -85,7 +85,7 @@ import {
   writeStamp,
 } from './allowed-writes';
 import { filesUnderBounded as filesUnder } from './dir-files';
-import { leftBy, stringLeaves, type EndedRun } from './left-by';
+import { LEFT_BY_MAX_PATHS, leftBy, stringLeaves, type EndedRun } from './left-by';
 import { accountedAt, passWrites, type PassLane } from './pass-writes';
 import {
   bulkFoldKey,
@@ -444,7 +444,9 @@ export function createWatcher(deps: {
   ): string[] {
     const raised = withoutTrusted(project, site, strays, stamps);
     if (raised.length === 0) return raised;
-    const left = leftBy(raised, site.root, retryableFailedRuns(project, site.batchId), (rel) => {
+    const runs =
+      raised.length > LEFT_BY_MAX_PATHS ? [] : retryableFailedRuns(project, site.batchId);
+    const left = leftBy(raised, site.root, runs, (rel) => {
       try {
         return lstatSync(join(site.root, rel)).mtimeMs;
       } catch {
