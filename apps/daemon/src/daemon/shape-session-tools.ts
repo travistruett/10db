@@ -486,7 +486,20 @@ export function createFullAccessPreparer(
   const nothing = (): Promise<void> => Promise.resolve();
   return async (input) => {
     const claude = input.harness === Provider.Claude;
-    const base = input.relay && relayed !== null ? await relayed({ ...input, writes: true }) : null;
+    let base: ShapePrepared | null = null;
+    let relayNote: string | null = null;
+    if (input.relay && relayed !== null) {
+      try {
+        base = await relayed({ ...input, writes: true });
+      } catch (error) {
+        // The session starts without the builder's setup rather than not at all.
+        logger.warn(
+          { err: error, projectId: input.projectId },
+          'a Full access relay could not be built',
+        );
+        relayNote = `Note from 10db: your plugins, instructions and MCP servers could not be brought into this session (${error instanceof Error ? error.message : String(error)}), so it runs without them.`;
+      }
+    }
     const broker = createPermissionBroker(
       { state, inbox, git: deps.git, logger },
       {
@@ -506,7 +519,7 @@ export function createFullAccessPreparer(
       projectMcpServers: claude ? {} : (base?.projectMcpServers ?? {}),
       yourMcpServers: base?.yourMcpServers ?? {},
       claudeConnectors: base?.claudeConnectors ?? false,
-      note: base?.note ?? null,
+      note: base?.note ?? relayNote,
       credentialsExpireAt: base?.credentialsExpireAt ?? null,
       instructions: base?.instructions ?? null,
       setup: base?.setup ?? EMPTY_SETUP,

@@ -197,6 +197,11 @@ export interface ChatService {
   stop(conversationId: ConversationId): Promise<void>;
   /** Runs what waits for Your folder now, reading only. Refused with the engine's words when nothing waits. */
   sendNow(conversationId: ConversationId): void;
+  /**
+   * A turn that needs Your folder found it taken as it began: its starters park, and run once the folder can be
+   * the chat's, as a blocked Here send's do.
+   */
+  parkForFolder(chatId: ChatId): void;
   /** Stops waiting for Your folder: the queue runs reading only. A chat that waits for nothing is left as it is. */
   stopWaiting(chatId: ChatId): void;
   /** Whether the conversation's message waits for Your folder. */
@@ -324,7 +329,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   };
   // Full access applies from the next turn: stored, then the warm session closes so the next start reads it.
   // Turning it on while the session only reads records Here first, as Open in Terminal does.
-  const changeFullAccess = async (chat: ReturnType<typeof getChat>, on: boolean): Promise<void> => {
+  const refuseFullAccessChange = (chat: ReturnType<typeof getChat>, on: boolean): void => {
     const conv = getConversation(state.db, chat.conversationId);
     if (conv.state !== null && BUSY.has(conv.state))
       throw new ConflictError(CHANGE_FULL_ACCESS_BETWEEN_TURNS);
@@ -336,6 +341,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       throw new ConflictError(
         'Full access isn’t available while the session is in your terminal or handed off.',
       );
+  };
+  const changeFullAccess = async (chat: ReturnType<typeof getChat>, on: boolean): Promise<void> => {
     if (on) deps.work?.().enterHere(chat.id);
     state.write((ctx) => {
       setChatFullAccess(ctx, chat.id, on);
@@ -421,8 +428,12 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     async patch(id, input) {
       const chat = getChat(state.db, id);
-      if (input.fullAccess !== undefined && input.fullAccess !== chat.fullAccess)
-        await changeFullAccess(chat, input.fullAccess);
+      // Refused before anything is applied, so a patch that carries a model and Full access never half-applies.
+      const fullAccess =
+        input.fullAccess !== undefined && input.fullAccess !== chat.fullAccess
+          ? input.fullAccess
+          : undefined;
+      if (fullAccess !== undefined) refuseFullAccessChange(chat, fullAccess);
       if (input.model !== undefined || input.effort !== undefined) {
         const conv = getConversation(state.db, chat.conversationId);
         if (conv.state !== null && BUSY.has(conv.state))
@@ -447,6 +458,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
           }
         }
       }
+      if (fullAccess !== undefined) await changeFullAccess(chat, fullAccess);
       const wasClosed = getChat(state.db, id).tabPosition === null;
       state.write((ctx) => {
         if (input.title !== undefined) setChatTitle(ctx, id, input.title, ChatTitleSource.Builder);
@@ -629,6 +641,12 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
         if (!stoppedForOpen.delete(chatId)) return;
         engine.releaseStarts(chat.conversationId);
       };
+    },
+
+    parkForFolder(chatId) {
+      const chat = getChat(state.db, chatId);
+      engine.holdStarts(chat.conversationId);
+      watchFolder(chat);
     },
 
     watchFolder: (conversationId) => {

@@ -22,6 +22,7 @@ import {
   type Effort,
   type ProjectDto,
   type ProjectId,
+  type TrustPolicy,
   type ChatId,
   WorkPlace,
 } from '@10db/contracts';
@@ -236,6 +237,8 @@ export interface ChatHooksDeps {
   readonly prepareFullAccess?: (
     input: ShapePrepareInput & { readonly relay: boolean },
   ) => Promise<ShapePrepared>;
+  /** Parks the turn that is starting until Your folder can be the chat's; a Full access turn never runs without it. */
+  readonly parkForFolder?: (chatId: ChatId) => void;
   /** Whether the SDK reports a background task still running for the conversation's open session. */
   readonly backgroundRunning?: (conversationId: ConversationId) => boolean;
   /** What a chat adds to its session for planning: its folder and agents always, and its prompt, intake and read budget once it has a plan. */
@@ -449,6 +452,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       }
       const taken = deps.folderHold.takeTurn(conv.projectId, chat.id);
       if (!taken.taken) {
+        if (chat.fullAccess) {
+          // No kernel keeps its shell out of the checkout, so it waits for the hold instead of running read-only.
+          deps.parkForFolder?.(chat.id);
+          return { writes: false };
+        }
         notices.set(chat.id, [readOnlyNotice(taken.blockers)]);
         return { writes: false };
       }
@@ -663,11 +671,20 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           : {}),
       });
       holdingSession.set(chat.id, start.sessionId);
+      // A read that fails counts as still running: the deadline then closes the session and gives the folder back.
+      const runningNow = (): boolean => {
+        try {
+          return deps.backgroundRunning?.(conv.id) === true;
+        } catch (error) {
+          log.warn({ err: error, conversationId: conv.id }, 'background tasks could not be read');
+          return true;
+        }
+      };
       // A Full access turn's folder goes back once the SDK reports no background task running.
       const backgroundGone = (): Promise<void> =>
         new Promise<void>((resolve) => {
           const look = (): void => {
-            if (ending.signal.aborted || deps.backgroundRunning?.(conv.id) !== true) resolve();
+            if (ending.signal.aborted || !runningNow()) resolve();
             else deps.clock.setTimeout(look, BACKGROUND_POLL_MS);
           };
           look();
@@ -736,26 +753,27 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             sandboxed: (ready?.sandbox ?? null) !== null,
             writes: writable,
           });
-      const policy = buildTrustPolicy({
-        surface: TrustSurface.Chat,
-        projectName: project.name,
-        checkout: root,
-        gateCommand: project.gateCommand,
-        liveSystems: projectLiveSystems(state.db, project.id, (stored) => {
-          log.warn(
-            { stored },
-            'the stored live systems are not a list 10db reads, so it reads none',
-          );
-        }),
-        switches,
-        grants: projectGrantLines(state.db, project.id),
-        yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
-        claudeConnectors,
-        devAccess: {
-          ...open,
-          compose: open.docker ? await deps.composeServices(project) : null,
-        },
-      });
+      const policyOf = (compose: ComposeServices | null): TrustPolicy =>
+        buildTrustPolicy({
+          surface: TrustSurface.Chat,
+          projectName: project.name,
+          checkout: root,
+          gateCommand: project.gateCommand,
+          liveSystems: projectLiveSystems(state.db, project.id, (stored) => {
+            log.warn(
+              { stored },
+              'the stored live systems are not a list 10db reads, so it reads none',
+            );
+          }),
+          switches,
+          grants: projectGrantLines(state.db, project.id),
+          yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
+          claudeConnectors,
+          devAccess: { ...open, compose: open.docker ? compose : null },
+        });
+      // A Claude Full access session is judged by Claude Code, which reads no policy: it is built only if read.
+      const policy =
+        full === null ? policyOf(open.docker ? await deps.composeServices(project) : null) : null;
       // The thread says once per session that 10db's judge stopped answering.
       let saidUnavailable = false;
       const webOn =
@@ -805,7 +823,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         spec: {
           sessionId: start.sessionId,
           conversationId: conv.id,
-          policy,
+          get policy() {
+            return policy ?? policyOf(null);
+          },
           profile: {
             kind: 'explore',
             judge,
@@ -908,7 +928,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                       preExisting: [],
                       setupReads: access.setupReads ?? [],
                     },
-                    policy,
+                    policy: policy ?? policyOf(null),
                     allowLines: () => projectGrantLines(state.db, project.id),
                     judgeNow: (req) => judgeForCall(judge, req.reportedMode ?? null, tendbReady),
                     // A chat's allow list holds none of the project's allowed commands.

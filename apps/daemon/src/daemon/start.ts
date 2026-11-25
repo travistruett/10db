@@ -2180,8 +2180,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       launch: conversationLaunch,
       ...(conversationPrepare === undefined ? {} : { prepare: conversationPrepare }),
       prepareFullAccess: conversationPrepareFullAccess,
-      backgroundRunning: (conversationId) =>
-        exploreEngine.view(conversationId).backgroundTasks.length > 0,
+      parkForFolder: (chatId) => {
+        chat.parkForFolder(chatId);
+      },
+      backgroundRunning: (conversationId) => exploreEngine.backgroundTaskCount(conversationId) > 0,
       plan: shape.planParts,
       limitsFor: pictureLimitsFor,
       judgeOf: (account, model) => adapter.capabilities(account, model).judge,
