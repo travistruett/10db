@@ -115,34 +115,50 @@ the choice.
 | `project_id`, `program_key`, `scope` | unique together. `scope` is `copy` when every example ran in a separate copy, else `project` |
 | `kind` | one line, the builder's to edit; by default `` `make t` with arguments like the examples `` |
 | `examples` | up to 5 calls the builder saw, each at most 200 characters, JSON |
-| `runs_hash` | sha256 of the committed text the kind ran at approval (`CallRuns`); null when there is none |
+| `runs_hash` | sha256 of the committed text the kind ran at approval (`CallRuns`, and for a package runner the script's line of `package.json`); null when there is none |
 | `state` | `active`, `paused`, `declined` (Keep Skipping) or `revoked` |
-| `uses`, `last_used_at`, `conflicts` | counted by the hook judge |
+| `uses`, `last_used_at`, `conflicts` | counted by the hook judge, on fresh verdicts only |
 | `source_inbox_id`, `created_at`, `ended_at` | |
 
 ### The program key (`trust/program-key.ts`, new)
 
-`programKey(toolName, input, checkout): string | null` names the program a shell call runs. It walks the line as
-`call-runs.ts` does (past a leading `cd <dir> &&`, `env` and assignments) and answers:
+`programKey(toolName, input, checkout, cwd): string | null` names the program a shell call runs. It walks the
+line as `call-runs.ts` does (past a leading `cd <dir> &&`, `env` and assignments) and answers:
 
 - `make <target>` (with `-C <dir>`, the folder too);
 - `<interpreter> <script>` or `<script>` for a repository script, its path relative to the checkout;
 - `<package runner> <script>` for `pnpm`, `npm run`, `yarn` and `bun`;
-- otherwise the program and its first word that isn't an option (`docker run`, `git push`).
+- otherwise the program and its first word that isn't an option (`docker run`, `pytest`).
 
 A line with a second command has no key, except a pipe into commands the fast path already allows
 (`read-allowlist.ts`), such as `| tail -20`. A substitution or a here-document has no key. A call with no key is
 judged as today. MCP tools and web hosts get keys in F2; P1 is shell calls on Claude and Codex.
 
+The hook judge computes the key once per call and stores it on the rows it writes: `skipped_actions.program_key`
+and `judge_calls.program_key` (both new, nullable). Candidates read those columns, so they count only calls made
+after P1 is installed; nothing is backfilled.
+
+### Scope
+
+- `project`: every session of the project, copies included.
+- `copy`: sessions in a separate copy only. A kind is proposed with this scope when every example ran in a copy.
+
+A copy session is shown the `copy` row for its key, else the `project` row. Any other session is shown only the
+`project` row.
+
 ### What the judge reads
 
-`HookJudgeContext` gains `precedents: () => readonly TrustPrecedentDto[]`. For a call, the hook judge picks the
-active precedent with the call's key and the session's scope (`precedentFor`), and leaves it out when:
+`HookJudgeContext` gains `precedents: () => readonly TrustPrecedentDto[]` and `inCopy: boolean`. For a call, the
+hook judge picks the active precedent for the call's key and scope (`precedentFor`), and withholds it when:
 
 - the call has no key;
-- the checkout's copy of a file the call runs differs from the base (`readCommitted` answers `differs`): a lane
-  that rewrote the Makefile gets no help from an approval of the old one. This is a rule for the judge's
-  integrity, not a verdict on the call.
+- a file the call runs is not the base's (`CallRuns.differs`: `readCommitted` answered `differs`, or the base has
+  no such file and the checkout does): a lane that rewrote or created the Makefile gets no help from an approval;
+- the key is a package runner's and the `package.json` that names the script (the nearest one from where the call
+  runs, inside the checkout) is not the base's.
+
+These are rules for the judge's integrity, not verdicts on the call: a withheld precedent leaves the call judged
+as today.
 
 The state gains, only when a precedent is picked:
 
@@ -172,28 +188,40 @@ and the questions gain one:
 5. Otherwise unclear, and the second opinion is asked the same questions over the same state.
 
 So a precedent narrows the unclear band for its kind from [1 − f, f) to [0.5, f), and does nothing else. At 0.8,
-every one of the 77 calls above (top limit 0.21–0.30) passes at step 4 once its kind is approved. A call over 0.5
-on any limit is treated as if no precedent existed.
+the 77 calls above (top limit 0.21–0.30 in each one read) would pass at step 4 once their kinds are approved, if
+the model answers `precedent_applies` at or over f for them. That is **unverified** until the replay has the
+cases. A call at or over 0.5 on any limit is treated as if no precedent existed.
 
 The row logs `answer: 'allow'`, `confidence` as `precedent_applies`'s value, and `judge_calls.precedent_id`. The
-hook judge's memory key gains the precedent, so approving, pausing or revoking one judges the call afresh. The
-hook judge adds one to `uses` per allow at step 4.
+hook judge's memory key gains the precedent, so approving, pausing or revoking one judges the call afresh, and an
+allow by precedent is remembered for the session like a model's allow. `uses` and `conflicts` count fresh
+verdicts only, never one answered from memory: a lane that repeats one stopped call three times is one conflict.
 
-For Claude's auto mode, `buildTrustPolicy` adds each active precedent of the session's scope to
-`TrustPolicy.allow`, at most 30:
-`Routine in this project, the builder says: <kind>. For example <two quoted calls>. Weigh it; it never permits
-crossing a limit.` A lane's four limits stay hard denies there.
+**Claude's auto mode never reads a precedent as an allow line.** An allow line there is an exception to a soft
+deny: in a chat or a pass the four limits are soft denies (`renderClaudeAutoMode`), and in a lane Claude's own
+defaults are. So `buildTrustPolicy` puts each active precedent the session's scope can be shown into
+`TrustPolicy.environment`, at most 30, on every surface:
+`The builder calls this routine in this project: <kind>. For example <two quoted calls>. It is context, not
+permission.` Auto mode weighs it as it weighs any environment line, and its denies are unchanged. The lines are
+fixed when a session starts, so a Remove reaches a running auto mode session at its next start; 10db's judge reads
+the rows on every call.
 
 ### The proposal card
 
 Candidates are computed, not stored (`trust/precedent-candidates.ts`): the project's last 14 days of
 
-- `skipped_actions` rows of kind `classifier` with no `limit_name` and an uncut summary, and
-- `judge_calls` rows of `crosses_limit` answered `unsure` (the call went to the second opinion),
+- `skipped_actions` rows of kind `classifier` from 10db's judge (`source = 'tendb_judge'`) with no `limit_name`, a
+  `program_key` and an uncut summary, and
+- `judge_calls` rows of `crosses_limit` answered `unsure` with a `program_key` (the call went to the second
+  opinion), joined to their project through the run,
 
-grouped by program key, less keys that have a precedent row in any state. A key is offered when it has 3 skips in
-2 runs (`PRECEDENT_MIN_SKIPS`, `PRECEDENT_MIN_RUNS`), or a run failed `blocked` listing it, or the builder approved
-one of its calls with Run these now.
+grouped by program key and scope, less keys that have a precedent row in any state. A key is offered when it has
+3 skips in 2 runs (`PRECEDENT_MIN_SKIPS`, `PRECEDENT_MIN_RUNS`), or a run failed `blocked` listing it, or the
+builder approved one of its calls with Run these now.
+
+**A denial by Claude's auto mode is never a candidate.** It names a limit only when its reason holds the limit's
+label (`limitOfDenial`), so a null `limit_name` there doesn't mean no limit was crossed. It is treated as a limit
+skip: it keeps its skip card and Run these now.
 
 `inbox/precedent-card.ts` raises one card per project (kind `permission`, tier `ask`, fold key
 `precedent:<projectId>`, closed by its answer), reworded as candidates change:
@@ -217,38 +245,42 @@ same write, as `repo-mcp-servers.ts` answers its card.
 { kinds: { programKey: string; scope: 'copy' | 'project'; choice: 'approve' | 'keep_skipping' | 'report'; kind?: string }[] }
 ```
 
-- **Approve** inserts an `active` row. From F2, runs waiting on the kind are replayed (below).
-- **Keep Skipping** inserts a `declined` row. From F2, runs waiting on the kind are retried once with the note
+- **Approve** writes an `active` row. From F2, runs waiting on the kind are replayed (below).
+- **Keep Skipping** writes a `declined` row. From F2, runs waiting on the kind are retried once with the note
   "10db won't run `<call>`; do the step without it".
 - **Report to 10db** leaves the kind on the card. In P1 it copies the report (the pattern, the runs, the
   probabilities); from F2 it files the engine-bug task (below).
 
+**A declined or removed kind can be approved later.** It is not offered on the card again, but Approve, from
+Settings or from Run and Make Routine, moves its row to `active` with the new examples and hash and `conflicts`
+at 0 (`approvePrecedent`).
+
 P1 retries nothing: until F2, a failed run that lists an approved kind keeps its card and its Retry.
 
 The skip card and the task drawer gain **Run and Make Routine** beside Run these now, offered when every listed
-skip names no limit: it runs them as today and approves their kinds.
+skip is 10db's judge's, names no limit and has a key: it runs them as today and approves their kinds.
 
 A skip that names a limit never becomes a candidate. It stays a limit card, where Always in this project stores a
 grant in the builder's words (as built).
 
-**On the rules floor** (no Decisions account, and a lane not in auto mode) no model can weigh a kind. The card is
-still raised. Approve writes the row, which auto mode reads, and with no Decisions account also stores the exact
-calls as quoted-call grants (`grantTargetOf`), and the card says "10db can
-match these exact calls only: kinds need a Decisions account".
+**With no Decisions account** no model of 10db's can weigh a kind, and nothing is stored in its place: a
+quoted-call grant is matched in the hook ahead of every judge, which is the text match this design refuses. There are then no rows of 10db's judge, so no card is raised. Settings › This Project › Trust
+says "Standing approvals need a Decisions account". A follow-up task closes the gap for plan-only builders.
 
 ### How a bad one is caught
 
-1. **Before it is offered:** the limit warning above.
-2. **On every call:** step 2. When `precedent_applies` ≥ f and a limit ≥ f in one reading, the limit wins and
-   `conflicts` goes up by one. Three conflicts since it was approved or last kept (`PRECEDENT_CONFLICTS_MAX`) set the row `paused` and
-   raise one card (fold key `precedent-conflict:<id>`): "The standing approval for `make t` matched 3 calls 10db
-   stopped at Reading Secrets", with the calls, and **Keep**, **Edit** or **Remove**. A paused precedent is shown
-   to no judge, so calls are judged as they were before it.
+1. **Before it is offered:** the limit warning above, and no candidate from auto mode's denials.
+2. **On every freshly judged call:** step 2. When `precedent_applies` ≥ f and a limit ≥ f in one reading, the
+   limit wins and `conflicts` goes up by one. Three conflicts since it was approved or last kept
+   (`PRECEDENT_CONFLICTS_MAX`) set the row `paused` and raise one card (fold key `precedent-conflict:<id>`): "The
+   standing approval for `make t` matched 3 calls 10db stopped at Reading Secrets", with the calls, and **Keep**,
+   **Edit** or **Remove**. A paused precedent is shown to no judge, so calls are judged as they were before it.
 3. **When what it runs changes:** `changed_since` tells the judge, which also reads the new text in `call.runs`. A
    notice names the precedent and the commit, with **Remove**. **Keep** on the notice stores the new hash.
-4. **In review:** Settings › This Project › Trust gains **Standing Approvals**: each with its kind, scope,
-   examples, uses, last use, the last 5 calls it allowed (`judge_calls.precedent_id`) and **Remove**. Recent
-   decisions labels a row "Allowed as routine: `<kind>`".
+4. **In review:** Settings › This Project › Trust gains **Standing Approvals**: each `active` or `paused` row with
+   its kind, scope, examples, uses, last use, the last 5 calls it allowed (`lastAllowed`, read from
+   `judge_calls.precedent_id`) and **Remove**; and under them the declined and removed kinds, each with
+   **Approve**. Recent decisions labels a row "Allowed as routine: `<kind>`".
 
 ### The floor goes back (P2)
 
@@ -271,7 +303,7 @@ When a run reaches `FAILED`, `fail()` sets its `sort` to `sorting` in the same w
 | Class | Settled by rules when | Otherwise |
 | --- | --- | --- |
 | Transient | kind is `session_failed`, `no_result` (no findings written) or `install_broken`; the failed step has no non-question skip; the failure is not `retryable: false`; and the task has had no auto-retry since the builder last acted on it | — |
-| Permission | every non-question skip in the failed step is the judge's doubt (kind `classifier`, no limit named), and the kind is `blocked`, or `session_failed` with that skip in the last turn | the diagnosis names the skip that stopped the run |
+| Permission | every non-question skip in the failed step is 10db's judge's doubt (kind `classifier`, source `tendb_judge`, no limit named), and the kind is `blocked`, or `session_failed` with that skip in the last turn | the diagnosis names the skip that stopped the run |
 | Engine bug | every non-question skip is 10db's own refusal (`unread_hazard`, `unread_edit_path`) | the diagnosis answers `engine` and cites the rows that show 10db's part erred |
 | Host session | every non-question skip is `cant_run_in_lane` or `read_outside` | diagnosis, from the task (a builder tool such as `aside`) |
 | Question | never (the wording is the agent's) | diagnosis |
@@ -296,7 +328,8 @@ retry and one diagnosed retry.
 ### Transient
 
 10db retries once after 5 minutes, once the run's account isn't paused, with the note "10db retried this after
-`<kind>`", through `retryWorkstream`. The run shows "Retrying by itself" and raises no card. If the retry fails,
+`<kind>`", through `retryWorkstream`. The sort's write stores when the retry is due (`auto_retry_at`), and the
+scheduler's tick starts it, so a restart during the wait loses nothing. The run shows "Retrying by itself" and raises no card. If the retry fails,
 the run goes to the diagnosis and never back to Transient.
 
 ### Permission
@@ -309,7 +342,10 @@ own.
   the run's policy.
 - A call that would now run retries its run, once. A kind set to Keep Skipping retries its runs once without the
   call. A run that fails again is out of attempts.
-- A waiting run whose kind is neither answered nor passing after 24 hours stays waiting. The card is the one ask.
+- A waiting run stays waiting while its kind is on the card: the card is the one ask. When the kind leaves the
+  card unanswered (14 days with no new skip), the run gets the fallback card, so it never waits on nothing.
+- A replay's result is applied inside one write that first checks the run is still failed and still sorted
+  `permission`. If the builder retried, closed or edited it meanwhile, the result is dropped.
 
 ### Engine bug
 
@@ -325,7 +361,7 @@ own.
 
 A question card (`InboxKind.Question`) asks in the agent's words, with the diagnosis's options when it gives any,
 and follows [the evidence rule](#an-ask-cites-what-10db-saw). It routes like any lane question, Slack routes
-included. The answer calls `retryWorkstream(id, answer)`, so the judges read it as the builder's words. Where the
+included. The answer calls `retryWorkstream(state, id, answer)`, so the judges read it as the builder's words. Where the
 question is a setting, the card links it, as `clearedBy` does today.
 
 ### Host session
@@ -434,7 +470,7 @@ needs nothing beyond its task. If its merged `detail` differs, S1's plan adapts 
 - **Skip cards close when the task is done** (`closeFinishedSkippedCards` drops the `stillOffersRun` exception),
   and when a later run of the task finishes. Run these now stays in the task drawer. Its skips still count as
   precedent candidates.
-- **Stray writes wait.** A "Write outside every claim" card for a non-sensitive path is raised only if
+- **Stray writes wait** (F1b, Core: it touches claims). A "Write outside every claim" card for a non-sensitive path is raised only if
   `resolveSettledStrays` hasn't settled it 3 minutes after the write, or when the step ends. A sensitive path
   still cards at once.
 
@@ -448,16 +484,19 @@ needs nothing beyond its task. If its merged `detail` differs, S1's plan adapts 
 | Offered | the builder approves it | `active`; waiting runs are replayed; the kind leaves the card |
 | Offered | Keep Skipping | `declined`; waiting runs retried once without the call |
 | Offered | Report to 10db | the engine-bug task is filed; the kind stays offered |
-| Offered | 14 days pass with no new skip | the kind leaves the card; the card closes when it lists none |
+| Offered | 14 days pass with no new skip (seen at the hourly refresh) | the kind leaves the card; the card closes when it lists none |
+| Offered | a refresh computed before an answer lands after it | the refresh filters against the rows inside its write, so the answered kind stays off |
+| Declined or revoked | Approve in Settings, or Run and Make Routine | `active`, new examples and hash, conflicts 0 |
 | Offered | a self-update's judge now runs the call | the kind leaves the card; waiting runs are retried |
 | Active | a call of the kind, top limit under 0.5 | allowed by precedent; `uses` + 1 |
 | Active | a call of the kind, a limit ≥ f | the limit; `conflicts` + 1; at 3, `paused` and a card |
 | Active | the lane changed a file the call runs | the precedent is not shown; judged as today |
 | Active | the committed text changes on the base | `changed_since`; a notice with Remove and Keep |
-| Active or paused | Remove | `revoked`; the next call is judged afresh |
+| Active or paused | Remove | `revoked`; 10db's judge judges the next call afresh; a running auto mode session drops the line at its next start |
 | Paused | Keep or Edit | `active`, `conflicts` reset |
 | Any | the daemon restarts | rows are the state; the card is recomputed from the rows |
 | Any | two answers race | the unique index keeps one row; the second answer reads it and writes nothing |
+| Active | the same stopped call is repeated in a session | answered from memory; no second conflict |
 
 ### Triage of one failed run
 
@@ -476,6 +515,9 @@ needs nothing beyond its task. If its merged `detail` differs, S1's plan adapts 
 | Fallback | today's card, cause-first | "Workstream failed" with Retry | as today |
 | Any | the builder retries, closes or edits the task | — | the sort stops; a new failure sorts afresh |
 | Any | the daemon restarts mid-sort | — | `sorting` runs are sorted again; a retry already started is not repeated (`autoRetriedAt`, `diagnosedRetryAt`) |
+| Transient | the daemon restarts during the 5-minute wait | "Retrying by itself" | the due time is a column (`auto_retry_at`); the first tick after it starts the retry, once |
+| Permission | the builder retries while a replay is deciding | — | the replay's write finds the run no longer failed and drops its result |
+| Permission | the kind leaves the card unanswered | the fallback card | as today |
 | Any | the diagnosis cites a row that doesn't exist | — | no answer: the fallback |
 
 ### A stall handed to triage
@@ -492,9 +534,10 @@ needs nothing beyond its task. If its merged `detail` differs, S1's plan adapts 
 
 | | Claude plan | Claude via Bedrock or API key | ChatGPT/Codex plan |
 | --- | --- | --- | --- |
-| Precedent read by | auto mode, as an allow line; 10db's judge where the lane is on it | same | 10db's hook judge (`decisions/2026-11-12-codex-is-judged-by-10dbs-judge.md`) |
-| Steps 2 and 4, `uses`, conflicts | 10db's judge only. Auto mode reports no probability: its hard denies hold the limits, and its denials are skips that feed the candidates | same | 10db's judge |
-| No Decisions account | auto mode weighs kinds; a lane on the rules floor gets exact-call grants and the card says so | same | exact-call grants; the card says kinds need a Decisions account |
+| Precedent read by | auto mode, as an environment line (context, never an allow line), on every surface; 10db's judge where the session is on it | API key: same. Bedrock: auto mode runs only on a pinned model that has it (`auto-mode-models.ts`); with Bedrock's default model the session is on 10db's judge | 10db's hook judge (`decisions/2026-11-12-codex-is-judged-by-10dbs-judge.md`) |
+| Steps 2 and 4, `uses`, conflicts, candidates | 10db's judge only. Auto mode reports no probability; its own denies hold the limits, and its denials are never candidates | same | 10db's judge |
+| Remove takes effect | 10db's judge: the next call. Auto mode: the session's next start | same | the next call |
+| No Decisions account | no rows of 10db's judge, so no card and no standing approvals; Settings says they need a Decisions account. Auto mode judges as today | same; a Bedrock session with no auto mode is on the rules floor, as today | same: the rules floor, no card, Settings says so |
 | Precedent card, Settings list, Remove | same | same | same |
 | Diagnosis session | Claude Code, project's account | same | Codex, project's account |
 | Flake diagnosis model | the account's strongest (Fable) | same; on Bedrock, Fable answers only in `aws_review` mode, else Opus | the account's strongest |
@@ -503,15 +546,17 @@ needs nothing beyond its task. If its merged `detail` differs, S1's plan adapts 
 
 - The diagnosis spends the project's account: it's the builder's billing line, and works on a plan login.
 - A paused account delays it ("Diagnosing: waits for <account>"); after 30 minutes the fallback card is raised.
-- Follow-up for the gap: counting a precedent's uses on native auto mode, from its allowed calls.
+- Follow-ups for the gaps: standing approvals for a builder with no Decisions account; counting a precedent's
+  uses on native auto mode.
 
 ## Trust
 
 - **A judge decides, not a rulebook.** A precedent is a field of the state the judge reads and one more question.
   No call is allowed by matching text. The program key only picks which precedent the judge is shown; the rules
-  that withhold one (no key, a changed file) send the call to the judge as it is judged today.
-- **The four limits never become routine.** A candidate comes only from a skip that names no limit. Step 2 runs
-  before step 4. The ceiling is one half. Auto mode keeps its hard denies.
+  that withhold one (no key, a changed file) send the call to the judge as it is judged today. Nothing is stored
+  as a quoted-call grant, and auto mode gets no allow line.
+- **The four limits never become routine.** A candidate comes only from a call 10db's own judge left unclear. Step 2
+  runs before step 4. The ceiling is one half. Auto mode's denies, soft and hard, are untouched on every surface.
 - **Trust the developer.** The builder can still allow a call over a limit, in their own words, with Always in
   this project. That is unchanged.
 - **Nothing waits on the builder that needn't.** A paused or declined precedent returns calls to today's judging.
@@ -531,11 +576,20 @@ needs nothing beyond its task. If its merged `detail` differs, S1's plan adapts 
 - **Out of scope:** lanes getting Aside; Slack routing; parallel copies; Workbench pass turns, whose one answer
   stays Retry Turn; the wording of the four limit questions.
 
+## Open, left to the plans named
+
+- **Scores (P1, tsk_01a20e8c-fcee):** neither the reader fix's effect on `make t` nor how well the judge's model
+  answers `precedent_applies` is measured. P2 doesn't start until the replay has shown both.
+- **10db's own project (F2's plan):** how 10db recognises it when filing an engine-bug task.
+- **Starting a filed fix task (F5's plan):** how a flaky-test fix task is started without the builder.
+- **The watchdog's card (S1's plan):** the shape of its `detail`, unknown until tsk_01a21491 merges.
+
 ## Records
 
-- `trust_precedents` (new) and `judge_calls.precedent_id` (P1).
+- `trust_precedents` (new), `judge_calls.precedent_id`, `judge_calls.program_key` and
+  `skipped_actions.program_key` (P1).
 - `workstreams` gains `sort` (`sorting`, `transient`, `permission`, `engine`, `question`, `host`,
-  `out_of_attempts`, `waits`, `obsolete`, `fallback`, `settled`), `auto_retried_at` and `waits_on` (F2);
+  `out_of_attempts`, `waits`, `obsolete`, `fallback`, `settled`), `auto_retry_at`, `auto_retried_at` and `waits_on` (F2);
   `diagnosis` and `diagnosed_retry_at` (F3); `tasks` gains `fixes_check` (F5).
 - All additive, generated last, one migrating pull request at a time. Contracts: `TrustPrecedentDto`,
   `PrecedentAnswer`, `FailureSort`, `ReportDiagnosisInput`.
@@ -559,11 +613,12 @@ In build order: what each buys in unattended time for its work.
 | # | Milestone | Size | Recommended | Needs | Migration |
 | --- | --- | --- | --- | --- | --- |
 | — | In flight, not new work: the copy deadlock, the copy queue, the Linear hold, the watchdog, the replay cases | as filed | **needed** | — | theirs |
-| P1 | Precedent: the Makefile reader keeps recipes inside conditionals; `trust_precedents`; the program key; `precedent_applies` and its reading; the proposal card and Run and Make Routine; Standing Approvals in Settings; conflicts pause | Core (the judge) | **needed** | — | `trust_precedents`, `judge_calls.precedent_id` |
-| F0 | Cause-first failure lines and Close for a failed task in Factory | Small | **needed** | — | none |
-| F1 | Card hygiene: fold per task, cap card replaces checks card, Factory dedupe, skip cards close when the task is done, stray-write wait | Feature | **needed** | F0 | none |
-| F2 | The sort's rules pass: transient retry, permission runs wait and replay, engine bugs filed, host session by rules, `retryable: false`; keys for MCP tools and web hosts | Core (recovery) | **needed** | P1, F1 | `workstreams.sort`, `auto_retried_at`, `waits_on` |
+| P1 | Precedent: the Makefile reader keeps recipes inside conditionals (filed and running as tsk_01a2149e); `trust_precedents`; the program key; `precedent_applies` and its reading; the proposal card and Run and Make Routine; Standing Approvals in Settings; conflicts pause | Core (the judge) | **needed** | — | `trust_precedents`; `judge_calls.precedent_id` and `program_key`; `skipped_actions.program_key` |
 | P2 | The floor goes back: the "asked twice at 0.8" number and its notice | Small | **needed** | P1, tsk_01a20e8c-fcee | none |
+| F0 | Cause-first failure lines and Close for a failed task in Factory | Small | **needed** | — | none |
+| F1 | Card hygiene: fold per task, cap card replaces checks card, Factory dedupe, skip cards close when the task is done | Feature | **needed** | F0 | none |
+| F1b | Stray writes wait: a non-sensitive "Write outside every claim" card waits 3 minutes or the step's end | Core (claims), one task | **needed** | F1 | none |
+| F2 | The sort's rules pass: transient retry, permission runs wait and replay, engine bugs filed, host session by rules, `retryable: false`; keys for MCP tools and web hosts | Core (recovery) | **needed** | P1, F1 | `workstreams.sort`, `auto_retry_at`, `auto_retried_at`, `waits_on` |
 | F3 | Diagnosis session and `report_diagnosis`: question with evidence, host brief, out of attempts with one applied Try This, project task, obsolete | Core | **needed** | F2 | `workstreams.diagnosis`, `diagnosed_retry_at` |
 | F5 | Flaky tests: flake diagnosis from CI artifacts, fix task filed and started, `fixes_check` | Feature | **needed** | F3 | `tasks.fixes_check` |
 | S1 | Stalls into triage: a stall 10db made is filed as a 10db task | Feature | **needed** | tsk_01a21491, F2 | none |
@@ -582,9 +637,10 @@ result. F0 and F1 change no retry, git or judge path and can run beside P1.
     ceiling; absent);
   - the existing wiring test through `createJudge` is extended: a precedent in the state, the row's
     `precedent_id`;
-  - the card's answer writes the rows in its own write (real SQLite);
+  - the card's answer writes the rows in its own write, and a declined kind is approved again (real SQLite);
   - the trust e2e (`project-trust.spec.ts`) extended once: a standing approval is listed and removed.
 - F1: one regression test for the fold (an escaped bug: three cards for one task).
+- F1b (core: claims): one watcher test, that a sensitive path still cards at once and a settled stray never does.
 - F2 (core: recovery): the transient retry happens once across a restart (real SQLite); a replay that runs the
   call retries the waiting runs (real pipeline, fake adapter); the sort's rule table, pure.
 - F3: the e2e failure flow extended once, through the applied Try This and its card.

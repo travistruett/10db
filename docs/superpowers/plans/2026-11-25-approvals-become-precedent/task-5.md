@@ -5,41 +5,48 @@ tasks 2–4.
 
 ## Files
 
-- `packages/db/src/store/skipped-actions.ts`: `listDoubtSkips(db, projectId, since)`: skips of kind `classifier`
-  with no `limit_name` and `summary_cut` false, with their run, task and whether the run is in a copy; and the
-  same key's skips that do name a limit, for the warning.
-- `packages/db/src/store/judge-calls.ts`: `listUnclearLimitCalls(db, projectId, since)`: `crosses_limit` rows
-  answered `unsure`, with `state` and `probabilities`.
-- `apps/daemon/src/trust/precedent-candidates.ts` (new): `precedentCandidates`. Group both lists by
-  `programKey` and scope; drop keys with a `trust_precedents` row in any state; keep a key at the thresholds, or
-  whose run failed `blocked` naming it, or with a skip approved through Run these now (`approvedSkipsForTask`).
-  `kind` defaults to `` `<key>` with arguments like the examples ``; `runs` is the committed text through
-  `callRuns` (null when it reads nothing); `topWorry` from the newest row's probabilities; `stoppedAtLimit` from
-  the last 30 days.
-- `apps/daemon/src/inbox/precedent-card.ts` (new): `precedentFoldKey`, `refreshPrecedentCard` (kind
-  `permission`, tier `ask`, `closesWhen: BY_ANSWER`; title "Make n kinds of command routine in <project>?";
-  rewords in place; resolves when no candidate is left), `applyPrecedentAnswer` (Approve → `insertPrecedent`
-  with the candidate's examples, `runsHash` and the edited `kind`; Keep Skipping → a `declined` row; Report →
-  nothing written), and the conflict card (fold key `precedent-conflict:<id>`, with Keep, Edit, Remove).
-- With no Decisions account, Approve also stores each example through `grantTargetOf(null, example, 'Bash')`
-  and `insertTrustGrant`, and the card's body carries the line from the spec.
-- `apps/daemon/src/daemon/trust-services.ts`: the three routes. The answer route computes candidates, then in
-  one write applies the answer and refreshes the card. PATCH to `revoked` or `active`, and a `kind` edit.
-- Refresh points: after the skip recorder records a doubt skip (`trust/skip-recorder.ts`, through an injected
-  callback, not an import of `inbox/`), after an answer, and once at start.
+- `apps/daemon/src/trust/precedent-candidates.ts` (new): `precedentCandidates`.
+  - Read `listDoubtSkips` and `listUnclearLimitCalls` for the window. Both carry `program_key`, written by the
+    hook judge since task 4, so nothing is parsed from a summary and rows from before P1 are not counted.
+  - Group by key and scope (`copy` when every row of the key ran in a copy, else `project`). Keep a key at the
+    thresholds, or whose run failed `blocked` naming it, or with a skip approved through Run these now
+    (`approvedSkipsForTask`).
+  - `kind` defaults to `` `<key>` with arguments like the examples ``; `runs` and `runsHash` come from `callRuns`
+    on the newest example through `read` (null when it reads nothing); `topWorry` from the newest row's
+    probabilities; `stoppedAtLimit` from the same key's skips with a `limit_name` in the last 30 days.
+  - It does not filter against `trust_precedents`: the card's write does.
+- `apps/daemon/src/inbox/precedent-card.ts` (new):
+  - `refreshPrecedentCard` (kind `permission`, tier `ask`, `closesWhen: BY_ANSWER`; title "Make n kinds of
+    command routine in <project>?"). Inside its write it drops every candidate whose key and scope have a row in
+    any state, then raises, rewords in place, or resolves when none is left.
+  - `applyPrecedentAnswer`: Approve and Keep Skipping → `approvePrecedent` with the candidate's examples and
+    `runsHash` and the edited `kind`; Report → nothing written. Then `refreshPrecedentCard` in the same write.
+  - The conflict card (fold key `precedent-conflict:<id>`, with Keep, Edit, Remove), raised from
+    `onPrecedentPaused`.
+- `apps/daemon/src/daemon/trust-services.ts`: the three routes. GET answers `ProjectPrecedentsDto`: every row,
+  each with `lastAllowedByPrecedent(db, id, 5)`, and the candidates less those with a row. The answer route
+  computes candidates, then applies in one write. PATCH: `active` goes through `approvePrecedent` from any state;
+  `revoked`, `kind` and `runsHash` through `setPrecedent`.
+- With no Decisions account nothing is stored in a precedent's place and no `trust_grants` row is written.
+- Refresh points, each computing candidates and then writing: after the skip recorder records a doubt skip
+  (`trust/skip-recorder.ts`, through an injected callback, not an import of `inbox/`); after an answer; once at
+  start; and every `PRECEDENT_REFRESH_MS` on the injected clock for a project with an open precedent card, which
+  is what takes a 14-day-old kind off it.
 - `apps/daemon/src/delivery/skipped-card.ts`: `SkippedChoice.RunAndMakeRoutine` ('Run and Make Routine'),
-  offered when every approvable skip names no limit and has a key; `applySkippedChoice` runs them as Run these
-  now does and inserts their precedents in the same write.
-- The changed-script notice: where the hook judge first sees `changedSince` for a precedent, `postNotice` (key
-  `precedent-changed:<id>:<hash>`), with Remove and Keep (Keep stores the new hash through PATCH).
+  offered when every approvable skip has `source = 'tendb_judge'`, no limit and a `program_key`;
+  `applySkippedChoice` runs them as Run these now does and calls `approvePrecedent` for their kinds in the same
+  write, which also brings back a declined or revoked kind.
+- The changed-script notice, from `onPrecedentChanged`: `postNotice` (key `precedent-changed:<id>:<hash>`), with
+  Remove and Keep (Keep sends PATCH `{ runsHash: <hash> }`).
 
 ## Interfaces
 
-Implements `precedent-candidates.ts`, `precedent-card.ts` and the HTTP block; calls the store.
+Implements `precedent-candidates.ts`, `precedent-card.ts` and the HTTP block; calls the store and the two
+`HookJudgeContext` callbacks.
 
 ## State-table rows
 
-"No candidate", every "Offered" row, "Paused", "Any".
+"No candidate", every "Offered" row, "Declined, revoked", "Paused", "Any".
 
 ## Spec sections
 
@@ -47,9 +54,12 @@ Implements `precedent-candidates.ts`, `precedent-card.ts` and the HTTP block; ca
 
 ## Tests
 
-One daemon test on a real SQLite file (`apps/daemon/src/inbox/precedent-card.test.ts`): seeded doubt skips
-across two runs raise one card; an answer approving one kind and declining another writes both rows in the
-answer's write and rewords the card; the same answer sent again writes nothing; a key with a limit skip is
-offered with `stoppedAtLimit`. Value card: `protects=a standing approval exists only by the builder's answer,
-once; fails_when=a row is written outside the answer, twice, or for a limit skip; why_new=permissions;
-no_claim=that the judge then allows the kind (task 4)`.
+One daemon test on a real SQLite file (`apps/daemon/src/inbox/precedent-card.test.ts`): seeded doubt skips of
+10db's judge across two runs raise one card; an auto mode denial with no limit name is not on it; an answer
+approving one kind and declining another writes both rows in the answer's write, writes no `trust_grants` row and
+rewords the card; a refresh with candidates computed before that answer leaves the answered kinds off; the same
+answer sent again changes nothing; approving the declined kind through PATCH makes it `active`. Value card:
+`protects=a standing approval exists only by the builder's answer, never from an auto mode denial, and a
+declined kind can be approved again; fails_when=a row or grant is written outside the answer, a stale refresh
+re-offers a kind, or approve is a no-op on a declined row; why_new=permissions; no_claim=that the judge then
+allows the kind (task 4)`.

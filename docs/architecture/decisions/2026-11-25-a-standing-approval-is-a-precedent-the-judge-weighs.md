@@ -10,31 +10,38 @@
 
 1. **The builder's answer to a kind of skipped call is kept as a precedent.** A row of `trust_precedents` holds the
    project, the program the kind runs (its program key), a scope (`copy` or `project`), one line naming the kind
-   and up to five calls the builder saw. One row per project, key and scope.
+   and up to five calls the builder saw. One row per project, key and scope. A `project` row covers every
+   session of the project, copies included; a `copy` row covers sessions in a separate copy only, and a copy
+   session reads it ahead of the `project` row.
 2. **A precedent is evidence, read by a judge.** 10db's judge sees the one precedent whose key and scope match
    the call, as the state's `builder_precedent`, and is asked `precedent_applies`: is the call that kind of
-   command and nothing more. Claude's auto mode reads each active precedent as an allow line. No call is allowed
-   by matching text.
+   command and nothing more. Claude's auto mode reads each active precedent as an environment line, on every
+   surface, and never as an allow line: an allow line there is an exception to a soft deny, which the four limits
+   are in a chat and Claude's own defaults are in a lane. No call is allowed by matching text, so nothing is
+   stored as a quoted-call grant either.
 3. **It never clears a limit.** `readLimitAnswers` reads `builder_allowed`, then the limits, as before. Only after
    them: `precedent_applies` at or above the floor allows a call whose likeliest limit is under one half. A call
    at or over the floor on any limit is that limit, whatever the precedent says. A call between one half and the
    floor goes to the second opinion as it does today.
-4. **Only a doubt becomes a candidate.** A kind is proposed from skips that name no limit and from calls the
-   first judge left unclear. A skip at a named limit stays a limit card, where Always in this project stores a
+4. **Only a doubt becomes a candidate.** A kind is proposed only from 10db's own judge's rows: its skips that
+   name no limit and the calls it left unclear. A denial by auto mode is never a candidate, since it names a
+   limit only when its reason holds the label. A skip at a named limit stays a limit card, where Always in this project stores a
    grant in the builder's words; a grant can still allow a call over a limit.
 5. **10db withholds a precedent, and judges the call as before, when** the call has no program key (a second
-   command, a substitution, a here-document), or the checkout's copy of a file the call runs differs from the
-   base. These are rules for the judge's integrity; they allow nothing.
-6. **A precedent that proves wrong stops itself.** Each reading where it applies and a limit is named counts a
+   command, a substitution, a here-document), or a file the call runs is not the base's: changed in the checkout, or created
+   there. For a package runner's key that file is the `package.json` naming the script. These are rules for the judge's integrity; they allow nothing.
+6. **A precedent that proves wrong stops itself.** Each freshly judged call where it applies and a limit is named
+   counts a conflict; a verdict answered from the session's memory counts nothing, so one call repeated is one
    conflict. Three since it was approved or last kept pause it and raise one card. Paused, declined and removed precedents are shown to
    no judge.
 7. **A change to what the kind runs is told, not blocked.** The judge reads the new committed text and is told the
    kind changed since it was approved; the builder gets a notice with Remove.
 8. **The builder sees and removes them** in Settings › This Project › Trust, each with its uses and the last calls
-   it allowed.
+   it allowed. A declined or removed kind is listed there and can be approved again. 10db's judge reads the rows
+   on every call; a running auto mode session drops a removed line at its next start.
 9. **Parity.** Steps 3 and 6 are 10db's judge's. Where auto mode judges, its own hard denies hold the four limits.
-   On the rules floor no model can weigh a kind, so Approve stores the exact calls as quoted-call grants and the
-   card says so.
+   With no Decisions account there are no rows of 10db's judge to propose from: no card is raised, and Settings
+   says standing approvals need a Decisions account. A follow-up closes that gap.
 
 ## Why
 
@@ -59,6 +66,11 @@
   - _Lowering the floor_, per project or for everyone. It widens every call, the ones nobody approved included.
     The 0.65 stopgap did this.
   - _Writing the kind as a grant line._ See "a question of its own".
+  - _Storing the examples as quoted-call grants where no model can weigh a kind._ A quoted-call grant is matched
+    in the hook ahead of every judge. That is the text match this decision refuses, and Remove would leave it
+    live.
+  - _Auto mode allow lines._ Plan review found an allow line clears a soft deny, so an approved kind would lift
+    a limit in a chat and one of Claude's own default denies in a lane.
   - _Pausing a precedent whenever its script changes._ Each merge to a Makefile would stall unattended work
     until the builder answered, which the trust decision calls a bug.
   - _A model writing each kind's description._ The card shows the committed text the kind runs instead, which is

@@ -20,11 +20,14 @@ Needs nothing; can run beside task 2.
   - **No key:** a `;`, `&&`, `||`, `&`, a substitution (`$(`, a backtick), a here-document, or a pipe whose later
     segments aren't all allowed by the fast path's read list (`read-allowlist.ts`; reuse its segment check).
     A redirect to a path outside the checkout or the temp folder is no key.
-- `apps/daemon/src/trust/index.ts`: export it.
+- `keyPackageFile(key, checkout, cwd)`: for a `pnpm`, `npm run`, `yarn` or `bun` key, the repository path of the
+  nearest `package.json` from `cwd` up to the checkout; null for any other key. Task 4 reads it through
+  `readCommitted` to withhold a precedent when the lane changed or created it.
+- `apps/daemon/src/trust/index.ts`: export both.
 
 ## Interfaces
 
-Implements `programKey` as the index quotes it.
+Implements `programKey` and `keyPackageFile` as the index quotes them.
 
 ## Spec sections
 
@@ -34,6 +37,6 @@ Implements `programKey` as the index quotes it.
 
 One pure table in `apps/daemon/src/trust/program-key.test.ts`: each key form above; `cd sub && make t`; `env A=1
 make t ARGS="x y"`; `make t 2>&1 | tail -20` keeps `make t`; `make t && curl …`, `make t | sh`, `$(…)` and a
-here-document give null; a script outside the checkout gives the program word only. Value card:
+here-document give null; a script outside the checkout gives the program word only; `keyPackageFile` from a nested folder finds the nearest file and is null for `make t`. Value card:
 `protects=which precedent a call is shown; fails_when=a compound or substituted line gets a key, or two targets
 share one; why_new=the judge (a pure parser); no_claim=that a keyed call is allowed`.
