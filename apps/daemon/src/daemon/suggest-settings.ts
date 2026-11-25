@@ -19,14 +19,10 @@ import {
   uiUnitOf,
   type AreaNamer,
   type DevLogin,
+  type ReadRepoFile,
 } from '../folders';
 import type { Git } from '../git';
-import {
-  callsDocker,
-  MAX_DOCKER_SCAN_BYTES,
-  originBaseCommit,
-  type ReadRepoFile,
-} from './docker-need';
+import { callsDocker, MAX_DOCKER_SCAN_BYTES, originBaseCommit } from './docker-need';
 import type { ListenerReader } from './listening-ports';
 import type { AddressProbe } from './loopback-probe';
 

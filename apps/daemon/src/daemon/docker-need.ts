@@ -1,12 +1,10 @@
 import { posix } from 'node:path';
 import type { ProjectDto } from '@10db/contracts';
+import { parseRules, within, withoutComments, type MakeRule, type ReadRepoFile } from '../folders';
 import type { Git } from '../git';
 
 /** The most of a Makefile or script read from the base to see whether a gate calls docker. */
 export const MAX_DOCKER_SCAN_BYTES = 256 * 1024;
-
-/** Reads a repository file as text, or null when it is absent; paths are relative to the repository root. */
-export type ReadRepoFile = (path: string) => Promise<string | null>;
 
 // `docker`, `docker-compose` and `docker compose` as a command; not `dockerfile`, `.dockerignore`
 // or a directory named `docker/`.
@@ -17,59 +15,6 @@ const SCRIPT_TOKEN = /(?:^|[\s;&|(])(\.\/[\w@./-]+|[\w@./-]+\.(?:sh|bash))(?=$|[
 const CD_DIR = /(?:^|[\s;&|(])cd\s+([\w@./-]+)/g;
 const MAX_DEPTH = 4;
 const MAX_READS = 24;
-
-/** The text without the lines that are only a comment (a recipe's too, whatever its prefix). */
-function withoutComments(text: string): string {
-  return text
-    .split('\n')
-    .filter((line) => !/^\s*[@+-]*\s*#/.test(line))
-    .join('\n');
-}
-
-/** `rel` under `dir`, or null when it leaves the repository or is absolute. */
-function within(dir: string, rel: string): string | null {
-  if (rel.startsWith('/')) return null;
-  const joined = posix.normalize(posix.join(dir, rel));
-  return joined === '..' || joined.startsWith('../') ? null : joined.replace(/^\.\/?/, '');
-}
-
-interface MakeRule {
-  readonly prerequisites: readonly string[];
-  readonly recipe: string;
-}
-
-/** The rules of one Makefile by target name; a target named twice keeps both recipes. */
-function parseRules(text: string): Map<string, MakeRule[]> {
-  const rules = new Map<string, MakeRule[]>();
-  let current: { names: string[]; prerequisites: string[]; recipe: string[] } | null = null;
-  const close = (): void => {
-    if (current === null) return;
-    const rule = { prerequisites: current.prerequisites, recipe: current.recipe.join('\n') };
-    for (const name of current.names) rules.set(name, [...(rules.get(name) ?? []), rule]);
-    current = null;
-  };
-  for (const line of text.split('\n')) {
-    if (line.startsWith('\t')) {
-      current?.recipe.push(line);
-      continue;
-    }
-    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
-    close();
-    const head = /^([^\s:=#][^:=#]*):(?!=)([^=]*)$/.exec(line.replace(/#.*$/, ''));
-    if (head === null) continue;
-    current = {
-      names: (head[1] ?? '').trim().split(/\s+/),
-      // What follows `|` is order-only and needs no scan.
-      prerequisites: (head[2] ?? '')
-        .split('|', 1)
-        .flatMap((normal) => normal.trim().split(/\s+/))
-        .filter((name) => name !== ''),
-      recipe: [],
-    };
-  }
-  close();
-  return rules;
-}
 
 /**
  * Whether a gate command is seen to call Docker: it says so itself, or the Makefile target or script

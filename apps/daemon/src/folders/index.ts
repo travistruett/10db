@@ -12,6 +12,14 @@ export {
   type Listener,
 } from './detect-app-address';
 export { readComposeServices, type ComposeServices } from './dev-services';
+export {
+  MAKEFILE_NAMES,
+  parseRules,
+  within,
+  withoutComments,
+  type MakeRule,
+  type ReadRepoFile,
+} from './make-rules';
 export { CHANGED_CHECK_NOTE, changedCheckFor, uiUnitOf } from './detect-changed-check';
 export {
   devLoginAnswer,
