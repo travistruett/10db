@@ -251,7 +251,8 @@ function ProjectItem({
                 <StackedBar counts={counts} tips={false} />
               </Box>
             </HoverCard.Target>
-            <HoverCard.Dropdown>
+            {/* Words only, so the card never takes a click meant for the rows it lies over. */}
+            <HoverCard.Dropdown style={{ pointerEvents: 'none' }}>
               <BarBreakdown counts={counts} verdict={line} />
             </HoverCard.Dropdown>
           </HoverCard>
