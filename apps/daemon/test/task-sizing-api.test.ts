@@ -13,6 +13,7 @@ import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
+import { noulAnswer } from './fake-noul-answers';
 import { createMemoryKeychain, createTempRepo, tempDir, waitForAsync } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
@@ -58,8 +59,11 @@ async function start(sizingWaitMs: number, extra: Record<string, unknown> = {}) 
     tickMs: 3_600_000,
     keychain: createMemoryKeychain(),
     sizingWaitMs,
-    fetch: (_url, init) =>
-      new Promise<Response>((resolve) => {
+    fetch: (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const nouls = noulAnswer(url, init?.body);
+      if (nouls !== null) return Promise.resolve(nouls);
+      return new Promise<Response>((resolve) => {
         const rigor = typeof init?.body === 'string' && init.body.includes('"careful"');
         const call = {
           rigor,
@@ -83,7 +87,8 @@ async function start(sizingWaitMs: number, extra: Record<string, unknown> = {}) 
         };
         held.push(call);
         if (answering) call.answer();
-      }),
+      });
+    },
   });
   const api = apiClient(daemon.url, daemon.token);
   const { account } = await api.post('/accounts', AccountCreatedDto, {

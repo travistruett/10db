@@ -17,6 +17,7 @@ import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createMemoryKeychain, tempDir, waitFor } from './fixtures';
+import { noulAnswer } from './fake-noul-answers';
 import { readModelsDevFixture } from './models-dev-fixture';
 
 const QUIET = { caffeinate: () => null, watch: false } as const;
@@ -61,8 +62,10 @@ async function start(
     ...(opts.judgeOff === true ? { judgeOff: true } : {}),
     ...(opts.benchmarksOff === true ? { benchmarksOff: true } : {}),
     keychain: createMemoryKeychain(),
-    fetch: (input) => {
+    fetch: (input, init) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const nouls = noulAnswer(url, init?.body);
+      if (nouls !== null) return Promise.resolve(nouls);
       // The second opinion's model is a chat model on OpenRouter; it answers the test decision there.
       if (url.endsWith('/chat/completions'))
         return Promise.resolve(
