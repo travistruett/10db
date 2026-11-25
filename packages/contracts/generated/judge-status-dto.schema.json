@@ -378,7 +378,7 @@
               "default": {
                 "enabled": false,
                 "model": "anthropic/claude-sonnet-5.5",
-                "floor": 0.8
+                "floor": 0.7
               },
               "type": "object",
               "properties": {
