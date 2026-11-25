@@ -172,6 +172,8 @@ function WindowedArticles({
   // A conversation opens at its newest message, as a chat does, unless Why? points elsewhere. After
   // that a new entry scrolls into view, unless the builder has scrolled up to read.
   const drawn = useRef(0);
+  // Whether the builder reads at the end; scrolling keeps it current.
+  const atEnd = useRef(true);
   const pointed = highlightNonce !== undefined && targetIndex !== -1;
   useEffect(() => {
     const el = viewport.current;
@@ -179,21 +181,25 @@ function WindowedArticles({
     const opening = drawn.current === 0;
     drawn.current = entryCount;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_DISTANCE;
+    // A list opened at a message is not at its end, whatever its geometry says before it scrolls.
+    if (opening && pointed) atEnd.current = false;
     if ((opening && !pointed) || nearBottom) virtualizer.scrollToEnd();
     // Only a new entry moves the list; Why? pointing elsewhere is read as it stands then.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [virtualizer, entryCount]);
 
-  // Whether the builder reads at the end. A window that shrinks or grows keeps a reader at the end
-  // there, as a chat does; one who scrolled up to read stays where they were.
-  const atEnd = useRef(true);
+  // A window that shrinks or grows, or a last message that grows (a files list arriving late), keeps
+  // a reader at the end there, as a chat does; one who scrolled up to read stays where they were.
+  const sizer = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = viewport.current;
-    if (el === null) return;
+    const content = sizer.current;
+    if (el === null || content === null) return;
     const keep = new ResizeObserver(() => {
       if (atEnd.current) virtualizer.scrollToEnd();
     });
     keep.observe(el);
+    keep.observe(content);
     return () => {
       keep.disconnect();
     };
@@ -246,7 +252,7 @@ function WindowedArticles({
           },
         }}
       >
-        <div style={{ position: 'relative', height: virtualizer.getTotalSize() }}>
+        <div ref={sizer} style={{ position: 'relative', height: virtualizer.getTotalSize() }}>
           <Box
             px="md"
             style={{

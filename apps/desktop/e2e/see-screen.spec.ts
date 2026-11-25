@@ -77,17 +77,35 @@ async function ask(page: Page, text: string): Promise<void> {
 const DRAWN_SCREEN_COLOURS = 16;
 
 /**
- * The caption arrives once the daemon's browser has taken the picture, which may use its whole
- * 90 s capture deadline on a saturated machine, so the wait outlasts that deadline.
+ * The daemon answers every `see_screen` within 20 s of asking (`renderTimeoutMs` in `screens/broker.ts`),
+ * with the picture or the reason there is none. The window's own draw budget sits inside those 20 s, and
+ * the session replies once it has that answer, so 30 s is the deadline plus room for the reply.
  */
-const CAPTURE_CAPTION_WAIT_MS = 100_000;
+const CAPTURE_REPLY_WAIT_MS = 30_000;
+
+/**
+ * A reply is final once it shows, so a reply that is not the caption fails after this, not after the
+ * config's default 20 s expect timeout.
+ */
+const REPLY_SETTLE_MS = 1_000;
+
+/**
+ * Waits for the session's reply to a screen request, then checks that it is the caption for the picture.
+ * The reply is that caption, or `I could not see it:` and the reason the window or the daemon gave, so a
+ * refusal fails here with its reason in the message rather than as a timeout that says nothing.
+ */
+async function expectSeen(page: Page, caption: string): Promise<void> {
+  const reply = page.getByText(caption, { exact: true }).or(page.getByText(/^I could not see it:/));
+  await expect(reply).toBeVisible({ timeout: CAPTURE_REPLY_WAIT_MS });
+  await expect(reply).toHaveText(caption, { timeout: REPLY_SETTLE_MS });
+}
 
 test('the window draws the Board and Plan for a session, and the conversation shows the real picture', async ({
   page,
   request,
 }) => {
-  // Two captures, each allowed its full deadline, plus the page's own setup.
-  test.setTimeout(2 * CAPTURE_CAPTION_WAIT_MS + 60_000);
+  // Two replies, each within its wait, plus the picture reads and the page's own setup.
+  test.setTimeout(2 * CAPTURE_REPLY_WAIT_MS + 60_000);
   const projectId = await createProject(request, 'see-screen');
   const task = await request.post(`${daemonUrl}/projects/${projectId}/tasks`, {
     headers: auth,
@@ -103,9 +121,7 @@ test('the window draws the Board and Plan for a session, and the conversation sh
   await openNewPlan(page);
 
   await ask(page, 'Please see the board at 900');
-  await expect(page.getByText('I saw the board: 1 picture.', { exact: true })).toBeVisible({
-    timeout: CAPTURE_CAPTION_WAIT_MS,
-  });
+  await expectSeen(page, 'I saw the board: 1 picture.');
   const board = await pictureOf(page, /The Board at 900×900/);
   await keep('board', board);
   expect(board.naturalWidth).toBe(900);
@@ -114,9 +130,7 @@ test('the window draws the Board and Plan for a session, and the conversation sh
 
   // The conversation now holds a screenshot, which a frame must draw without reading the kept picture.
   await ask(page, 'Now please see the plan at 1000');
-  await expect(page.getByText('I saw the plan: 1 picture.', { exact: true })).toBeVisible({
-    timeout: CAPTURE_CAPTION_WAIT_MS,
-  });
+  await expectSeen(page, 'I saw the plan: 1 picture.');
   const plan = await pictureOf(page, /Plan at 1000×900/);
   await keep('plan', plan);
   expect(plan.naturalWidth).toBe(1000);

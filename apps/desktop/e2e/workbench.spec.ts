@@ -383,9 +383,10 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await message.press('Meta+Enter');
   await expect(row(page, 'Settings')).toContainText('Ready');
   await expect(settings.getByText('Loosened the padding.')).toBeVisible();
-  await expect(
-    settings.getByRole('list', { name: 'Files this turn changed' }).last(),
-  ).toContainText('src/views/settings/page.tsx');
+  // Both turns' lists are drawn, so `.last()` is turn 2's and not turn 1's alone.
+  const turnFiles = settings.getByRole('list', { name: 'Files this turn changed' });
+  await expect(turnFiles).toHaveCount(2);
+  await expect(turnFiles.last()).toContainText('src/views/settings/page.tsx');
 
   // Two turns outgrow a short window: the thread scrolls inside the page, never the window.
   for (const width of [1280, 480]) await threadScrollsInside(page, settings, 'Settings', width);
