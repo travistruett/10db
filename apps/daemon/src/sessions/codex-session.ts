@@ -56,6 +56,7 @@ import {
   type CodexRpc,
 } from './codex-rpc';
 import { codexLoginStatus } from './codex-sign-in-check';
+import { isFullAccess } from './full-access';
 import type { SignInCheck } from './sign-in-check';
 import {
   AccountProbeError,
@@ -182,6 +183,9 @@ const pictureInputs = (images: readonly ShapeImage[]): readonly Record<string, s
 /** The text of a message a session that has started sends; nothing was prompted before then. */
 const unlessStarted = (started: boolean): string => (started ? '' : ` ${NO_PROMPT}`);
 
+/** The `sandbox` a Full access thread starts under; it wins over the home's `default_permissions`. */
+const FULL_ACCESS_SANDBOX = 'danger-full-access';
+
 const modelRefusal = (model: string): string =>
   `Codex refused the model "${model}" on this account.`;
 
@@ -260,6 +264,8 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
   let threadId: string | null = null;
   /** The model the next `turn/start` names: the spec's, until `setModel` picks another. */
   let model = spec.model;
+  /** A chat the builder turned Full access on for: Codex's own full-access mode, still under 10db's guard hook. */
+  const fullAccess = isFullAccess(spec);
   /** Turns that have completed, so a `turn/start` reply is not taken for a turn that already ended. */
   let turnsCompleted = 0;
   const state = createTurnState();
@@ -531,7 +537,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     const developerInstructions = codexDeveloperInstructions(spec);
     // With no lane sandbox the profile is read-only over the checkout, whose secret files it denies.
     let secretFiles: string[] = [];
-    if ((spec.sandbox ?? null) === null) {
+    if ((spec.sandbox ?? null) === null && !fullAccess) {
       try {
         secretFiles = await secretFilesIn(spec.cwd);
       } catch {
@@ -544,6 +550,8 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
       cwd: spec.cwd,
       model: spec.model,
       approvalPolicy: 'never',
+      // A Full access chat's thread runs Codex's own full-access mode; the home's lane profile gives way to it.
+      ...(fullAccess ? { sandbox: FULL_ACCESS_SANDBOX } : {}),
       config: codexThreadConfig(spec, secretFiles),
       ...(developerInstructions === null ? {} : { developerInstructions }),
     };
@@ -564,7 +572,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
         );
       throw error;
     }
-    if (thread.activePermissionProfile?.id !== LANE_PROFILE)
+    if (!fullAccess && thread.activePermissionProfile?.id !== LANE_PROFILE)
       throw sandboxRefused('Codex runs the thread under a permission profile other than the lane.');
     if (!modelMatches(spec.model, thread.model))
       throw new StartRefused(
@@ -640,6 +648,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
           ...pictureInputs(message.images),
         ],
         approvalPolicy: 'never',
+        ...(fullAccess ? { sandboxPolicy: { type: 'dangerFullAccess' } } : {}),
         model,
         effort: spec.effort,
       },

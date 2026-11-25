@@ -1,5 +1,10 @@
 import { AccountKind } from '@10db/contracts';
-import type { FullAccessSettings } from './types';
+import type { AgentSessionSpec, FullAccessSettings } from './types';
+
+/** Whether a session is a chat the builder turned Full access on for; a lane's spec never is. */
+export function isFullAccess(spec: AgentSessionSpec): boolean {
+  return 'fullAccess' in spec;
+}
 
 /**
  * What a Full access chat's Claude session runs with, from the account it is on. A key in the session's env

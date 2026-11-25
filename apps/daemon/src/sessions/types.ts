@@ -262,7 +262,10 @@ export interface FullAccessSettings {
 
 export type ExploreSessionSpec = AgentSessionCore & {
   readonly profile: ExploreProfile;
-  /** Set only for a Full access chat; absent, the session runs in 10db's sandbox as Plan's does. */
+  /**
+   * Set only for a Full access chat; absent, the session runs in 10db's sandbox as Plan's does. A Codex chat's
+   * carries it as a flag alone: the mode, helper and scrub are Claude's.
+   */
   readonly fullAccess?: FullAccessSettings;
 };
 export type AgentSessionSpec = LaneSessionSpec | ExploreSessionSpec;

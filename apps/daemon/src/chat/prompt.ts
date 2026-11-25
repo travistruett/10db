@@ -5,8 +5,11 @@
  * project whose Web switch is off, is never told it has the web. `fullAccess` is a chat the builder turned
  * Full access on for: it runs as Claude Code does in a terminal, so its shell and git are its own.
  */
-export function chatSystemPrompt(web: boolean, fullAccess = false): string {
-  if (fullAccess) return fullAccessPrompt();
+export function chatSystemPrompt(
+  web: boolean,
+  fullAccess: 'claude' | 'codex' | null = null,
+): string {
+  if (fullAccess !== null) return fullAccessPrompt(fullAccess);
   return [
     web
       ? 'You are in a chat with the builder in 10db, about one project. You read the project, run commands and search the web, with the builder watching.'
@@ -23,9 +26,11 @@ export function chatSystemPrompt(web: boolean, fullAccess = false): string {
 }
 
 /** The prompt of a chat running as Claude Code does in the builder's terminal. */
-function fullAccessPrompt(): string {
+function fullAccessPrompt(agent: 'claude' | 'codex'): string {
   return [
-    "You are in a chat with the builder in 10db, about one project. Full access is on: you run as Claude Code does in the builder's terminal, with their settings, tools and servers, and Claude Code's own checks decide what to ask.",
+    agent === 'claude'
+      ? "You are in a chat with the builder in 10db, about one project. Full access is on: you run as Claude Code does in the builder's terminal, with their settings, tools and servers, and Claude Code's own checks decide what to ask."
+      : "You are in a chat with the builder in 10db, about one project. Full access is on: your commands run with no sandbox, as Codex's full-access mode does in the builder's terminal, and 10db's judge checks each call that crosses a limit.",
     "Your turn holds the builder's checkout, which keeps 10db's own tasks and passes out of it while you work. Edit and run commands as you would in a terminal, and stay in the checkout unless the builder points you elsewhere.",
     "git is yours to run in the shell. Commit, push, open a pull request or merge only when the builder asks for it. Branches under 10db/ are 10db's own: never make, switch to, push or merge one.",
     'Call set_title once, after your first reply, with a title of at most 8 words in sentence case and no trailing period.',

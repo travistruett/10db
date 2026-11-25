@@ -1,4 +1,6 @@
 import { SandboxedMcpServer } from '../sandbox';
+import { CODEX_TUI_DEFAULTS, MCP_TOKEN_PREFIX } from './codex-takeover';
+import { isFullAccess } from './full-access';
 import { lanePermissions, readOnlyPermissions } from './codex-lane-permissions';
 import { codexYourServers } from './codex-your-servers';
 import type { AgentSessionSpec, SessionMcpServer } from './types';
@@ -33,6 +35,23 @@ function projectServer(server: SessionMcpServer): Record<string, unknown> {
   };
 }
 
+/** The session's MCP servers: the project's, then the builder's, then 10db's own. */
+function mcpServers(spec: AgentSessionSpec): Record<string, unknown> {
+  return {
+    ...Object.fromEntries(
+      Object.entries(spec.projectMcpServers).map(([name, server]) => [name, projectServer(server)]),
+    ),
+    ...codexYourServers(spec),
+    '10db': {
+      url: spec.mcp.url,
+      bearer_token_env_var: MCP_TOKEN_VARIABLE,
+      required: true,
+      default_tools_approval_mode: APPROVAL_MODE,
+      tool_timeout_sec: spec.mcp.toolTimeoutMs / 1000,
+    },
+  };
+}
+
 /**
  * The per-session `config` for `thread/start` and `thread/resume`: a lane's, or an explore
  * conversation's on its read-only sandbox, whose checkout the profile makes `read`; with no lane sandbox it is
@@ -44,10 +63,23 @@ export function codexThreadConfig(
   spec: AgentSessionSpec,
   secretFiles: readonly string[] = [],
 ): Record<string, unknown> {
-  const projects = Object.fromEntries(
-    Object.entries(spec.projectMcpServers).map(([name, server]) => [name, projectServer(server)]),
-  );
-  const yours = codexYourServers(spec);
+  const mcp = mcpServers(spec);
+  // A Full access chat runs Codex's full-access mode (the thread's `sandbox` param): no permission profile, the
+  // shell as a terminal's, and the managed network proxy off. Its commands never hold 10db's server token or a key.
+  if (isFullAccess(spec))
+    return {
+      ...((spec.setup?.skillRoots ?? []).length > 0
+        ? { skills: { include_instructions: true } }
+        : {}),
+      web_search: spec.webSearch ?? 'disabled',
+      allow_login_shell: CODEX_TUI_DEFAULTS.allowLoginShell,
+      features: { network_proxy: CODEX_TUI_DEFAULTS.features.network_proxy },
+      shell_environment_policy: {
+        inherit: CODEX_TUI_DEFAULTS.shellInherit,
+        exclude: [MCP_TOKEN_VARIABLE, `${MCP_TOKEN_PREFIX}*`, 'OPENROUTER_API_KEY'],
+      },
+      mcp_servers: mcp,
+    };
   const { sandbox } = spec;
   // A conversation with no lane sandbox reads the checkout and runs no command; a lane never starts without one.
   if (sandbox === null && spec.profile.kind !== 'explore') {
@@ -63,17 +95,7 @@ export function codexThreadConfig(
     // The thread's own setting over the home's `disabled`.
     web_search: spec.webSearch ?? 'disabled',
     shell_environment_policy: { inherit: 'none', set: { ...sandbox?.shellEnv } },
-    mcp_servers: {
-      ...projects,
-      ...yours,
-      '10db': {
-        url: spec.mcp.url,
-        bearer_token_env_var: MCP_TOKEN_VARIABLE,
-        required: true,
-        default_tools_approval_mode: APPROVAL_MODE,
-        tool_timeout_sec: spec.mcp.toolTimeoutMs / 1000,
-      },
-    },
+    mcp_servers: mcp,
   };
 }
 

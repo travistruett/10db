@@ -139,6 +139,17 @@ const FULL_ACCESS_DEFAULTS = {
   defaultConfigDir: true,
 } as const;
 
+/**
+ * A Codex chat's Full access as the spec carries it. Claude's mode, key helper and scrub mean nothing to Codex,
+ * which reads only that the chat is Full access; its judge stays 10db's.
+ */
+const CODEX_FULL_ACCESS = {
+  permissionMode: 'default',
+  apiKeyHelper: null,
+  scrub: false,
+  ownSetup: false,
+} as const;
+
 /** How often a Full access turn's end looks for background tasks still running. */
 export const BACKGROUND_POLL_MS = 1_000;
 
@@ -540,8 +551,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               defaultConfigDir: fullInputs.defaultConfigDir,
               keyInEnv: fullInputs.keyInEnv,
             });
+      // A Codex chat runs Codex's own full-access mode, still under 10db's guard hook and judge.
+      const fullCodex = chat.fullAccess && launch.account.harness === Provider.Codex;
+      const fullAgent = full !== null ? 'claude' : fullCodex ? 'codex' : null;
       // A Full access session can write wherever its turn holds the folder, which every one of its turns does.
-      const writable = full !== null || writesNow(chat, launch.cwd);
+      const writable = full !== null || fullCodex || writesNow(chat, launch.cwd);
       const folder: ChatPlace = {
         get place() {
           return getChat(state.db, chat.id).workPlace;
@@ -549,7 +563,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         holds: () => {
           const place = getChat(state.db, chat.id).workPlace;
           const current = holdingSession.get(chat.id) === start.sessionId;
-          if (full !== null) return current && deps.folderHold.holdsTurn(chat.id);
+          if (full !== null || fullCodex) return current && deps.folderHold.holdsTurn(chat.id);
           if (place === WorkPlace.Here) return current && deps.folderHold.holdsTurn(chat.id);
           if (place === WorkPlace.Branch)
             return (
@@ -593,10 +607,14 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         limits: limitNotes,
       };
       let ready: ShapePrepared | null;
-      if (full !== null)
-        // Where Claude Code finds the builder's own setup (their default config folder) nothing is relayed.
+      if (full !== null || fullCodex)
+        // Where Claude Code finds the builder's own setup (their default config folder) nothing is relayed;
+        // Codex's home is 10db's own, so its instructions and servers always are.
         ready =
-          (await deps.prepareFullAccess?.({ ...prepareInput, relay: !full.ownSetup })) ?? null;
+          (await deps.prepareFullAccess?.({
+            ...prepareInput,
+            relay: !full?.ownSetup,
+          })) ?? null;
       else ready = deps.prepare === undefined ? null : await deps.prepare(prepareInput);
       // A session that starts with no plan is owed the planning rules once it has one. A session that has its
       // plan at start, resumed or not, holds the rules in its system prompt (a resumed Codex thread's
@@ -648,7 +666,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           look();
         });
       const endJobs =
-        full !== null ? backgroundGone : ready === null ? undefined : () => ready.endJobs();
+        full !== null || fullCodex
+          ? backgroundGone
+          : ready === null
+            ? undefined
+            : () => ready.endJobs();
       if (endJobs !== undefined) sessionJobs.set(conv.id, endJobs);
       let marked = false;
       let released: Promise<void> | null = null;
@@ -674,7 +696,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       };
       // A Full access session's commands run outside any sandbox, so closing it is what stops them.
       const closer = async (): Promise<void> => {
-        if (full !== null) await opened?.stop();
+        if (full !== null || fullCodex) await opened?.stop();
         await release();
       };
       sessionClosers.set(conv.id, closer);
@@ -700,10 +722,13 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         (ready?.claudeConnectors ?? false) &&
         launch.account.kind === AccountKind.ClaudeSubscription;
       // As the session's sandbox is built: Docker for a session that writes, loopback by the project's switch.
-      const open = sessionDevAccess(project, {
-        sandboxed: (ready?.sandbox ?? null) !== null,
-        writes: writable,
-      });
+      // A Full access Codex session has no sandbox, so Docker and loopback are open to it, as they are to its shell.
+      const open = fullCodex
+        ? { docker: true, localhost: true }
+        : sessionDevAccess(project, {
+            sandboxed: (ready?.sandbox ?? null) !== null,
+            writes: writable,
+          });
       const policy = buildTrustPolicy({
         surface: TrustSurface.Chat,
         projectName: project.name,
@@ -779,18 +804,18 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             judge,
             systemPrompt:
               plan === undefined
-                ? chatSystemPrompt(webOn, full !== null)
-                : `${chatSystemPrompt(webOn, full !== null)}\n\n${
+                ? chatSystemPrompt(webOn, fullAgent)
+                : `${chatSystemPrompt(webOn, fullAgent)}\n\n${
                     shapeId === null
                       ? PLANNING_STUB
                       : plan.systemPrompt(launch.agentModels, subagents, web)
                   }`,
-            ...chatProfile(full !== null || ready?.commands !== undefined),
+            ...chatProfile(full !== null || fullCodex || ready?.commands !== undefined),
             ...(plan === undefined
               ? {}
               : {
                   agents: plan.agents(
-                    full !== null || ready?.commands !== undefined,
+                    full !== null || fullCodex || ready?.commands !== undefined,
                     subagents,
                     web,
                   ),
@@ -818,6 +843,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           },
           hookWaitMs: (project.humanWaitMinutes + 5) * 60_000,
           ...(full === null ? {} : { fullAccess: full }),
+          ...(fullCodex ? { fullAccess: CODEX_FULL_ACCESS } : {}),
           sandbox: ready?.sandbox ?? null,
           projectMcpServers: ready?.projectMcpServers ?? {},
           yourMcpServers: ready?.yourMcpServers ?? {},
@@ -828,7 +854,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               : ready.canUseTool(req),
           // Each call by its own judge: a native session's call outside auto mode has no classifier behind it.
           preToolUse: (req) => {
-            if (full !== null) {
+            if (full !== null || fullCodex) {
               const verdict = judgeFullAccessCall(chatCallOf(req), root, folder, reviewTurns);
               return readsNow()?.preToolUse(req, verdict) ?? verdict;
             }
