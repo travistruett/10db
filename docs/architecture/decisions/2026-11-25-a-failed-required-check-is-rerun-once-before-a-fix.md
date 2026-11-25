@@ -18,7 +18,10 @@ in `pr-watch.ts` does the work.
 - If a rerun check then fails with a job id that isn't in the record, it **failed again**: the failure is
   the change's, and a fix or the card follows as before. A check still listed only by its old job ids
   10 minutes after the rerun (`CHECKS_START_MS`) counts as failed again too, because the rerun never took.
-- If no rerun check fails or runs, it **flaked**: the pull request merges as usual, the notice turns into
+- A rerun check that is cancelled (no runner, say) has not passed: the head waits, and the cancelled-check
+  flows run it again or raise their own card. A read that lists no checks at all waits too, for
+  `CHECKS_START_MS`; after that nothing is recorded until GitHub lists them.
+- If GitHub lists the checks and no rerun check fails, runs or is cancelled, it **flaked**: the pull request merges as usual, the notice turns into
   a warning naming the check and the head, and the "Flaky check" Inbox card counts one more time and names
   the head and the pull request.
 - GitHub refusing the rerun (other than "already running", which waits for the next round) is stored as

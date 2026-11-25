@@ -1172,6 +1172,8 @@ export function createPrWatch(input: {
       change,
       failing: required.failing,
       pending: required.pending,
+      cancelled: required.cancelled,
+      listed: required.state !== 'none',
       now: clock.now().getTime(),
     });
     const store = (next: FailedRerunRecord, detail?: string): void => {

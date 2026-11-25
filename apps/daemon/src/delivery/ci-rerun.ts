@@ -18,7 +18,7 @@ export type CiRerunStep =
   | { readonly kind: 'hold'; readonly names: readonly string[] }
   /** A rerun check failed again: the failure is the change's. */
   | { readonly kind: 'failedAgain' }
-  /** The rerun checks passed: they flaked on the head. */
+  /** The rerun checks passed (not cancelled, not unlisted): they flaked on the head. */
   | { readonly kind: 'flaked'; readonly names: readonly string[] };
 
 /**
@@ -33,16 +33,23 @@ export type CiRerunStep =
  * - A rerun check is pending: hold.
  * - Only the old jobs fail: hold for `CHECKS_START_MS` after the rerun, then it failed again (the
  *   rerun never took).
- * - No rerun check fails or runs: it flaked.
+ * - A rerun check is cancelled: hold. It never passed, and the cancelled-check flows run it again or
+ *   raise their own card.
+ * - GitHub lists no checks (`listed` false, as it may right after a rerun): hold for
+ *   `CHECKS_START_MS`, then nothing, with the record kept for the read that lists them.
+ * - The checks are listed and no rerun check fails, runs or is cancelled: it passed, so it flaked.
  */
 export function ciRerunStep(input: {
   readonly record: FailedRerunRecord | null;
   readonly change: readonly RequiredCheckJobDto[];
   readonly failing: readonly RequiredCheckJobDto[];
   readonly pending: readonly RequiredCheckJobDto[];
+  readonly cancelled: readonly RequiredCheckJobDto[];
+  /** Whether GitHub listed any required check for the head. */
+  readonly listed: boolean;
   readonly now: number;
 }): CiRerunStep {
-  const { record, change, failing, pending, now } = input;
+  const { record, change, failing, pending, cancelled, listed, now } = input;
   if (record === null) {
     if (change.length === 0) return { kind: 'none' };
     const runs = [...new Set(change.flatMap((job) => (job.runId === null ? [] : [job.runId])))];
@@ -55,10 +62,10 @@ export function ciRerunStep(input: {
   const failed = failing.filter(named);
   if (failed.some((job) => job.jobId !== null && !record.jobs.includes(job.jobId)))
     return { kind: 'failedAgain' };
-  if (pending.some(named)) return { kind: 'hold', names: record.names };
+  if (pending.some(named) || cancelled.some(named)) return { kind: 'hold', names: record.names };
+  const starting = now - record.at < CHECKS_START_MS;
   if (failed.length > 0)
-    return now - record.at < CHECKS_START_MS
-      ? { kind: 'hold', names: record.names }
-      : { kind: 'failedAgain' };
+    return starting ? { kind: 'hold', names: record.names } : { kind: 'failedAgain' };
+  if (!listed) return starting ? { kind: 'hold', names: record.names } : { kind: 'none' };
   return { kind: 'flaked', names: record.names };
 }

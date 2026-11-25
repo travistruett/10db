@@ -27,6 +27,8 @@ describe('ciRerunStep', () => {
     change: RequiredCheckJobDto[];
     failing: RequiredCheckJobDto[];
     pending: RequiredCheckJobDto[];
+    cancelled?: RequiredCheckJobDto[];
+    listed?: boolean;
     now: number;
     step: CiRerunStep;
   }[] = [
@@ -102,6 +104,36 @@ describe('ciRerunStep', () => {
       now: AT + 1,
       step: { kind: 'flaked', names: ['build'] },
     },
+    {
+      name: 'rerun: a rerun check cancelled: hold, it never passed',
+      record: ran,
+      change: [],
+      failing: [],
+      pending: [],
+      cancelled: [job('build', '78')],
+      now: AT + CHECKS_START_MS,
+      step: { kind: 'hold', names: ['build'] },
+    },
+    {
+      name: 'rerun: no checks listed, within the minutes: hold',
+      record: ran,
+      change: [],
+      failing: [],
+      pending: [],
+      listed: false,
+      now: AT + CHECKS_START_MS - 1,
+      step: { kind: 'hold', names: ['build'] },
+    },
+    {
+      name: 'rerun: no checks listed, past the minutes: nothing, and never flaked',
+      record: ran,
+      change: [],
+      failing: [],
+      pending: [],
+      listed: false,
+      now: AT + CHECKS_START_MS,
+      step: { kind: 'none' },
+    },
     ...(['failed', 'flaked', 'refused'] as const).map((outcome) => ({
       name: `${outcome}: a head is never rerun twice`,
       record: { ...ran, outcome },
@@ -112,7 +144,17 @@ describe('ciRerunStep', () => {
       step: { kind: 'none' } as const,
     })),
   ];
-  it.each(rows)('$name', ({ record, change, failing, pending, now, step }) => {
-    expect(ciRerunStep({ record, change, failing, pending, now })).toEqual(step);
+  it.each(rows)('$name', ({ record, change, failing, pending, cancelled, listed, now, step }) => {
+    expect(
+      ciRerunStep({
+        record,
+        change,
+        failing,
+        pending,
+        cancelled: cancelled ?? [],
+        listed: listed ?? true,
+        now,
+      }),
+    ).toEqual(step);
   });
 });
