@@ -19,3 +19,9 @@
   session takes later never covers files another area now holds.
 - A session of a separate copy's batch (builder, reviewer, takeover, on every start and resume) gets `TENDB_COPY_ID` from the batch's journal row through `copyIdForBatch` and `withCopyId`, never from the ambient environment. A copy batch whose row can't be read doesn't launch and fails with the error's reason. A copy's step checks run in the copy, and a batch's final check is the landing's gate, not the runner's.
 - Acceptance pass: how the runner checks criteria after the last gate, sends back through a resumable `fix`, and leaves the `acceptance` card is in `acceptance/AGENTS.md`.
+- A task has one failed card (`runner/failed-card.ts`, fold key `failed:<taskId>`): `flagFailedRun`, which the runner and
+  startup recovery call, folds a later run's failure into the open card. The card then speaks for that run: its body,
+  options and detail are the new run's, its only target is that run, the earlier runs go to `releasedWorkstreams` (so
+  Factory's human-touch figures still count their minutes), and `detail.failedRuns` counts the runs, which the title
+  shows as "(3 runs)". `markDone` withdraws it in its write (`withdrawFailedCard`): a later run that finishes leaves it
+  nothing to ask.

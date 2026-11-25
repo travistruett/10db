@@ -40,7 +40,6 @@ import {
   StepStatus,
   ToolAccess,
   Verdict,
-  WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamFailure,
   WorkstreamState as S,
   AccountKind,
@@ -365,6 +364,7 @@ import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
 import { checkCoverage, coverageNote, type CheckCoverage } from './check-coverage';
 import { planOf, raisePlanApproval, waitsForPlanApproval } from './plan-approval';
+import { flagFailedRun, withdrawFailedCard } from './failed-card';
 import { outstandingFixEvidence } from './fix-evidence';
 import { shipsAtRetryLimit } from './limit-ship';
 import {
@@ -1336,24 +1336,17 @@ export function createRunner(opts: RunnerOptions): Runner {
     clearLease(ctx, id);
   }
 
-  /** The failed card; `review` is the reviewer's rejection that ended the workstream, when one did. */
+  /** The task's failed card; `review` is the reviewer's rejection that ended the workstream, when one did. */
   function flagFailed(row: WorkstreamRow, reason: string, review?: ReviewCardDetail): void {
     const batch = batchCardFields(row);
-    opts.inbox.flag({
-      projectId: row.projectId,
-      workstreamId: row.id,
-      tier: CardTier.Ask,
-      urgency: Urgency.High,
-      closesWhen: {
-        by: 'withdrawn',
-        when: 'the run is retried, cancelled or shipped (cancelForWorkstream)',
-      },
-      title: `${WORKSTREAM_FAILED_TITLE_PREFIX}${getTask(db, row.taskId).title}`,
-      body: reason,
-      ...(batch ? { options: batch.options } : {}),
-      ...(batch || review
-        ? { detail: { ...batch?.detail, ...(review ? { [REVIEW_CARD_DETAIL]: review } : {}) } }
-        : {}),
+    opts.state.write((ctx) => {
+      flagFailedRun(ctx, row, {
+        body: reason,
+        ...(batch ? { options: batch.options } : {}),
+        ...(batch || review
+          ? { detail: { ...batch?.detail, ...(review ? { [REVIEW_CARD_DETAIL]: review } : {}) } }
+          : {}),
+      });
     });
   }
 
@@ -1417,6 +1410,8 @@ export function createRunner(opts: RunnerOptions): Runner {
   ): void {
     transitionWorkstream(ctx, id, { to: S.Done, fence, reason });
     setTaskStatus(ctx, row.taskId, 'done');
+    // The task's card for an earlier run's failure has nothing left to ask.
+    withdrawFailedCard(ctx, row);
     releaseClaims(ctx, id);
     clearLease(ctx, id);
   }
