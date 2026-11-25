@@ -12,12 +12,12 @@ import { useNow } from '../../shell/relative';
 import { GoalDetail } from './goal-detail';
 import { GoalRow } from './goal-row';
 import { GOAL_STATUS_LOOK } from '../board/goal-status';
-import { groupGoals, verdictLine } from './goal-status';
+import { goalDetails, goalStatusWord, groupGoals, verdictLine } from './goal-status';
 import { shortAgo } from './short-ago';
 import { goalBar } from './factory-summary';
 import { StackedBar } from './stacked-bar';
 
-/** "· 3 new since 3h ago": plain text, with no badge, when the goal has items in its window. */
+/** "3 new since 3h ago", when the goal has items in its window: the row's hover card says it whole. */
 function newsOf(summary: GoalSummaryDto, now: number): string | undefined {
   if (summary.newItems === 0) return undefined;
   const since = summary.digest.since;
@@ -71,14 +71,25 @@ export function GoalList({
   function goalRow(summary: GoalSummaryDto) {
     const id = summary.goal.id;
     const expanded = openKey === id;
+    const news = newsOf(summary, now);
+    const { merged, total } = summary.digest.progress;
     return (
       <GoalRow
         key={id}
         title={summary.goal.title}
-        line={verdictLine(summary.digest)}
-        news={newsOf(summary, now)}
+        status={goalStatusWord(summary.digest)}
+        waitsOnYou={summary.digest.status === GoalStatus.WaitingOnYou}
+        // A goal that has not started has nothing merged to count.
+        {...(summary.digest.status === GoalStatus.NotStarted
+          ? {}
+          : { count: `${String(merged)}/${String(total)}` })}
+        {...(summary.newItems === 0 ? {} : { news: `${String(summary.newItems)} new` })}
+        details={[...goalDetails(summary.digest), ...(news === undefined ? [] : [news])]}
+        label={[summary.goal.title, verdictLine(summary.digest), news]
+          .filter((part) => part !== undefined)
+          .join(' ')}
         color={GOAL_STATUS_LOOK[summary.digest.status].color}
-        bar={<StackedBar counts={goalBar(summary.digest.progress)} size="sm" />}
+        bar={<StackedBar counts={goalBar(summary.digest.progress)} size="sm" tips={false} />}
         expanded={expanded}
         onToggle={() => {
           toggleGoal(summary);
@@ -106,7 +117,7 @@ export function GoalList({
       {done.length > 0 ? (
         <GoalRow
           title="Done"
-          line={done.length === 1 ? '1 goal' : `${String(done.length)} goals`}
+          status={done.length === 1 ? '1 goal' : `${String(done.length)} goals`}
           expanded={doneShown}
           flush
           onToggle={() => {

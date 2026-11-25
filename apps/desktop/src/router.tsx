@@ -149,13 +149,16 @@ function projectFilter(search: Record<string, unknown>): { project?: ProjectId }
 const factoryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/factory',
-  // `goal` opens that goal's row, so the Board's "Open in Factory" lands on the goal expanded.
+  // `goal` opens that goal's row, so the Board's "Open in Factory" lands on the goal expanded. `task` opens
+  // that task's drawer over the page, so Back and a shared link reopen it.
   validateSearch: (
     search: Record<string, unknown>,
-  ): { goal?: GoalId; project?: ProjectId; view?: FactoryMode } => {
+  ): { goal?: GoalId; project?: ProjectId; view?: FactoryMode; task?: TaskId } => {
     const goal = GoalId.safeParse(search['goal']);
+    const task = TaskId.safeParse(search['task']);
     return {
       ...(goal.success ? { goal: goal.data } : {}),
+      ...(task.success ? { task: task.data } : {}),
       ...projectFilter(search),
       // Only Metrics is named in the link; Live is the page without it.
       ...(search['view'] === FactoryMode.Metrics ? { view: FactoryMode.Metrics } : {}),
