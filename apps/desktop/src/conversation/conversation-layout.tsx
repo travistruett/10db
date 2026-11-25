@@ -1,10 +1,11 @@
 import { Box } from '@mantine/core';
 import { useState, type ReactNode } from 'react';
+import { CONTENT_WIDTH_PX, ContentWidth } from '../shell/content-width';
 import classes from './conversation-layout.module.css';
 import { ListScrolledContext } from './list-scrolled';
 
 /** The widest a conversation's column is drawn, so a line of the reply stays readable. */
-export const CONVERSATION_WIDTH = 720;
+export const CONVERSATION_WIDTH = CONTENT_WIDTH_PX[ContentWidth.Reading];
 
 export interface ConversationLayoutProps {
   /** The region's name. */

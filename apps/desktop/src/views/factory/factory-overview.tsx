@@ -7,7 +7,8 @@ import {
   type ProjectViewDto,
   type WorkstreamDto,
 } from '@10db/contracts';
-import { Alert, Stack } from '@mantine/core';
+import { Alert, Container, Stack } from '@mantine/core';
+import { ContentWidth } from '../../shell/content-width';
 import { IconBuildingFactory2, IconPlus } from '@tabler/icons-react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
@@ -32,7 +33,6 @@ import { passTitle } from '../workbench/pass-title';
 import { waitingCount } from '../workbench/queue-order';
 import { medianTurnMinutes } from '../workbench/timing';
 import { failureCauses, flatRows, waitsOnSomeoneElse } from './factory-summary';
-import classes from './factory-overview.module.css';
 import { GlanceTiles } from './glance-tiles';
 import { LiveGroup, liveGroups } from './live-groups';
 import { NeedsYouPanel, type WaitingPass } from './needs-you-panel';
@@ -171,54 +171,56 @@ export function FactoryOverview({
   };
 
   return (
-    <Stack gap={26} className={classes['page']}>
-      <GlanceTiles
-        figures={{
-          needsYou: needsYou.length + waitingPasses.length,
-          failed: failed.length,
-          causes: causes.length,
-          // Across every project the figure is the Mac's lanes in use, out of its cap; for one project, its runs.
-          running:
-            filter === null && admission !== undefined
-              ? admission.lanesRunning
-              : of(LiveGroup.Running).length + busyPasses.length,
-          laneCap: filter === null ? (admission?.machineLaneCap ?? null) : null,
-          queued: waiting.filter((ws) => ws.state === WorkstreamState.Queued).length,
-          inReview: of(LiveGroup.InReview).length,
-          merged: of(LiveGroup.Done).length,
-        }}
-      />
-      <NeedsYouPanel
-        waiting={needsYou.map((run) => ({ run, card: cardFor(run) }))}
-        passes={waitingPasses}
-        causes={causes}
-        onOthers={waiting.filter(waitsOnSomeoneElse)}
-        now={now}
-        nameOf={nameOf}
-        canRetry={canRetry}
-        onOpen={open}
-        onOpenInbox={openInbox}
-        onOpenPass={openPass}
-      />
-      {goalsFailed == null ? null : (
-        <Alert color="red" title="Couldn't load the goals">
-          {goalsFailed.message}
-        </Alert>
-      )}
-      <ProjectList
-        entries={shown.map((project, i) => ({
-          project,
-          rows: rows.filter((r) => r.run.projectId === project.id),
-          passes: busyPasses.filter((p) => p.projectId === project.id),
-          asks: waitingPasses.filter((p) => p.projectId === project.id).length,
-          goals: goalLists[i]?.data,
-        }))}
-        goalOf={new Map([...tasks.values()].map((t) => [t.id, t.goalId ?? null]))}
-        linkedGoalId={linkedGoalId}
-        now={now}
-        onOpen={open}
-        onOpenPass={openPass}
-      />
-    </Stack>
+    <Container size={ContentWidth.Page} w="100%">
+      <Stack gap={26}>
+        <GlanceTiles
+          figures={{
+            needsYou: needsYou.length + waitingPasses.length,
+            failed: failed.length,
+            causes: causes.length,
+            // Across every project the figure is the Mac's lanes in use, out of its cap; for one project, its runs.
+            running:
+              filter === null && admission !== undefined
+                ? admission.lanesRunning
+                : of(LiveGroup.Running).length + busyPasses.length,
+            laneCap: filter === null ? (admission?.machineLaneCap ?? null) : null,
+            queued: waiting.filter((ws) => ws.state === WorkstreamState.Queued).length,
+            inReview: of(LiveGroup.InReview).length,
+            merged: of(LiveGroup.Done).length,
+          }}
+        />
+        <NeedsYouPanel
+          waiting={needsYou.map((run) => ({ run, card: cardFor(run) }))}
+          passes={waitingPasses}
+          causes={causes}
+          others={waiting.filter(waitsOnSomeoneElse).map((run) => ({ run, card: cardFor(run) }))}
+          now={now}
+          nameOf={nameOf}
+          canRetry={canRetry}
+          onOpen={open}
+          onOpenInbox={openInbox}
+          onOpenPass={openPass}
+        />
+        {goalsFailed == null ? null : (
+          <Alert color="red" title="Couldn't load the goals">
+            {goalsFailed.message}
+          </Alert>
+        )}
+        <ProjectList
+          entries={shown.map((project, i) => ({
+            project,
+            rows: rows.filter((r) => r.run.projectId === project.id),
+            passes: busyPasses.filter((p) => p.projectId === project.id),
+            asks: waitingPasses.filter((p) => p.projectId === project.id).length,
+            goals: goalLists[i]?.data,
+          }))}
+          goalOf={new Map([...tasks.values()].map((t) => [t.id, t.goalId ?? null]))}
+          linkedGoalId={linkedGoalId}
+          now={now}
+          onOpen={open}
+          onOpenPass={openPass}
+        />
+      </Stack>
+    </Container>
   );
 }

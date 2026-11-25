@@ -307,12 +307,13 @@ export function ProjectList(props: ProjectListProps) {
       </Group>
       <Accordion
         multiple
+        variant="separated"
         defaultValue={opened}
         chevronPosition="left"
         keepMounted={false}
         // Folded points right and open points down, as the goal rows inside do.
         chevron={<IconChevronRight size={16} stroke={1.5} />}
-        classNames={{ chevron: classes['chevron'] }}
+        classNames={{ chevron: classes['chevron'], item: classes['projectCard'] }}
       >
         {ranked.map((entry) => (
           <ProjectItem key={entry.project.id} entry={entry} props={props} />

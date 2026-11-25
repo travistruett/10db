@@ -1,10 +1,10 @@
 import type { ChatDto, Effort, ProjectId, ProjectViewDto } from '@10db/contracts';
-import { Alert, Box, Button, Group, Select, Text } from '@mantine/core';
+import { Alert, Box, Button, Container, Group, Select, Text } from '@mantine/core';
 import { useElementSize } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { Composer } from '../../conversation/composer';
 import { addFiles } from '../../conversation/dropped-files';
-import { CONVERSATION_WIDTH } from '../../conversation/conversation-layout';
+import { ContentWidth } from '../../shell/content-width';
 import { composerPhase } from '../../conversation/composer-phase';
 import { applyDraftChange, hasContent, type DraftChange } from '../../conversation/drafts';
 import { ModelMenu } from '../../conversation/model-menu';
@@ -150,7 +150,7 @@ export function FreshTab({
 
   const conversation = (
     <Box style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto' }}>
-      <Box maw={CONVERSATION_WIDTH} mx="auto" px="md" pt="12vh" pb="xl">
+      <Container size={ContentWidth.Reading} px="md" pt="12vh" pb="xl">
         {tab.plan ? (
           <Text size="sm" c="dimmed" mb="md">
             {`Plan in ${name}: talk it through, or drop a document. The plan fills in beside the conversation.`}
@@ -233,7 +233,7 @@ export function FreshTab({
             </Group>
           </Alert>
         )}
-      </Box>
+      </Container>
     </Box>
   );
 

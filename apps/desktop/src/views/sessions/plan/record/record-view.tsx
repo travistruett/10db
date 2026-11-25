@@ -3,7 +3,7 @@ import {
   ActionIcon,
   Alert,
   Badge,
-  Box,
+  Container,
   Group,
   Loader,
   Stack,
@@ -30,6 +30,7 @@ import { QuestionsTab } from './questions-tab';
 import { RECORD_TABS, RecordTab, type RecordSearch } from './record-tabs';
 import { ReviewsTab } from './reviews-tab';
 import { TasksTab } from './tasks-tab';
+import { ContentWidth } from '../../../../shell/content-width';
 
 // The Plan page: the Plan the session's panel shows, full width, then its record: the documents an effort
 // wrote, what it decided, the evidence it read, its reviews, what it left open and the tasks made from it.
@@ -195,9 +196,9 @@ export function RecordView({
   // The Plan's rows, as the panel shows them. Where it came from and Ask for Changes go back to the
   // session, the second with its words in the session's draft.
   const plan = (
-    <Box maw={760} h="100%" style={{ minHeight: 0 }}>
+    <Container size={ContentWidth.Reading} w="100%" h="100%" style={{ minHeight: 0 }}>
       <PlanPanel shapeId={shapeId} full onWhy={back} onAskForChanges={toSession} />
-    </Box>
+    </Container>
   );
   const imported = record.data === undefined ? null : importedLine(record.data);
   return (
