@@ -107,18 +107,30 @@
   padding-inline-end: 8px;
 }
 
-/* A goal row on the same columns: the status runs to the news, or to the edge when there is none. */
+/* A goal row on the same columns: its short status where a task line's state starts, then the merged
+   count and the news, each right-aligned in its own column so they line up down the list. */
 .goalStatus {
-  grid-column: 5 / -1;
+  grid-column: 6 / 8;
 }
 
-.goalStatus[data-news] {
-  grid-column: 5 / 8;
+.goalCount {
+  grid-column: 8;
+  justify-self: end;
+  font-variant-numeric: tabular-nums;
 }
 
 .goalNews {
-  grid-column: 8 / -1;
-  text-align: right;
+  grid-column: 9;
+  justify-self: end;
+}
+
+/* A Needs you row opens what it is about, so the whole row answers the pointer. */
+.needRow {
+  cursor: pointer;
+}
+
+.needRow:hover {
+  background: var(--mantine-color-default-hover);
 }
 
 /* An open project's chevron turns a quarter, from right to down. */

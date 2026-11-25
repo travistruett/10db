@@ -41,7 +41,8 @@ export function StackedBar({
   const total = BAR_ORDER.reduce((n, part) => n + counts[part], 0);
   return (
     <Progress.Root
-      size={6}
+      // A goal's bar is thinner than its project's, which runs over it.
+      size={size === 'sm' ? 4 : 6}
       w="100%"
       maw={size === 'sm' ? 140 : undefined}
       style={{ flex: 'none' }}
@@ -83,26 +84,28 @@ export function BarSwatch({ part }: { readonly part: BarPart }) {
   );
 }
 
-/** What a project's bar is made of: its verdict on top, then every part's swatch, name and count. */
-export function BarBreakdown({
-  counts,
-  verdict,
-}: {
-  readonly counts: BarCounts;
-  readonly verdict: string;
-}) {
+/**
+ * What a project's bar is made of, for its hover card: each part with work in it, in the bar's order, as its
+ * swatch, name and count. A project with nothing open says so in one dim line.
+ */
+export function BarBreakdown({ counts }: { readonly counts: BarCounts }) {
+  const parts = BAR_ORDER.filter((part) => counts[part] > 0);
+  if (parts.length === 0) {
+    return (
+      <Text size="xs" c="dimmed">
+        Idle · nothing open
+      </Text>
+    );
+  }
   return (
     <Stack gap={6}>
-      <Text size="sm" fw={600} c="bright">
-        {verdict}
-      </Text>
-      {BAR_ORDER.map((part) => (
+      {parts.map((part) => (
         <Group key={part} gap={8} wrap="nowrap">
           <BarSwatch part={part} />
           <Text size="xs" style={{ flex: 1 }}>
             {BAR_LABELS[part]}
           </Text>
-          <Text size="xs" c={counts[part] === 0 ? 'dimmed' : 'bright'} ff="monospace">
+          <Text size="xs" ta="right" style={{ fontVariantNumeric: 'tabular-nums' }}>
             {counts[part]}
           </Text>
         </Group>

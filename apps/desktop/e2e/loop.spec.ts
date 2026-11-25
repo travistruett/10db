@@ -274,13 +274,14 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(project.getByRole('group', { name: /goals$/ })).toHaveCount(0);
   await project.getByRole('button', { name: /merged today/ }).click();
   await expectAccessible(page, 'factory, projects, dark');
-  // A line opens its task on the Board.
+  // A line opens its task's drawer over Factory, and the link keeps it.
   await project
     .getByRole('button', { name: new RegExp(TASK) })
     .first()
     .click();
   const taskDrawer = page.getByRole('dialog', { name: 'Task' });
   await expect(taskDrawer).toBeVisible();
+  await expect(page).toHaveURL(/\/factory\?.*task=/);
   // What the build wrote last is on the card under its own phase, apart from the review's verdict.
   const report = taskDrawer.getByTestId('task-report');
   await expect(report.getByText('Implementation Report')).toBeVisible();
