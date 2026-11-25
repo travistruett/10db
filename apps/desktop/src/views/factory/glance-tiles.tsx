@@ -31,7 +31,7 @@ function Tile({
   readonly label: string;
 }) {
   return (
-    <Paper radius="md" px={16} py={14} bg="var(--tendb-color-panel)">
+    <Paper radius="md" px={16} py={14} bg="var(--tendb-color-card)" shadow="xs">
       <Group gap={8} align="baseline">
         <Text
           fz={24}
@@ -48,7 +48,7 @@ function Tile({
           </Text>
         )}
       </Group>
-      <Group gap={6} mt={6} wrap="nowrap">
+      <Group gap={6} mt={12} wrap="nowrap">
         {mark}
         <Text size="xs">{label}</Text>
       </Group>

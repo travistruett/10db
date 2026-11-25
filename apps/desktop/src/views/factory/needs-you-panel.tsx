@@ -106,6 +106,8 @@ function Need({
           color={color}
           maw="100%"
           mt={3}
+          // A person's name keeps its own case.
+          tt={avatar === undefined ? undefined : 'none'}
           leftSection={
             avatar === undefined ? undefined : (
               <Avatar size={12} radius="xl" color="gray" name={avatar} />
