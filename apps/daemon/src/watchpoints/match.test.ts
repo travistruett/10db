@@ -7,6 +7,7 @@ import {
   type WatchpointFileHit,
 } from '@10db/contracts';
 import { matchWatchpoints } from './match';
+import { splitPatch } from './split-patch';
 
 const watchpoint = (key: string, globs: string[], over: Partial<Watchpoint> = {}): Watchpoint => ({
   key,
@@ -93,5 +94,73 @@ describe('effectiveWatchpoints', () => {
       ['migrations', 'you'],
       ['prompts', 'you'],
     ]);
+  });
+});
+
+describe('splitPatch', () => {
+  // A real `git diff-tree -p --no-renames` of one commit: a modified, an added and a deleted file, a rename
+  // (shown as a delete and an add) and a path with spaces, whose ---/+++ lines git ends with a tab.
+  const diff = [
+    'diff --git a/added.txt b/added.txt',
+    'new file mode 100644',
+    'index 0000000..92d5444',
+    '--- /dev/null',
+    '+++ b/added.txt',
+    '@@ -0,0 +1 @@',
+    '+fresh',
+    'diff --git a/dir with space/a b.md b/dir with space/a b.md',
+    'index 587be6b..975fbec 100644',
+    '--- a/dir with space/a b.md\t',
+    '+++ b/dir with space/a b.md\t',
+    '@@ -1 +1 @@',
+    '-x',
+    '+y',
+    'diff --git a/mod.txt b/mod.txt',
+    'index 814f4a4..879de50 100644',
+    '--- a/mod.txt',
+    '+++ b/mod.txt',
+    '@@ -1,2 +1,2 @@',
+    ' one',
+    '-two',
+    '+TWO',
+    'diff --git a/new.txt b/new.txt',
+    'new file mode 100644',
+    'index 0000000..ed0d042',
+    '--- /dev/null',
+    '+++ b/new.txt',
+    '@@ -0,0 +1,3 @@',
+    '+moved',
+    'diff --git a/old.txt b/old.txt',
+    'deleted file mode 100644',
+    'index ed0d042..0000000',
+    '--- a/old.txt',
+    '+++ /dev/null',
+    '@@ -1,3 +0,0 @@',
+    '-moved',
+    '',
+  ].join('\n');
+
+  it('keys each file by its path, with its status, and keeps the hunks under its own header', () => {
+    const found = splitPatch(diff, { fileBytes: 24 * 1024, diffCut: false });
+    expect([...found.values()].map((f) => [f.path, f.status, f.clipped])).toEqual([
+      ['added.txt', 'A', false],
+      ['dir with space/a b.md', 'M', false],
+      ['mod.txt', 'M', false],
+      ['new.txt', 'A', false],
+      ['old.txt', 'D', false],
+    ]);
+    expect(found.get('mod.txt')?.patch).toBe(
+      'diff --git a/mod.txt b/mod.txt\nindex 814f4a4..879de50 100644\n--- a/mod.txt\n+++ b/mod.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+TWO\n',
+    );
+  });
+
+  it('clips the last file when the diff itself was cut, and a file past its own cap', () => {
+    const cut = splitPatch(diff, { fileBytes: 40, diffCut: true });
+    expect(cut.get('old.txt')?.clipped).toBe(true);
+    expect(cut.get('mod.txt')?.clipped).toBe(true);
+    expect(cut.get('mod.txt')?.patch.endsWith('\n')).toBe(true);
+    expect(splitPatch(diff, { fileBytes: 24 * 1024, diffCut: true }).get('mod.txt')?.clipped).toBe(
+      false,
+    );
   });
 });
