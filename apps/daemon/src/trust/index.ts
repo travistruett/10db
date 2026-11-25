@@ -18,9 +18,8 @@ export {
   type LimitAt,
   type LimitVerdict,
 } from './crosses-limit';
-export { callRuns, type CallRuns, type RunText } from './call-runs';
+export { callRuns, type CallRuns } from './call-runs';
 export {
-  MAKEFILE_NAMES,
   parseRules,
   within,
   withoutComments,

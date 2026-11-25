@@ -12,12 +12,7 @@ export {
   type Listener,
 } from './detect-app-address';
 export { readComposeServices, type ComposeServices } from './dev-services';
-export {
-  MAX_COMMITTED_BYTES,
-  readCommitted,
-  type CommittedFile,
-  type CommittedReader,
-} from './committed-file';
+export { readCommitted, type CommittedFile, type CommittedReader } from './committed-file';
 export { CHANGED_CHECK_NOTE, changedCheckFor, uiUnitOf } from './detect-changed-check';
 export {
   devLoginAnswer,
