@@ -1,14 +1,72 @@
-import { ActionIcon, Anchor, Button, Text } from '@mantine/core';
-import { IconExternalLink } from '@tabler/icons-react';
+import { ActionIcon, Anchor, Button, Group, Menu, Stack, Text } from '@mantine/core';
+import { IconChevronDown, IconExternalLink } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { SettingsSectionKey } from '../settings/sections';
 import type { OpenPageControl } from './open-page';
 
+function MenuLine({ title, byline }: { readonly title: string; readonly byline: string }) {
+  return (
+    <Stack gap={0}>
+      <Text size="sm">{title}</Text>
+      <Text size="xs" c="dimmed">
+        {byline}
+      </Text>
+    </Stack>
+  );
+}
+
 /**
- * Open in Browser, a default button, which reads Copy Link once the page has been opened in this pass.
- * A refusal is said by `OpenPageRefusal`.
+ * Open Preview, a split button whose menu says how each way of opening differs (Pick on Page spec §2);
+ * where there is no Preview, Open in Browser, which reads Copy Link once the page has been opened in
+ * this pass. A refusal is said by `OpenPageRefusal`.
  */
 export function OpenPageButton({ control }: { readonly control: OpenPageControl }) {
+  const { preview } = control;
+  if (preview !== null)
+    return (
+      <Group gap={0} wrap="nowrap">
+        <Button
+          variant="default"
+          size="xs"
+          style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+          onClick={() => {
+            void preview();
+          }}
+        >
+          Open Preview
+        </Button>
+        <Menu position="bottom-end" width={300}>
+          <Menu.Target>
+            <Button
+              variant="default"
+              size="xs"
+              px={6}
+              aria-label="More ways to open"
+              style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeftWidth: 0 }}
+            >
+              <IconChevronDown size={14} stroke={1.5} />
+            </Button>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Item onClick={() => void preview()}>
+              <MenuLine
+                title="Open Preview"
+                byline="10db's window, signed in. Pick elements here."
+              />
+            </Menu.Item>
+            <Menu.Item onClick={() => void control.launch()}>
+              <MenuLine
+                title="Open in Browser"
+                byline="Your browser, with your own session and DevTools."
+              />
+            </Menu.Item>
+            <Menu.Item onClick={() => void control.copy()}>
+              <MenuLine title="Copy Link" byline="The page's address, for anywhere else." />
+            </Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
+      </Group>
+    );
   return (
     <Button
       variant="default"

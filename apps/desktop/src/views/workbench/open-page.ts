@@ -1,7 +1,15 @@
-import { DevUiConnectionDto, handOffTo, type PassId, type TaskId } from '@10db/contracts';
+import {
+  DevUiConnectionDto,
+  handOffTo,
+  PreviewSignInDto,
+  type PassId,
+  type ProjectId,
+  type TaskId,
+} from '@10db/contracts';
 import { useState } from 'react';
 import { readJson } from '../../daemon/client';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
+import { openPreview, previewAvailable } from '../../desktop/preview';
 import { appPageUrl, openAppPage } from '../../desktop/tauri';
 
 // Workbench spec §4.3, design review D18: Open in Browser's first click for a page in a pass opens it
@@ -16,6 +24,12 @@ export interface OpenPageTarget {
   readonly route: string | null;
   /** The project's app address, or null when none is set. */
   readonly appUrl: string | null;
+  /** The page's project, its folder and the page's name, for the Preview window; none, no Preview. */
+  readonly preview?: {
+    readonly projectId: ProjectId;
+    readonly repoPath: string;
+    readonly label: string;
+  };
 }
 
 export interface OpenPageControl {
@@ -29,6 +43,11 @@ export interface OpenPageControl {
   readonly launch: () => Promise<void>;
   /** Copies the page's link (⌘L), opened or not. */
   readonly copy: () => Promise<void>;
+  /**
+   * Opens the page in the project's Preview window, signed in with its dev login; null where there is
+   * no Preview: outside the desktop app, and for 10db's own window, which the shell itself serves.
+   */
+  readonly preview: (() => Promise<void>) | null;
 }
 
 const storageKey = (passId: PassId): string => `tendb.workbench.opened.${passId}`;
@@ -110,11 +129,35 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
       setOpenedHere((held) => new Set(held).add(key));
     });
   const act = () => (opened ? attempt(copy) : launch());
+  const ownWindow = originOf(target.appUrl) === window.location.origin;
+  const about = target.preview;
+  const preview =
+    about !== undefined && previewAvailable() && !devUi && !ownWindow
+      ? () =>
+          attempt(async ({ appUrl, route }) => {
+            const signIn = await readJson(
+              await client.projects[':projectId'].preview['sign-in'].$post({
+                param: { projectId: about.projectId },
+              }),
+              PreviewSignInDto,
+            );
+            if (!signIn.ok) throw new Error(signIn.problem);
+            await openPreview({
+              projectId: about.projectId,
+              appUrl,
+              route,
+              taskId: target.taskId,
+              pageLabel: about.label,
+              repoPath: about.repoPath,
+            });
+          })
+      : null;
   return {
     opened,
     refusal: refused?.key === key ? refused.reason : null,
     act,
     launch,
     copy: () => attempt(copy),
+    preview,
   };
 }

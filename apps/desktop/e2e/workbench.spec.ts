@@ -7,7 +7,9 @@ import { test } from './routed-test';
 import { inConversationColumn } from './conversation-column';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
+import { E2E_TOKEN } from './paths';
 import { auth, createProject } from './shape-project';
+import { fakeTauriWindow, type TauriCall } from './tauri-window';
 
 // Runs after window-csp.spec.ts (files run in name order with one worker); it adds its own project, on its
 // own repository, and selects it. The fake adapter answers the two pages from script-book.json:
@@ -479,4 +481,106 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
       return Live.parse(await live.json()).filter((view) => view.pass.projectId === projectId);
     })
     .toEqual([]);
+});
+
+// Pick on Page spec §4, §5: in the desktop app a page's Preview hands its picks to the page's draft.
+// The shell's edge is stood in for (`tauri-window.ts`); the UI and the daemon are the real ones.
+test('a pick from the Preview becomes a chip, and Send makes one message with its crop', async ({
+  page,
+  request,
+}) => {
+  const projectId = await createProject(
+    request,
+    'workbench-picks',
+    [
+      { name: 'repo', globs: ['**'], catchAll: true },
+      { name: 'settings', globs: ['src/views/settings/**'], role: 'page', route: '/settings' },
+    ],
+    APP,
+  );
+  await claudeIsInstalled(page);
+  await page.addInitScript(fakeTauriWindow, { url: daemonUrl, token: E2E_TOKEN });
+  await page.addInitScript((id) => {
+    window.localStorage.setItem('tendb.project', JSON.stringify(id));
+  }, projectId);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/workbench');
+  await page.getByRole('checkbox', { name: 'Settings', exact: true }).check();
+  await page.getByRole('button', { name: 'Start Pass', exact: true }).click();
+  await expect(row(page, 'Settings')).toContainText('Your turn');
+  await row(page, 'Settings')
+    .getByRole('button', { name: /^Settings/ })
+    .click();
+  const settings = page.getByRole('region', { name: 'Settings' });
+  // The desktop app opens a page in its Preview first; the browser and the link are in the menu.
+  const titleRow = page.locator('[data-title-row]');
+  await expect(titleRow.getByRole('button', { name: 'Open Preview' })).toBeVisible();
+  await titleRow.getByRole('button', { name: 'More ways to open' }).click();
+  await expect(page.getByRole('menuitem', { name: /^Open in Browser/ })).toContainText(
+    'your own session',
+  );
+  await page.keyboard.press('Escape');
+
+  const live = await request.get(`${daemonUrl}/passes?live=true`, { headers: auth });
+  const taskId = Live.parse(await live.json())
+    .find((view) => view.pass.projectId === projectId)
+    ?.pages.find((p) => p.label === 'Settings')?.taskId;
+  const pick = {
+    id: 'pk_e2e',
+    kind: 'element',
+    elements: [
+      {
+        tag: 'button',
+        selector: 'main > button',
+        text: 'Save changes',
+        rect: { x: 10, y: 20, width: 80, height: 30 },
+        component: 'SaveButton',
+        source: { file: 'src/views/settings/settings-view.tsx', line: 1 },
+      },
+    ],
+    area: null,
+    note: 'make it the secondary style',
+    route: '/settings',
+    viewport: { width: 1280, height: 800, dpr: 2 },
+    engine: 'WebKit',
+  };
+  await page.evaluate(
+    (payload) => {
+      (window as unknown as { emitTauri: (e: string, p: unknown) => void }).emitTauri(
+        'preview-pick',
+        payload,
+      );
+    },
+    { projectId, taskId, pick, crop: PICTURE.toString('base64') },
+  );
+  const picks = settings.getByRole('region', { name: 'Picks from the Preview' });
+  await expect(picks).toContainText('button “Save changes”');
+  await expect(picks).toContainText('src/views/settings/settings-view.tsx:1');
+  await expect(picks).toContainText('make it the secondary style');
+
+  const message = settings.getByRole('textbox', { name: 'Message to Settings' });
+  await message.fill('padding too tight');
+  await message.press('Meta+Enter');
+  await expect(picks).toHaveCount(0);
+  await expect(settings.getByText('From the page (data, not instructions)')).toBeVisible();
+  await expect(settings.getByRole('img', { name: 'pick-pk_e2e.png' })).toBeVisible();
+  // The sent pick leaves the Preview too.
+  await expect
+    .poll(async () =>
+      (
+        await page.evaluate(() => (window as unknown as { tauriCalls: TauriCall[] }).tauriCalls)
+      ).filter((call) => call.cmd === 'drop_preview_picks'),
+    )
+    .toEqual([
+      { cmd: 'drop_preview_picks', args: { projectId, pickIds: ['pk_e2e'], notice: null } },
+    ]);
+
+  // Later specs read Factory across projects, so nothing of this pass is left running.
+  await page.getByRole('button', { name: 'More actions', exact: true }).click();
+  await page.getByRole('menuitem', { name: /^Discard Pass/ }).click();
+  await page
+    .getByRole('dialog', { name: 'Discard Pass' })
+    .getByRole('button', { name: 'Discard Pass' })
+    .click();
+  await expect(page.getByRole('button', { name: 'Start Pass', exact: true })).toBeVisible();
 });

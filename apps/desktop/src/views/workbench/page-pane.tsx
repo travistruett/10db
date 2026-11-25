@@ -1,6 +1,7 @@
 import {
   ConversationState,
   type PassId,
+  type ProjectId,
   type PassTurnId,
   type ToolCallView,
 } from '@10db/contracts';
@@ -16,7 +17,7 @@ import { useSignOff } from '../../daemon/pass-close-queries';
 import { CodeSpans } from '../../shell/code-spans';
 import { useFrameSlots } from '../../shell/frame-slots';
 import { TitleRow } from '../../shell/title-row';
-import { hasContent } from '../../conversation/drafts';
+import { hasTyped } from '../../conversation/drafts';
 import { liveLine } from './live-line';
 import { useOpenPage } from './open-page';
 import { OpenPageRefusal } from './open-page-button';
@@ -39,6 +40,11 @@ export interface PagePaneProps {
   readonly passId: PassId;
   /** The project's app address, which Open in Browser opens the page's route on. */
   readonly appUrl: string | null;
+  /** The page's project and its folder, for its Preview window. */
+  readonly projectId: ProjectId;
+  readonly repoPath: string;
+  /** Counts the Preview bringing the window forward on this page: its picks take the cursor. */
+  readonly picksFocus: number;
   readonly row: QueueRow;
   /** The pass is open: while it closes or is abandoned, nothing can be sent to a page. */
   readonly passOpen: boolean;
@@ -61,7 +67,7 @@ export interface PagePaneProps {
 export function PagePane(props: PagePaneProps) {
   const { passId, appUrl, row, passOpen, openedAt, composerFocus, draft, onDraft, pullRequest } =
     props;
-  const { header } = props;
+  const { header, projectId, repoPath, picksFocus } = props;
   const { panelShown } = useFrameSlots();
   const { page, status } = row;
   const actions = usePageActions(page.taskId, page.conversationId);
@@ -95,10 +101,17 @@ export function PagePane(props: PagePaneProps) {
     setLogPage(page.taskId);
     setLogTurn(null);
   }
-  const open = useOpenPage({ passId, taskId: page.taskId, route: page.route, appUrl });
+  const open = useOpenPage({
+    passId,
+    taskId: page.taskId,
+    route: page.route,
+    appUrl,
+    preview: { projectId, repoPath, label: page.label },
+  });
   // Commit's variant follows the composer's phase: the primary once the page is ready and nothing is typed.
   const { commit: commitVariant } = pageComposerPhase(pagePhase(status), {
-    hasContent: hasContent(draft),
+    typed: hasTyped(draft),
+    picks: (draft.picks?.length ?? 0) > 0,
     label: page.label,
     firstMessage: !page.spokenTo,
   });
@@ -240,6 +253,9 @@ export function PagePane(props: PagePaneProps) {
               }
               inputRef={input}
               disabled={!passOpen}
+              projectId={projectId}
+              route={page.route}
+              picksFocus={picksFocus}
             />
           </>
         }
