@@ -115,6 +115,12 @@ export interface GuardInput {
    * floor's deploy refusal is lifted, and nothing else is.
    */
   readonly deployApproved?: boolean;
+  /**
+   * The call is a read of the builder's own Linear (`isLaneLinearRead`): a listed read tool on one of the
+   * session's Linear servers, with a short input that holds no secret. It sends Linear only the ids and
+   * filters it names, so it runs settled instead of going to the broker as a call that sends data out.
+   */
+  readonly linearRead?: boolean;
 }
 
 /**

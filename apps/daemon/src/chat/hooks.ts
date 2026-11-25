@@ -56,7 +56,7 @@ import type { AccountAgent } from '../environment';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import { holderWords, type FolderBlocker, type FolderHold } from '../folder-hold';
-import type { ComposeServices } from '../folders';
+import type { CommittedReader, ComposeServices } from '../folders';
 import { createHookJudge, createLimitNotes } from '../inbox';
 import type { Judge } from '../judge';
 import { principlesBrief } from '../knowledge';
@@ -264,6 +264,14 @@ export interface ChatHooksDeps {
   readonly composeServices: (
     project: Pick<ProjectDto, 'repoPath' | 'baseBranch'>,
   ) => Promise<ComposeServices | null>;
+  /**
+   * Reads the project's files as committed at its base and unchanged in `checkout`, for what a shell call runs
+   * (`readCommitted`); null shows 10db's judge the call alone.
+   */
+  readonly readCommitted: (
+    project: Pick<ProjectDto, 'repoPath' | 'baseBranch'>,
+    checkout: string,
+  ) => CommittedReader | null;
   /** Where the chat's tools find the session that calls them. */
   readonly live: ChatLiveSessions;
   /** A reading session's first change: asks the builder where the work happens. */
@@ -981,6 +989,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                       // A rewrite of the call is the guard's; its decision is what the floor gives.
                       return 'updatedInput' in floor ? { decision: 'allow' } : floor;
                     },
+                    readCommitted: deps.readCommitted(project, root),
                     skips: null,
                     limits: limitNotes,
                     onFloor: (detail) => {

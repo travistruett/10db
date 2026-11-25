@@ -1,3 +1,5 @@
+import { COPY_ID_VARIABLE } from '@10db/contracts';
+
 const ALLOWED_NAMES: ReadonlySet<string> = new Set([
   'PATH',
   'HOME',
@@ -27,7 +29,7 @@ const ALLOWED_NAMES: ReadonlySet<string> = new Set([
   'GIT_CONFIG_GLOBAL',
   'GIT_OPTIONAL_LOCKS',
   'TENDB_SANDBOX',
-  'TENDB_COPY_ID',
+  COPY_ID_VARIABLE,
   'npm_config_cache',
   'npm_config_devdir',
   'UV_CACHE_DIR',

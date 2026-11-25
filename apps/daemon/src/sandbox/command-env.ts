@@ -1,12 +1,9 @@
-import type { CopyId } from '@10db/contracts';
+import { COPY_ID_VARIABLE, type CopyId } from '@10db/contracts';
 import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { laneMiseConfig } from './mise-config';
 import { packageCacheEnv } from './package-cache';
 import { isEqualOrUnder } from './protected-reads';
-
-/** Names the separate copy whose databases a command may reach; each copy's command gets its own. */
-export const COPY_ID_VARIABLE = 'TENDB_COPY_ID';
 
 /**
  * `env` with the copy id set to `copyId`, or with none when it is null: a value the project's env or a

@@ -18,6 +18,14 @@ export {
   type LimitAt,
   type LimitVerdict,
 } from './crosses-limit';
+export { callRuns, type CallRuns } from './call-runs';
+export {
+  parseRules,
+  within,
+  withoutComments,
+  type MakeRule,
+  type ReadRepoFile,
+} from './make-rules';
 export {
   grantCallSummary,
   grantTargetOf,

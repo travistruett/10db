@@ -13,22 +13,12 @@ import { listAccounts } from '@10db/db';
 import type { McpSignIns } from '../accounts';
 import type { StateStore } from '../events';
 import type { YourMcpPlan } from '../session-setup';
+import { isLinearServer } from '../linear';
 import { harnessReadsServer } from './connect-service';
-
-const LINEAR_HOST = 'mcp.linear.app';
 
 /** A row the Connect Linear button settles has no note; only a row 10db can't read says why. */
 const NOT_CHECKED = 'Your Linear sign-in is checked when the agent first uses it.';
 const NOT_READ = "Couldn't read this account's claude.ai connectors.";
-
-/** Whether a remote server's url is Linear's own host. */
-export function isLinearServer(url: string): boolean {
-  try {
-    return new URL(url).host === LINEAR_HOST;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * How each agent account reaches Linear, from reads that already exist: the claude.ai connectors a plan

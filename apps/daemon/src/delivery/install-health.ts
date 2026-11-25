@@ -1,10 +1,46 @@
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, type Dirent } from 'node:fs';
 import { isAbsolute, join, normalize } from 'node:path';
 import { parse, parseAllDocuments } from 'yaml';
 import { z } from 'zod';
 
 /** The lockfile that says a project's packages are pnpm's. */
 export const PNPM_LOCKFILE = 'pnpm-lock.yaml';
+
+/** The package directory of a lockfile at the copy's root. */
+export const ROOT_PACKAGE = '.';
+
+/** How many folder levels below the root a pnpm package's own lockfile is looked for. */
+const PACKAGE_DEPTH = 3;
+
+/** Folders a package search never enters: dependencies and git's own. */
+const SKIPPED_FOLDERS: ReadonlySet<string> = new Set(['node_modules', '.git']);
+
+/**
+ * The directories of the copy that are pnpm packages of their own, relative to it: `.` when the root
+ * holds the lockfile (the one pnpm project of the copy, its workspace packages named by that
+ * lockfile), otherwise each folder up to three levels down that holds one, such as `amps/frontend`.
+ * A folder holding a lockfile owns what lies below it, which is not searched. Reads directories only.
+ */
+export function pnpmPackageDirs(path: string): string[] {
+  if (existsSync(join(path, PNPM_LOCKFILE))) return [ROOT_PACKAGE];
+  const found: string[] = [];
+  const search = (relative: string, depth: number): void => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(join(path, relative), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!entry.isDirectory() || SKIPPED_FOLDERS.has(entry.name)) continue;
+      const dir = join(relative, entry.name);
+      if (existsSync(join(path, dir, PNPM_LOCKFILE))) found.push(dir);
+      else if (depth < PACKAGE_DEPTH) search(dir, depth + 1);
+    }
+  };
+  search('', 1);
+  return found;
+}
 
 /**
  * What the builder is told runs. The real command (`installCommand`) also fixes the program, the

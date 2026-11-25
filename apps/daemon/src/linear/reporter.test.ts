@@ -15,6 +15,7 @@ import {
 import {
   createTestStore,
   enqueueLinearPost,
+  findOpenByFoldKey,
   insertTask,
   listLinearPosts,
   seedProject,
@@ -31,8 +32,14 @@ import { createInboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { createMcpHandler, mintSessionToken } from '../mcp';
 import { FakeAdapter, type FakeScriptBook } from '../sessions';
-import { createLinearReporter, REPORTER_STARTER, type LinearReporter } from './reporter';
+import {
+  createLinearReporter,
+  HOLD_RETRY_MS,
+  REPORTER_STARTER,
+  type LinearReporter,
+} from './reporter';
 import { reporterConversations } from './reporter-conversation';
+import { linearReporterFoldKey } from './reporter-inbox';
 import { reporterHooks } from './reporter-owner';
 import { SNAPSHOT_FIRST_LINE, SNAPSHOT_STARTER } from './snapshot';
 
@@ -251,13 +258,13 @@ afterEach(async () => {
   closeStore();
 });
 
-const oweOne = (): LinearPostId => {
+const oweOne = (dedupeKey = 'run_started:1:0'): LinearPostId => {
   const row = store.write((ctx) =>
     enqueueLinearPost(ctx, {
       taskId: task.id,
       projectId: project.id,
       event: LinearEventKind.RunStarted,
-      dedupeKey: 'run_started:1:0',
+      dedupeKey,
       attempt: 1,
       detail: {},
       dueAt: new Date(clock.now().getTime() + 30_000).toISOString(),
@@ -288,7 +295,14 @@ describe('the Linear reporter', () => {
 
   it('keeps a row whose session ended without recording pending, and runs it again at its backoff', async () => {
     const id = oweOne();
-    book[KEY] = [[{ do: 'turn_complete' }], recordingScript(id)];
+    book[KEY] = [
+      [
+        // The session reached Linear, so its failure to record spends a try.
+        { do: 'tool', toolName: `${PREFIX}get_issue`, input: { id: ISSUE }, result: '{}' },
+        { do: 'turn_complete' },
+      ],
+      recordingScript(id),
+    ];
     const first = clock.now().getTime() + 30_000;
     clock.advance(30_000);
     await expect.poll(() => rows()[0]?.tries, { timeout: 10_000 }).toBe(1);
@@ -302,6 +316,76 @@ describe('the Linear reporter', () => {
     reporter.start();
     clock.advance(5 * 60_000);
     await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+  });
+
+  it('holds the rows of a run that reached no Linear, names the account on the card, and posts them once woken', async () => {
+    const id = oweOne();
+    book[KEY] = [[{ do: 'turn_complete' }], recordingScript(id)];
+    const first = clock.now().getTime() + 30_000;
+    clock.advance(30_000);
+    await expect
+      .poll(() => rows()[0]?.lastError ?? null, { timeout: 10_000 })
+      .toContain("Claude plan isn't signed in to Linear");
+    // A hold spends no try and is due again at the hold's retry.
+    expect(rows()[0]).toMatchObject({
+      state: LinearPostState.Pending,
+      tries: 0,
+      dueAt: new Date(first + HOLD_RETRY_MS).toISOString(),
+    });
+    const card = () => findOpenByFoldKey(store.db, project.id, linearReporterFoldKey(project.id));
+    expect(card()?.body).toContain("Claude plan isn't signed in to Linear");
+    expect(card()?.body).toContain('Settings › Integrations');
+    // A sign-in, a move or Linear switched on wakes the project: the held row goes out without waiting the
+    // hold out. Only zero-delay timers fire here (the settle's retire, the woken arm), never the hold's retry.
+    reporter.wake(project.id);
+    await expect
+      .poll(
+        () => {
+          clock.advance(0);
+          return rows()[0]?.state;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(LinearPostState.Recorded);
+    expect(card()).toBeUndefined();
+  });
+
+  it('does not take the account as signed out when a run that made no Linear call left nothing to hold', async () => {
+    const first = oweOne();
+    // The run records its row without a call the guard counts as Linear's, so nothing is left to hold.
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: {
+            postIds: [first],
+            outcome: {
+              state: 'recorded',
+              commentIds: ['c-1'],
+              statusSet: null,
+              attachmentUrl: null,
+            },
+          },
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    // A later update still gets a session of its own, instead of being held for a sign-in nobody lacks.
+    const second = oweOne('run_started:2:0');
+    book[KEY].push(recordingScript(second));
+    clock.advance(30_000);
+    await expect
+      .poll(
+        () => {
+          clock.advance(0);
+          return rows().find((r) => r.id === second)?.state;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(LinearPostState.Recorded);
   });
 
   it('fails the rows of a run whose session cannot be made, and does not run again before the backoff', async () => {

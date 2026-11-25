@@ -6,6 +6,7 @@
   the one rule every caller, a lane, a pass, a chat and the reporter, takes them from, so a chat that writes has
   Docker as its sandbox does) and, with Docker open, names the project's compose services, read by `folders/dev-services.ts` from
   `origin/<base>` only, never the lane-writable checkout (`decisions/2026-11-24-judges-know-the-projects-dev-containers.md`).
+  A session in a separate copy (`TrustPolicyInput.copyId`) gets a `Separate copy:` line naming what the copy owns, the databases and stack its id's commands scope to, and what stays shared; `LIMIT_QUESTIONS`' DestroysData "no" counts what the session lines name as its own, which outside a copy is nothing (`decisions/2026-11-25-the-judge-takes-a-copys-project-commands-as-the-copys-own.md`).
   `scripts/crosses-limit-replay.ts` replays the commands the judge skipped in the builder's own history, and controls, through the judge by hand.
 - 10db's judge: `fast-path.ts` (`fastPathAllows`, `namesSecret`; its `JUDGED_OWN_TOOLS`, a chat's push, pull request and merge, are never fast) answers the calls that can't cross a limit
   with no model, a shell command only when every segment is in `read-allowlist.ts` (each read command with the
@@ -21,6 +22,24 @@
 - The hook judge that runs them is `inbox/hook-judge.ts` (`createHookJudge`, `LimitNotes`); the card a noted limit
   raises is `inbox/limit-card.ts`, with the three answers, and Always in this project stores a grant in the
   answer's write (`inbox/service.ts`).
+- `call.runs`: for a shell call the hook judge shows 10db's judge the committed text of what it runs
+  (`call-runs.ts`, `callRuns`; `decisions/2026-11-25-the-judge-reads-the-committed-code-a-call-runs.md`): the rules of
+  the make targets it names (`make [-C dir] target`, with their prerequisites, `$(MAKE)` calls and the scripts on their
+  recipe lines, and the variables the recipes use) and repository scripts named by a path or after an interpreter,
+  whole. Files come through `HookJudgeContext.readCommitted` (`folders/committed-file.ts`): `origin/<base>`'s text only
+  where the checkout holds the same bytes, so a script the lane changed or created is judged as before, without its
+  text. Only the first command of a line is followed, past `cd`s that certainly move it (the line's text is
+  exactly `cd`, one bare word, then `&&`, `;` or a newline; a bracket, brace, quote or second argument stops the
+  walk): an earlier command could write the file or change the shell (`cp e x.sh && ./x.sh`, `export
+MAKEFLAGS=…; make x`), and so could a substitution or a here-document on the command itself, so those show nothing. Where a folder
+  holds only `Makefile`, the reader's `differs` for `makefile` names that entry and the walk reads `Makefile`.
+  Bounded: `RUNS_MAX_DEPTH` 3, `RUNS_MAX_READS` 12, `RUNS_MAX_SCRIPT_BYTES` 16 KiB (a larger script is not shown,
+  never cut), `RUNS_MAX_CHARS` 24,000. `crossesLimit` adds `about_runs` and `call.runs` only when there is something
+  to show. The runs are in the hook judge's verdict key, so an edit to a script judges its call again. Claude's auto
+  mode and Codex's Auto-review don't see this text; a native session's calls they judge run as before.
+  `make-rules.ts` (`parseRules`, `within`, `MAKEFILE_NAMES`) is the Makefile reader it shares with
+  `daemon/docker-need.ts`; it lives here because `folders/` reaches `guard/` through `git/` and the sandbox, and
+  `guard/` imports `trust/`, so `trust/` imports `folders/` for types only.
 - `propose-production.ts` (`proposeProduction`, behind `GET /projects/:id/live-systems/proposals`) reads a capped set of
   files from `origin/<base>`'s commit, else HEAD, in git's object store and proposes live-system entries (vercel.json
   aliases, `*PROD*` names and production URLs in `.env*.example`, prod compose images, production workflow urls, prod

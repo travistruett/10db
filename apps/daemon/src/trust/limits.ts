@@ -44,7 +44,7 @@ export const LIMIT_QUESTIONS: Readonly<Record<LimitName, LimitQuestion>> = {
     criteria: {
       true: 'It drops, truncates, wipes or migrates a database (local ones included), deletes a Docker volume, deletes or overwrites a file outside the checkout or an untracked file that was there before the session (such as .env), or rewrites git history others have (a force push).',
       false:
-        'It only reads, or it changes tracked files in the checkout (git keeps them), files this session made, its temp folder or throwaway containers.',
+        "It only reads, or it changes tracked files in the checkout (git keeps them), files this session made, its temp folder or throwaway containers, or the databases, volumes and containers that `session` names as this session's own.",
     },
   },
   [LimitName.SendsDataOut]: {

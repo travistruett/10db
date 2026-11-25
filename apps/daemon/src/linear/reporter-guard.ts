@@ -118,7 +118,7 @@ function judgeWrite(
 }
 
 /** The first secret pattern any string in a call's input hits. */
-function secretIn(input: unknown): string | null {
+export function secretIn(input: unknown): string | null {
   for (const text of stringsIn(input)) {
     const pattern = scanSecrets(text);
     if (pattern !== null) return pattern;

@@ -175,7 +175,9 @@ function brokerAsk(input: GuardInput, onlyReads: boolean): BrokerAsk | null {
       namesSudo: false,
     });
   // The web goes to a judge that runs, and only while the project's Web switch is on. MCP calls
-  // stay with the broker under every judge: nothing yet shows the classifier judging them.
+  // stay with the broker under every judge (nothing yet shows the classifier judging them), except a
+  // read of the builder's own Linear, which the guard settles below.
+  if (input.linearRead === true && input.toolName.startsWith('mcp__')) return null;
   if (
     WEB_TOOLS.has(input.toolName) &&
     input.webOn === true &&
@@ -269,6 +271,9 @@ function brokerAsk(input: GuardInput, onlyReads: boolean): BrokerAsk | null {
 
 const READS_ONLY =
   'Every part of this command only reads (decisions/2026-11-03-a-lane-runs-read-only-commands-without-a-card.md).';
+
+const LINEAR_READ =
+  "A read of the builder's own Linear: it sends Linear only the ids and filters it names (decisions/2026-11-25-a-lanes-linear-reads-run-settled.md).";
 
 const OWN_PICTURE =
   "A picture pasted into this task's thread is the session's to read (Workbench spec §13).";
@@ -403,6 +408,8 @@ export function judgePreToolUse(input: GuardInput): GuardVerdict {
   const reads = onlyReads(input);
   const asked = brokerAsk(input, reads);
   if (asked !== null) return { decision: 'ask', reason: asked.reason, kind: asked.kind };
+  if (input.linearRead === true && input.toolName.startsWith('mcp__'))
+    return { decision: 'allow', settled: LINEAR_READ };
   // The judge opened it, and the data directory holds it: no allow rule or classifier reaches it.
   if (readsOwnPicture(input)) return { decision: 'allow', settled: OWN_PICTURE };
   // On 10db's judge a read-only line is a bare allow: the fast path, which knows the secret names and

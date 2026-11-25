@@ -1,4 +1,4 @@
-import { TRUST_DEFAULTS, type TrustSurface } from '@10db/contracts';
+import { CopyId, TRUST_DEFAULTS, type TrustSurface } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { buildTrustPolicy, sessionDevAccess, type TrustPolicyInput } from './policy';
 
@@ -148,6 +148,30 @@ describe('buildTrustPolicy', () => {
       .toBe(true);
     expect.soft(odd.join(' '), 'quoted').toContain('"db\\nhost: prod"');
     expect.soft(odd.join(' '), 'quoted').toContain('"a\\"b"');
+  });
+
+  it('a lane in a separate copy is told what the copy owns and what stays shared; any other is told nothing new', () => {
+    const open = { docker: true, localhost: true, compose: null };
+    const env = buildTrustPolicy(
+      input({ devAccess: open, copyId: CopyId.parse('0123456789ab') }),
+    ).environment;
+    const copy = env.filter((l) => l.startsWith('Separate copy:'));
+    expect.soft(copy, 'one copy line').toHaveLength(1);
+    for (const said of ['"0123456789ab"', 'TENDB_COPY_ID'])
+      expect.soft(copy[0], said).toContain(said);
+    expect.soft(copy[0], 'what stays shared').toMatch(/another database.*docker volume rm/is);
+    expect
+      .soft(
+        env.some((l) => l.startsWith('Still a limit on this Mac')),
+        'the shared-database limit stays',
+      )
+      .toBe(true);
+
+    const outside = buildTrustPolicy(input({ devAccess: open })).environment;
+    expect
+      .soft(buildTrustPolicy(input({ devAccess: open, copyId: null })).environment, 'no copy')
+      .toEqual(outside);
+    expect.soft(outside.some((l) => l.startsWith('Separate copy:'))).toBe(false);
   });
 
   it('a session has Docker and localhost as its sandbox opens them', () => {

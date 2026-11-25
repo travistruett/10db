@@ -35,6 +35,9 @@ export const CopyId = z
   .brand<'CopyId'>();
 export type CopyId = z.infer<typeof CopyId>;
 
+/** Names the separate copy whose databases a command may reach; each copy's command gets its own. */
+export const COPY_ID_VARIABLE = 'TENDB_COPY_ID';
+
 /** One copy batch's journal row. A batch is a local copy exactly when it has one. */
 export const LocalCopyDto = z.object({
   batchId: BatchId,

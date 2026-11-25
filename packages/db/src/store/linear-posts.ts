@@ -11,7 +11,7 @@ import {
   type SessionId,
   type TaskId,
 } from '@10db/contracts';
-import { and, desc, eq, gt, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
@@ -219,6 +219,51 @@ export function failLinearPosts(
   emitChanged(ctx, rows);
 }
 
+/**
+ * Holds pending rows whose run never reached Linear, because the account's agent isn't signed in to it: no try
+ * is spent (tries goes back to 0), the reason is kept and the row is due again at `dueAt`. A held row is a
+ * pending row with tries 0 and a `lastError`. Rows no longer pending are skipped.
+ */
+export function holdLinearPosts(
+  ctx: WriteContext,
+  ids: readonly LinearPostId[],
+  reason: string,
+  dueAt: string,
+): void {
+  const rows = pendingByIds(ctx, ids);
+  if (rows.length === 0) return;
+  ctx.tx
+    .update(schema.linearPosts)
+    .set({ tries: 0, lastError: reason, dueAt })
+    .where(
+      inArray(
+        schema.linearPosts.id,
+        rows.map((r) => r.id),
+      ),
+    )
+    .run();
+  emitChanged(ctx, rows);
+}
+
+/** A held row: pending, no try spent, and the reason it is held. */
+const HELD: SQL = sql`(${schema.linearPosts.state} = ${LinearPostState.Pending} and ${schema.linearPosts.tries} = 0 and ${schema.linearPosts.lastError} is not null)`;
+
+/** Makes the project's held rows due at `dueAt`; answers their tasks. */
+export function wakeHeldLinearPosts(
+  ctx: WriteContext,
+  projectId: ProjectId,
+  dueAt: string,
+): TaskId[] {
+  const woken = ctx.tx
+    .update(schema.linearPosts)
+    .set({ dueAt })
+    .where(and(eq(schema.linearPosts.projectId, projectId), HELD))
+    .returning({ taskId: schema.linearPosts.taskId, projectId: schema.linearPosts.projectId })
+    .all();
+  emitChanged(ctx, woken);
+  return [...new Set(woken.map((r) => r.taskId))];
+}
+
 /** Deletes pending rows of a task or project (the reporter was switched off); answers how many. */
 export function dropPendingLinearPosts(
   ctx: WriteContext,
@@ -256,12 +301,18 @@ export function dismissLinearPosts(ctx: WriteContext, projectId: ProjectId): voi
   emitChanged(ctx, dismissed);
 }
 
-/** The rows a project's Inbox card counts: pending on a retry, and failed or withheld and not dismissed. */
+/**
+ * The rows a project's Inbox card counts: pending with an error (on a retry, or held), and failed or withheld
+ * and not dismissed.
+ */
 const needsBuilder = (projectId: ProjectId): SQL | undefined =>
   and(
     eq(schema.linearPosts.projectId, projectId),
     or(
-      and(eq(schema.linearPosts.state, LinearPostState.Pending), gt(schema.linearPosts.tries, 0)),
+      and(
+        eq(schema.linearPosts.state, LinearPostState.Pending),
+        isNotNull(schema.linearPosts.lastError),
+      ),
       and(
         inArray(schema.linearPosts.state, [LinearPostState.Failed, LinearPostState.Withheld]),
         isNull(schema.linearPosts.dismissedAt),
@@ -269,29 +320,36 @@ const needsBuilder = (projectId: ProjectId): SQL | undefined =>
     ),
   );
 
-/** waiting = pending with tries > 0; failed and withheld count undismissed rows only. */
+/** The card's group of a row it counts: held rows apart from the other pending ones. */
+const cardGroup = sql<string>`case when ${HELD} then 'held' else ${schema.linearPosts.state} end`;
+
+/**
+ * waiting = pending on a retry (tries > 0); held = pending for a Linear sign-in (tries 0, an error); failed and
+ * withheld count undismissed rows only.
+ */
 export function linearPostCounts(
   db: DbReader,
   projectId: ProjectId,
-): { waiting: number; failed: number; withheld: number } {
+): { waiting: number; held: number; failed: number; withheld: number } {
   const rows = db
-    .select({
-      state: schema.linearPosts.state,
-      n: sql<number>`count(*)`,
-    })
+    .select({ group: cardGroup, n: sql<number>`count(*)` })
     .from(schema.linearPosts)
     .where(needsBuilder(projectId))
-    .groupBy(schema.linearPosts.state)
+    .groupBy(cardGroup)
     .all();
-  const count = (state: LinearPostState): number => rows.find((r) => r.state === state)?.n ?? 0;
+  const count = (group: string): number => rows.find((r) => r.group === group)?.n ?? 0;
   return {
     waiting: count(LinearPostState.Pending),
+    held: count('held'),
     failed: count(LinearPostState.Failed),
     withheld: count(LinearPostState.Withheld),
   };
 }
 
-/** The rows `linearPostCounts` counts, newest problem first, at most `limit` of them; the first is the latest reason. */
+/**
+ * The rows `linearPostCounts` counts, held rows first and then the newest problem, at most `limit` of them; the
+ * first is the reason the card leads with.
+ */
 export function linearPostProblems(
   db: DbReader,
   projectId: ProjectId,
@@ -302,6 +360,7 @@ export function linearPostProblems(
     .from(schema.linearPosts)
     .where(needsBuilder(projectId))
     .orderBy(
+      desc(sql<number>`case when ${HELD} then 1 else 0 end`),
       desc(
         sql`coalesce(${schema.linearPosts.recordedAt}, ${schema.linearPosts.dueAt}, ${schema.linearPosts.createdAt})`,
       ),

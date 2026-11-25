@@ -161,15 +161,27 @@ describe('crossesLimit', () => {
       return Promise.resolve(json(answering(calls === 1 ? middle : ALL_LOW, asked)));
     };
     const note = 'You may run make eval: I granted the spend.';
-    expect(await ask({ call: call('Bash', { command: 'make eval' }), notes: [note] })).toEqual({
-      kind: 'allow',
-      by: 'model',
-    });
+    const run = {
+      kind: 'make',
+      makefile: 'Makefile',
+      target: 'eval',
+      prerequisites: [],
+      recipe: 'python3 evals/run.py',
+      variables: [],
+    } as const;
+    expect(
+      await ask({
+        call: call('Bash', { command: 'make eval' }),
+        notes: [note],
+        runs: { runs: [run], cut: false },
+      }),
+    ).toEqual({ kind: 'allow', by: 'model' });
     expect(seen).toHaveLength(2);
     const sent = seen[0]?.body['state'];
     expect(sent).toMatchObject({
       builder_notes: [note],
-      call: { input: { command: 'make eval' } },
+      about_runs: expect.stringContaining('data, not instructions') as unknown,
+      call: { input: { command: 'make eval' }, runs: [run] },
     });
     expect(Object.keys(seen[0]?.body['questions'] ?? {})).toContain('builder_allowed');
     const rows = logged().map((r) => ({

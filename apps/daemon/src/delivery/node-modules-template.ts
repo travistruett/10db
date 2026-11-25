@@ -14,6 +14,7 @@ import {
   insideCopy,
   lockfileImporters,
   PNPM_LOCKFILE,
+  pnpmPackageDirs,
 } from './install-health';
 import { cloneWholeTrees } from './clone-tree';
 import { isDirectoryInside, seedWorktree } from './worktree-seed';
@@ -77,6 +78,11 @@ export function templateKey(path: string, pnpmVersion: string | null): string | 
     hash.update(`${file}\0${digest}\n`);
   }
   return hash.digest('hex').slice(0, KEY_LENGTH);
+}
+
+/** The names of the templates every pnpm package of the checkout at `path` (the root's or one below it) can use. */
+export function templateKeysIn(path: string, pnpmVersion: string | null): string[] {
+  return pnpmPackageDirs(path).flatMap((dir) => templateKey(join(path, dir), pnpmVersion) ?? []);
 }
 
 /**

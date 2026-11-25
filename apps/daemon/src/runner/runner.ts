@@ -198,7 +198,12 @@ import {
   recordPlanPacked,
   RESULT_NUDGE,
 } from '../briefing';
-import { snapshotSection, type LinearSnapshot } from '../linear';
+import {
+  isLaneLinearRead,
+  laneLinearPrefixes,
+  snapshotSection,
+  type LinearSnapshot,
+} from '../linear';
 import { handoffStands, nextUnaskedRun, workLeftIn, type UnaskedRun } from './handoff-rule';
 import {
   unready,
@@ -234,7 +239,7 @@ import {
   type MigrationsBase,
 } from '../delivery';
 import { createLiveFrames, type LiveFrames, type StateStore } from '../events';
-import { readComposeServices } from '../folders';
+import { readCommitted, readComposeServices } from '../folders';
 import {
   AccountLaunchError,
   KeychainError,
@@ -2974,6 +2979,18 @@ export function createRunner(opts: RunnerOptions): Runner {
           : 'default';
     // A plan account takes the builder's claude.ai connectors under the same switch as the servers.
     const claudeConnectors = yours.connectorsOn && account.kind === AccountKind.ClaudeSubscription;
+    // The tool prefixes of the builder's own Linear in this session, whose reads the guard settles. A
+    // prefix one of the session's other servers holds is not Linear's, so those are named too.
+    const linearPrefixes = laneLinearPrefixes({
+      remote: yours.remote,
+      connectors: claudeConnectors,
+      harness: provider,
+      otherServers: [
+        ...Object.keys(mcpServers.remote),
+        ...Object.keys(mcpServers.stdio),
+        ...Object.keys(yours.stdio),
+      ],
+    });
     // A step that only reads has the engine's socket in its sandbox, but the guard refuses every docker
     // command in it, so Docker is closed to it too.
     const open = sessionDevAccess(project, { sandboxed: true, writes: !readOnly });
@@ -3001,6 +3018,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       yourMcpServers: Object.keys(yourServers),
       claudeConnectors,
       devAccess,
+      copyId: sessionCopyId,
     });
     // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
     // starts on 10db's rules.
@@ -3520,6 +3538,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         judge,
         coveredByAllowRule: matchesAllowedTool(req.toolName, req.input, allowedTools, checkout),
         webOn: switches.web,
+        linearRead: isLaneLinearRead(linearPrefixes, req.toolName, req.input),
       });
       if (unattended === null) return verdict;
       const answer = answerUnattended({
@@ -3581,6 +3600,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               coveredByBuilderRule: (req) =>
                 matchesAllowedTool(req.toolName, req.input, builderRules, checkout),
               floorVerdict: (req) => laneVerdict(req, JudgeKind.Rules),
+              readCommitted: readCommitted(opts.git, project, checkout),
               skips: unattended?.skips ?? null,
               limits: limitNotes,
               onFloor: (detail) => {

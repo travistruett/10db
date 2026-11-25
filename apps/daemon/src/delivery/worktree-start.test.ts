@@ -264,6 +264,49 @@ describe('installing a new worktree’s dependencies', () => {
     expect(logged).toMatchObject({ batchId: batch.id });
   });
 
+  describe('a pnpm package whose lockfile is below the repo root', () => {
+    const PACKAGE = 'amps/frontend';
+    const installLine = (path: string): string =>
+      `${realpathSync(path)}/${PACKAGE} | install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --store-dir ${h.pnpm.bin} --modules-dir node_modules --virtual-store-dir node_modules/.pnpm`;
+    const packageLogs = (): Record<string, unknown>[] =>
+      h.logs.lines().filter((line) => line['msg'] === 'worktree package dependencies');
+
+    function withPackage(): void {
+      pushed('.gitignore', 'node_modules/\n');
+      pushed(`${PACKAGE}/pnpm-lock.yaml`, 'lockfileVersion: 9\n');
+      mkdirSync(join(h.repo, PACKAGE, 'node_modules', 'pkg'), { recursive: true });
+      writeFileSync(join(h.repo, PACKAGE, 'node_modules', 'pkg', 'index.js'), 'builder own\n');
+    }
+
+    it('installs it from its own folder when the seed is taken, and names the package in the log', async () => {
+      withPackage();
+      const batch = await startedOne(h.addTask('Alpha'));
+      expect(batch.state).toBe('OPEN');
+      expect(h.pnpm.calls()).toEqual([installLine(pathOf(batch))]);
+      // The builder's own install is not cloned; the install made the folder.
+      expect(existsSync(join(pathOf(batch), PACKAGE, 'node_modules', 'pkg'))).toBe(false);
+      expect(existsSync(join(pathOf(batch), PACKAGE, 'node_modules'))).toBe(true);
+      expect(packageLogs()).toEqual([
+        expect.objectContaining({ batchId: batch.id, packageDir: PACKAGE, outcome: 'installed' }),
+      ]);
+    });
+
+    it('installs it when a shared lane has run, so no seed was taken', async () => {
+      withPackage();
+      // An unfinished shared batch: a row with no worktree path.
+      h.state.write((c) =>
+        insertBatch(c, { projectId: h.project.id, title: 'Shared', baseBranch: 'main' }),
+      );
+      const batch = await startedOne(h.addTask('Alpha'));
+      expect(batch.state).toBe('OPEN');
+      expect(h.pnpm.calls()).toEqual([installLine(pathOf(batch))]);
+      expect(existsSync(join(pathOf(batch), PACKAGE, 'node_modules'))).toBe(true);
+      expect(packageLogs()).toEqual([
+        expect.objectContaining({ batchId: batch.id, packageDir: PACKAGE, outcome: 'installed' }),
+      ]);
+    });
+  });
+
   it('runs nothing in a project that is not pnpm’s', async () => {
     pushed('.gitignore', 'node_modules/\n');
     mkdirSync(join(h.repo, 'node_modules'), { recursive: true });

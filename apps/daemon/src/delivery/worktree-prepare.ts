@@ -1,11 +1,11 @@
-import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { ProjectDto } from '@10db/contracts';
 import { findUnfinishedBatch, sharedLaneRan } from '@10db/db';
 import { existsAsEntry, type WorktreeOwner } from '../git';
 import type { DeliveryContext } from './context';
-import { PNPM_LOCKFILE, type DependencyRefresh } from './worktree-dependencies';
+import { pnpmPackageDirs, ROOT_PACKAGE } from './install-health';
+import type { DependencyRefresh } from './worktree-dependencies';
 import { seedDirs, seedWorktree } from './worktree-seed';
 
 /**
@@ -48,9 +48,20 @@ export async function seedAndInstall(
   // daemon's template for it or installed from nothing, so Your folder's is not cloned: pnpm would remove it
   // anyway, since it names another store
   // (`decisions/2026-11-17-a-copys-node-modules-is-cloned-from-a-template-made-once-per-lockfile.md`).
-  const installMakes =
-    existsSync(join(path, PNPM_LOCKFILE)) && dirs.some((dir) => basename(dir) === 'node_modules');
-  const cloned = installMakes ? dirs.filter((dir) => basename(dir) !== 'node_modules') : dirs;
+  // The lockfile may be the root's or a package's below it (`amps/frontend`): each package's install
+  // makes the `node_modules` directories that lie in its folder, the root's all of them.
+  const packageDirs = pnpmPackageDirs(path);
+  const inPackage = (dir: string, packageDir: string): boolean =>
+    packageDir === ROOT_PACKAGE || dir.startsWith(`${packageDir}/`);
+  const makingPackages = packageDirs.filter((packageDir) =>
+    dirs.some((dir) => basename(dir) === 'node_modules' && inPackage(dir, packageDir)),
+  );
+  const installMakes = makingPackages.length > 0;
+  const cloned = dirs.filter(
+    (dir) =>
+      basename(dir) !== 'node_modules' ||
+      !makingPackages.some((packageDir) => inPackage(dir, packageDir)),
+  );
   if (seeded) {
     try {
       // A directory already there is one an earlier, interrupted run of this cut made: the install repairs it.
@@ -60,6 +71,7 @@ export async function seedAndInstall(
         {
           ...whose,
           path,
+          dirs: fresh,
           files: copied.files,
           links: copied.links,
           skipped: copied.skipped,
@@ -87,13 +99,68 @@ export async function seedAndInstall(
     );
   }
   if (signal.aborted) return { seeded, dirs, installMakes, installed: { kind: 'aborted' } };
-  const installed = await ctx.dependencies.refresh({
-    owner,
-    project,
-    path,
-    signal,
-    seeded: seeded && !installMakes,
-    makeTemplate: true,
-  });
-  return { seeded, installMakes, dirs, installed };
+  const results: DependencyRefresh[] = [];
+  for (const packageDir of packageDirs) {
+    const result = await ctx.dependencies.refresh({
+      owner,
+      project,
+      path,
+      signal,
+      seeded: seeded && !makingPackages.includes(packageDir),
+      makeTemplate: true,
+      packageDir,
+    });
+    results.push(result);
+    ctx.logger.info(
+      {
+        ...whose,
+        path,
+        packageDir,
+        outcome: describeOutcome(result),
+        ...(result.kind === 'installed' || result.kind === 'failed'
+          ? { logPath: result.logPath }
+          : {}),
+      },
+      'worktree package dependencies',
+    );
+    // A package that failed or was stopped ends the cut; the ones after it would not be used.
+    if (result.kind === 'failed' || result.kind === 'aborted') break;
+  }
+  return { seeded, installMakes, dirs, installed: combined(results) };
+}
+
+/** What one package's refresh did, for the log. */
+function describeOutcome(result: DependencyRefresh): string {
+  switch (result.kind) {
+    case 'skipped':
+      return 'nothing to do';
+    case 'installed':
+      return result.fromTemplate === true ? 'cloned from template' : 'installed';
+    case 'failed':
+      return 'install failed';
+    case 'aborted':
+      return 'stopped';
+  }
+}
+
+/** The one outcome a cut's caller reads from every package's: the first stop, else the installs together. */
+function combined(results: readonly DependencyRefresh[]): DependencyRefresh {
+  const stopped = results.find((result) => result.kind === 'failed' || result.kind === 'aborted');
+  if (stopped !== undefined) return stopped;
+  const installs = results.filter((result) => result.kind === 'installed');
+  const [first, ...rest] = installs;
+  if (first === undefined) return { kind: 'skipped' };
+  if (rest.length === 0) return first;
+  const leftBroken = installs.find((result) => result.leftBroken !== undefined)?.leftBroken;
+  return {
+    kind: 'installed',
+    logPath: first.logPath,
+    durationMs: installs.reduce((total, result) => total + result.durationMs, 0),
+    startedOver: installs.some((result) => result.startedOver),
+    installs: installs.reduce((total, result) => total + result.installs, 0),
+    ...(leftBroken === undefined ? {} : { leftBroken }),
+    ...(installs.every((result) => result.fromTemplate === true)
+      ? { fromTemplate: true as const }
+      : {}),
+  };
 }

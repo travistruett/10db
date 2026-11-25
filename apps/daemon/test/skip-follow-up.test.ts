@@ -153,7 +153,7 @@ describe('Run these now', () => {
     const stop = subscribeLinearEvents(engine.bus, {
       state: engine.state,
       clock: engine.clock,
-      reporter: { poke: () => undefined },
+      reporter: { poke: () => undefined, wake: () => undefined },
       log: silentLogger,
     });
     let followTask;

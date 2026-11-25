@@ -104,7 +104,12 @@ describe('the Linear post queue', () => {
     store.write((ctx) => {
       failLinearPosts(ctx, [foreign.id], 'down', ctx.now, 1);
     });
-    expect(linearPostCounts(store.db, project.id)).toEqual({ waiting: 0, failed: 0, withheld: 0 });
+    expect(linearPostCounts(store.db, project.id)).toEqual({
+      waiting: 0,
+      held: 0,
+      failed: 0,
+      withheld: 0,
+    });
     expect(linearPostCounts(store.db, other.project.id).failed).toBe(1);
   });
 });

@@ -33,8 +33,7 @@ import {
 } from '../sessions';
 import type { TakeoverServers } from '../takeover';
 import { privateHostProblem, type ShapePrepareInput, type ShapePrepared } from '../shape';
-import type { ReporterPrepared } from '../linear';
-import { isLinearServer } from './linear-sign-ins';
+import { isLinearServer, type ReporterPrepared } from '../linear';
 
 /** What a Plan conversation's session is told when one of the project's servers is left out. */
 const INSTEAD = 'Work without them, and tell the builder when the plan needs one.';

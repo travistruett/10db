@@ -23,6 +23,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
+import type { CommittedFile, CommittedReader } from '../folders';
 import { judgePreToolUse, type GuardVerdict } from '../guard';
 import { createJudge } from '../judge';
 import { silentLogger } from '../log';
@@ -170,6 +171,7 @@ function hookJudge(
     readonly surface?: TrustSurface;
     readonly skips?: SkipRecorder | null;
     readonly preExisting?: readonly string[];
+    readonly readCommitted?: CommittedReader;
   } = {},
   allowedCommand: string | null = null,
 ) {
@@ -209,6 +211,7 @@ function hookJudge(
         req.toolName === 'Bash' &&
         JSON.stringify(req.input).includes(allowedCommand),
       floorVerdict: (req) => rulesVerdict(req, surface !== 'lane'),
+      readCommitted: opts.readCommitted ?? null,
       skips: opts.skips ?? null,
       limits,
       onFloor: (detail) => {
@@ -498,6 +501,19 @@ describe('the hook judge, attended', () => {
     await run(judgeCall, bash('pnpm test'));
     await run(judgeCall, bash('pnpm build'));
     expect(sent.map((s) => s.includes(grant))).toEqual([false, true, false]);
+  });
+
+  // Value: protects=a verdict on committed text isn't reused after an edit; fails_when=the key ignores runs; why_new=trust/judge cache; no_claim=imports
+  it("a script's verdict is judged again once the checkout's text of it changes, and then without its text", async () => {
+    let script: CommittedFile = { kind: 'same', text: 'echo report\n' };
+    const judgeCall = hookJudge({
+      readCommitted: (path) =>
+        Promise.resolve(path === 'scripts/report.sh' ? script : { kind: 'absent' }),
+    });
+    await run(judgeCall, bash('./scripts/report.sh'));
+    script = { kind: 'differs' };
+    await run(judgeCall, bash('./scripts/report.sh'));
+    expect(sent.map((s) => s.includes('echo report'))).toEqual([true, false]);
   });
 
   // Value: protects=a write the fast path allowed is checked again on the disk; fails_when=a remembered fast-path allow lets a write follow a new link onto data that was there before; why_new=escaped bug found in review: the session memory of verdicts; no_claim=other ways a session changes the disk between two calls
