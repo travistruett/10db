@@ -19,7 +19,7 @@ import { countLanes, getWorkstream, insertWorkstream, transitionWorkstream } fro
 import { holdTask, resumeTask } from './holds';
 import { insertSession } from './sessions';
 import type { Store } from './store';
-import { cancelTask, getTask, insertTask, listTasks, moveTask } from './tasks';
+import { cancelTask, getTask, insertTask, listTasks, moveTask, removeTaskFromBoard } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 
 let store: Store;
@@ -204,5 +204,22 @@ describe('removing a held task', () => {
     );
     expect(() => store.write((ctx) => cancelTask(ctx, task.id))).toThrow(TaskHasDependentsError);
     expect(getWorkstream(store.db, ws.id).state).toBe(S.Held);
+  });
+});
+
+describe('removeTaskFromBoard', () => {
+  it('retires a task whose run failed and whose later run was cancelled, keeping both runs', () => {
+    const { task, ws: failed } = seedQueued('Done by hand');
+    walk(failed.id, [S.Starting, S.Running, S.Failed]);
+    const later = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
+    walk(later.id, [S.Cancelled]);
+
+    const { value } = store.write((ctx) => removeTaskFromBoard(ctx, task.id));
+
+    expect(value.status).toBe(TaskStatus.Cancelled);
+    expect(getWorkstream(store.db, failed.id).state).toBe(S.Failed);
+    expect(getWorkstream(store.db, later.id).state).toBe(S.Cancelled);
   });
 });
