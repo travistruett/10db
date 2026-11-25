@@ -22,6 +22,7 @@ export * from './handoffs';
 export * from './hazard-assessment';
 export * from './holds';
 export * from './human-touch';
+export * from './acceptance-figures';
 export * from './rigor-figures';
 export * from './inbox';
 export * from './inbox-context';

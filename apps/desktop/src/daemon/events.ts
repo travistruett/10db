@@ -23,6 +23,7 @@ import { githubKeys } from './github-queries';
 import { goalKeys } from './goal-queries';
 import { cardTypesKeys } from './card-types-queries';
 import { humanTouchKeys } from './human-touch-queries';
+import { acceptanceFiguresKeys } from './acceptance-queries';
 import { rigorFiguresKeys } from './rigor-figures-queries';
 import { HAZARD_ASSESSMENT_KEY } from './hazard-queries';
 import { KINDS_KEY } from './kind-queries';
@@ -87,6 +88,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
     CANDIDATES,
     skipKeys.all,
     rigorFiguresKeys.all,
+    acceptanceFiguresKeys.all,
     shapeKeys.startCountsAll,
     // A follow-up's issue line follows its source, which a cancel releases.
     linearPostKeys.all,
@@ -134,6 +136,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
     queryKeys.keepAwake,
     CANDIDATES,
     humanTouchKeys.all,
+    acceptanceFiguresKeys.all,
     passKeys.live,
     folderKeys.all,
     taskSessionKeys.all,
@@ -146,7 +149,14 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   evidence: WORK,
   // An account pause moves workstreams, which send their own events.
   account: [accountKeys.all, modelKeys.all],
-  inbox: [queryKeys.inbox, ['workstreams'], goalKeys.all, humanTouchKeys.all, cardTypesKeys.all],
+  inbox: [
+    queryKeys.inbox,
+    ['workstreams'],
+    goalKeys.all,
+    humanTouchKeys.all,
+    cardTypesKeys.all,
+    acceptanceFiguresKeys.all,
+  ],
   app_setting: [queryKeys.keepAwake, queryKeys.agentSkill],
   // Settings › People lists people and the routes each answers; Question Routing and a task's question routes
   // name them. Step plans, which only the batch sheet shows, are not read from people; they follow personas,

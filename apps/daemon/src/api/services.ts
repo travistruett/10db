@@ -97,6 +97,7 @@ import type {
   CardTypesDto,
   HumanTouchDto,
   RigorFiguresDto,
+  AcceptanceFigures,
   RigorFiguresPeriod,
   InboxAnswer,
   StakeholderReplyInput,
@@ -538,6 +539,11 @@ export interface ApiServices extends PlanRecordServices {
    * builder overrode the judge's sizing in the period. Throws NotFoundError for an unknown project.
    */
   rigorFigures(projectId: ProjectId, days: RigorFiguresPeriod): RigorFiguresDto;
+  /**
+   * The Board's acceptance counts for the last `days` days and whether acceptance is checking.
+   * Throws NotFoundError for an unknown project.
+   */
+  acceptanceFigures(projectId: ProjectId, days: RigorFiguresPeriod): AcceptanceFigures;
   /**
    * The goal's digest for the builder opening it: Δ rows run from the previous view, and the view
    * advances to now. Throws NotFoundError for an unknown goal.

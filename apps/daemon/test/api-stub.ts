@@ -224,6 +224,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     humanTouch: track('humanTouch'),
     cardTypes: track('cardTypes'),
     rigorFigures: track('rigorFigures'),
+    acceptanceFigures: track('acceptanceFigures'),
     openGoalDigest: track('openGoalDigest'),
     listShapes: track('listShapes'),
     getShapeView: track('getShapeView'),

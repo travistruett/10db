@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RIGOR_FIGURES_PERIODS } from './rigor-figures';
 
 /** What the acceptance check read of one criterion. `unread` is a call that gave no answer. */
 export const AcceptanceVerdict = {
@@ -46,3 +47,9 @@ export const AcceptanceFigures = z.object({
   checking: AcceptanceChecking,
 });
 export type AcceptanceFigures = z.infer<typeof AcceptanceFigures>;
+
+/** The query string of `GET /projects/:projectId/acceptance-figures`: the same periods as the rigor figures. */
+export const AcceptanceFiguresQuery = z.strictObject({
+  days: z.coerce.number().pipe(z.literal(RIGOR_FIGURES_PERIODS)).default(7),
+});
+export type AcceptanceFiguresQuery = z.output<typeof AcceptanceFiguresQuery>;
