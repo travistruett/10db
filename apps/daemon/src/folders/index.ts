@@ -13,6 +13,12 @@ export {
 } from './detect-app-address';
 export { readComposeServices, type ComposeServices } from './dev-services';
 export {
+  MAX_COMMITTED_BYTES,
+  readCommitted,
+  type CommittedFile,
+  type CommittedReader,
+} from './committed-file';
+export {
   MAKEFILE_NAMES,
   parseRules,
   within,
