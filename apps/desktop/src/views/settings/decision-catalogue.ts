@@ -62,7 +62,7 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.Acceptance]: {
     group: DecisionGroup.Delivery,
-    label: 'Acceptance: Is Each Criterion Met?',
+    label: 'Whether Work Meets Its Criteria',
     asks: 'After the final gate passes: for each acceptance criterion of the task, is it met by the change? One yes/no question per criterion.',
     onAnswer:
       'Every criterion likely met: the run goes on. A criterion not clearly met: the second opinion reads it.',
@@ -73,7 +73,7 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.AcceptanceSecond]: {
     group: DecisionGroup.Delivery,
-    label: 'Acceptance, Second Opinion',
+    label: 'Second Opinion on Criteria',
     asks: 'For a criterion the first call did not read as met: the same question, asked of a stronger model.',
     onAnswer:
       'Met: the run goes on. Not met: the run goes back to its build session. In between: the reviewer is told.',
@@ -96,8 +96,8 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.CrossesLimit]: {
     group: DecisionGroup.Trust,
-    label: 'Limits',
-    asks: 'Check calls against the four limits. On accounts without Claude Code’s auto mode (Codex, an older model), 10db’s judge asks one yes/no question per limit of each call.',
+    label: 'Whether an Action Could Do Harm',
+    asks: 'For a command or edit an agent is about to make: could it destroy data, send data out, read a secret, or write to anything live? One yes/no question for each of these four limits. It runs on accounts without Claude Code’s auto mode (Codex, an older model).',
     onAnswer:
       'Every limit unlikely: the call runs. A limit likely: a card asks you, or a lane nobody watches skips the call. In between: the second opinion decides.',
     whenUnsure:
@@ -108,14 +108,14 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.CrossesLimitSecond]: {
     group: DecisionGroup.Trust,
-    label: 'Second Opinion on Limits',
-    asks: 'For a call the Limits judge left between yes and no: the same questions, asked of a stronger model.',
+    label: 'Second Opinion on Harm',
+    asks: 'For an action the first judge left between yes and no: the same four questions, asked of a stronger model.',
     onAnswer:
       'Every limit unlikely: the call runs. A limit likely: a card asks you, or a lane skips the call.',
     whenUnsure: 'Still in between: the call is stopped as a limit with no name.',
     fellBack: 'the call was stopped',
     mode: DecisionMode.Acting,
-    note: 'It waits up to 20 seconds. Off, a call the Limits judge leaves in between is stopped, as before.',
+    note: 'It waits up to 20 seconds. Off, an action the first judge leaves in between is stopped, as before.',
   },
   [JudgeDecision.TaskRigor]: {
     group: DecisionGroup.Sizing,
