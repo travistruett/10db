@@ -1,4 +1,10 @@
-import { InboxKind, type InboxItemDto, type ProjectId, type WorkstreamDto } from '@10db/contracts';
+import {
+  InboxKind,
+  WORKSTREAM_FAILED_TITLE_PREFIX,
+  type InboxItemDto,
+  type ProjectId,
+  type WorkstreamDto,
+} from '@10db/contracts';
 import {
   Alert,
   Avatar,
@@ -47,6 +53,12 @@ export interface WaitingRun {
   readonly card: InboxItemDto | undefined;
 }
 
+/** A failed run and the open Inbox card that stands for its task's failures. */
+export interface CardedFailure {
+  readonly run: WorkstreamDto;
+  readonly card: InboxItemDto;
+}
+
 /** A UI Workbench pass with pages waiting on the builder. */
 export interface WaitingPass {
   readonly key: string;
@@ -59,6 +71,8 @@ export interface NeedsYouProps {
   readonly waiting: readonly WaitingRun[];
   readonly passes: readonly WaitingPass[];
   readonly causes: readonly FailureCause[];
+  /** Failed runs with their task's open failed card: each is that card's row, never also a cause. */
+  readonly carded: readonly CardedFailure[];
   /** Runs waiting on a question someone other than the builder holds, with the card that asks it. */
   readonly others: readonly WaitingRun[];
   readonly now: number;
@@ -160,7 +174,8 @@ function Need({
           {when}
         </Text>
       </Table.Td>
-      <Table.Td w={200}>
+      {/* Room for a carded failure's Answer beside the Retry split button. */}
+      <Table.Td w={220}>
         <Group gap={6} justify="flex-end" wrap="nowrap">
           {children}
         </Group>
@@ -189,6 +204,66 @@ function titlesOf(runs: readonly WorkstreamDto[]): string {
   return rest.length === 0 ? named : `${named} · and ${String(rest.length)} more`;
 }
 
+/**
+ * One failed run's row: its failure's first sentence, and Retry and Close where they apply; the row opens
+ * the task. A run with its task's open failed card is titled by the card and adds Answer, which opens it in
+ * the Inbox.
+ */
+function FailedRun({
+  run,
+  title,
+  props,
+  retrying,
+  onRetry,
+  closing,
+  onClose,
+  onAnswer,
+}: {
+  readonly run: WorkstreamDto;
+  readonly title: string;
+  readonly props: NeedsYouProps;
+  readonly retrying: boolean;
+  readonly onRetry: (runs: readonly WorkstreamDto[]) => void;
+  readonly closing: boolean;
+  readonly onClose: (runs: readonly WorkstreamDto[]) => void;
+  readonly onAnswer?: () => void;
+}) {
+  const retryable = props.canRetry(run);
+  const line = failureLine(run, retryable);
+  return (
+    <Need
+      kind="Failed"
+      color={KindColor.Failed}
+      title={title}
+      sub={run.failureReason === null ? line : firstSentence(run.failureReason)}
+      subTip={run.failureReason === null ? undefined : line}
+      project={props.nameOf(run.projectId)}
+      when={shortAgo(lastMoment(run), props.now)}
+      onOpen={() => {
+        props.onOpen(run);
+      }}
+    >
+      {onAnswer === undefined ? null : (
+        <Button size="compact-xs" variant="default" onClick={onAnswer}>
+          Answer
+        </Button>
+      )}
+      <FailureActions
+        canRetry={retryable}
+        canClose={props.canClose(run)}
+        retrying={retrying}
+        closing={closing}
+        onRetry={() => {
+          onRetry([run]);
+        }}
+        onClose={() => {
+          onClose([run]);
+        }}
+      />
+    </Need>
+  );
+}
+
 /** One failure cause: a lone run reads as its task; several read as what happened, with Retry All. */
 function Cause({
   cause,
@@ -212,36 +287,18 @@ function Cause({
   const closable = cause.runs.filter(props.canClose);
   const project = props.nameOf(cause.projectId);
   const when = shortAgo(lastMoment(first), props.now);
-  if (cause.runs.length === 1) {
-    const line = failureLine(first, retryable.length > 0);
+  if (cause.runs.length === 1)
     return (
-      <Need
-        kind="Failed"
-        color={KindColor.Failed}
+      <FailedRun
+        run={first}
         title={first.taskTitle}
-        sub={first.failureReason === null ? line : firstSentence(first.failureReason)}
-        subTip={first.failureReason === null ? undefined : line}
-        project={project}
-        when={when}
-        onOpen={() => {
-          props.onOpen(first);
-        }}
-      >
-        <FailureActions
-          canRetry={retryable.length > 0}
-          canClose={props.canClose(first)}
-          retrying={retrying}
-          closing={closing}
-          onRetry={() => {
-            onRetry(retryable);
-          }}
-          onClose={() => {
-            onClose([first]);
-          }}
-        />
-      </Need>
+        props={props}
+        retrying={retrying}
+        onRetry={onRetry}
+        closing={closing}
+        onClose={onClose}
+      />
     );
-  }
   return (
     <>
       <Need
@@ -339,8 +396,9 @@ export function NeedsYouPanel(props: NeedsYouProps) {
   const closeTask = useCloseTask();
   const [retryingKey, setRetryingKey] = useState<string | null>(null);
   const [closingKey, setClosingKey] = useState<string | null>(null);
-  const { waiting, passes, causes, others, now, nameOf } = props;
-  const failed = causes.reduce((n, c) => n + c.runs.length, 0);
+  const { waiting, passes, causes, carded, others, now, nameOf } = props;
+  const failed = carded.length + causes.reduce((n, c) => n + c.runs.length, 0);
+  const causeCount = carded.length + causes.length;
   const asks = waiting.length + passes.length;
   if (asks + failed + others.length === 0) return null;
 
@@ -369,7 +427,7 @@ export function NeedsYouPanel(props: NeedsYouProps) {
   const meta = [
     asks > 0 ? `${String(asks)} to answer` : null,
     failed > 0
-      ? `${String(failed)} failed, in ${String(causes.length)} ${causes.length === 1 ? 'cause' : 'causes'}`
+      ? `${String(failed)} failed, in ${String(causeCount)} ${causeCount === 1 ? 'cause' : 'causes'}`
       : null,
   ]
     .filter((part) => part !== null)
@@ -466,6 +524,31 @@ export function NeedsYouPanel(props: NeedsYouProps) {
                     Open Pass
                   </Button>
                 </Need>
+              ))}
+              {carded.map(({ run, card }) => (
+                <FailedRun
+                  key={run.id}
+                  run={run}
+                  title={
+                    card.title.startsWith(WORKSTREAM_FAILED_TITLE_PREFIX)
+                      ? card.title.slice(WORKSTREAM_FAILED_TITLE_PREFIX.length)
+                      : card.title
+                  }
+                  props={props}
+                  retrying={retryingKey === run.id}
+                  onRetry={(runs) => {
+                    closeTask.reset();
+                    void retryAll(run.id, runs);
+                  }}
+                  closing={closingKey === run.id}
+                  onClose={(runs) => {
+                    retry.reset();
+                    void closeAll(run.id, runs);
+                  }}
+                  onAnswer={() => {
+                    props.onOpenInbox(run.projectId);
+                  }}
+                />
               ))}
               {causes.map((cause) => (
                 <Cause

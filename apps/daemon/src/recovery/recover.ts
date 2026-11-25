@@ -2,13 +2,11 @@ import {
   ACTIVE_STATES,
   PassState,
   EventType,
-  WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamFailure,
   WorkstreamState as S,
   type InboxItemId,
   type NextAction,
   type WorkstreamId,
-  Urgency,
 } from '@10db/contracts';
 import {
   clearLease,
@@ -33,7 +31,7 @@ import {
 import { batchCardFields, checkoutOf, runCommits, type DeliveryJobs } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
-import type { InboxService } from '../inbox';
+import { flagFailedRun, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { Clock } from '../clock';
 import {
@@ -52,7 +50,6 @@ import {
 import { recoverPage } from './pass-pages';
 import { failStep } from '../team';
 import type { ProcessTerminator } from './processes';
-import { CardTier } from '../inbox';
 
 export interface RecoveryReport {
   readonly requeued: WorkstreamId[];
@@ -290,18 +287,11 @@ export async function recoverOnStartup(opts: {
       }
     });
     if (failed) {
-      opts.inbox.flag({
-        projectId: project.id,
-        workstreamId: ws.id,
-        tier: CardTier.Ask,
-        urgency: Urgency.High,
-        closesWhen: {
-          by: 'withdrawn',
-          when: 'the run is retried, cancelled or shipped (cancelForWorkstream)',
-        },
-        title: `${WORKSTREAM_FAILED_TITLE_PREFIX}${getTask(db, row.taskId).title}`,
-        body: `Recovery failed ${String(attempts)} times.`,
-        ...batchCardFields(row),
+      opts.state.write((ctx) => {
+        flagFailedRun(ctx, row, {
+          body: `Recovery failed ${String(attempts)} times.`,
+          ...batchCardFields(row),
+        });
       });
       report.failed.push(ws.id);
     } else {

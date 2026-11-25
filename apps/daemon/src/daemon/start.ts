@@ -2939,6 +2939,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     liveFrames,
     runner: createdRunner,
     scheduler: createdScheduler,
+    startFollowUps: () => {
+      startFollowUps();
+    },
     waits: queueWaits,
     moves,
     inbox,
