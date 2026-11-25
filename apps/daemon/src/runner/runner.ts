@@ -13,6 +13,7 @@ import {
   AcceptanceVerdict,
   EvidenceKind,
   type AcceptanceDetail,
+  type EvidenceDto,
   ConflictError,
   currentStep,
   EventType,
@@ -905,6 +906,10 @@ const NUDGES: Readonly<
   },
 };
 
+/** Whether the evidence is the acceptance check's reading that sent the run back. */
+const isAcceptanceSendBack = (evidence: EvidenceDto): boolean =>
+  evidence.kind === EvidenceKind.Acceptance && evidence.detail?.sentBack === true;
+
 /** What `acceptanceAfter` answers when a stop cut its calls short. */
 const ACCEPTANCE_STOPPED = 'stopped';
 
@@ -1230,12 +1235,12 @@ export function createRunner(opts: RunnerOptions): Runner {
     const drifted = moved === null ? reviseAfterModelDrift(id, ctl, row) : null;
     const action = moved ?? drifted ?? row.nextAction;
     const step = row.steps[row.stepIndex];
-    if (
-      (action.kind !== 'revise' && action.kind !== 'fix') ||
-      action.providerSessionId !== null ||
-      step?.fixFresh !== FixFresh.Pending
-    )
+    // A gate failure's fix owes no step-up for a send-back that was fixed since: only a fix for the acceptance
+    // check's send-back, or a revise, stands in for the resumed session it replaces.
+    if (action.kind !== 'revise' && action.kind !== 'fix') return row;
+    if (action.kind === 'fix' && !isAcceptanceSendBack(getEvidence(db, action.evidenceId)))
       return row;
+    if (action.providerSessionId !== null || step?.fixFresh !== FixFresh.Pending) return row;
     const rejecter =
       action.kind === 'revise'
         ? (row.steps[action.reviewStep]?.role ?? StepRole.Review)
