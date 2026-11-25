@@ -6,15 +6,16 @@ spend) and gets its own plan once the builder makes its product call.
 ## Brief
 
 **What changes for you.** A project gets an **Evals** page, after Knowledge in the sidebar. It lists each eval suite
-10db finds in the repository at HEAD, with:
+10db finds in the project: eval files in the repository at HEAD, results in your checkout (projects keep
+them out of git, so a fresh clone shows none), with:
 - its bar in the repo's own words;
 - the last result per model: gates passed, and the gate furthest under its minimum when one fails;
 - the last eight runs as dots;
 - the cost of a run and its p50 latency.
 
-A suite's drawer shows each gate's rate against its minimum, every committed run, the flaky cases, what code the
+A suite's drawer shows each gate's rate against its minimum, every run on disk, the flaky cases, what code the
 suite covers, and its free and live commands. A **No Eval** tab lists the LLM work no suite covers. ampsio's 123
-committed reports fill the page the first time you open it, and nothing runs a model.
+local reports fill the page the first time you open it, and nothing runs a model.
 
 Later slices add the rest:
 - A task whose diff touches a suite's code gets a marker on its card, and its drawer shows before and after (slice 2).
@@ -71,9 +72,17 @@ Research: `~/Agents/notes/10db/2026-11-25-evals-research.md`.
 
 ### Discovery (daemon, `apps/daemon/src/evals/`)
 
-10db reads the repository at HEAD through `Git.survey` and `Git.surveyTexts`: the object store only, never the
-working tree, no program the repo configures, and never a model. A pure rule table turns tracked paths into
-suites:
+**Eval files are read at HEAD** through `Git.survey` and `Git.surveyTexts`: the object store only, and no
+program the repo configures. **Result files are read from the checkout**, because projects keep them out of git
+(ampsio's `evals/reports/` is gitignored). The walk is bounded:
+- It reads only under `X/evals/reports/` and `X/evals/lane-pipeline/baselines/`, for each tracked `X/evals/`.
+- Each root is resolved with `realpath` and must stay inside the checkout's own `realpath`, so a symlinked
+  `evals`, `reports` or `baselines` folder is skipped. Symlinked entries inside a root are skipped too.
+- It reads `*.json` matching a marker: at most 2,000 files, 1 MB each and 32 MB in total.
+- Nothing is written, nothing is sent out, and no model is called.
+
+The summary line names the commit the eval files were read at. Results are dated by their own timestamps, not by
+that commit. A pure rule table turns the paths into suites:
 
 | Marker | Gives |
 | --- | --- |
@@ -83,7 +92,7 @@ suites:
 | `evals/<case>/prompt.md` | a `claude plugin eval` suite; results not read |
 
 Each format's adapter validates only the fields it reads (zod, loose) and maps them onto `EvalRunSummaryDto` and
-`EvalModelResultDto` (`packages/contracts/src/evals.ts`). Parsed results are cached per project and HEAD commit.
+`EvalModelResultDto` (`packages/contracts/src/evals.ts`). Parsed results are cached per project, HEAD commit and the result files' count and newest change time.
 
 ### The manifest
 
@@ -91,6 +100,10 @@ Each format's adapter validates only the fields it reads (zod, loose) and maps t
 no migration is needed. It lists:
 - per suite: label, bar, definition paths, covered globs, free command and live command;
 - the gaps: LLM work with no eval, where it is, and why it counts.
+
+A manifest holds at most 500 suites, 50 definition paths and 50 covered globs per suite, 200 covered globs in
+total, and 200 gaps. A manifest past a cap is refused with zod's message, which `evals <projectId> <file>`
+prints, and nothing is kept.
 
 `PUT /projects/:id/evals/manifest` keeps a manifest only when every definition path is tracked and every covered
 glob matches at least one tracked file. Otherwise it refuses and names the untracked paths, and it records the
@@ -104,6 +117,10 @@ The `10db-task` skill's "Assess a project's evals" gathers the evidence from the
 - the LLM work with no eval.
 
 It writes the manifest JSON and applies it through `evals <projectId> <file>`. It never runs a live eval.
+
+A manifest is read as recorded. A path it names that leaves HEAD later simply matches nothing: its suite still
+lists, and the next assessment drops it. Who may write the manifest matters once slices 2 and 4 read it, since a
+lane could otherwise drop a covered glob to skip its own marker; slice 2 settles that (see there).
 
 ### Routes
 
@@ -138,22 +155,39 @@ Before an assessment, a bordered line offers Copy the Ask. Notes: `views/evals/A
 Per `.claude/rules/testing.md`:
 - one pure test of the marker rule table and the gate-report adapter;
 - one test through the wiring on a real temp git repo, where a manifest naming an untracked path is refused;
-- one e2e flow extended: a fixture project with a committed gate report opens on Evals and shows its suite.
+- one test that a symlinked result root pointing outside the checkout is not read (a hard limit: reading data
+  outside the project);
+- one e2e flow extended: a fixture project with an untracked gate report under a tracked `evals/` opens on Evals
+  and shows its suite.
 
 ## Slice 2: the covered-task marker and the "not run" item (Feature)
 
-- Path-match a task's changed files against each suite's covered globs, after the gate, beside `forcedReview`.
-- The card shows a marker: "<suite> · not run", "passing" or "regressed".
-- The drawer shows **Evals this task touches**: before (the latest result on the base) and after (a run committed at
-  the head, once one exists).
-- A covered task's run leaves one Inbox item: "changes <path>; <suite> hasn't run on this; last on base: …", with
-  the live command to run yourself.
+Results live in the builder's checkout, not at commits, so slice 2 ties a run to a task by time:
+- **Matching:** after the gate, beside `forcedReview`, a task's changed files are matched against each suite's
+  covered globs. The globs are read from the manifest as recorded before the run started, so a lane that edits
+  the manifest mid-run can't drop its own marker. A manifest write from a lane's session (the CLI is open to any
+  session) is held as a proposal for the builder, as principle proposals are.
+- **Before:** the newest result for that suite in the checkout whose time is before the task's branch point.
+- **After:** the first result for that suite in the checkout whose time is after the task's last commit. The
+  builder writes it by running the live command in their checkout after the task lands; a lane's worktree has no
+  results and never runs one. A report with a dataset fingerprint that differs from before's is shown as "the
+  eval itself changed", not as a regression.
+- **The marker:** "<suite> · not run" until an after exists, then "passing" or "regressed" (any model that passed
+  before and fails after).
+- **The Inbox:** a covered task adds one line to the run's single Inbox item, never a second item: "changes
+  <path>; <suite> hasn't run on this; last before: …", with the live command to run.
+- **Provider parity:** path matching and the marker are the daemon's, the same on every provider. The live
+  command runs on the project's own key, never 10db's account.
 
 ## Slice 3: define an eval (Feature)
 
 **New Eval** on the page, on a No Eval row, or from a Shape `PlanEval` files a normal task, "Write the eval for
 <behavior>". Its brief carries ampsio's rationale: Decision, Evidence, Oracle, Coverage and bar, Models and
 Execution. `PlanEval` widens with `decision` and `oracle`.
+
+**Provider parity:** the task is a normal lane on the project's account. A Claude lane follows the project's
+skill from `.claude/skills`; a Codex lane from `.agents/skills` (ampsio keeps the same `llm-eval` in both). Where a
+project has its skill only for one agent, the brief carries the skill's path and the lane reads it as a file.
 
 The lane drafts the cases, graders and free companion in the project's own format, following its own skill
 (`llm-eval`, `backend-ai-agents.md`), and opens a PR. It never runs the live arm.
@@ -167,7 +201,14 @@ A diff that touches a suite's definition paths emits `eval.definition_changed`, 
 - grader changed;
 - a model judge added.
 
-Focuses (the judgment feature) consumes it. It fires after the gate, beside `testValueFollowUpsAfter`.
+Focuses (the judgment feature, designed in `~/Agents/notes/10db/2026-11-25-judgment-areas-research.md` and
+being built in a parallel session; nothing consumes the event yet) consumes it. It fires after the gate, beside
+`testValueFollowUpsAfter`.
+
+Classification is by code only, never a judge, so it is the same on every provider. Where a definition is code
+(ampsio's `GATES` in Python), only line patterns are read: a `minimum_rate=` number that went down is "bar
+lowered", a removed `Case(` is "cases removed". Anything else is "definition changed, unclassified", which still
+emits the event.
 
 ## Slice 5: run the live arm from 10db (Core, later)
 

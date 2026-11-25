@@ -5,6 +5,7 @@ export function costText(usd: number | null): string {
   if (usd === null) return 'unknown';
   if (usd === 0) return '$0';
   if (usd >= 0.1) return `$${usd.toFixed(2)}`;
+  if (usd < 0.001) return '<$0.001';
   return `$${usd.toPrecision(2)}`;
 }
 
@@ -34,8 +35,10 @@ export function worstGate(model: EvalModelResultDto): EvalGateDto | null {
   let worst: EvalGateDto | null = null;
   for (const gate of model.gates) {
     if (gate.passed) continue;
-    const short = (gate.minimum ?? 1) - gate.rate;
-    if (worst === null || short > (worst.minimum ?? 1) - worst.rate) worst = gate;
+    // A gate with no stated minimum failed by the report's own word; it ranks below one that missed a number.
+    const short = gate.minimum === null ? 0 : gate.minimum - gate.rate;
+    const worstShort = worst?.minimum == null ? 0 : worst.minimum - worst.rate;
+    if (worst === null || short > worstShort) worst = gate;
   }
   return worst;
 }

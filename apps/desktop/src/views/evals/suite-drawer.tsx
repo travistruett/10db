@@ -19,6 +19,9 @@ function Section({ title, children }: { readonly title: string; readonly childre
   );
 }
 
+/** A model's binding in a run: two slots may name one model. */
+const bindingOf = (m: EvalModelResultDto): string => `${m.slot ?? ''}|${m.model}`;
+
 /** One model's gates, failing first, each rate against its minimum. */
 function Gates({ model }: { readonly model: EvalModelResultDto }) {
   const gates = [...model.gates].sort((a, b) => Number(a.passed) - Number(b.passed));
@@ -58,18 +61,18 @@ function RunGates({ detail }: { readonly detail: EvalSuiteDetailDto }) {
   const models = detail.run?.models ?? [];
   const [chosen, setChosen] = useState<string | null>(null);
   const shown =
-    models.find((m) => m.model === chosen) ?? models.find((m) => !m.passed) ?? models[0];
+    models.find((m) => bindingOf(m) === chosen) ?? models.find((m) => !m.passed) ?? models[0];
   if (shown === undefined) return null;
   return (
     <Section title="Gates">
       {models.length > 1 ? (
         <SegmentedControl
           size="xs"
-          value={shown.model}
+          value={bindingOf(shown)}
           onChange={setChosen}
           data={models.map((m) => ({
-            value: m.model,
-            label: `${m.model} · ${gatesPassed(m)}`,
+            value: bindingOf(m),
+            label: `${m.slot ?? m.model} · ${gatesPassed(m)}`,
           }))}
         />
       ) : null}
@@ -229,7 +232,10 @@ export function SuiteDrawer({
   return (
     <SurfaceDrawer
       opened={suiteKey !== null}
-      onClose={onClose}
+      onClose={() => {
+        setPicked(null);
+        onClose();
+      }}
       label="Suite"
       widthPx={560}
       closeOnClickOutside

@@ -1,6 +1,9 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect } from '@playwright/test';
 import { claudeIsInstalled } from './claude-is-installed';
 import { test } from './routed-test';
+import { E2E_DIR } from './paths';
 import { createProject } from './shape-project';
 
 /** A gate report as ampsio commits one: one model passes, the other misses a gate. */
@@ -43,7 +46,7 @@ const GATE_REPORT = {
 // Core flow 10 (a setting that changes behavior): This Project › Trust says what a lane gets. A switch lists
 // what it brings, 10db proposes a Production entry from the repo's vercel.json, and the repo's own MCP
 // server waits until the builder turns it On after reading what it runs. Evals reads the same repository: a
-// committed gate report becomes a suite with its result per model, and its drawer shows the failing gate.
+// gitignored gate report in the checkout becomes a suite with its result per model, and its drawer shows the failing gate.
 test('a builder sees what a lane gets, adds a Production proposal and turns on a repo server', async ({
   page,
   request,
@@ -72,9 +75,13 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
     'vercel.json': JSON.stringify({ alias: ['app.acme-prod.dev'] }, null, 2),
     '.claude/skills/deploy/SKILL.md':
       '---\nname: deploy\ndescription: Ships the app\n---\nShip it.\n',
-    'evals/reports/ingest.mapping/20261013T140758276231Z.json': JSON.stringify(GATE_REPORT),
+    // Results are local output a project keeps out of git, as ampsio does.
+    '.gitignore': 'evals/reports/\n',
     'evals/ingest/mapping.py': 'DATASET = None\n',
   });
+  const reports = join(E2E_DIR, 'trust-page-repo', 'evals', 'reports', 'ingest.mapping');
+  mkdirSync(reports, { recursive: true });
+  writeFileSync(join(reports, '20261013T140758276231Z.json'), JSON.stringify(GATE_REPORT));
   await claudeIsInstalled(page);
   await page.addInitScript((id: string) => {
     window.localStorage.setItem('tendb.project', JSON.stringify(id));
@@ -121,7 +128,7 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await expect(tools).toContainText('Its env block replaces PATH');
   await tools.getByRole('button', { name: 'Cancel' }).click();
 
-  // Evals: the committed report is a suite, the failing model says which gate, nothing ran a model.
+  // Evals: the local report is a suite, the failing model says which gate, nothing ran a model.
   await page.goto('/evals');
   const suites = page.getByRole('table', { name: 'Suites' });
   await expect(suites).toContainText('ingest.mapping');

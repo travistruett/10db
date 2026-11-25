@@ -32,7 +32,8 @@ export function useEvalSuite(projectId: ProjectId, key: string | null, run: stri
     queryFn: async () =>
       readJson(
         await client.projects[':projectId'].evals[':suiteKey'].$get({
-          param: { projectId, suiteKey: key ?? '' },
+          // Hono's client puts a param into the path as it is, and a key may hold `/` or `:`.
+          param: { projectId, suiteKey: encodeURIComponent(key ?? '') },
           query: run === null ? {} : { run },
         }),
         EvalSuiteDetailDto,

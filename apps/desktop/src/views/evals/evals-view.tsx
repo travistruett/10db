@@ -153,7 +153,7 @@ function Gaps({
       <DataTable<EvalGapDto>
         aria-label="LLM work with no eval"
         records={[...gaps]}
-        idAccessor="where"
+        idAccessor={(gap) => `${gap.where}|${gap.label}`}
         backgroundColor="transparent"
         verticalSpacing="sm"
         horizontalSpacing="md"

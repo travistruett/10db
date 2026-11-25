@@ -61,7 +61,7 @@ export function ModelLine({ result }: { readonly result: EvalModelResultDto }) {
           {`${gatesPassed(result)} gates`}
           {worst === null
             ? ''
-            : ` · ${worst.name} ${rateText(worst.rate)} < ${rateText(worst.minimum ?? 1)}`}
+            : ` · ${worst.name} ${rateText(worst.rate)}${worst.minimum === null ? '' : ` < ${rateText(worst.minimum)}`}`}
           {slot === null ? null : <Text span size="xs" c="dimmed">{` · ${slot}`}</Text>}
         </Text>
       </Group>
