@@ -79,3 +79,8 @@ giving them the same text.
 Checked by hand with `apps/daemon/scripts/crosses-limit-replay.ts --floor 0.8`, which shows each case the text a
 stand-in app's Makefile and query scripts give it, with `make db-prepare` and a script that sends the database out
 as controls.
+
+Tests: the reader (`folders/committed-file.test.ts`), the walk (`trust/call-runs.test.ts`) and the hook judge's
+verdict key (`inbox/hook-judge.test.ts`) each have one test against a real git repository, because they decide
+which text may allow a call. The other tests added with this change cover the Linear reporter's hold and the
+install of a nested pnpm package, which each guard an escaped failure from the Ampsio pilot.
