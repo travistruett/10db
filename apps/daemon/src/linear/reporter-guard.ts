@@ -3,11 +3,14 @@ import { Provider } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { mcpToolPrefix } from '../sessions';
 import { OUTBOUND_PATTERNS, SECRET_PATTERN_NAMES } from '../stakeholders';
+import type { ReporterPicture } from './reporter-pictures';
 
 /** The claude.ai connector's prefix, used whenever the connector list is unread. */
 const CONNECTOR_PREFIX = 'mcp__claude_ai_Linear__';
 
 const REPORT_TOOLS: ReadonlySet<string> = new Set(['mcp__10db__report_linear_post']);
+/** The upload tool, allowed only in a run that was offered pictures. */
+const UPLOAD_TOOL = 'mcp__10db__upload_linear_picture';
 
 /** Linear tools that only read. `extract_images` is left out: it fetches URLs. */
 const LINEAR_READS: ReadonlySet<string> = new Set([
@@ -26,8 +29,7 @@ const LINEAR_READS: ReadonlySet<string> = new Set([
 const WRITE_KEYS: Readonly<Record<string, readonly string[]>> = {
   save_issue: ['id', 'state', 'links'],
   save_comment: ['issueId', 'body'],
-  prepare_attachment_upload: ['issue', 'filename', 'contentType', 'size', 'title', 'subtitle'],
-  create_attachment_from_upload: ['issue', 'assetUrl', 'title', 'subtitle'],
+  prepare_file_upload: ['filename', 'contentType', 'size'],
 };
 
 /** The only Linear tools a snapshot run calls: it reads the linked issue, its comments and its relations. */
@@ -40,7 +42,8 @@ export interface ReporterRun {
   readonly link: ExternalLink;
   /** The task's PR: the only URL a `10db` link may point at. */
   readonly prUrl: string | null;
-  readonly uploads: { url: string; headers: Record<string, string>; assetUrl: string }[];
+  /** The pictures the brief offered this run; the only files it may upload. */
+  readonly pictures: readonly ReporterPicture[];
   /** Pattern names refused this run. */
   readonly withheld: Set<string>;
 }
@@ -104,8 +107,13 @@ function judgeWrite(
       return typeof field(input, 'body') === 'string' && field(input, 'issueId') === issueId
         ? null
         : 'wrong issue';
+    case 'prepare_file_upload':
+      // A signed URL alone sends nothing: only 10db's upload tool sends a file, and only an offered picture.
+      return run.pictures.length > 0 && field(input, 'contentType') === 'image/png'
+        ? null
+        : 'no picture offered';
     default:
-      return field(input, 'issue') === issueId ? null : 'wrong issue';
+      return 'unlisted tool';
   }
 }
 
@@ -126,6 +134,15 @@ export function judgeReporterCall(
   const { toolName } = call;
   if (toolName.startsWith('mcp__10db__')) {
     if (run.readOnly) return { verdict: deny('A snapshot run may only read Linear.') };
+    if (toolName === UPLOAD_TOOL) {
+      const input = asRecord(call.input);
+      const id = input === null ? undefined : field(input, 'pictureId');
+      return {
+        verdict: run.pictures.some((p) => p.id === id)
+          ? allow()
+          : deny('Upload only a picture your brief lists, by its id.'),
+      };
+    }
     return {
       verdict: REPORT_TOOLS.has(toolName)
         ? allow()

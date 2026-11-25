@@ -231,6 +231,7 @@ beforeEach(async () => {
       // Reads the reporter at call time: a test swaps it for a new one over the same store.
       reporter: {
         reportPost: (id, input) => reporter.reportPost(id, input),
+        uploadPicture: (id, input) => reporter.uploadPicture(id, input),
       },
     }),
     hostname: '127.0.0.1',
