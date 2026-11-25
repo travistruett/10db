@@ -10,6 +10,7 @@ import {
 import { Alert, Loader, SegmentedControl, Stack, Table, Text, Title } from '@mantine/core';
 import { useState } from 'react';
 import { useRigorFigures } from '../../daemon/rigor-figures-queries';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 const COLUMNS = [
   'Rigor',
@@ -97,22 +98,24 @@ export function RigorPanel({ projectId }: { readonly projectId: ProjectId | null
       {figures.isLoading ? <Loader size="sm" aria-label="Loading work per rigor" /> : null}
       {figures.isSuccess ? (
         <>
-          <Table.ScrollContainer minWidth={900}>
-            <Table aria-label="Work per task by rigor" striped withTableBorder>
-              <Table.Thead>
-                <Table.Tr>
-                  {COLUMNS.map((name) => (
-                    <Table.Th key={name}>{name}</Table.Th>
+          <RaisedPanel>
+            <Table.ScrollContainer minWidth={900}>
+              <Table aria-label="Work per task by rigor">
+                <Table.Thead>
+                  <Table.Tr>
+                    {COLUMNS.map((name) => (
+                      <Table.Th key={name}>{name}</Table.Th>
+                    ))}
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {figures.data.rows.map((row) => (
+                    <FigureRow key={row.rigor} row={row} />
                   ))}
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {figures.data.rows.map((row) => (
-                  <FigureRow key={row.rigor} row={row} />
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          </RaisedPanel>
           {override === null ? null : (
             <Text size="sm" c="dimmed">
               {override}

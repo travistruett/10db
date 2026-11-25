@@ -124,7 +124,7 @@ export function SelfUpdateSection() {
       >
         <Group justify="flex-end" gap="xs" wrap="nowrap">
           {blocker === null ? null : (
-            <HoverCard width={300} position="bottom-end" withArrow shadow="md">
+            <HoverCard width={300} position="bottom-end" withArrow>
               <HoverCard.Target>
                 <ActionIcon
                   variant="subtle"

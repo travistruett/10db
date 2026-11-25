@@ -20,6 +20,7 @@ import {
   type ModelFilter,
   type ModelSort,
 } from './model-order';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 const isModelColumn = (value: unknown): value is ModelColumn =>
   Object.values(ModelColumn).some((c) => c === value);
@@ -276,31 +277,31 @@ export function ModelsTable({
     numeric(ModelColumn.StepsRun, 'Steps Run', (row) => row.stepsRun),
   ];
   return (
-    <DataTable<ModelRowDto>
-      aria-label="Models"
-      records={families.flatMap((f) =>
-        expanded.includes(f.lead.model) ? [f.lead, ...f.older] : [f.lead],
-      )}
-      columns={columns}
-      idAccessor={(row) => row.model}
-      withTableBorder
-      backgroundColor="var(--tendb-color-panel)"
-      borderRadius="md"
-      verticalSpacing="sm"
-      horizontalSpacing="md"
-      // Too narrow a frame scrolls the table sideways instead of wrapping a name.
-      styles={{ table: { minWidth: 820 } }}
-      highlightOnHover
-      {...pagerProps(paging, TABLE_PAGE_SIZES)}
-      {...(families.length === 0 ? { minHeight: 160 } : {})}
-      emptyState={
-        <Text c="dimmed" size="sm" ta="center">
-          No model matches these filters.
-        </Text>
-      }
-      onRowClick={({ record }) => {
-        onOpen(record);
-      }}
-    />
+    <RaisedPanel>
+      <DataTable<ModelRowDto>
+        aria-label="Models"
+        records={families.flatMap((f) =>
+          expanded.includes(f.lead.model) ? [f.lead, ...f.older] : [f.lead],
+        )}
+        columns={columns}
+        idAccessor={(row) => row.model}
+        backgroundColor="transparent"
+        verticalSpacing="sm"
+        horizontalSpacing="md"
+        // Too narrow a frame scrolls the table sideways instead of wrapping a name.
+        styles={{ table: { minWidth: 820 } }}
+        highlightOnHover
+        {...pagerProps(paging, TABLE_PAGE_SIZES)}
+        {...(families.length === 0 ? { minHeight: 160 } : {})}
+        emptyState={
+          <Text c="dimmed" size="sm" ta="center">
+            No model matches these filters.
+          </Text>
+        }
+        onRowClick={({ record }) => {
+          onOpen(record);
+        }}
+      />
+    </RaisedPanel>
   );
 }

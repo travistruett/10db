@@ -1,6 +1,7 @@
 import type { HumanTouchDayDto, ProjectId } from '@10db/contracts';
 import { Alert, Loader, Stack, Table, Text, Title } from '@mantine/core';
 import { useHumanTouch } from '../../daemon/human-touch-queries';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 /** "Nov 3" for a `YYYY-MM-DD` UTC day, the way the daemon cut it. */
 function dayLabel(day: string): string {
@@ -77,22 +78,24 @@ export function HumanTouchPanel({ projectId }: { readonly projectId: ProjectId |
       ) : null}
       {touch.isLoading ? <Loader size="sm" aria-label="Loading human touch" /> : null}
       {touch.isSuccess ? (
-        <Table.ScrollContainer minWidth={720}>
-          <Table aria-label="How often a person was needed" striped withTableBorder>
-            <Table.Thead>
-              <Table.Tr>
-                {COLUMNS.map((name) => (
-                  <Table.Th key={name}>{name}</Table.Th>
+        <RaisedPanel>
+          <Table.ScrollContainer minWidth={720}>
+            <Table aria-label="How often a person was needed">
+              <Table.Thead>
+                <Table.Tr>
+                  {COLUMNS.map((name) => (
+                    <Table.Th key={name}>{name}</Table.Th>
+                  ))}
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {touch.data.days.map((day) => (
+                  <DayRow key={day.day} day={day} />
                 ))}
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {touch.data.days.map((day) => (
-                <DayRow key={day.day} day={day} />
-              ))}
-            </Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        </RaisedPanel>
       ) : null}
     </Stack>
   );

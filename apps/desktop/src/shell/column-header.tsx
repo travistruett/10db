@@ -79,7 +79,6 @@ function ColumnHeader<T>({
           }}
           onClose={close}
           withArrow
-          shadow="md"
           trapFocus
           // A filter stays open while the list it narrows changes under it; Mantine otherwise closes a
           // popover whose header it reads as out of view, mid-word.

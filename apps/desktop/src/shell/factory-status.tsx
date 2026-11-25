@@ -27,14 +27,7 @@ export function FactoryStatusDot() {
   const tone: Tone = holds.length > 0 || busy?.holding === true ? Tone.Holding : Tone.Busy;
   const phrase = tone === Tone.Holding ? 'New work is waiting' : 'Your Mac is very busy';
   return (
-    <HoverCard
-      role="tooltip"
-      position="right-start"
-      width={300}
-      shadow="md"
-      withArrow
-      openDelay={150}
-    >
+    <HoverCard role="tooltip" position="right-start" width={300} withArrow openDelay={150}>
       <HoverCard.Target>
         <span className={classes['target']} data-compact={compact ? '' : undefined}>
           <span className={classes['dot']} data-tone={tone} aria-hidden="true" />

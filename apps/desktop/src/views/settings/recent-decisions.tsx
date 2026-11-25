@@ -8,13 +8,14 @@ import { ActionIcon, Select, Stack, Text, Title, Tooltip } from '@mantine/core';
 import { IconExternalLink } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { DataTable, type DataTableColumn, type DataTableSortStatus } from 'mantine-datatable';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useJudgeCallsPage } from '../../daemon/judge-queries';
 import { withColumnHeader } from '../../shell/column-header';
 import { absoluteTime, fromNow, useNow } from '../../shell/relative';
 import { pagerProps, TABLE_PAGE_SIZES, usePaging } from '../../shell/table-pager';
 import { DECISIONS } from './decision-catalogue';
 import { answerText, modelName, outcomeText } from './decision-numbers';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 const ANY_DECISION = 'any';
 const ANY_OUTCOME = 'any';
@@ -166,39 +167,44 @@ export function RecentDecisions({
   return (
     <Stack gap="xs">
       <Title order={decision === undefined ? 4 : 5}>Recent Decisions</Title>
-      <DataTable<JudgeCallDto>
-        aria-label={
-          decision === undefined
-            ? 'Recent decisions'
-            : `Recent decisions: ${DECISIONS[decision].label}`
-        }
-        records={calls}
-        fetching={page.isPending}
-        columns={columns}
-        idAccessor="id"
-        withTableBorder
-        backgroundColor="var(--tendb-color-panel)"
-        borderRadius="md"
-        verticalSpacing="sm"
-        horizontalSpacing="md"
-        highlightOnHover
-        {...(calls.length === 0 ? { minHeight: 160 } : {})}
-        emptyState={
-          <Text c="dimmed" size="sm" ta="center">
-            {page.isPending
-              ? ''
-              : page.isError
-                ? 'Recent decisions could not be read.'
-                : filtered
-                  ? 'No decision matches these filters.'
-                  : 'No decisions yet.'}
-          </Text>
-        }
-        {...pagerProps(
-          page.data === undefined ? undefined : { ...paging, total: page.data.total },
-          TABLE_PAGE_SIZES,
-        )}
-      />
+      {/* On the page the table is a raised thing; in a decision's drawer it stays flat. */}
+      <Raised when={decision === undefined}>
+        <DataTable<JudgeCallDto>
+          aria-label={
+            decision === undefined
+              ? 'Recent decisions'
+              : `Recent decisions: ${DECISIONS[decision].label}`
+          }
+          records={calls}
+          fetching={page.isPending}
+          columns={columns}
+          idAccessor="id"
+          backgroundColor="transparent"
+          verticalSpacing="sm"
+          horizontalSpacing="md"
+          highlightOnHover
+          {...(calls.length === 0 ? { minHeight: 160 } : {})}
+          emptyState={
+            <Text c="dimmed" size="sm" ta="center">
+              {page.isPending
+                ? ''
+                : page.isError
+                  ? 'Recent decisions could not be read.'
+                  : filtered
+                    ? 'No decision matches these filters.'
+                    : 'No decisions yet.'}
+            </Text>
+          }
+          {...pagerProps(
+            page.data === undefined ? undefined : { ...paging, total: page.data.total },
+            TABLE_PAGE_SIZES,
+          )}
+        />
+      </Raised>
     </Stack>
   );
+}
+
+function Raised({ when, children }: { readonly when: boolean; readonly children: ReactNode }) {
+  return when ? <RaisedPanel>{children}</RaisedPanel> : children;
 }
