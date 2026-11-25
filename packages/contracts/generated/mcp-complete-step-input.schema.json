@@ -29,8 +29,8 @@
         }
       ]
     },
-    "focusNotes": {
-      "description": "Review and QA steps only: one entry per focus file you checked, { path, note } with the note starting ✓ when it holds up or ⚠ when it does not, and why, at most 400 characters. Leave it out of a plan or plan review.",
+    "watchpointNotes": {
+      "description": "Review and QA steps only: one entry per watchpoint file you checked, { path, note } with the note starting ✓ when it holds up or ⚠ when it does not, and why, at most 400 characters. Leave it out of a plan or plan review.",
       "maxItems": 40,
       "type": "array",
       "items": {

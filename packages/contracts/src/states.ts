@@ -260,8 +260,8 @@ export const EvidenceKind = {
   Browser: 'browser',
   /** The acceptance check's reading of each criterion of a finished run. */
   Acceptance: 'acceptance',
-  /** The focuses a finished run's change hit, kept with their hunks. */
-  Focus: 'focus',
+  /** The watchpoints a finished run's change hit, kept with their hunks. */
+  Watchpoint: 'watchpoint',
 } as const;
 export type EvidenceKind = ValueOf<typeof EvidenceKind>;
 

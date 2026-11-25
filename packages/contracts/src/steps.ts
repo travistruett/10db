@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ModelSetting } from './catalogue';
-import { FocusNotes } from './focus-hit';
+import { WatchpointNotes } from './watchpoint-hit';
 import { ModelProfileId, PersonaId, SessionId, TaskId } from './ids';
 import { Rigor } from './rigor';
 import { Effort, StepRole, StepStatus, ToolAccess, Verdict } from './states';
@@ -20,8 +20,8 @@ export const StepResult = z.object({
   /** The session that recorded it, so a nudge knows whether this session has finished its step. */
   sessionId: SessionId,
   at: z.iso.datetime(),
-  /** A Review or QA step's check of each focus file it read: ✓ or ⚠ and why. */
-  focusNotes: FocusNotes.optional(),
+  /** A Review or QA step's check of each watchpoint file it read: ✓ or ⚠ and why. */
+  watchpointNotes: WatchpointNotes.optional(),
 });
 export type StepResult = z.infer<typeof StepResult>;
 

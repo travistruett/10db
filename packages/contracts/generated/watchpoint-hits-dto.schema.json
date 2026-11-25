@@ -28,7 +28,7 @@
       "items": {
         "type": "object",
         "properties": {
-          "focus": {
+          "watchpoint": {
             "type": "object",
             "properties": {
               "key": {
@@ -134,7 +134,7 @@
           }
         },
         "required": [
-          "focus",
+          "watchpoint",
           "files"
         ]
       }

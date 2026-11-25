@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { InboxOption, Title } from './entities';
-import { FocusNotes } from './focus-hit';
+import { WatchpointNotes } from './watchpoint-hit';
 import { BriefKey } from './goals';
 import { HandoffDto, HandoffInput } from './handoff';
 import {
@@ -306,8 +306,8 @@ export const McpToolInputs = {
     opId: OpId,
     paths: z.array(z.string().min(1)).min(1).max(200),
     message: z.string().min(1).max(2000),
-    focusNotes: FocusNotes.optional().describe(
-      'One entry per file you changed that your brief says a focus covers: { path, note } with your reason for the change, at most 400 characters. The builder reads it beside the changed lines.',
+    watchpointNotes: WatchpointNotes.optional().describe(
+      'One entry per file you changed that your brief says a watchpoint covers: { path, note } with your reason for the change, at most 400 characters. The builder reads it beside the changed lines.',
     ),
   }),
   record_evidence: z.object({
@@ -330,8 +330,8 @@ export const McpToolInputs = {
       .nullable()
       .default(null)
       .describe('Required for plan_review, review and QA steps; null for a plan step.'),
-    focusNotes: FocusNotes.optional().describe(
-      'Review and QA steps only: one entry per focus file you checked, { path, note } with the note starting ✓ when it holds up or ⚠ when it does not, and why, at most 400 characters. Leave it out of a plan or plan review.',
+    watchpointNotes: WatchpointNotes.optional().describe(
+      'Review and QA steps only: one entry per watchpoint file you checked, { path, note } with the note starting ✓ when it holds up or ⚠ when it does not, and why, at most 400 characters. Leave it out of a plan or plan review.',
     ),
     followUps: z
       .array(FollowUpInput)
@@ -476,7 +476,7 @@ export const McpToolOutputs = {
     sha: z.string().regex(/^[0-9a-f]{40}$/),
     alreadyCommitted: z.boolean(),
     /** The notes the call sent, echoed so the lane sees they were kept. */
-    focusNotes: FocusNotes.default([]),
+    watchpointNotes: WatchpointNotes.default([]),
   }),
   record_evidence: z.object({ evidenceId: EvidenceId }),
   write_handoff: z.object({ handoffId: HandoffId, instruction: z.string() }),

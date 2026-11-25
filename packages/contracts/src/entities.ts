@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AcceptanceDetail } from './acceptance';
-import { StoredFocusDetail } from './focus-hit';
+import { StoredWatchpointDetail } from './watchpoint-hit';
 import { USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN } from './accounts';
 import { AllowedCommands } from './allowed-commands';
 import { ModelSetting } from './catalogue';
@@ -1473,9 +1473,9 @@ export const EvidenceDto = z.discriminatedUnion('kind', [
   }),
   z.object({
     ...EvidenceBase,
-    kind: z.literal(EvidenceKind.Focus),
-    /** The focuses the run's change hit, with their hunks. A detail that does not parse reads as unreadable. */
-    detail: StoredFocusDetail,
+    kind: z.literal(EvidenceKind.Watchpoint),
+    /** The watchpoints the run's change hit, with their hunks. A detail that does not parse reads as unreadable. */
+    detail: StoredWatchpointDetail,
     command: z.null(),
     exitCode: z.null(),
   }),

@@ -21,8 +21,8 @@
       "minLength": 1,
       "maxLength": 2000
     },
-    "focusNotes": {
-      "description": "One entry per file you changed that your brief says a focus covers: { path, note } with your reason for the change, at most 400 characters. The builder reads it beside the changed lines.",
+    "watchpointNotes": {
+      "description": "One entry per file you changed that your brief says a watchpoint covers: { path, note } with your reason for the change, at most 400 characters. The builder reads it beside the changed lines.",
       "maxItems": 40,
       "type": "array",
       "items": {
