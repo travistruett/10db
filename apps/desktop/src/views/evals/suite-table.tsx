@@ -9,6 +9,7 @@ const COLUMNS: DataTableColumn<EvalSuiteDto>[] = [
   {
     accessor: 'key',
     title: 'Suite',
+    width: 260,
     render: (suite) => (
       <Stack gap={2}>
         <Text size="sm" fw={500} c="var(--mantine-color-bright)">
@@ -26,7 +27,7 @@ const COLUMNS: DataTableColumn<EvalSuiteDto>[] = [
     render: (suite) =>
       suite.latest === null ? (
         <Text size="xs" c="dimmed">
-          {suite.format === null ? 'No results committed' : 'No run could be read'}
+          {suite.format === null ? 'No results found' : 'No run could be read'}
         </Text>
       ) : (
         <Stack gap={4}>
@@ -72,7 +73,7 @@ const COLUMNS: DataTableColumn<EvalSuiteDto>[] = [
     accessor: 'at',
     title: 'Last Run',
     textAlign: 'right',
-    width: 90,
+    width: 104,
     render: (suite) => (
       <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
         {suite.latest === null ? '—' : dayText(suite.latest.at)}

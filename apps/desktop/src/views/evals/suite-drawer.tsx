@@ -175,7 +175,7 @@ function SuiteBody({
   const meta = [
     suite.definitionPaths[0] ?? null,
     run?.repeat ? `${String(run.repeat)} trials a case` : null,
-    run ? `run ${dayTimeText(run.at)}` : 'no results committed',
+    run ? `run ${dayTimeText(run.at)}` : 'no results found',
   ].filter((part): part is string => part !== null);
   return (
     <Stack gap="lg">

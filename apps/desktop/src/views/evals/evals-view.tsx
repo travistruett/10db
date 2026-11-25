@@ -59,16 +59,23 @@ function CopyAskButton({ project }: { readonly project: ProjectViewDto }) {
 
 /** The one line that says what the page read, in figures. */
 function summary(evals: EvalsDto): string {
+  const at = evals.commit === null ? 'HEAD' : evals.commit.slice(0, 7);
+  const where = `Read at ${at} and from the checkout's results; no model ran.`;
+  if (evals.suites.length === 0)
+    return evals.unlinked.length === 0
+      ? where
+      : `${String(evals.unlinked.length)} eval files found by name, none linked to a suite yet. ${where}`;
   const withResults = evals.suites.filter((s) => s.latest !== null);
   const failing = withResults.filter((s) => s.latest?.passed === false).length;
   const parts = [
     `${String(evals.suites.length)} suites`,
     `${String(withResults.length - failing)} passing`,
     ...(failing > 0 ? [`${String(failing)} failing`] : []),
-    `${String(evals.suites.length - withResults.length)} with no results`,
+    ...(withResults.length < evals.suites.length
+      ? [`${String(evals.suites.length - withResults.length)} with no results`]
+      : []),
   ];
-  const at = evals.commit === null ? '' : ` at ${evals.commit.slice(0, 7)}`;
-  return `${parts.join(' · ')}. Read from the files committed${at}; nothing here ran a model.`;
+  return `${parts.join(' · ')}. ${where}`;
 }
 
 /** Before an assessment: what file names alone found, and the ask that fills in the rest. */
@@ -231,11 +238,12 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
       {tab === EvalsTab.Suites ? (
         <Stack gap="md">
           {data.assessedAt === null ? <NotAssessed project={project} /> : null}
-          {data.suites.length === 0 ? (
+          {data.suites.length === 0 && data.unlinked.length === 0 ? (
             <EmptyState icon={IconFlask} title="No evals found" action={copyAsk}>
-              No eval files or committed results at HEAD. An agent's assessment can still find them.
+              No eval files at HEAD and no results in the checkout. An agent's assessment can still
+              find them.
             </EmptyState>
-          ) : (
+          ) : data.suites.length === 0 ? null : (
             <SuiteTable
               suites={data.suites}
               openKey={open}
@@ -262,7 +270,7 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
 
 /**
  * A project's evals: each suite found in its repository at HEAD, its last result per model, trend and
- * cost, and the LLM work no eval covers. It reads committed files only and never runs an eval.
+ * cost, and the LLM work no eval covers. It reads eval files at HEAD and result files in the checkout, and never runs an eval.
  */
 export function EvalsView() {
   const { project } = useSelectedProject();

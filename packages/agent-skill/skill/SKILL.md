@@ -202,7 +202,7 @@ The builder never edits hazards by hand; you assess and fix them.
 
 ## Assess a project's evals
 
-10db reads a project's committed eval results and shows them; it defines no eval format, runs no eval and calls no
+10db reads a project's eval files at HEAD and its eval results in the checkout, and shows them; it defines no eval format, runs no eval and calls no
 model for this. Result files and eval files are found by name. What no file name says (which code a suite covers,
 its bar and commands, the LLM work with no eval) is yours to record, as a manifest beside the project's settings,
 never a file in the repo.

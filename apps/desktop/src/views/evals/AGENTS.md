@@ -2,7 +2,8 @@
 
 - Evals (`views/evals/`, `daemon/evals-queries.ts`) is the project's nav item after Knowledge. It shows what the
   daemon found of the selected project's evals at its checkout's HEAD (`GET /projects/:id/evals`, `EvalsDto`): it
-  reads committed result files and never runs an eval or calls a model. 10db defines no eval format; the daemon
+  reads eval files at HEAD and result files in the checkout (projects keep them out of git), and never runs an
+  eval or calls a model. 10db defines no eval format; the daemon
   reads each project's own (`apps/daemon/src/evals/`).
 - Two tabs: Suites and No Eval. Suites is one raised table (`suite-table.tsx`): the suite and its bar in words
   (one dim line; the first definition path or the key when there is no bar), the last result per model

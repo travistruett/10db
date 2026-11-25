@@ -161,10 +161,14 @@ export type EvalManifestSuite = z.infer<typeof EvalManifestSuite>;
  * never a file in the repository. It names what no file name says: which code a suite covers, its bar and
  * commands, and the LLM work with no eval.
  */
-export const EvalManifest = z.strictObject({
-  suites: z.array(EvalManifestSuite).max(500),
-  gaps: z.array(EvalGapDto).max(200),
-});
+export const EvalManifest = z
+  .strictObject({
+    suites: z.array(EvalManifestSuite).max(500),
+    gaps: z.array(EvalGapDto).max(200),
+  })
+  .refine((m) => m.suites.reduce((n, s) => n + s.coveredPaths.length, 0) <= 200, {
+    message: 'a manifest covers at most 200 globs in all',
+  });
 export type EvalManifest = z.infer<typeof EvalManifest>;
 
 /** The manifest as stored: what was recorded, the commit it read, and when. */

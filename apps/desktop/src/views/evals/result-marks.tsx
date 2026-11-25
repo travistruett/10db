@@ -40,26 +40,31 @@ export function Trend({ runs }: { readonly runs: readonly boolean[] }) {
   );
 }
 
+/** The project's name for a binding, when it says more than the model it names (`SMART@medium`). */
+function slotText(result: EvalModelResultDto): string | null {
+  if (result.slot === null || result.slot.startsWith(result.model)) return null;
+  return result.slot;
+}
+
 /** One model's line in a run: its result, the model, and the gate that failed it. */
 export function ModelLine({ result }: { readonly result: EvalModelResultDto }) {
   const worst = worstGate(result);
+  const slot = slotText(result);
   return (
     <Group gap={8} wrap="nowrap" align="baseline">
       <ResultDot passed={result.passed} />
-      <Text size="sm" c="var(--mantine-color-bright)" style={{ whiteSpace: 'nowrap' }}>
-        {result.model}
-      </Text>
-      <Text size="xs" c={result.passed ? 'dimmed' : 'red'} style={{ whiteSpace: 'nowrap' }}>
-        {`${gatesPassed(result)} gates`}
-        {worst === null
-          ? ''
-          : ` · ${worst.name} ${rateText(worst.rate)} < ${rateText(worst.minimum ?? 1)}`}
-      </Text>
-      {result.slot === null ? null : (
-        <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
-          {result.slot}
+      <Group gap={2} style={{ columnGap: 8, minWidth: 0 }} align="baseline">
+        <Text size="sm" c="var(--mantine-color-bright)" style={{ whiteSpace: 'nowrap' }}>
+          {result.model}
         </Text>
-      )}
+        <Text size="xs" c={result.passed ? 'dimmed' : 'red'}>
+          {`${gatesPassed(result)} gates`}
+          {worst === null
+            ? ''
+            : ` · ${worst.name} ${rateText(worst.rate)} < ${rateText(worst.minimum ?? 1)}`}
+          {slot === null ? null : <Text span size="xs" c="dimmed">{` · ${slot}`}</Text>}
+        </Text>
+      </Group>
     </Group>
   );
 }
