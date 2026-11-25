@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Focuses: mockups</title>
+<title>Watchpoints: mockups</title>
 <style>
 /* Selenized, exactly (docs/architecture/decisions/2026-10-28-selenized-exactly.md). */
 :root, [data-scheme="dark"] {
@@ -69,7 +69,7 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
 .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
 .toolbar .sp { flex: 1; }
 
-/* The focus table */
+/* The watchpoint table */
 .ftable { width: 100%; border-collapse: collapse; }
 .ftable th { text-align: left; font-size: 11.5px; color: var(--dim); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--bg2); }
 .ftable td { padding: 9px 10px; border-bottom: 1px solid var(--bg1); vertical-align: middle; }
@@ -174,17 +174,17 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
 </template>
 
 <div class="page-head">
-  <h1>Focuses: mockups</h1>
+  <h1>Watchpoints: mockups</h1>
   <button type="button" data-set-scheme="dark" aria-pressed="true">Dark</button>
   <button type="button" data-set-scheme="light" aria-pressed="false">Light</button>
 </div>
 
 <!-- 1. Settings -->
 <section class="frame-block">
-  <h2>1. Settings › Focuses</h2>
-  <p class="note">A new project section under Planning, after Areas and Hazards. It lists your focuses that apply in every
+  <h2>1. Settings › Watchpoints</h2>
+  <p class="note">A new project section under Planning, after Areas and Hazards. It lists your watchpoints that apply in every
     project, then this project's own. Each row's loudness is one click. A project can override one of yours by key (the cyan
-    tag); the row then edits the override, and "Use yours" drops it. The hit rate is the last 30 days; a noisy focus
+    tag); the row then edits the override, and "Use yours" drops it. The hit rate is the last 30 days; a noisy watchpoint
     (at least 5 asks, at least 80% answered "Looks right" without a note) turns yellow. Hold is greyed out until S5.</p>
   <div class="win" data-scheme="dark">
     <div class="lights"><i></i><i></i><i></i></div>
@@ -195,27 +195,27 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
       <div class="glabel">Project</div>
       <div class="prow">General</div><div class="prow">App Preview</div><div class="prow">Sharing</div><div class="prow">Board Columns</div>
       <div class="glabel">Planning</div>
-      <div class="prow">Planning</div><div class="prow">Areas and Hazards</div><div class="prow on">Focuses</div><div class="prow">Question Routing</div><div class="prow">Linear</div>
+      <div class="prow">Planning</div><div class="prow">Areas and Hazards</div><div class="prow on">Watchpoints</div><div class="prow">Question Routing</div><div class="prow">Linear</div>
       <div class="glabel">Agents</div>
       <div class="prow">Playbook</div><div class="prow">Billing</div><div class="prow">Trust</div><div class="prow">Sandbox</div>
     </div>
     <div class="titlerow"><b>10db</b><span class="kind">Settings</span></div>
     <div class="surface"><div class="content"><div class="col">
-      <h3>Focuses</h3>
+      <h3>Watchpoints</h3>
       <p class="lede">The kinds of change you want to judge yourself. When a task's diff touches one, the task shows you just those
         changes, with the agent's reason and the reviewer's check against your guidance.</p>
       <div class="legend">
         <div><b>Show</b>In the task's For You section and the PR body. No Inbox item.</div>
-        <div><b>Ask</b>Also one Inbox item per task, however many focuses it hits. The run still finishes.</div>
+        <div><b>Ask</b>Also one Inbox item per task, however many watchpoints it hits. The run still finishes.</div>
         <div><b>Hold</b>Also opens the PR without auto-merge; it merges when you say. <span class="dim">Coming later.</span></div>
       </div>
       <div class="toolbar">
         <span class="sp"></span>
         <button class="btn">Add from library ▾</button>
-        <button class="btn primary">New focus</button>
+        <button class="btn primary">New watchpoint</button>
       </div>
       <table class="ftable">
-        <thead><tr><th style="width:30%">Focus</th><th>Matches</th><th style="width:184px">Loudness</th><th style="width:110px">Last 30 days</th></tr></thead>
+        <thead><tr><th style="width:30%">Watchpoint</th><th>Matches</th><th style="width:184px">Loudness</th><th style="width:110px">Last 30 days</th></tr></thead>
         <tbody>
           <tr class="grp"><td colspan="4">Yours, in every project</td></tr>
           <tr><td class="name"><b>Prompts</b><small>A prompt's wording changes what every run does.</small></td>
@@ -249,7 +249,7 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
             <td class="rate">8 tasks</td></tr>
         </tbody>
       </table>
-      <p class="small dim" style="margin-top:14px">Agents can propose a change to a focus; it reaches you as an Inbox item and
+      <p class="small dim" style="margin-top:14px">Agents can propose a change to a watchpoint; it reaches you as an Inbox item and
         changes nothing until you accept it.</p>
     </div></div></div>
   </div>
@@ -257,14 +257,14 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
 
 <!-- 1b. Edit drawer -->
 <section class="frame-block">
-  <h2>1b. Editing a focus</h2>
+  <h2>1b. Editing a watchpoint</h2>
   <p class="note">Clicking a row opens its drawer, as an area or hazard does. Guidance is what you want checked; the builder
-    and the reviewer both read it. "Applies to" moves a focus between yours and this project's.</p>
+    and the reviewer both read it. "Applies to" moves a watchpoint between yours and this project's.</p>
   <div class="win" data-scheme="dark" style="height:640px">
     <div class="lights"><i></i><i></i><i></i></div>
     <div class="toprow-left"></div>
     <div data-rail="settings"></div>
-    <div class="panel"><div class="panel-head">Settings</div><div class="glabel">Planning</div><div class="prow">Areas and Hazards</div><div class="prow on">Focuses</div></div>
+    <div class="panel"><div class="panel-head">Settings</div><div class="glabel">Planning</div><div class="prow">Areas and Hazards</div><div class="prow on">Watchpoints</div></div>
     <div class="titlerow"><b>10db</b><span class="kind">Settings</span></div>
     <div class="surface"><div class="scrim"></div>
       <div class="drawer" style="width:560px">
@@ -288,7 +288,7 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
 <!-- 2. Task drawer -->
 <section class="frame-block">
   <h2>2. The task drawer: For You</h2>
-  <p class="note">The first section of a task's Overview when its diff hits a focus. One fold per focus, its loudness tag, and only
+  <p class="note">The first section of a task's Overview when its diff hits a watchpoint. One fold per watchpoint, its loudness tag, and only
     the matching hunks. Each file shows the agent's reason (from the build step) and the reviewer's check against your
     guidance. Folds start open for ask and hold, closed for show. "Open the whole diff" opens the Changes view. The hunks are
     kept when the run finishes, so a Done task still shows them after its worktree is gone.</p>
@@ -305,7 +305,7 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
         <div class="chips"><span class="chip" style="color:var(--green)">DONE</span><span>Standard · PR #871</span></div>
         <h3>Tasks get a priority the Board sorts by</h3>
         <div class="tabs"><span class="on">Overview</span><span>Reviews<span class="count">1</span></span><span>Edit</span></div>
-        <div class="slabel">For You <span class="dim" style="font-weight:400">· 2 focuses · 3 files</span><span style="flex:1"></span><a class="small" style="color:var(--blue);font-weight:400">Open the whole diff</a></div>
+        <div class="slabel">For You <span class="dim" style="font-weight:400">· 2 watchpoints · 3 files</span><span style="flex:1"></span><a class="small" style="color:var(--blue);font-weight:400">Open the whole diff</a></div>
 
         <div class="fold">
           <div class="fold-head"><span class="chev">▾</span><b>Migrations</b><span class="lvl ask">ASK</span><span class="sp"></span><span class="small dim">1 file</span></div>
@@ -360,9 +360,9 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
 <!-- 3. Inbox card -->
 <section class="frame-block">
   <h2>3. The Ask card in the Inbox</h2>
-  <p class="note">One card per task, however many ask focuses it hit. It is written when the run moves on, so the task never waits
+  <p class="note">One card per task, however many ask watchpoints it hit. It is written when the run moves on, so the task never waits
     for it. "Looks right" closes it. "Send back with a note" files a follow-up task with your note, as the Acceptance card does.
-    For a focus set to hold (later), a third button, Merge, turns on the PR's auto-merge.</p>
+    For a watchpoint set to hold (later), a third button, Merge, turns on the PR's auto-merge.</p>
   <div class="win" data-scheme="dark" style="height:700px; grid-template-columns: 52px 320px 1fr">
     <div class="lights"><i></i><i></i><i></i></div>
     <div class="toprow-left" style="background:linear-gradient(to right, var(--bg0) 52px, transparent 52px)"></div>
@@ -377,7 +377,7 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
     <div class="surface"><div class="content"><div class="col" style="max-width:720px">
       <div class="chips"><span class="chip">LOOK AT THESE CHANGES</span><span>10db · Standard · PR #871 · merged</span></div>
       <h3>Tasks get a priority the Board sorts by</h3>
-      <p class="lede small">It touched two of your focuses set to ask. The run finished; this is for you to judge.</p>
+      <p class="lede small">It touched two of your watchpoints set to ask. The run finished; this is for you to judge.</p>
       <div class="fold">
         <div class="fold-head"><span class="chev">▾</span><b>Migrations</b><span class="sp"></span><span class="small dim">1 file</span></div>
         <div class="fold-body">
@@ -399,8 +399,8 @@ code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
 <!-- 4. PR body -->
 <section class="frame-block">
   <h2>4. The PR body</h2>
-  <p class="note">A "For you" section after "What and why": each focus the PR's tasks hit, its loudness, its files, and the
-    reviewer's check. Show focuses are listed too, so the PR alone tells a reader what to look at. The faded block is the hold
+  <p class="note">A "For you" section after "What and why": each watchpoint the PR's tasks hit, its loudness, its files, and the
+    reviewer's check. Show watchpoints are listed too, so the PR alone tells a reader what to look at. The faded block is the hold
     banner a held PR adds later (S5).</p>
   <div class="gh">
     <h2>What and why</h2>
