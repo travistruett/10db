@@ -46,6 +46,7 @@ highlights code) and `see-screen.spec.ts` (the screen a session draws is a real 
   while the daemon has no project. The Board shows the first project by name, so the project it makes,
   `e2e-first-run`, sorts after `e2e`, which `loop.spec.ts` and the specs after it open. Every spec adds its own
   project, and ends with nothing open that a later spec would read: Factory lists every project.
+- **A keyboard drag's move and drop keys are sent again until they show.** dnd-kit's sensor listens for them only from a timer that the pick-up starts, so a key sent before the timer fires is lost (`loop.spec.ts`). The pick-up is handled on the card itself and is sent once.
 - **Seeding scripts** in `apps/daemon/scripts/seed-*.ts` write to the idle daemon's database for a state a lane
   would raise (a question card, a waiting question); they are the one place another process writes it.
 - `E2E_DAEMON_PORT` and `E2E_UI_PORT` fix the ports while debugging; `E2E_BOOK` points the daemon at another script book.
