@@ -120,7 +120,7 @@ import type {
   JudgeStatusDto,
   JudgeTestResultDto,
   KeepAwakeMode,
-  EffectiveWatchpointsDto,
+  ProjectWatchpointsDto,
   ProjectWatchpoints,
   WatchpointHitsDto,
   YourWatchpoints,
@@ -827,9 +827,9 @@ export interface ApiServices extends PlanRecordServices {
   /** Replaces the builder's whole list. */
   setYourWatchpoints(watchpoints: YourWatchpoints): YourWatchpoints;
   /** The watchpoints that apply in the project, each tagged with where it came from. */
-  projectWatchpoints(projectId: ProjectId): EffectiveWatchpointsDto;
+  projectWatchpoints(projectId: ProjectId): ProjectWatchpointsDto;
   /** Replaces the project's whole list of its own watchpoints, overrides and `off` entries. */
-  setProjectWatchpoints(projectId: ProjectId, entries: ProjectWatchpoints): EffectiveWatchpointsDto;
+  setProjectWatchpoints(projectId: ProjectId, entries: ProjectWatchpoints): ProjectWatchpointsDto;
   /** The run's newest watchpoint reading with the agent's and reviewer's notes on each file. */
   watchpointHits(id: WorkstreamId): WatchpointHitsDto;
   /** Settings › Agent skill: the shipped skill's switch, installed copy and links. */

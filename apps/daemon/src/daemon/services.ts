@@ -52,7 +52,7 @@ import {
   type FigmaSignInsDto,
   type LinearSignInsDto,
   effectiveWatchpoints,
-  type EffectiveWatchpointsDto,
+  type ProjectWatchpointsDto,
   type ProjectId,
 } from '@10db/contracts';
 import {
@@ -412,9 +412,10 @@ export function createServices(deps: {
   readonly figmaSignIns: { list(): Promise<FigmaSignInsDto> };
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
-  const effectiveWatchpointsOf = (projectId: ProjectId): EffectiveWatchpointsDto => {
+  const effectiveWatchpointsOf = (projectId: ProjectId): ProjectWatchpointsDto => {
     getProject(db, projectId);
-    return effectiveWatchpoints(readYourWatchpoints(db), readProjectWatchpoints(db, projectId));
+    const entries = readProjectWatchpoints(db, projectId);
+    return { effective: effectiveWatchpoints(readYourWatchpoints(db), entries), entries };
   };
   const restarts = createFailedRestarts(deps);
   const catalogueStatus = (): CatalogueStatusDto => ({

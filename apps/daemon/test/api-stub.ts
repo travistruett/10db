@@ -87,7 +87,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     systemCheck: none,
     yourWatchpoints: () => [],
     setYourWatchpoints: none,
-    projectWatchpoints: () => [],
+    projectWatchpoints: () => ({ effective: [], entries: [] }),
     setProjectWatchpoints: none,
     watchpointHits: none,
     keepAwake: () => ({ mode: 'while_running', active: false }),

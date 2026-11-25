@@ -51,9 +51,19 @@ export type WatchpointOrigin = (typeof WatchpointOrigin)[keyof typeof Watchpoint
 export const EffectiveWatchpoint = Watchpoint.extend({ from: z.enum(WatchpointOrigin) });
 export type EffectiveWatchpoint = z.infer<typeof EffectiveWatchpoint>;
 
-/** `GET /projects/:id/watchpoints`: the list that applies in the project. */
+/** The watchpoints that apply in a project, each tagged with where it came from. */
 export const EffectiveWatchpointsDto = z.array(EffectiveWatchpoint);
 export type EffectiveWatchpointsDto = z.infer<typeof EffectiveWatchpointsDto>;
+
+/**
+ * `GET` and `PUT /projects/:id/watchpoints`: the list that applies, and the project's own entries behind it
+ * (its overrides, its own watchpoints and its `off` entries), which is exactly what a PUT replaces.
+ */
+export const ProjectWatchpointsDto = z.object({
+  effective: EffectiveWatchpointsDto,
+  entries: ProjectWatchpoints,
+});
+export type ProjectWatchpointsDto = z.infer<typeof ProjectWatchpointsDto>;
 
 /** Whether a project entry is the `off` shape, which names one of the builder's keys and nothing else. */
 export function isWatchpointOff(entry: ProjectWatchpointEntry): entry is WatchpointOff {
