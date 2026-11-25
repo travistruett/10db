@@ -1080,6 +1080,8 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         kept?.covers.includes(id) ? kept.revert : null,
       );
       if (waitingBatch !== null) withdrawWaitCards(ctx, waitingBatch.projectId, waitingBatch.id);
+      // The run's failed card, and any other card it left open, closes: the retried run raises its own.
+      ctx.inbox.cancelForWorkstream(id);
       if (retried.batchId !== null) reopen(retried.batchId);
       return retried;
     },

@@ -1,5 +1,14 @@
 import { z } from 'zod';
 import { JudgeCallError } from './credential';
+import {
+  NOULS_MAX_TOKENS,
+  NOULS_SYSTEM,
+  noulsPrompt,
+  noulsSchema,
+  readReportedProbabilities,
+  type NoulAnswers,
+  type NoulsAsked,
+} from './noul-questions';
 import type { ModelAnswer } from './openrouter';
 import { optionsText } from './openrouter';
 
@@ -62,6 +71,21 @@ export function messagesBody(q: MessagesQuestion): Record<string, unknown> {
   };
 }
 
+/** Yes/no questions asked of a Messages-shaped model, with its listed price when known. */
+export interface MessagesNouls extends NoulsAsked {
+  readonly price?: MessagesQuestion['price'];
+}
+
+/** The body for yes/no questions: the model reports each one's probability of yes. */
+export function messagesNoulsBody(q: MessagesNouls): Record<string, unknown> {
+  return {
+    max_tokens: NOULS_MAX_TOKENS,
+    system: NOULS_SYSTEM,
+    messages: [{ role: 'user', content: noulsPrompt(q) }],
+    output_config: { format: { type: 'json_schema', schema: noulsSchema(q) } },
+  };
+}
+
 const MessagesResponse = z.object({
   model: z.string().optional(),
   stop_reason: z.string().nullish(),
@@ -70,12 +94,12 @@ const MessagesResponse = z.object({
 });
 const Answer = z.object({ choice: z.string(), confidence: z.number() });
 
-/** Reads a Messages response into an answer. Throws JudgeCallError, naming `provider`, when it is none. */
-export function parseMessagesResponse(
+/** The text of a Messages response, its model and its cost. Throws JudgeCallError, naming `provider`, when it has none. */
+function messagesText(
   provider: string,
-  q: MessagesQuestion,
+  q: { readonly model: string; readonly price?: MessagesQuestion['price'] },
   value: unknown,
-): ModelAnswer {
+): { readonly text: string; readonly model: string; readonly costUsd: number | null } {
   const response = MessagesResponse.safeParse(value);
   if (!response.success) throw new JudgeCallError(`${provider} sent no usable message`);
   const { stop_reason: stop, content, usage } = response.data;
@@ -83,6 +107,35 @@ export function parseMessagesResponse(
     throw new JudgeCallError(`${provider} gave no answer: it stopped for ${stop}`);
   const text = content.find((block) => block.type === 'text')?.text;
   if (text === undefined) throw new JudgeCallError(`${provider} sent no text`);
+  const costUsd =
+    q.price === undefined || usage === null || usage === undefined
+      ? null
+      : (usage.input_tokens * q.price.inputUsdPerMillion +
+          usage.output_tokens * q.price.outputUsdPerMillion) /
+        1_000_000;
+  return { text, model: response.data.model ?? q.model, costUsd };
+}
+
+/** Reads a Messages response to yes/no questions. Throws JudgeCallError, naming `provider`, when it is none. */
+export function parseMessagesNouls(
+  provider: string,
+  q: MessagesNouls,
+  value: unknown,
+): NoulAnswers {
+  const { text, model, costUsd } = messagesText(provider, q, value);
+  const probabilities = readReportedProbabilities(q, text);
+  if (probabilities === null)
+    throw new JudgeCallError('The model did not answer every question with a number');
+  return { probabilities, model, costUsd };
+}
+
+/** Reads a Messages response into an answer. Throws JudgeCallError, naming `provider`, when it is none. */
+export function parseMessagesResponse(
+  provider: string,
+  q: MessagesQuestion,
+  value: unknown,
+): ModelAnswer {
+  const { text, model, costUsd } = messagesText(provider, q, value);
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -97,18 +150,7 @@ export function parseMessagesResponse(
     throw new JudgeCallError(
       `The model chose ${JSON.stringify(answer.data.choice)}, which was not offered`,
     );
-  const costUsd =
-    q.price === undefined || usage === null || usage === undefined
-      ? null
-      : (usage.input_tokens * q.price.inputUsdPerMillion +
-          usage.output_tokens * q.price.outputUsdPerMillion) /
-        1_000_000;
-  return {
-    choice,
-    confidence: Math.min(1, Math.max(0, answer.data.confidence)),
-    model: response.data.model ?? q.model,
-    costUsd,
-  };
+  return { choice, confidence: Math.min(1, Math.max(0, answer.data.confidence)), model, costUsd };
 }
 
 /** The provider's own words are kept, so a refusal is readable; the secret is never in them. */
@@ -121,14 +163,29 @@ export function scrubbed(text: string, ...secrets: readonly (string | null)[]): 
 
 const ErrorBody = z.object({ error: z.object({ message: z.string() }) });
 
+/** What an Anthropic call carries, whatever it asks. */
+export interface AnthropicCall {
+  readonly key: string;
+  readonly fetch: typeof fetch;
+  readonly signal: AbortSignal;
+}
+
 /** One Messages call to Anthropic's API. Throws JudgeCallError, or what `fetch` throws. */
-export async function askAnthropic(
-  q: MessagesQuestion & {
-    readonly key: string;
-    readonly fetch: typeof fetch;
-    readonly signal: AbortSignal;
-  },
-): Promise<ModelAnswer> {
+export async function askAnthropic(q: MessagesQuestion & AnthropicCall): Promise<ModelAnswer> {
+  return parseMessagesResponse('Anthropic', q, await sendAnthropic(q, q.model, messagesBody(q)));
+}
+
+/** Yes/no questions in one Messages call to Anthropic's API. Throws JudgeCallError, or what `fetch` throws. */
+export async function askAnthropicNouls(q: MessagesNouls & AnthropicCall): Promise<NoulAnswers> {
+  return parseMessagesNouls('Anthropic', q, await sendAnthropic(q, q.model, messagesNoulsBody(q)));
+}
+
+/** Posts a Messages body and answers the parsed JSON. Throws JudgeCallError, or what `fetch` throws. */
+async function sendAnthropic(
+  q: AnthropicCall,
+  model: string,
+  body: Record<string, unknown>,
+): Promise<unknown> {
   const response = await q.fetch(MESSAGES_URL, {
     method: 'POST',
     headers: {
@@ -136,7 +193,7 @@ export async function askAnthropic(
       'anthropic-version': ANTHROPIC_VERSION,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ model: q.model, ...messagesBody(q) }),
+    body: JSON.stringify({ model, ...body }),
     signal: q.signal,
   });
   const text = await response.text();
@@ -159,5 +216,5 @@ export async function askAnthropic(
       scrubbed(`Anthropic answered HTTP ${String(response.status)}${why}`, q.key),
     );
   }
-  return parseMessagesResponse('Anthropic', q, value);
+  return value;
 }

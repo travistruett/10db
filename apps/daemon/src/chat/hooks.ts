@@ -930,6 +930,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                     },
                     policy: policy ?? policyOf(null),
                     allowLines: () => projectGrantLines(state.db, project.id),
+                    // A chat is no run, so it has no Retry or Send back notes.
+                    builderNotes: [],
                     judgeNow: (req) => judgeForCall(judge, req.reportedMode ?? null, tendbReady),
                     // A chat's allow list holds none of the project's allowed commands.
                     coveredByBuilderRule: () => false,

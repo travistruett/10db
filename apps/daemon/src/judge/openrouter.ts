@@ -1,4 +1,13 @@
 import { z } from 'zod';
+import {
+  NOULS_MAX_TOKENS,
+  NOULS_SYSTEM,
+  noulsPrompt,
+  noulsSchema,
+  readReportedProbabilities,
+  type NoulAnswers,
+  type NoulsAsked,
+} from './noul-questions';
 
 /**
  * The two shapes of call OpenRouter serves, from its own documentation:
@@ -106,8 +115,26 @@ const ChatResponse = z.object({
 
 const ChatAnswer = z.object({ choice: z.string(), confidence: z.number().min(0).max(1) });
 
+/** What every OpenRouter call carries, whatever it asks. */
+type OpenRouterCall = Pick<OpenRouterQuestion, 'key' | 'fetch' | 'signal'>;
+
+/** Several yes/no questions on the endpoint `api` names. */
+export interface OpenRouterNouls extends NoulsAsked, OpenRouterCall {
+  readonly api: ModelApi;
+}
+
+/** A System One or decisions answer to yes/no questions: each one's probability of yes. */
+const NoulResponse = z.object({
+  model: z.string(),
+  answers: z.record(
+    z.string(),
+    z.object({ type: z.literal('noul'), noul: z.number().min(0).max(1) }),
+  ),
+  usage: Cost,
+});
+
 async function post(
-  q: OpenRouterQuestion,
+  q: OpenRouterCall,
   url: string,
   body: unknown,
 ): Promise<{ readonly value: unknown }> {
@@ -236,6 +263,63 @@ async function askChat(q: OpenRouterQuestion): Promise<ModelAnswer> {
     model: response.data.model,
     costUsd: costOf(response.data.usage),
   };
+}
+
+/** A System One or decisions call: each question a `noul`, answered with its probability of yes. */
+async function askNoulDecision(q: OpenRouterNouls, url: string): Promise<NoulAnswers> {
+  const { value } = await post(q, url, {
+    model: q.model,
+    state: q.state,
+    questions: Object.fromEntries(
+      Object.entries(q.questions).map(([id, question]) => [id, { type: 'noul', ...question }]),
+    ),
+  });
+  const parsed = NoulResponse.safeParse(value);
+  if (!parsed.success) throw new OpenRouterError('OpenRouter sent no usable yes/no answers');
+  const probabilities: Record<string, number> = {};
+  for (const id of Object.keys(q.questions)) {
+    const answer = parsed.data.answers[id];
+    if (answer === undefined) throw new OpenRouterError(`OpenRouter left ${id} unanswered`);
+    probabilities[id] = answer.noul;
+  }
+  return { probabilities, model: parsed.data.model, costUsd: costOf(parsed.data.usage) };
+}
+
+/** A chat model reports its own probability of yes for each question, as JSON. */
+async function askChatNouls(q: OpenRouterNouls): Promise<NoulAnswers> {
+  const { value } = await post(q, CHAT_URL, {
+    model: q.model,
+    max_tokens: NOULS_MAX_TOKENS,
+    temperature: 0,
+    messages: [
+      { role: 'system', content: NOULS_SYSTEM },
+      { role: 'user', content: noulsPrompt(q) },
+    ],
+    response_format: {
+      type: 'json_schema',
+      json_schema: { name: 'answers', strict: true, schema: noulsSchema(q) },
+    },
+  });
+  const response = ChatResponse.safeParse(value);
+  const content = response.success ? response.data.choices[0]?.message.content : null;
+  if (!response.success || content === null || content === undefined)
+    throw new OpenRouterError('OpenRouter sent no message');
+  const probabilities = readReportedProbabilities(q, content);
+  if (probabilities === null)
+    throw new OpenRouterError('The model did not answer every question with a number');
+  return { probabilities, model: response.data.model, costUsd: costOf(response.data.usage) };
+}
+
+/** Yes/no questions on the OpenRouter endpoint `q.api` names. Throws OpenRouterError, or what `fetch` throws. */
+export function askOpenRouterNouls(q: OpenRouterNouls): Promise<NoulAnswers> {
+  switch (q.api) {
+    case ModelApi.SystemOne:
+      return askNoulDecision(q, SYSTEM_ONE_URL);
+    case ModelApi.Decisions:
+      return askNoulDecision(q, DECISIONS_URL);
+    case ModelApi.Chat:
+      return askChatNouls(q);
+  }
 }
 
 /** One call on the OpenRouter endpoint `q.api` names. Throws OpenRouterError, or what `fetch` throws. */

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "365d7c75-3261-4be8-b498-dc9dc2a0b79e",
+  "id": "3874a7a5-455f-47ab-a255-ee31abc2fd9f",
   "prevId": "cb94b858-9648-4bd5-9c5e-5f5a1930b6c3",
   "tables": {
     "aa_models": {
@@ -879,14 +879,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "full_access": {
-          "name": "full_access",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
         }
       },
       "indexes": {
@@ -2838,6 +2830,13 @@
         "confidence": {
           "name": "confidence",
           "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "probabilities": {
+          "name": "probabilities",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

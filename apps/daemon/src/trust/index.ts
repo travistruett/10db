@@ -16,6 +16,7 @@ export {
   crossesLimit,
   PRE_EXISTING_READ_MAX,
   type LimitAt,
+  type LimitVerdict,
 } from './crosses-limit';
 export {
   grantCallSummary,

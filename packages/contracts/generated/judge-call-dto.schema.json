@@ -21,6 +21,7 @@
         "task_rigor",
         "task_kinds",
         "crosses_limit",
+        "crosses_limit_second",
         "test_value"
       ]
     },
@@ -40,6 +41,22 @@
       "type": [
         "number",
         "null"
+      ]
+    },
+    "probabilities": {
+      "anyOf": [
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "outcome": {
@@ -103,6 +120,7 @@
     "question",
     "answer",
     "confidence",
+    "probabilities",
     "outcome",
     "latencyMs",
     "costUsd",

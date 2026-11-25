@@ -18,6 +18,7 @@ import {
   callKey,
   callSummary,
   crossesLimit,
+  type LimitVerdict,
   isGrantedCall,
   projectGrantedCalls,
   skipMessage,
@@ -31,6 +32,8 @@ export const FLOOR_BACKOFF_MS = 60_000;
 
 /** The most tool use ids whose limits are kept for their cards; the oldest is dropped first. */
 const NOTED_IDS_MAX = 256;
+/** The most calls a session remembers the judges' verdict on; the oldest is forgotten first. */
+export const SETTLED_CALLS_MAX = 512;
 
 /**
  * The limits 10db's judge stopped calls at, by tool use id, for the card the broker raises next. A Codex patch
@@ -73,6 +76,8 @@ export interface HookJudgeContext {
   readonly policy: TrustPolicy;
   /** The builder's approved calls and the project's grants as they are now, so a grant removed mid-session stops at once. */
   readonly allowLines: () => readonly string[];
+  /** What the builder wrote on this run when they retried it or sent it back, oldest first. */
+  readonly builderNotes: readonly string[];
   /** The judge of this call: only a `tendb` call is 10db's judge's. */
   readonly judgeNow: (req: JudgedCallRequest) => JudgeKind;
   /**
@@ -100,13 +105,30 @@ const InputRecord = z.record(z.string(), z.unknown());
 /**
  * The session judge for a call the guard left open, on 10db's judge: the fast path, then `crossesLimit`. An allow
  * settles the call; a limit asks the builder (attended) or is a recorded skip (a lane); a judge that can't answer
- * gives the session's rules answer, and for `FLOOR_BACKOFF_MS` after a timeout or an error asks no model.
+ * gives the session's rules answer, and for `FLOOR_BACKOFF_MS` after a timeout or an error asks no model. The judges'
+ * verdict on a call is kept for the session, keyed by the call and the allow lines it was judged with, so the same
+ * call is answered the same way and a changed grant judges it again. For `FLOOR_BACKOFF_MS` after the second opinion
+ * timed out or failed, a call the first judge leaves unclear skips without asking it.
  */
 export function createHookJudge(
   deps: { readonly judge: Judge; readonly state: StateStore; readonly logger: Logger },
   ctx: HookJudgeContext,
 ): (req: JudgedCallRequest) => Promise<GuardVerdict> {
   let downAt: { readonly ms: number; readonly detail: string } | null = null;
+  let secondDownAt: number | null = null;
+  const settled = new Map<string, LimitVerdict>();
+  // Only a model's decisive verdict is kept: its allow, or a limit it named. The fast path reads the disk each time
+  // (a link made since can lead a write to data that was there before), so its allow is never kept; nor is a call
+  // the judges couldn't settle, or one a failed judge left to the rules.
+  const remember = (key: string, verdict: LimitVerdict): void => {
+    if (verdict.kind === 'floor' || (verdict.kind === 'limit' && verdict.at.limit === null)) return;
+    if (verdict.kind === 'allow' && verdict.by !== 'model') return;
+    settled.set(key, verdict);
+    if (settled.size > SETTLED_CALLS_MAX) {
+      const [oldest] = settled.keys();
+      if (oldest !== undefined) settled.delete(oldest);
+    }
+  };
 
   const floor = (req: JudgedCallRequest, detail: string): GuardVerdict => {
     ctx.onFloor(detail);
@@ -130,28 +152,48 @@ export function createHookJudge(
       return { decision: 'allow', settled: GRANT_SETTLED };
     if (judging !== JudgeKind.Tendb) return { decision: 'allow' };
     if (ctx.coveredByBuilderRule(req)) return { decision: 'allow', settled: RULE_SETTLED };
+    const allow = ctx.allowLines();
+    const key = JSON.stringify([
+      callKey(req.toolName, input, ctx.fastPath.checkout),
+      // An input that is not an object reads as `{}` above, so the raw input keeps such calls apart.
+      req.input,
+      req.cwd,
+      req.hunk,
+      allow,
+      ctx.builderNotes,
+    ]);
+    const known = settled.get(key);
     const now = ctx.clock.now().getTime();
-    if (downAt !== null && now - downAt.ms < FLOOR_BACKOFF_MS) return floor(req, downAt.detail);
-    const verdict = await crossesLimit(
-      { judge: deps.judge, state: deps.state },
-      {
-        call: {
-          toolName: req.toolName,
-          input: req.input,
-          cwd: req.cwd ?? ctx.fastPath.checkout,
-          hunk: req.hunk,
+    if (known === undefined && downAt !== null && now - downAt.ms < FLOOR_BACKOFF_MS)
+      return floor(req, downAt.detail);
+    const verdict =
+      known ??
+      (await crossesLimit(
+        { judge: deps.judge, state: deps.state },
+        {
+          call: {
+            toolName: req.toolName,
+            input: req.input,
+            cwd: req.cwd ?? ctx.fastPath.checkout,
+            hunk: req.hunk,
+          },
+          fastPath: ctx.fastPath,
+          policy: ctx.policy,
+          allow,
+          notes: ctx.builderNotes,
+          secondOpinion: secondDownAt === null || now - secondDownAt >= FLOOR_BACKOFF_MS,
+          ...(ctx.workstreamId === null ? {} : { workstreamId: ctx.workstreamId }),
+          ...(ctx.taskId === null ? {} : { taskId: ctx.taskId }),
+          signal: req.signal,
         },
-        fastPath: ctx.fastPath,
-        policy: ctx.policy,
-        allow: ctx.allowLines(),
-        ...(ctx.workstreamId === null ? {} : { workstreamId: ctx.workstreamId }),
-        ...(ctx.taskId === null ? {} : { taskId: ctx.taskId }),
-        signal: req.signal,
-      },
-    );
+      ));
+    remember(key, verdict);
+    if (verdict.kind === 'limit' && verdict.secondDown !== undefined)
+      secondDownAt = ctx.clock.now().getTime();
+    // Only a model's fresh answer says the judge is back; a remembered verdict says nothing of it.
+    if (known === undefined && verdict.kind !== 'floor') downAt = null;
     switch (verdict.kind) {
       case 'allow':
-        downAt = null;
         return {
           decision: 'allow',
           settled: verdict.by === 'fast_path' ? FAST_PATH_SETTLED : MODEL_SETTLED,
@@ -161,7 +203,6 @@ export function createHookJudge(
           downAt = { ms: ctx.clock.now().getTime(), detail: verdict.detail };
         return floor(req, verdict.detail);
       case 'limit': {
-        downAt = null;
         const { at } = verdict;
         if (ctx.skips === null) {
           // Without an id no card can be tied to the call, so it is refused with its reason.

@@ -22,6 +22,8 @@ export interface TrustPolicyInput {
   readonly approved?: readonly ApprovedAction[];
   /** The project's grants as lines (`projectGrantLines`), read as the session starts. */
   readonly grants: readonly string[];
+  /** What the builder wrote on this run when they retried it or sent it back (`builderNotesOf`); none when absent. */
+  readonly builderNotes?: readonly string[];
   /** The names of the builder's own MCP servers in this session; their tools act outside the sandbox. */
   readonly yourMcpServers: readonly string[];
   /** Whether the session carries the builder's claude.ai connectors, which act outside the sandbox. */
@@ -143,6 +145,13 @@ function environmentLines(input: TrustPolicyInput): string[] {
   ];
 }
 
+/** The builder's notes on the run as allow lines Claude Code's auto mode reads, each on one line. */
+function builderNoteLines(notes: readonly string[]): string[] {
+  return notes.map(
+    (note) => `The builder wrote on this run: ${JSON.stringify(note.replace(/\s+/g, ' ').trim())}`,
+  );
+}
+
 /** The approved calls a judge reads by intent, as lines: only the classifier's, which it skipped by intent. */
 export function approvedLines(approved: readonly ApprovedAction[]): string[] {
   return approved.flatMap((a) => {
@@ -161,7 +170,13 @@ export function buildTrustPolicy(input: TrustPolicyInput): TrustPolicy {
     environment: environmentLines(input),
     coordination: coordinationLines(input.surface, input.gateCommand),
     // Only the classifier reads by intent; the guard and the broker match the other approvals' keys.
-    allow: [...new Set([...approvedLines(input.approved ?? []), ...input.grants])],
+    allow: [
+      ...new Set([
+        ...approvedLines(input.approved ?? []),
+        ...input.grants,
+        ...builderNoteLines(input.builderNotes ?? []),
+      ]),
+    ],
     switches: input.switches,
   });
 }

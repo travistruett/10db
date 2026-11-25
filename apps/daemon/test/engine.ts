@@ -274,6 +274,13 @@ export const offJudge: Judge = {
       detail: 'off',
       callId: mintId('JudgeCall'),
     }),
+  assess: () =>
+    Promise.resolve({
+      kind: 'fallback',
+      reason: 'off',
+      detail: 'off',
+      callId: mintId('JudgeCall'),
+    }),
 };
 
 export async function createTestEngine(

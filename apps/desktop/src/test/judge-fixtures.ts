@@ -138,6 +138,7 @@ export function serveJudge(initial: {
             task_rigor: merged(JudgeDecision.TaskRigor),
             task_kinds: merged(JudgeDecision.TaskKinds),
             crosses_limit: merged(JudgeDecision.CrossesLimit),
+            crosses_limit_second: merged(JudgeDecision.CrossesLimitSecond),
             test_value: merged(JudgeDecision.TestValue),
           },
         },

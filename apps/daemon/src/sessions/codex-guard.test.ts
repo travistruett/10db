@@ -779,6 +779,7 @@ describe('judgeHookCall with the session judge', () => {
               devAccess: { docker: false, localhost: false, compose: null },
             }),
             allowLines: () => [],
+            builderNotes: [],
             judgeNow: () => JudgeKind.Tendb,
             coveredByBuilderRule: () => false,
             floorVerdict: () => ({ decision: 'ask', reason: 'rules' }),
