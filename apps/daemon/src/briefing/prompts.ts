@@ -88,6 +88,11 @@ export interface PromptInput {
    * reviewer, not a finding. Absent or null when there is nothing to say.
    */
   readonly testValue?: string | null;
+  /**
+   * What the acceptance check could not settle, for a review's first round: the criteria it read as unclear and
+   * what the change does that the task didn't ask for. Input to the reviewer, not a finding.
+   */
+  readonly acceptance?: string | null;
   readonly revisedBy: {
     readonly role: StepRole;
     readonly personaName: string;
@@ -1077,6 +1082,8 @@ function stepSection(input: PromptInput): string[] {
   const firstRound = !input.earlierResults.some((r) => r.verdict === Verdict.Reject);
   if (step.role === StepRole.Review && firstRound && input.testValue)
     lines.push('', input.testValue);
+  if (step.role === StepRole.Review && firstRound && input.acceptance)
+    lines.push('', input.acceptance);
   return lines;
 }
 

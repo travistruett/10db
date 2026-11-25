@@ -10,6 +10,9 @@ import {
   Approval,
   McpToolName,
   McpToolOutputs,
+  AcceptanceVerdict,
+  EvidenceKind,
+  type AcceptanceDetail,
   ConflictError,
   currentStep,
   EventType,
@@ -358,6 +361,15 @@ import { checkCoverage, coverageNote, type CheckCoverage } from './check-coverag
 import { planOf, raisePlanApproval, waitsForPlanApproval } from './plan-approval';
 import { outstandingFixEvidence } from './fix-evidence';
 import { shipsAtRetryLimit } from './limit-ship';
+import {
+  ACCEPTANCE_DIFF_CAP,
+  AcceptanceMove,
+  acceptanceBrief,
+  acceptanceMove,
+  acceptedCriteria,
+  checkAcceptance,
+  raiseAcceptanceCard,
+} from '../acceptance';
 import { FORCED_REVIEW_DIFF_BYTES, forcedReview } from './forced-review';
 import {
   createLaneMessages,
@@ -1563,6 +1575,65 @@ export function createRunner(opts: RunnerOptions): Runner {
     )
       return [];
     return testValueFlags(row, checkout);
+  }
+
+  /**
+   * What the acceptance check reads of the run after its final gate passed: each criterion of the task against the
+   * change. Null unless the step is the last Implement step of a plan with no fixed plan, the task has criteria and
+   * the first decision can be asked. Read before the write that moves the workstream on; a stop ends the calls.
+   */
+  async function acceptanceAfter(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+    checkout: string,
+    gate: { command: string; summary: string },
+  ): Promise<Omit<AcceptanceDetail, 'sentBack'> | null> {
+    const now = withCurrentPlan(db, id, ctl.accountId);
+    const task = getTask(db, row.taskId);
+    if (
+      now.steps[now.stepIndex]?.role !== StepRole.Implement ||
+      now.steps.slice(now.stepIndex + 1).some((s) => s.role === StepRole.Implement) ||
+      now.steps.some((s) => s.fixedPlan === true) ||
+      task.acceptanceCriteria.length === 0 ||
+      row.baseHead === null
+    )
+      return null;
+    const reading = new AbortController();
+    ctl.holdAbort = reading;
+    if (ctl.stopReason !== null) reading.abort();
+    try {
+      const { ranges } = await ownWork(row, checkout, row.baseHead);
+      const diff = await diffOfRanges(opts.git, checkout, ranges, ACCEPTANCE_DIFF_CAP * 4);
+      const decisions = getJudgeConfig(db).decisions;
+      return await checkAcceptance(
+        {
+          judge: opts.judge,
+          floors: {
+            first: decisions[JudgeDecision.Acceptance].floor,
+            second: decisions[JudgeDecision.AcceptanceSecond].floor,
+          },
+        },
+        {
+          task: { title: task.title, why: task.why, description: task.description },
+          criteria: task.acceptanceCriteria,
+          accepted: acceptedCriteria(db, id),
+          diff,
+          gate,
+          workstreamId: id,
+          taskId: row.taskId,
+        },
+        reading.signal,
+      );
+    } catch (error) {
+      opts.logger.warn(
+        { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+        'the acceptance check could not read the run; it goes on',
+      );
+      return null;
+    } finally {
+      ctl.holdAbort = null;
+    }
   }
 
   function reviewFollows(steps: readonly WorkstreamStep[], at: number): boolean {
@@ -3046,6 +3117,16 @@ export function createRunner(opts: RunnerOptions): Runner {
       !step.earlier.some((r) => r.verdict === Verdict.Reject)
         ? testValueBrief(await testValueFlags(row, checkout))
         : null;
+    const acceptance =
+      step.role === StepRole.Review &&
+      action.kind === 'start' &&
+      !step.earlier.some((r) => r.verdict === Verdict.Reject)
+        ? acceptanceBrief(
+            listEvidence(db, id)
+              .filter((e) => e.kind === EvidenceKind.Acceptance)
+              .at(-1)?.detail ?? null,
+          )
+        : null;
     const prompt = buildSessionPrompt({
       provider,
       linearIssue: linearIssue === null ? null : snapshotSection(linearIssue),
@@ -3112,6 +3193,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       previousResult: readOnly || plansFirst ? step.result : null,
       earlierResults: step.earlier,
       testValue,
+      acceptance,
       revisedBy: reviser
         ? {
             role: reviser.role,
@@ -4610,6 +4692,107 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
   }
 
+  /**
+   * Records what the acceptance check read and decides the run's move, inside the write that ends the step. A
+   * criterion not met sends the run back to the implement step that just ended while the rigor's rounds last
+   * (true: the caller does no more); otherwise the run goes on, leaving one card for what stayed unsettled
+   * (false). Verdicts of a criterion the task no longer names are dropped.
+   */
+  function sendBackForAcceptance(
+    ctx: WriteContext,
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+    current: WorkstreamRow,
+    plan: readonly WorkstreamStep[],
+    read: Omit<AcceptanceDetail, 'sentBack'>,
+    commitShas: readonly string[],
+  ): boolean {
+    const task = getTask(ctx.tx, row.taskId);
+    const named = new Set(task.acceptanceCriteria);
+    const criteria = read.criteria.filter((c) => named.has(c.criterion));
+    const step = current.steps[current.stepIndex];
+    if (!step) return false;
+    const { reviewRounds, fixBy } = rowProcess(
+      task.effectiveRigor,
+      playbookInputs(ctx.tx, row.projectId).playbook,
+    );
+    const move = acceptanceMove({
+      results: criteria,
+      reviewFollows: reviewFollows(plan, current.stepIndex),
+      atLimit: atRoundLimit(step.acceptanceSentBack ?? 0, reviewRounds),
+    });
+    const sentBack = move === AcceptanceMove.SendBack;
+    const detail: AcceptanceDetail = { criteria, unasked: read.unasked, sentBack };
+    const notMet = criteria.filter((c) => c.verdict === AcceptanceVerdict.NotMet).length;
+    const record = insertEvidence(ctx, {
+      workstreamId: id,
+      kind: EvidenceKind.Acceptance,
+      command: null,
+      exitCode: null,
+      summary: `Acceptance: ${String(notMet)} of ${String(criteria.length)} criteria read as not met`,
+      logPath: null,
+      commitShas: [...commitShas],
+      detail,
+    });
+    if (move === AcceptanceMove.GoOnWithCard)
+      raiseAcceptanceCard(ctx, {
+        workstreamId: id,
+        projectId: row.projectId,
+        taskTitle: task.title,
+        detail,
+      });
+    if (!sentBack) return false;
+    // The fix resumes the step's own session when the rigor fixes in it; otherwise it runs fresh, a rung up.
+    const resumes = fixBy === FixBy.Resumed && step.providerSessionId !== undefined;
+    const up = resumes
+      ? {
+          step: {
+            ...step,
+            reason: step.reason.includes(FIXING_IN_OWN_SESSION)
+              ? step.reason
+              : `${step.reason}; ${FIXING_IN_OWN_SESSION}`,
+            fixFresh: FixFresh.Pending,
+          },
+          moved: false,
+        }
+      : withFixFresh(
+          escalated(row, step, 'the acceptance check read a criterion as not met', ctl.accountId),
+        );
+    if (up.moved && step.profileId)
+      recordProfileOutcome(ctx, step.profileId, { firstPass: false, escalated: true });
+    const target = { ...up.step, acceptanceSentBack: (step.acceptanceSentBack ?? 0) + 1 };
+    transitionWorkstream(ctx, id, {
+      to: S.Queued,
+      fence: ctl.fence,
+      patch: {
+        nextAction: {
+          kind: 'fix',
+          evidenceId: record.id,
+          providerSessionId: resumes ? (step.providerSessionId ?? null) : null,
+        },
+        steps: sendBackSteps(
+          current.steps,
+          current.stepIndex,
+          current.stepIndex,
+          target,
+          entryFor(ctx, id),
+        ),
+        model: up.step.model,
+        effort: up.step.effort,
+      },
+      reason: 'acceptance: a criterion is not met',
+    });
+    clearLease(ctx, id);
+    ctx.emit({
+      type: EventType.StepChanged,
+      entityType: 'workstream',
+      entityId: id,
+      data: { stepIndex: current.stepIndex, role: step.role, sentBackBy: 'acceptance' },
+    });
+    return true;
+  }
+
   async function verify(id: WorkstreamId, ctl: Control, final = false): Promise<void> {
     if (getWorkstreamRow(db, id).state !== S.Verifying) {
       opts.state.write((ctx) =>
@@ -4919,6 +5102,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       const forced = await reviewForcedAfter(id, ctl, row, checkout);
       // With no Review after this step, the judge's flags on the new tests become follow-up tasks.
       const testValue = await testValueFollowUpsAfter(id, ctl, row, checkout, forced);
+      const acceptance = await acceptanceAfter(id, ctl, row, checkout, {
+        command: gateCommand,
+        summary: evidence.summary,
+      });
       // Information only: a check that passed on less than the step changed says so in its record.
       const note = coverageNote(await coverageOf(row, checkout, head, gateCommand));
       if (note !== null) evidence.summary = `${note}\n\n${evidence.summary}`;
@@ -4936,6 +5123,20 @@ export function createRunner(opts: RunnerOptions): Runner {
         const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
         const net = withSafetyNet(ctx.tx, ctl.accountId, current, forced);
         const steps = net.steps;
+        if (
+          acceptance !== null &&
+          sendBackForAcceptance(
+            ctx,
+            id,
+            ctl,
+            row,
+            current,
+            net.steps,
+            acceptance,
+            evidence.commitShas,
+          )
+        )
+          return;
         const after = moveAfter(steps, current.stepIndex);
         countFinished(ctx, step);
         if (!reviewFollows(net.steps, current.stepIndex))
