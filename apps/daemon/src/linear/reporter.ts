@@ -27,6 +27,7 @@ import {
   getTask,
   holdLinearPosts,
   insertItem,
+  lastConversationSessions,
   lastItems,
   listItems,
   pendingLinearPosts,
@@ -47,7 +48,7 @@ import { refreshReporterCard } from './reporter-inbox';
 import { taskPrUrl } from './reporter-brief';
 import { judgeReporterCall, type ReporterRun } from './reporter-guard';
 import { reporterPictures, uploadPicture } from './reporter-pictures';
-import { checkSaysSignedOut, reachOutcome } from './reporter-reach';
+import { accountRunStart, checkSaysSignedOut, reachOutcome } from './reporter-reach';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
 import { noLinearCall, signInNeeded } from './sign-in-needed';
 import {
@@ -81,6 +82,8 @@ export const REPORTER_STARTER = 'Report the pending Linear updates.';
 
 /** How many of the conversation's newest items a settle reads for the run's and the earlier Linear calls. */
 const CALLS_READ = 200;
+/** How many of the conversation's newest sessions a settle reads for where its account's own run began. */
+const SESSIONS_READ = 50;
 
 const ALLOWED_BY_RULE = "10db's reporter rule allows this call.";
 const SESSION_OVER = 'This reporter run is over; nothing it calls is recorded.';
@@ -324,8 +327,10 @@ export function createLinearReporter(
       arm(taskId);
       return;
     }
+    // A check that says signed in outweighs what an earlier run found.
+    if (row?.signedIn === true) signedOut.delete(accountId);
     // An account a run lately found signed out holds without a session, as does one whose check says signed out;
-    // an unchecked row is a maybe (after a restart) and goes ahead.
+    // an unchecked or unread row is a maybe (after a restart) and goes ahead.
     const known = signedOut.get(accountId);
     const found =
       known !== undefined && known.until > now
@@ -457,15 +462,27 @@ export function createLinearReporter(
     return { kind: 'missing', reason };
   };
 
-  /** The tool calls of the conversation's newest items: the run's own, and those before its starter. */
-  const callsOf = (flight: Flight): { runCalls: ToolCallView[]; earlierCalls: ToolCallView[] } => {
+  /**
+   * The tool calls of the conversation's newest items: the run's own, and those before its starter that sessions
+   * on the run's account made. The conversation outlives a move, so another account's answers are left out.
+   */
+  const callsOf = (
+    flight: Flight & { accountId: AccountId },
+  ): { runCalls: ToolCallView[]; earlierCalls: ToolCallView[] } => {
     const runCalls: ToolCallView[] = [];
     const earlierCalls: ToolCallView[] = [];
+    const since = accountRunStart(
+      lastConversationSessions(state.db, flight.conversationId, SESSIONS_READ),
+      flight.accountId,
+    );
     for (const item of lastItems(state.db, flight.conversationId, CALLS_READ)) {
       if (item.kind !== ConversationItemKind.ToolCall) continue;
+      const own = item.seq > flight.afterSeq;
+      // Items and sessions are stamped by the store's one clock, in the same form.
+      if (!own && (since === null || item.createdAt < since)) continue;
       try {
         const call = parseItemBody(ConversationItemKind.ToolCall, item.body);
-        (item.seq > flight.afterSeq ? runCalls : earlierCalls).push(call);
+        (own ? runCalls : earlierCalls).push(call);
       } catch {
         // A body that isn't a call's shows nothing either way.
       }

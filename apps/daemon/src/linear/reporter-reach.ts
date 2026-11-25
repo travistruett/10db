@@ -1,6 +1,7 @@
 import {
   LinearVia,
   ToolCallStatus,
+  type AccountId,
   type LinearSignInRowDto,
   type ToolCallView,
 } from '@10db/contracts';
@@ -26,10 +27,30 @@ export type ReachOutcome =
 const AUTH_ERROR =
   /\b401\b|unauthori[sz]ed|unauthenticated|invalid_token|authentication required|needs? auth/i;
 
-/** The account's sign-in check says it has no Linear: a checked `none`, or its server read as signed out. */
+/**
+ * The account's sign-in check says it has no Linear: a checked `none`, or a read of its server that says not
+ * signed in. A status that couldn't be read is `signedIn: null`, which says nothing.
+ */
 export function checkSaysSignedOut(row: LinearSignInRowDto | null | undefined): boolean {
   if (row === null || row === undefined) return false;
   return (row.via === LinearVia.None && !row.unchecked) || row.signedIn === false;
+}
+
+/**
+ * When the account's unbroken run of the conversation's newest sessions began, from its sessions newest first.
+ * A task's one reporter conversation outlives a move to another account, and only what Linear answered since
+ * the account took it over says anything about that account's sign-in. Null when the newest session isn't its own.
+ */
+export function accountRunStart(
+  newestFirst: readonly { readonly accountId: AccountId; readonly startedAt: string }[],
+  accountId: AccountId,
+): string | null {
+  let since: string | null = null;
+  for (const session of newestFirst) {
+    if (session.accountId !== accountId) break;
+    since = session.startedAt;
+  }
+  return since;
 }
 
 type McpCall = Extract<ToolCallView, { kind: 'mcp' }>;
@@ -52,7 +73,7 @@ export function reachOutcome(input: {
   readonly signIn: LinearSignInRowDto | null;
   /** The run's own tool calls. */
   readonly runCalls: readonly ToolCallView[];
-  /** The conversation's tool calls before the run. */
+  /** The conversation's tool calls before the run, from sessions on the run's account (`accountRunStart`). */
   readonly earlierCalls: readonly ToolCallView[];
 }): ReachOutcome {
   const run = linearCalls(input.runCalls, input.linearPrefixes);

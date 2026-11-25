@@ -12,12 +12,12 @@ account that can't reach Linear. `linear/reporter-reach.ts` (`reachOutcome`, pur
 2. A Linear call of the run failed with an auth error (401, unauthorized, unauthenticated, `invalid_token`,
    authentication required, needs auth, in its error or result): held for a sign-in.
 3. The guard allowed a Linear call: the run reached Linear, and its rows fail.
-4. The account's sign-in check says signed out (`checkSaysSignedOut`: a checked `LinearVia.None`, or its
-   server read as `signedIn: false`): held.
+4. The account's sign-in check says signed out (`checkSaysSignedOut`: a checked `LinearVia.None`, or a read
+   of its server that says not signed in, `signedIn: false`): held.
 5. The session had no Linear server: held.
 6. The check says signed in, or a Linear call answered earlier in the same Reporter conversation (the newest 200
-   items): the rows fail with a try spent, and the reason says why this isn't a sign-in (`noLinearCall`). The
-   account is not taken as signed out, so its other tasks still run.
+   items) in a session on the run's account: the rows fail with a try spent, and the reason says why this isn't
+   a sign-in (`noLinearCall`). The account is not taken as signed out, so its other tasks still run.
 7. Otherwise (a Claude account whose check can't read its server and whose conversation never answered): held.
 
 A call is on Linear when `mcp__<mcpToolPrefix(server)>__` is one of the run's Linear prefixes. The `server`
@@ -25,8 +25,17 @@ field of a tool call is the same on Claude and Codex.
 
 Also:
 
-- A pickup and a snapshot hold, or answer missing, on `checkSaysSignedOut`, which now includes `signedIn: false`.
-- An allowed Linear call forgets the account's in-memory signed-out note.
+- A pickup and a snapshot hold, or answer missing, on `checkSaysSignedOut`, which includes `signedIn: false`.
+- A Codex account's `signedIn` (`daemon/linear-sign-ins.ts`) is true when a Linear server reads signed in, false
+  only when every one reads not signed in, and null otherwise: a status that couldn't be read (a timeout immediately
+  after a restart, Codex still answering `unknown`) or a sign-in under way or ended in error says nothing, so the
+  run goes ahead and the rule above decides. Settings then shows such a row its switch, not Connect Linear.
+- Earlier answers count only from the account's own sessions. A task's one Reporter conversation outlives a move,
+  and its sessions name their account: `accountRunStart` finds where the unbroken run of newest sessions on the
+  run's account began (the newest 50), and only calls since then count. A project moved to a Claude account that
+  isn't signed in is therefore held, naming that account, as the amended decision says.
+- An allowed Linear call forgets the account's in-memory signed-out note, as does a pickup whose check says
+  signed in.
 - A `failed` report from a run that reached no Linear follows the same rule; when it spends a try, the reason
   carries what the session said.
 - A run's first message names its tools in full (`runToolNames` in `reporter-guard.ts`) and says to search for

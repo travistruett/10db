@@ -6,7 +6,7 @@ import {
   type LinearSignInRowDto,
   type ToolCallView,
 } from '@10db/contracts';
-import { checkSaysSignedOut, reachOutcome } from './reporter-reach';
+import { accountRunStart, checkSaysSignedOut, reachOutcome } from './reporter-reach';
 
 const CLAUDE = 'mcp__linear__';
 const CODEX = 'mcp__linear_app__';
@@ -134,6 +134,22 @@ describe('whether a reporter run that posted nothing was kept from Linear by its
     expect(checkSaysSignedOut(signIn({ via: LinearVia.None, unchecked: true }))).toBe(false);
     expect(checkSaysSignedOut(signIn({ signedIn: false }))).toBe(true);
     expect(checkSaysSignedOut(signIn({ signedIn: true }))).toBe(false);
+    expect(checkSaysSignedOut(signIn({ signedIn: null }))).toBe(false);
     expect(checkSaysSignedOut(null)).toBe(false);
+  });
+
+  it("counts earlier answers only from the account's own unbroken run of newest sessions", () => {
+    const other = AccountId.parse('acc_0193a5b0-0000-7000-8000-000000000002');
+    const own = signIn().accountId;
+    const session = (accountId: AccountId, minute: number) => ({
+      accountId,
+      startedAt: `2026-11-25T20:${String(minute)}:00.000Z`,
+    });
+    // Newest first: the project moved from `other` to `own` between minutes 30 and 40.
+    const moved = [session(own, 50), session(own, 40), session(other, 30), session(own, 20)];
+    expect(accountRunStart(moved, own)).toBe('2026-11-25T20:40:00.000Z');
+    // The newest session is another account's: nothing earlier is this account's answer.
+    expect(accountRunStart(moved, other)).toBeNull();
+    expect(accountRunStart([], own)).toBeNull();
   });
 });
