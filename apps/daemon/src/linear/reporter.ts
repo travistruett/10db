@@ -14,6 +14,7 @@ import {
   type ReportLinearPostInput,
   type SessionId,
   type TaskId,
+  type UploadLinearPictureInput,
 } from '@10db/contracts';
 import {
   dropPendingLinearPosts,
@@ -39,6 +40,7 @@ import { reporterBlockedBy } from './reporter-events';
 import { refreshReporterCard } from './reporter-inbox';
 import { taskPrUrl } from './reporter-brief';
 import { judgeReporterCall, type ReporterRun } from './reporter-guard';
+import { reporterPictures, uploadPicture } from './reporter-pictures';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
 import {
   SNAPSHOT_FIRST_LINE,
@@ -76,6 +78,8 @@ export interface LinearReporter {
   poke(taskId: TaskId): void;
   /** `report_linear_post`, from a reporter session only. */
   reportPost(sessionId: SessionId, input: ReportLinearPostInput): { ok: true };
+  /** `upload_linear_picture`: sends a picture this run was offered to Linear's signed URL. */
+  uploadPicture(sessionId: SessionId, input: UploadLinearPictureInput): Promise<{ ok: true }>;
   /**
    * Reads the task's linked Linear issue, its comments and its named relations through the account's own Linear
    * sign-in, in a read-only run, for a lane's brief. Null for a task with no link; a run that can't read says why.
@@ -117,6 +121,8 @@ export interface LinearReporterDeps {
   readonly conversations: { reporterOf(taskId: TaskId, projectId: ProjectId): ConversationId };
   readonly signIns: { list(): Promise<LinearSignInsDto> };
   readonly inbox: InboxService;
+  /** Sends a picture's bytes to Linear's storage. */
+  readonly fetch?: typeof fetch;
 }
 
 /** One run, from its trigger to its settle. */
@@ -510,7 +516,7 @@ export function createLinearReporter(
           linearPrefixes: input.linearPrefixes,
           link,
           prUrl: null,
-          uploads: [],
+          pictures: [],
           withheld: new Set(),
         };
         flight.sessionId = input.sessionId;
@@ -535,7 +541,7 @@ export function createLinearReporter(
         linearPrefixes: input.linearPrefixes,
         link,
         prUrl: taskPrUrl(state.db, flight.taskId),
-        uploads: [],
+        pictures: reporterPictures(state.db, flight.taskId, posts),
         withheld: new Set(),
       };
       flight.sessionId = input.sessionId;
@@ -606,6 +612,14 @@ export function createLinearReporter(
         recordLinearPosts(ctx, input.postIds, outcome);
       });
       refreshCard(flight.projectId);
+      return { ok: true };
+    },
+
+    async uploadPicture(sessionId, input) {
+      const { guard } = runOf(sessionId);
+      if (!guard.pictures.some((p) => p.id === input.pictureId))
+        throw new ConflictError('That picture was not offered to this run.');
+      await uploadPicture(state.db, input, deps.fetch ?? fetch);
       return { ok: true };
     },
 

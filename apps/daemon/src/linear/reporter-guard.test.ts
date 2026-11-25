@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { Provider, type ExternalLink } from '@10db/contracts';
+import { Provider, TaskScreenId, type ExternalLink } from '@10db/contracts';
 import { judgeReporterCall, linearToolPrefixes, type ReporterRun } from './reporter-guard';
+import { isLinearUploadUrl, type ReporterPicture } from './reporter-pictures';
 
 const L = 'mcp__claude_ai_Linear__';
 const PR = 'https://github.com/acme/app/pull/7';
@@ -18,13 +19,28 @@ function run(over: Partial<ReporterRun> = {}): ReporterRun {
     linearPrefixes: [L],
     link,
     prUrl: PR,
-    uploads: [],
+    pictures: [],
     withheld: new Set(),
     ...over,
   };
 }
 
 const call = (toolName: string, input: unknown = {}) => ({ toolName, input });
+
+const picture: ReporterPicture = {
+  id: TaskScreenId.parse('tsc_0193a5b0-0000-7000-8000-000000000001'),
+  name: '1-home-after.png',
+  label: 'After, /',
+  size: 68,
+};
+const offered = (): ReporterRun => run({ pictures: [picture] });
+const upload = (pictureId: string) =>
+  call('mcp__10db__upload_linear_picture', { pictureId, uploadUrl: 'x', headers: {} });
+const prepare = call(`${L}prepare_file_upload`, {
+  filename: '1-home-after.png',
+  contentType: 'image/png',
+  size: 68,
+});
 const decision = (r: ReporterRun, c: { toolName: string; input: unknown }) =>
   judgeReporterCall(r, c).verdict.decision;
 
@@ -102,6 +118,23 @@ describe('judgeReporterCall', () => {
     ['a read', run(), call(`${L}get_issue`, { id: 'iss-119' }), 'allow'],
     ['report tool', run(), call('mcp__10db__report_linear_post', {}), 'allow'],
     ['another 10db tool', run(), call('mcp__10db__commit', {}), 'deny'],
+    ['upload an offered picture', offered(), upload(picture.id), 'allow'],
+    [
+      'upload a picture not offered',
+      offered(),
+      upload('tsc_0193a5b0-0000-7000-8000-000000000002'),
+      'deny',
+    ],
+    ['upload with none offered', run(), upload(picture.id), 'deny'],
+    ['prepare a PNG upload when offered', offered(), prepare, 'allow'],
+    ['prepare an upload with none offered', run(), prepare, 'deny'],
+    ['attach a file to Resources', offered(), call(`${L}prepare_attachment_upload`, {}), 'deny'],
+    [
+      'snapshot uploads nothing',
+      run({ readOnly: true, pictures: [picture] }),
+      upload(picture.id),
+      'deny',
+    ],
     [
       'snapshot reads the issue',
       run({ readOnly: true }),
@@ -130,6 +163,25 @@ describe('judgeReporterCall', () => {
   ];
   it.each(rows)('%s', (_name, r, c, expected) => {
     expect(decision(r, c)).toBe(expected);
+  });
+
+  it('sends a picture only to an upload URL Linear signed', () => {
+    const signed = (
+      over: { host?: string; bucket?: string; signer?: string; scheme?: string } = {},
+    ) =>
+      `${over.scheme ?? 'https'}://${over.host ?? 'storage.googleapis.com'}/${over.bucket ?? 'linear-uploads-c4-us-east4'}/a/b/c?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=${encodeURIComponent(`${over.signer ?? 'linear-server@linear-1.iam.gserviceaccount.com'}/20261125/auto/storage/goog4_request`)}&X-Goog-Signature=ab`;
+    expect(isLinearUploadUrl(signed())).toBe(true);
+    expect(isLinearUploadUrl(signed({ scheme: 'http' }))).toBe(false);
+    expect(isLinearUploadUrl(signed({ host: 'evil.test' }))).toBe(false);
+    expect(isLinearUploadUrl(signed({ host: 'storage.googleapis.com.evil.test' }))).toBe(false);
+    expect(isLinearUploadUrl(signed({ bucket: 'someone-else' }))).toBe(false);
+    expect(isLinearUploadUrl(signed({ signer: 'me@evil-project.iam.gserviceaccount.com' }))).toBe(
+      false,
+    );
+    expect(isLinearUploadUrl('https://user:pw@storage.googleapis.com/linear-uploads-x/a')).toBe(
+      false,
+    );
+    expect(isLinearUploadUrl('not a url')).toBe(false);
   });
 
   it('withholds a body with a key, naming the pattern', () => {
