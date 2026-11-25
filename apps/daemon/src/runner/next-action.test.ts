@@ -86,6 +86,12 @@ describe('nextActionAfterCrash', () => {
         { kind: 'fix', evidenceId, providerSessionId: null },
       ],
       [
+        'sends an acceptance fix that resumed its session fresh after a crash',
+        { kind: 'fix', evidenceId, providerSessionId: 'p-build' },
+        'p-build',
+        { kind: 'fix', evidenceId, providerSessionId: null },
+      ],
+      [
         'keeps a revise with the step that rejected',
         { kind: 'revise', reviewStep: 1, providerSessionId: null },
         'p1',
@@ -215,6 +221,13 @@ describe('nextActionOnAnotherAccount', () => {
       [
         'leaves a fix alone',
         { kind: 'fix', evidenceId, providerSessionId: null },
+        handoff,
+        evidenceId,
+        { kind: 'fix', evidenceId, providerSessionId: null },
+      ],
+      [
+        'starts an acceptance fix that would resume a session on another account fresh',
+        { kind: 'fix', evidenceId, providerSessionId: 'p-build' },
         handoff,
         evidenceId,
         { kind: 'fix', evidenceId, providerSessionId: null },
@@ -352,6 +365,11 @@ describe('resumedSessionOf', () => {
         'names none for a fresh revise',
         { kind: 'revise', reviewStep: 1, providerSessionId: null },
         null,
+      ],
+      [
+        'names the session an acceptance fix resumes',
+        { kind: 'fix', evidenceId, providerSessionId: 'p-build' },
+        'p-build',
       ],
       ['names none for a gate fix', { kind: 'fix', evidenceId, providerSessionId: null }, null],
     ];

@@ -1190,7 +1190,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     row: WorkstreamRow,
   ): NextAction | null {
     const action = row.nextAction;
-    if (action.kind !== 'revise' || action.providerSessionId === null) return null;
+    if ((action.kind !== 'revise' && action.kind !== 'fix') || action.providerSessionId === null)
+      return null;
     const ran = getSessionByProviderId(db, id, action.providerSessionId);
     if (ran === undefined) return null;
     const account = getAccountRow(db, ctl.accountId);
@@ -1210,12 +1211,15 @@ export function createRunner(opts: RunnerOptions): Runner {
     const action = moved ?? drifted ?? row.nextAction;
     const step = row.steps[row.stepIndex];
     if (
-      action.kind !== 'revise' ||
+      (action.kind !== 'revise' && action.kind !== 'fix') ||
       action.providerSessionId !== null ||
       step?.fixFresh !== FixFresh.Pending
     )
       return row;
-    const rejecter = row.steps[action.reviewStep]?.role ?? StepRole.Review;
+    const rejecter =
+      action.kind === 'revise'
+        ? (row.steps[action.reviewStep]?.role ?? StepRole.Review)
+        : 'acceptance check';
     const cause =
       moved !== null
         ? 'it ran on another account'
@@ -1225,7 +1229,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const up = escalated(
       row,
       step,
-      `the ${rejecter} step rejected it, and the session that wrote it could not be resumed: ${cause}`,
+      `the ${rejecter}${action.kind === 'revise' ? ' step' : ''} rejected it, and the session that wrote it could not be resumed: ${cause}`,
       ctl.accountId,
     );
     opts.state.write((ctx) => {

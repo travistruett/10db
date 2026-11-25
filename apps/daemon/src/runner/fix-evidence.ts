@@ -3,14 +3,20 @@ import { listEvidence, type DbReader, type WorkstreamRow } from '@10db/db';
 
 /**
  * The failure the lane is fixing: its latest gate run when that failed and none has passed since, or
- * the builder's note when they sent the work back to a step that has not been entered again since.
+ * the builder's note, or an acceptance check's not-met reading that sent the run back, when it went to a step
+ * that has not been entered again since.
  * Sending the work back stamps the target's start in the same write as the note, so a step that
  * started later has already acted on it. A session that starts fresh needs it, since the
  * conversation that held it is gone.
  */
 export function outstandingFixEvidence(reader: DbReader, row: WorkstreamRow): EvidenceId | null {
   const latest = listEvidence(reader, row.id)
-    .filter((e) => e.kind === EvidenceKind.Gate || e.kind === EvidenceKind.Builder)
+    .filter(
+      (e) =>
+        e.kind === EvidenceKind.Gate ||
+        e.kind === EvidenceKind.Builder ||
+        (e.kind === EvidenceKind.Acceptance && e.detail?.sentBack === true),
+    )
     .at(-1);
   if (!latest) return null;
   if (latest.kind === EvidenceKind.Gate) return latest.exitCode !== 0 ? latest.id : null;
