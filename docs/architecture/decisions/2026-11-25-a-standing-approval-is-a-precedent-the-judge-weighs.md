@@ -15,8 +15,10 @@
    session reads it ahead of the `project` row.
 2. **A precedent is evidence, read by a judge.** 10db's judge sees the one precedent whose key and scope match
    the call, as the state's `builder_precedent`, and is asked `precedent_applies`: is the call that kind of
-   command and nothing more. Claude's auto mode reads each active precedent as an environment line, on every
-   surface, and never as an allow line: an allow line there is an exception to a soft deny, which the four limits
+   command and nothing more. Claude's auto mode reads each active precedent as a context line in its
+   environment, on every surface, from a field of the policy that only auto mode's rendering reads
+   (`TrustPolicy.autoModePrecedents`). 10db's judge never sees those lines: it is shown only the one precedent
+   picked for the call, so a withheld precedent reaches it in no form. Auto mode never reads one as an allow line: an allow line there is an exception to a soft deny, which the four limits
    are in a chat and Claude's own defaults are in a lane. No call is allowed by matching text, so nothing is
    stored as a quoted-call grant either.
 3. **It never clears a limit.** `readLimitAnswers` reads `builder_allowed`, then the limits, as before. Only after

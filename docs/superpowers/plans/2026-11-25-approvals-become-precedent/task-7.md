@@ -11,7 +11,7 @@ branch, and the branch's final merge of `main`.
   Check no other open pull request adds a migration.
 - `apps/daemon/src/trust/AGENTS.md`: `program-key.ts`, `precedents.ts`, `precedent-candidates.ts`, the fifth
   step of `readLimitAnswers`, `CallRuns.differs`, that a precedent is withheld and never refused on, and that it
-  reaches auto mode as an environment line only.
+  reaches auto mode through `TrustPolicy.autoModePrecedents` only, which `stateOf` never reads.
 - `apps/daemon/src/inbox/AGENTS.md`: the precedent card and its answer route; the conflict card; that only fresh
   verdicts count uses and conflicts.
 - `apps/daemon/src/judge/AGENTS.md`: `judge_calls.precedent_id`, `program_key` and `AssessReading.byPrecedent`.

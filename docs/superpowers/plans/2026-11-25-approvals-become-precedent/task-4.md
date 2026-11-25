@@ -40,16 +40,22 @@
     `onPrecedentPaused`. Each in one `state.write`. A verdict answered from memory counts nothing, so `uses` is
     the number of distinct judged calls, not of runs of the command.
   - `onPrecedentChanged(id, hash)` the first time a session sees `changedSince` for that id and hash.
-- `apps/daemon/src/trust/policy.ts`: `TrustPolicyInput.precedents`, joined into `environment`. Never into
-  `allow`: `renderClaudeAutoMode` (`sessions/claude-auto-mode.ts`) reads an allow line as an exception to a soft
-  deny, which the limits are on attended surfaces and Claude's defaults are in a lane.
+- `packages/contracts/src/trust-policy.ts`: `TrustPolicy.autoModePrecedents`, as the index quotes it.
+- `apps/daemon/src/trust/policy.ts`: `TrustPolicyInput.precedents`, copied into `autoModePrecedents` only.
+  - Never into `allow`: `renderClaudeAutoMode` reads an allow line as an exception to a soft deny, which the
+    limits are on attended surfaces and Claude's defaults are in a lane.
+  - Never into `environment`: `stateOf` copies `policy.environment` into the `session` of every call 10db's
+    judge reads, which would show it every precedent, the withheld ones included.
+- `apps/daemon/src/sessions/claude-auto-mode.ts`, `renderClaudeAutoMode`: append `policy.autoModePrecedents` to
+  the environment it renders. It is the field's only reader; check Codex's policy rendering and `stateOf` don't
+  spread the whole policy.
 - The callers that build `HookJudgeContext` and `TrustPolicyInput` (the runner, chats, passes, the reporter):
   pass `listPrecedents`, `inCopy` (the session has a `copyId`) and `precedentLines`.
 
 ## Interfaces
 
-Implements the `precedents.ts`, `crosses-limit.ts`, `call-runs.ts`, `judge.ts`, `hook-judge.ts` and `policy.ts`
-blocks; calls the store, `programKey` and `keyPackageFile`.
+Implements the `precedents.ts`, `crosses-limit.ts`, `call-runs.ts`, `judge.ts`, `hook-judge.ts`, `policy.ts` and
+`claude-auto-mode.ts` blocks; calls the store, `programKey` and `keyPackageFile`.
 
 ## State-table rows
 
@@ -67,9 +73,11 @@ Every "Active" row.
 - The existing wiring test ("a call the first judge leaves between yes and no …") is extended, not copied: the
   request carries a precedent, the state holds `builder_precedent`, the first judge's answers allow by precedent
   with no second call, and the row has the `precedent_id` and `program_key`.
-- The existing policy test that renders auto mode gains one assertion: a precedent line is in the environment
-  and the allow list is unchanged, attended and unattended.
+- The existing policy test that renders auto mode gains one assertion: a precedent line is in auto mode's
+  rendered environment and the allow list is unchanged, attended and unattended.
+- The extended wiring test also asserts 10db's judge's state: with the policy carrying `autoModePrecedents` and
+  the call's precedent withheld, no `session` line and no other field of the state holds a precedent's text.
 - Value card: `protects=a precedent never clears a limit, in 10db's judge or in auto mode, and only narrows the
-  unclear band; fails_when=step 4 runs before the limits or over the ceiling, or a precedent becomes an allow
-  line; why_new=the judge (rule table and its wiring); no_claim=that the model answers precedent_applies well,
+  unclear band; fails_when=step 4 runs before the limits or over the ceiling, a precedent becomes an allow
+  line, or a policy line shows 10db's judge a precedent it was not picked for; why_new=the judge (rule table and its wiring); no_claim=that the model answers precedent_applies well,
   which the replay checks`.

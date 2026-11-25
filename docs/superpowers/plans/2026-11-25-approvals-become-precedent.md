@@ -30,8 +30,9 @@ merges.
   `apps/daemon/src/inbox/AGENTS.md`; `.claude/rules/code-style.md` and `.claude/rules/testing.md`.
 - **A limit is read before a precedent, always.** No code path allows a call because text matched. The program
   key only picks which precedent the judge is shown. Nothing here writes a `trust_grants` row.
-- **Auto mode gets no allow line.** A precedent reaches Claude's auto mode only through
-  `TrustPolicy.environment`, on every surface. `TrustPolicy.allow` is untouched.
+- **Auto mode gets no allow line, and 10db's judge gets no policy line.** A precedent reaches Claude's auto mode
+  only through `TrustPolicy.autoModePrecedents`, which only `renderClaudeAutoMode` reads. `TrustPolicy.allow`
+  and `TrustPolicy.environment` are untouched, so `stateOf` never carries a precedent line.
 - **Only 10db's judge's rows make a candidate:** a skip with `source = 'tendb_judge'` and no limit, or a
   `crosses_limit` row answered `unsure`. An auto mode denial never does.
 - **A precedent is withheld, never refused on:** no key, `CallRuns.differs`, or a changed `package.json` for a
@@ -51,7 +52,7 @@ merges.
 
 | | Claude plan | Bedrock or API key | ChatGPT/Codex plan |
 | --- | --- | --- | --- |
-| Reads a precedent | auto mode, as an environment line; 10db's judge where the session is on it | API key: same. Bedrock: auto mode only on a pinned model that has it (`auto-mode-models.ts`); else 10db's judge | 10db's hook judge |
+| Reads a precedent | auto mode, as context lines from `autoModePrecedents`; 10db's judge where the session is on it | API key: same. Bedrock: auto mode only on a pinned model that has it (`auto-mode-models.ts`); else 10db's judge | 10db's hook judge |
 | Limit-first reading, ceiling, uses, conflicts, candidates | 10db's judge only; auto mode's own denies are unchanged | same | 10db's judge |
 | Remove takes effect | 10db's judge: the next call. Auto mode: the session's next start | same | the next call |
 | No Decisions account | no rows of 10db's judge, so no card; Settings says standing approvals need a Decisions account | same | same |
@@ -143,7 +144,7 @@ export const PRECEDENT_LINES_MAX = 30;
 export interface ShownPrecedent { readonly id: TrustPrecedentId; readonly kind: string; readonly examples: readonly string[]; readonly approved: string; readonly changedSince: boolean; readonly hash: string | null }
 /** The active row for the key: in a copy the `copy` row, else the `project` row; outside a copy the `project` row only. Null for a null key or `withheld`. */
 export function precedentFor(precedents: readonly TrustPrecedentDto[], key: string | null, inCopy: boolean, hash: string | null, withheld: boolean): ShownPrecedent | null;
-export function precedentLines(precedents: readonly TrustPrecedentDto[], inCopy: boolean): string[]; // for TrustPolicy.environment
+export function precedentLines(precedents: readonly TrustPrecedentDto[], inCopy: boolean): string[]; // for TrustPolicy.autoModePrecedents
 export function runsHash(runs: CallRuns, packageScript: string | null): string | null;
 
 // apps/daemon/src/trust/crosses-limit.ts
@@ -166,7 +167,11 @@ readonly onPrecedentPaused: (id: TrustPrecedentId) => void; // task 5 raises the
 readonly onPrecedentChanged: (id: TrustPrecedentId, hash: string) => void; // task 5 posts the notice; called once per id and hash per session
 
 // apps/daemon/src/trust/policy.ts
-// TrustPolicyInput gains: readonly precedents?: readonly string[];   joined into `environment`, never `allow`
+// TrustPolicyInput gains: readonly precedents?: readonly string[];
+// packages/contracts/src/trust-policy.ts — TrustPolicy gains: autoModePrecedents: z.array(z.string()).max(30).default([])
+//   buildTrustPolicy copies the input there, never into `allow` or `environment`.
+// apps/daemon/src/sessions/claude-auto-mode.ts — renderClaudeAutoMode appends policy.autoModePrecedents to the
+//   environment it renders; nothing else reads the field (stateOf in crosses-limit.ts does not).
 
 // apps/daemon/src/trust/precedent-candidates.ts
 export const PRECEDENT_MIN_SKIPS = 3;

@@ -199,10 +199,16 @@ verdicts only, never one answered from memory: a lane that repeats one stopped c
 
 **Claude's auto mode never reads a precedent as an allow line.** An allow line there is an exception to a soft
 deny: in a chat or a pass the four limits are soft denies (`renderClaudeAutoMode`), and in a lane Claude's own
-defaults are. So `buildTrustPolicy` puts each active precedent the session's scope can be shown into
-`TrustPolicy.environment`, at most 30, on every surface:
+defaults are. Nor does a precedent go into `TrustPolicy.environment`: `stateOf` copies those lines into the `session` of
+every call 10db's judge reads, where 30 "routine" lines would sit beside any call, whatever its key and even when
+its precedent is withheld, and could lower the limit answers.
+
+So `TrustPolicy` gains its own field, `autoModePrecedents`: each active precedent the session's scope can be
+shown, at most 30, on every surface:
 `The builder calls this routine in this project: <kind>. For example <two quoted calls>. It is context, not
-permission.` Auto mode weighs it as it weighs any environment line, and its denies are unchanged. The lines are
+permission.` Only `renderClaudeAutoMode` reads the field, appending the lines to auto mode's environment; auto
+mode weighs them as context and its denies are unchanged. `stateOf` never reads it, so 10db's judge sees a
+precedent only as the one `builder_precedent` the hook judge picked. The lines are
 fixed when a session starts, so a Remove reaches a running auto mode session at its next start; 10db's judge reads
 the rows on every call.
 
@@ -534,7 +540,7 @@ needs nothing beyond its task. If its merged `detail` differs, S1's plan adapts 
 
 | | Claude plan | Claude via Bedrock or API key | ChatGPT/Codex plan |
 | --- | --- | --- | --- |
-| Precedent read by | auto mode, as an environment line (context, never an allow line), on every surface; 10db's judge where the session is on it | API key: same. Bedrock: auto mode runs only on a pinned model that has it (`auto-mode-models.ts`); with Bedrock's default model the session is on 10db's judge | 10db's hook judge (`decisions/2026-11-12-codex-is-judged-by-10dbs-judge.md`) |
+| Precedent read by | auto mode, as context lines from `TrustPolicy.autoModePrecedents` (never an allow line, never in 10db's judge's state), on every surface; 10db's judge where the session is on it | API key: same. Bedrock: auto mode runs only on a pinned model that has it (`auto-mode-models.ts`); with Bedrock's default model the session is on 10db's judge | 10db's hook judge (`decisions/2026-11-12-codex-is-judged-by-10dbs-judge.md`) |
 | Steps 2 and 4, `uses`, conflicts, candidates | 10db's judge only. Auto mode reports no probability; its own denies hold the limits, and its denials are never candidates | same | 10db's judge |
 | Remove takes effect | 10db's judge: the next call. Auto mode: the session's next start | same | the next call |
 | No Decisions account | no rows of 10db's judge, so no card and no standing approvals; Settings says they need a Decisions account. Auto mode judges as today | same; a Bedrock session with no auto mode is on the rules floor, as today | same: the rules floor, no card, Settings says so |
