@@ -18,18 +18,22 @@ let server: ReturnType<typeof serve>;
 let url: string;
 let seen: { authorization: string | null; args: { issueId: string; body: string } }[] = [];
 let answer: { isError: boolean; text: string } = { isError: false, text: '{"id":"c-9"}' };
+/** Whether Linear takes the write and never answers it. */
+let hang = false;
 
 beforeEach(async () => {
   seen = [];
   answer = { isError: false, text: '{"id":"c-9"}' };
+  hang = false;
   server = serve({
     fetch: async (req: Request) => {
       const mcp = new McpServer({ name: 'linear', version: '0.0.0' });
       mcp.registerTool(
         'save_comment',
         { inputSchema: { issueId: z.string(), body: z.string() } },
-        (args) => {
+        async (args) => {
           seen.push({ authorization: req.headers.get('authorization'), args });
+          if (hang) await new Promise(() => undefined);
           return {
             isError: answer.isError,
             content: [{ type: 'text' as const, text: answer.text }],
@@ -66,11 +70,32 @@ describe('the Linear comment writer', () => {
   it('says what Linear refused with, and answers no id when Linear gave none', async () => {
     const writer = createLinearCommentWriter({ url, headers: { Authorization: 'Bearer k' } });
     answer = { isError: true, text: 'Issue not found' };
-    await expect(writer.postComment({ issueId: 'iss-1', body: 'x' })).rejects.toThrow(
-      new LinearWriteError('Issue not found'),
-    );
+    await expect(writer.postComment({ issueId: 'iss-1', body: 'x' })).rejects.toMatchObject({
+      name: 'LinearWriteError',
+      message: 'Issue not found',
+      refused: true,
+    });
     answer = { isError: false, text: 'saved' };
     await expect(writer.postComment({ issueId: 'iss-1', body: 'x' })).resolves.toBeNull();
+  });
+
+  it('calls a write Linear may have taken unknown, and one that never reached it refused', async () => {
+    hang = true;
+    const slow = createLinearCommentWriter({ url, headers: { Authorization: 'Bearer k' } }, 200);
+    const unknown = await slow
+      .postComment({ issueId: 'iss-1', body: 'x' })
+      .catch((e: unknown) => e);
+    expect(unknown).toBeInstanceOf(LinearWriteError);
+    expect(unknown).toMatchObject({ refused: false });
+    expect(seen).toHaveLength(1);
+    // Nothing listens on port 1, so the connection fails before any write is sent.
+    const gone = createLinearCommentWriter({
+      url: 'http://127.0.0.1:1/mcp',
+      headers: { Authorization: 'Bearer k' },
+    });
+    await expect(gone.postComment({ issueId: 'iss-1', body: 'x' })).rejects.toMatchObject({
+      refused: true,
+    });
   });
 
   it('is offered only a Linear entry whose headers carry an Authorization', () => {

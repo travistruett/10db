@@ -14,9 +14,22 @@ const SAVE_COMMENT = 'save_comment';
 /** How long Linear has to answer one write. */
 const WRITE_TIMEOUT_MS = 30_000;
 
+/**
+ * A comment write that did not answer an id. `refused` is true only when Linear certainly wrote nothing: it
+ * answered an error, or the connection failed before the write was sent. A timeout or a dropped connection after
+ * the send is not refused: Linear may have written the comment, so it is never written again.
+ */
 export class LinearWriteError extends Error {
   override readonly name = 'LinearWriteError';
+  readonly refused: boolean;
+  constructor(message: string, refused: boolean) {
+    super(message);
+    this.refused = refused;
+  }
 }
+
+const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
 /** What Linear answers a written comment with: its id, which 10db records on the row. */
 const SavedComment = z.object({ id: z.string().min(1) });
@@ -46,38 +59,47 @@ export function authorizedLinearServer(
 }
 
 /** Writes through Linear's MCP server over HTTP with the given headers, one short connection per comment. */
-export function createLinearCommentWriter(server: {
-  readonly url: string;
-  readonly headers: Readonly<Record<string, string>>;
-}): LinearCommentWriter {
+export function createLinearCommentWriter(
+  server: {
+    readonly url: string;
+    readonly headers: Readonly<Record<string, string>>;
+  },
+  timeoutMs: number = WRITE_TIMEOUT_MS,
+): LinearCommentWriter {
   return {
     async postComment({ issueId, body }) {
       const client = new Client({ name: '10db-linear-reporter', version: '0.0.0' });
       try {
-        await client.connect(
-          new StreamableHTTPClientTransport(new URL(server.url), {
-            requestInit: { headers: { ...server.headers } },
-          }),
-        );
-        const result = await client.callTool(
-          { name: SAVE_COMMENT, arguments: { issueId, body } },
-          undefined,
-          { timeout: WRITE_TIMEOUT_MS },
-        );
+        try {
+          await client.connect(
+            new StreamableHTTPClientTransport(new URL(server.url), {
+              requestInit: { headers: { ...server.headers } },
+            }),
+          );
+        } catch (error) {
+          throw new LinearWriteError(`Could not reach Linear: ${messageOf(error)}`, true);
+        }
+        let result: Awaited<ReturnType<Client['callTool']>>;
+        try {
+          result = await client.callTool(
+            { name: SAVE_COMMENT, arguments: { issueId, body } },
+            undefined,
+            { timeout: timeoutMs },
+          );
+        } catch (error) {
+          throw new LinearWriteError(messageOf(error), false);
+        }
         const text = (Array.isArray(result.content) ? result.content : [])
           .map((c: { type?: string; text?: string }) => (c.type === 'text' ? (c.text ?? '') : ''))
           .join('');
         if (result.isError === true)
-          throw new LinearWriteError(text.slice(0, 500) || 'Linear refused the comment');
+          throw new LinearWriteError(text.slice(0, 500) || 'Linear refused the comment', true);
         try {
           const saved = SavedComment.safeParse(JSON.parse(text));
           return saved.success ? saved.data.id : null;
         } catch {
           return null;
         }
-      } catch (error) {
-        if (error instanceof LinearWriteError) throw error;
-        throw new LinearWriteError(error instanceof Error ? error.message : String(error));
       } finally {
         await client.close().catch(() => undefined);
       }

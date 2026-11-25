@@ -30,7 +30,7 @@ import {
   insertItem,
   lastItems,
   listItems,
-  listLinearPosts,
+  noteLinearPostError,
   pendingLinearPosts,
   recordLinearPosts,
   reopenLinearPost,
@@ -47,7 +47,7 @@ import type { Logger } from '../log';
 import type { ShapeToolRequest, ShapeVerdict } from '../sessions';
 import { reporterBlockedBy } from './reporter-events';
 import { refreshReporterCard } from './reporter-inbox';
-import type { LinearCommentWriter } from './reporter-writer';
+import { LinearWriteError, type LinearCommentWriter } from './reporter-writer';
 import { cleanBody, commentText, MIN_BODY_CHARS, parseWrittenLines } from './reporter-comment';
 import { judgeReporterCall, secretIn, type ReporterRun } from './reporter-guard';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
@@ -104,6 +104,12 @@ export type ReportedPost =
       /** 10db's write was refused; the update is owed again. */
       readonly ok: true;
       readonly written: false;
+      readonly why: string;
+    }
+  | {
+      /** Linear did not answer 10db's write; it may exist, so the update is never written again. */
+      readonly ok: true;
+      readonly written: 'unknown';
       readonly why: string;
     }
   | { readonly ok: true; readonly recorded: 'nothing to report' }
@@ -495,8 +501,9 @@ export function createLinearReporter(
 
   /**
    * What the run's closing message says of the comments the guard let out: the id Linear gave each, which is
-   * recorded on its row, or the words Linear refused it with, which reopen the row. A comment with no line stays
-   * recorded without an id: it may exist, and 10db never writes it again.
+   * recorded on its row, or why the write failed, which is kept on the row. Either way the row stays recorded:
+   * the agent can't tell a refusal from a write Linear took without answering, so a comment the guard let out is
+   * never written again.
    */
   const settleWritten = (flight: Flight): void => {
     // 10db's own writes name their ids from Linear's answer; only the agent's carry a closing message.
@@ -505,21 +512,18 @@ export function createLinearReporter(
       .filter((item) => item.kind === ConversationItemKind.AgentMessage)
       .map((item) => parseItemBody(ConversationItemKind.AgentMessage, item.body).text);
     const lines = said.flatMap(parseWrittenLines).filter((l) => flight.written.has(l.postId));
-    const now = clock.now().getTime();
-    const tries = new Map(listLinearPosts(state.db, flight.taskId).map((p) => [p.id, p.tries]));
     state.write((ctx) => {
       for (const line of lines) {
         if ('commentId' in line) attachLinearCommentId(ctx, line.postId, line.commentId);
-        else
-          reopenLinearPost(
-            ctx,
-            line.postId,
-            line.failure,
-            new Date(now + backoffMs(tries.get(line.postId) ?? 0)).toISOString(),
-            MAX_TRIES,
-          );
+        else noteLinearPostError(ctx, line.postId, line.failure);
       }
     });
+    const failed = lines.filter((l) => !('commentId' in l)).map((l) => l.postId);
+    if (failed.length > 0)
+      log.warn(
+        { taskId: flight.taskId, posts: failed },
+        'a reporter run says comments failed that Linear may have written',
+      );
     const unnamed = [...flight.written].filter((id) => !lines.some((l) => l.postId === id));
     if (unnamed.length > 0)
       log.warn(
@@ -819,7 +823,8 @@ export function createLinearReporter(
         return { ok: true, next: { tool: 'save_comment', arguments: { issueId, body: text } } };
       }
       // 10db's own write. The row is recorded first, so a crash or a retry never writes the comment twice; the
-      // id is added when Linear answers, and a refusal reopens the row with a try spent.
+      // id is added when Linear answers. Only a certain refusal reopens the row with a try spent; a write Linear
+      // may have taken without answering stays recorded.
       state.write((ctx) => {
         recordLinearPosts(ctx, [post.id], {
           state: 'recorded',
@@ -840,13 +845,25 @@ export function createLinearReporter(
         return { ok: true, written: true, commentId };
       } catch (error) {
         const why = error instanceof Error ? error.message : String(error);
-        log.warn({ err: error, taskId: flight.taskId }, 'Linear refused a reporter comment');
-        const due = new Date(clock.now().getTime() + backoffMs(post.tries)).toISOString();
+        if (error instanceof LinearWriteError && error.refused) {
+          log.warn({ err: error, taskId: flight.taskId }, 'Linear refused a reporter comment');
+          const due = new Date(clock.now().getTime() + backoffMs(post.tries)).toISOString();
+          state.write((ctx) => {
+            reopenLinearPost(ctx, post.id, why, due, MAX_TRIES);
+          });
+          refreshCard(flight.projectId);
+          return { ok: true, written: false, why };
+        }
+        // Linear may have written it without answering: the row stays recorded, so it is never written twice.
+        log.warn(
+          { err: error, taskId: flight.taskId, postId: post.id },
+          'a reporter comment may have been written; Linear did not answer',
+        );
         state.write((ctx) => {
-          reopenLinearPost(ctx, post.id, why, due, MAX_TRIES);
+          noteLinearPostError(ctx, post.id, why);
         });
         refreshCard(flight.projectId);
-        return { ok: true, written: false, why };
+        return { ok: true, written: 'unknown', why };
       }
     },
 

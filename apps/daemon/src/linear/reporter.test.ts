@@ -41,6 +41,7 @@ import {
 import { reporterConversations } from './reporter-conversation';
 import { linearReporterFoldKey } from './reporter-inbox';
 import { reporterHooks } from './reporter-owner';
+import { LinearWriteError } from './reporter-writer';
 import { SNAPSHOT_FIRST_LINE, SNAPSHOT_STARTER } from './snapshot';
 
 // The reporter on the real pipeline: the store, the explore engine with the fake adapter, the daemon's own
@@ -71,7 +72,7 @@ let launchError: Error | null = null;
 let linearHeaders: Record<string, string> | null = null;
 /** The comments 10db wrote through its own writer, and the refusal its next write gets. */
 let written: { issueId: string; body: string }[] = [];
-let writeError: string | null = null;
+let writeError: { message: string; refused: boolean } | null = null;
 
 const BODY = 'The run started on this task.';
 
@@ -146,7 +147,7 @@ function makeReporter(): LinearReporter {
           written.push(comment);
           return writeError === null
             ? Promise.resolve('direct-1')
-            : Promise.reject(new Error(writeError));
+            : Promise.reject(new LinearWriteError(writeError.message, writeError.refused));
         },
       }),
       launch: () => {
@@ -422,28 +423,16 @@ describe('the Linear reporter', () => {
     expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(1);
   });
 
-  it('owes an update again when Linear refused its write, with the reason on the row', async () => {
+  it('keeps the reason an agent gives for a failed write, and never writes that comment again', async () => {
     const id = oweOne();
+    // The agent can't tell a refusal from a write Linear took but did not answer, so its word reopens nothing.
     book[KEY] = [recordingScript(id, `${id}: failed: Issue not found`), recordingScript(id)];
-    const first = clock.now().getTime() + 30_000;
     clock.advance(30_000);
-    await expect.poll(() => rows()[0]?.tries, { timeout: 10_000 }).toBe(1);
-    expect(rows()[0]).toMatchObject({
-      state: LinearPostState.Pending,
-      lastError: 'Issue not found',
-      dueAt: new Date(first + 5 * 60_000).toISOString(),
-    });
-    clock.advance(5 * 60_000);
-    await expect
-      .poll(
-        () => {
-          clock.advance(0);
-          return rows()[0]?.state;
-        },
-        { timeout: 10_000 },
-      )
-      .toBe(LinearPostState.Recorded);
-    expect(rows()[0]?.commentIds).toEqual(['comment-1']);
+    await expect.poll(() => rows()[0]?.lastError, { timeout: 10_000 }).toBe('Issue not found');
+    expect(rows()[0]).toMatchObject({ state: LinearPostState.Recorded, tries: 0, commentIds: [] });
+    clock.advance(60 * 60_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(1);
   });
 
   it('withholds a body that carries a key, and refuses one that says nothing, with no write', async () => {
@@ -501,7 +490,7 @@ describe('the Linear reporter', () => {
 
   it('owes an update again when its own write is refused, and does not hold it for a sign-in', async () => {
     linearHeaders = { Authorization: 'Bearer lin_api_x' };
-    writeError = 'Issue not found';
+    writeError = { message: 'Issue not found', refused: true };
     const id = oweOne();
     book[KEY] = [
       [
@@ -515,6 +504,25 @@ describe('the Linear reporter', () => {
       state: LinearPostState.Pending,
       lastError: 'Issue not found',
     });
+  });
+
+  it('never writes a comment again when Linear may have taken it but did not answer', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    writeError = { message: 'Request timed out', refused: false };
+    const id = oweOne();
+    book[KEY] = [
+      [
+        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY } },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.lastError, { timeout: 10_000 }).toContain('timed out');
+    expect(rows()[0]).toMatchObject({ state: LinearPostState.Recorded, tries: 0, commentIds: [] });
+    clock.advance(60 * 60_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(written).toHaveLength(1);
+    expect(rows()[0]?.state).toBe(LinearPostState.Recorded);
   });
 
   it('reads the linked issue for a lane without writing, and says why when it cannot', async () => {

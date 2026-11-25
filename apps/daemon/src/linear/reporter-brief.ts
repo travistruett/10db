@@ -194,12 +194,12 @@ const HAND_OVER = [
 ];
 const HAND_OVER_DIRECT = [
   ...HAND_OVER,
-  '10db writes the comment to Linear itself. You make no Linear write, and `save_comment` is refused. If 10db answers that Linear refused the write, say nothing more: the update is owed again.',
+  '10db writes the comment to Linear itself. You make no Linear write, and `save_comment` is refused. If 10db answers that Linear refused the write, or that Linear did not answer, say nothing more: 10db has recorded it.',
 ];
 const HAND_OVER_AGENT = [
   ...HAND_OVER,
   "10db checks the body and returns the exact arguments for Linear's `save_comment`; call `save_comment` with those arguments unchanged, once. Any other `save_comment` is refused, and the refusal says why.",
-  "End your last message with one line per update you handed over: `<post id>: <the comment id save_comment returned>`, or `<post id>: failed: <Linear's words>` when Linear refused the write. 10db records the comment from that line.",
+  "End your last message with one line per update you handed over: `<post id>: <the comment id save_comment returned>`, or `<post id>: failed: <Linear's words>` when the write failed. 10db records the comment from that line, and never asks for it again.",
 ];
 
 const RULES = [

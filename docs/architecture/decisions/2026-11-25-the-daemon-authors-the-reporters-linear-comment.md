@@ -19,12 +19,18 @@ The Linear reporter's agent writes only the words of a comment. `report_linear_p
 - **The record.** The row is set to `recorded` before the comment goes to Linear (in `reportPost` for 10db's
   own write, in `verdict` for the agent's), and the row, not a footer read from Linear, is what deduplicates: a
   recorded row is never owed again. The comment's id is added when Linear answers (10db's write) or from the
-  closing line of the agent's last message (`<post id>: <comment id>`). A refusal from Linear reopens the row
-  with a try spent. A run that dies after the write leaves a recorded row with no id, never a comment with no
-  row and never a second comment.
+  closing line of the agent's last message (`<post id>: <comment id>`).
+- **At most once.** Only a write 10db knows Linear did not take reopens the row with a try spent: Linear
+  answered an error, or the connection failed before the write was sent (`LinearWriteError.refused`). A timeout,
+  a connection dropped after the send or an unreadable answer leaves the row recorded with no id and the reason
+  on `lastError`, the same as a run that dies after the write. The agent's `<post id>: failed: …` line is kept
+  the same way and reopens nothing: the agent can't tell a refusal from a write Linear took without answering.
+  So no comment exists without a row, and none is written twice; the cost is that an update whose write
+  really failed this way is not retried.
 - **Nothing else from the agent.** Status moves, the PR link and picture uploads are no longer the reporter
   agent's: its guard refuses `save_issue`, `prepare_file_upload` and `upload_linear_picture`. The daemon's own
-  status and landing work sets them (`reporter-pictures.ts` keeps the picture planner and uploader for it).
+  status and landing work sets them. The agent-driven uploader (`reporter-pictures.ts`) was removed, and the
+  landing work starts from it in git history.
 
 ## Why
 

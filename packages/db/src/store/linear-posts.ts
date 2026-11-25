@@ -216,6 +216,27 @@ export function attachLinearCommentId(
 }
 
 /**
+ * Keeps why a recorded row's write may not have gone out, leaving it recorded: Linear may have taken the write
+ * without answering, so the update is never owed again. A row with a comment id was written and is left as it is.
+ */
+export function noteLinearPostError(ctx: WriteContext, id: LinearPostId, error: string): void {
+  const row = ctx.tx
+    .select()
+    .from(schema.linearPosts)
+    .where(
+      and(eq(schema.linearPosts.id, id), eq(schema.linearPosts.state, LinearPostState.Recorded)),
+    )
+    .get();
+  if (row === undefined || row.commentIds.length > 0) return;
+  ctx.tx
+    .update(schema.linearPosts)
+    .set({ lastError: error })
+    .where(eq(schema.linearPosts.id, id))
+    .run();
+  emitChanged(ctx, [row]);
+}
+
+/**
  * A recorded row whose write Linear refused goes back to pending with a try spent (failed at `maxTries`), so the
  * update is owed again. Only a row recorded without a comment id is reopened: one with an id was written.
  */
