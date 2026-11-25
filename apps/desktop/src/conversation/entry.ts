@@ -31,7 +31,8 @@ export type ConversationEntry =
       readonly kind: 'notice';
       readonly id: string;
       readonly text: string;
-      readonly tone: 'info' | 'error';
+      /** `allowed` and `refused` are an answered ask: a green check, a red cross. */
+      readonly tone: 'info' | 'error' | 'allowed' | 'refused';
     }
   | {
       readonly kind: 'divider';

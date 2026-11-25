@@ -27,7 +27,12 @@ import { ModelMenu } from '../../conversation/model-menu';
 import { nameOf } from '../../conversation/model-menu-options';
 import { BackgroundTasks } from '../../conversation/background-tasks';
 import { latestTodos, TodoList } from '../../conversation/todo-list';
-import { PermissionRequest, useConversationCards } from '../../conversation/permission-request';
+import {
+  DockedAsk,
+  PermissionRequest,
+  pendingAsks,
+  useConversationCards,
+} from '../../conversation/permission-request';
 import type { Streaming } from '../../conversation/working-line';
 import {
   fetchConversationFiles,
@@ -191,6 +196,7 @@ export function ChatTab({
   });
   const openTask = useOpenTask();
   const open = useConversationCards(chat.conversationId);
+  const asks = pendingAsks(open);
   const [sendError, setSendError] = useState<string | null>(null);
   const inTerminal = conversation.state === ConversationState.TakenOver;
   const takeover = useTakeover(chat.conversationId, inTerminal);
@@ -766,6 +772,11 @@ export function ChatTab({
                     <Text size="sm" c="dimmed" px="md" py="md">
                       This project was removed from 10db.
                     </Text>
+                    <Box px="md">{strip}</Box>
+                  </>
+                ) : asks.length > 0 ? (
+                  <>
+                    <DockedAsk items={open} onStop={stopNow} />
                     <Box px="md">{strip}</Box>
                   </>
                 ) : (

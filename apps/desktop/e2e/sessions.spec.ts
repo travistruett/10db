@@ -173,33 +173,26 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
     'needs_you',
   );
   await expect(sessionsBadge(page)).toContainText('1 session needs you');
+  // The card docks where the composer was, with the input focused; the turn's Stop stays on it.
+  await expect(page.getByRole('textbox', { name: 'Message' })).toHaveCount(0);
+  await expect(card.getByRole('textbox', { name: 'Tell Claude what to do instead' })).toBeFocused();
+  await expect(card.getByRole('button', { name: 'Stop' })).toBeVisible();
   // With a card waiting, the plan and the background tasks fold to their headings, so on a short narrow
-  // window the composer stays on screen.
+  // window the card stays on screen.
   await page.setViewportSize({ width: 480, height: 600 });
-  // The narrow layout settles after the resize, so the composer is read until it is in view: the
-  // whole box, from the textbox down to the controls under it.
-  const composerBottom = async (): Promise<number> =>
-    page.getByRole('textbox', { name: 'Message' }).evaluate((field) => {
-      const whole = field.closest('[data-composer-frame]')?.parentElement ?? field;
-      return whole.getBoundingClientRect().bottom;
-    });
-  await expect
-    .poll(composerBottom, { message: 'the composer’s bottom edge' })
-    .toBeLessThanOrEqual(600);
+  const cardBottom = async (): Promise<number> =>
+    card.evaluate((el) => el.getBoundingClientRect().bottom);
+  await expect.poll(cardBottom, { message: 'the card’s bottom edge' }).toBeLessThanOrEqual(600);
   await page.setViewportSize({ width: 1280, height: 900 });
   await scan(page, [1280, 480], 'a waiting card');
 
-  // ⌘J from a second tab selects the tab that needs the builder; the Inbox lists the card too.
+  // With the tab open the card belongs to the chat: a second tab and ⌘J reach it, and the Inbox leaves it out.
   await page.keyboard.press('Meta+t');
   await expect(page).toHaveURL(/\/sessions\?fresh=/);
   await page.keyboard.press('Meta+j');
   await expect(page).toHaveURL(/\/sessions\?chat=/);
   await page.getByRole('navigation').getByRole('link', { name: 'Inbox' }).click();
-  await page
-    .getByRole('option', { name: /Remove “Hold the line”\?/ })
-    .first()
-    .click();
-  await expect(page.getByRole('button', { name: 'Open Session' })).toBeVisible();
+  await expect(page.getByRole('option', { name: /Remove “Hold the line”\?/ })).toHaveCount(0);
   await page
     .getByRole('navigation')
     .getByRole('link', { name: /^Sessions/ })
@@ -207,9 +200,10 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   // Sessions comes back on the fresh session ⌘T opened; the row is the way to the one that waits.
   await sessionRow(page, /Login fails after sleep/).click();
 
-  // Deny in the session: the ring and the badge clear, the builder's task stays and the turn ends.
-  await card.getByRole('radio', { name: /Deny/ }).check();
-  await card.getByRole('button', { name: 'Send Answer' }).click();
+  // No in the session: the ring and the badge clear, the builder's task stays and the turn ends; the
+  // transcript keeps one line of the answer.
+  await card.getByRole('button', { name: /^No/ }).click();
+  await expect(page.getByText('You said no')).toBeVisible();
   await expect(sessionRow(page, /Login fails after sleep/)).not.toHaveAttribute(
     'data-state',
     'needs_you',

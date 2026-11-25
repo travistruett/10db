@@ -45,23 +45,29 @@ export interface ItemEntryOptions {
 
 const plural = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
 
-/** What the builder answered on a card, in words. */
-function answeredWords(card: InboxItemDto): string | null {
+/** What the builder answered on a card, in words, and how the line is marked. */
+function answeredLine(
+  card: InboxItemDto,
+): { text: string; tone: 'info' | 'allowed' | 'refused' } | null {
   const choice = card.answer?.choice;
   if (choice === undefined) return null;
+  const note = card.answer?.note;
   switch (choice) {
     case PermissionChoice.AllowOnce:
-      return 'You allowed this once';
+      return { text: 'You allowed this once', tone: 'allowed' };
     case PermissionChoice.AllowWorkstream:
-      return 'You allowed this for the session';
+      return { text: 'You allowed this for the session', tone: 'allowed' };
     case PermissionChoice.AllowProject:
-      return 'You allowed this in the project';
+      return { text: 'You allowed this in the project', tone: 'allowed' };
     case PermissionChoice.AllowChat:
-      return 'You allowed this command in this chat';
+      return { text: 'You allowed this command in this chat', tone: 'allowed' };
     case PermissionChoice.Deny:
-      return 'You denied this';
+      return {
+        text: note === undefined ? 'You said no' : `You said no: ${note}`,
+        tone: 'refused',
+      };
     default:
-      return `You answered: ${choice}`;
+      return { text: `You answered: ${choice}`, tone: 'info' };
   }
 }
 
@@ -138,8 +144,8 @@ export function itemEntry(
     case 'card': {
       const card = opts.cards.find((c) => c.id === item.inboxItemId);
       if (card === undefined || card.state === InboxState.Open) return null;
-      const words = answeredWords(card);
-      return words === null ? null : { kind: 'notice', id, text: words, tone: 'info' };
+      const line = answeredLine(card);
+      return line === null ? null : { kind: 'notice', id, ...line };
     }
     case 'plan':
       return {
