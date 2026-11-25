@@ -291,13 +291,15 @@ Each milestone gets its own plan once the one before it merges.
 
 ### Builder's cut
 
-| # | Milestone | Size | Recommended | Needs | Migration |
+Cut by the builder on 2026-11-25, as recommended: F0 is done, F1 to F3 are needed, and F4 is later.
+
+| # | Milestone | Size | Builder's cut | Needs | Migration |
 | --- | --- | --- | --- | --- | --- |
-| F0 | Cause-first failure lines (from `failureReason` and the skips, before diagnosis exists) and Close for a failed task in Factory, as the Board drawer has | Small | **needed** | — | none |
+| F0 | Cause-first failure lines (from `failureReason` and the skips, before diagnosis exists) and Close for a failed task in Factory, as the Board drawer has | Small | **done** (#859) | — | none |
 | F1 | Card hygiene: fold per task, cap card replaces checks card, Factory dedupe, skip cards close when the task is done, stray-write wait | Feature (the stray wait gets one watcher test: claims are core) | **needed** | F0 | none |
 | F2 | The sort, transient auto-retry, engine items with replay and Allow, `retryable: false` | Core | **needed** | F1 | `workstreams.sort`, `auto_retried_at`, `waits_on`; `engine_items` |
 | F3 | Diagnosis session and `report_diagnosis`: question, host session, out of attempts (Try This / Split / Close, CI cap card), obsolete | Core | **needed** | F2 | `workstreams.diagnosis` |
-| F4 | Waits on other work: File a Fix, `fixes_check`, wait, then bring the base in and rerun on merge | Core (git: merges and pushes) | later | F3 | `tasks.fixes_check` |
+| F4 | Waits on other work: File a Fix, `fixes_check`, wait, then bring the base in and rerun on merge | Core (git: merges and pushes) | **later** | F3 | `tasks.fixes_check` |
 
 **F0 and F1 can run ahead of F2's plan.** They change no retry, git or judge path.
 
