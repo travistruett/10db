@@ -10,16 +10,22 @@ const COLUMNS: DataTableColumn<EvalSuiteDto>[] = [
     accessor: 'key',
     title: 'Suite',
     width: 260,
-    render: (suite) => (
-      <Stack gap={2}>
-        <Text size="sm" fw={500} c="var(--mantine-color-bright)">
-          {suite.label}
-        </Text>
-        <Text size="xs" c="dimmed" lineClamp={1} title={suite.bar ?? undefined}>
-          {suite.bar ?? suite.definitionPaths[0] ?? suite.key}
-        </Text>
-      </Stack>
-    ),
+    render: (suite) => {
+      // The bar in words, else where the suite is defined; never the name again.
+      const under = suite.bar ?? suite.definitionPaths[0] ?? null;
+      return (
+        <Stack gap={2}>
+          <Text size="sm" fw={500} c="var(--mantine-color-bright)">
+            {suite.label}
+          </Text>
+          {under === null ? null : (
+            <Text size="xs" c="dimmed" lineClamp={1} title={under}>
+              {under}
+            </Text>
+          )}
+        </Stack>
+      );
+    },
   },
   {
     accessor: 'latest',
