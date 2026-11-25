@@ -47,6 +47,7 @@ export interface ChatRowView {
   readonly lastReplyAt: string | null;
   readonly tasksFiled: number;
   readonly work: ChatWork | null;
+  readonly fullAccess: boolean;
 }
 
 /** What the Sessions screen reads of a row's place; null while the session only reads. */
@@ -206,6 +207,7 @@ export function insertChat(
     branch: null,
     baseHead: null,
     workAskedAt: null,
+    fullAccess: false,
   };
   ctx.tx.insert(schema.chats).values(row).run();
   placeTab(ctx, row.id, input.tabPosition);
@@ -465,7 +467,19 @@ export function chatView(db: DbReader, chatId: ChatId): ChatRowView {
     lastReplyAt: reply?.at ?? null,
     tasksFiled: filed?.n ?? 0,
     work: workOf(row),
+    fullAccess: row.fullAccess,
   };
+}
+
+/** Turns the chat's Full access on or off; the change event goes in the caller's write. */
+export function setChatFullAccess(ctx: WriteContext, chatId: ChatId, on: boolean): void {
+  const row = getChat(ctx.tx, chatId);
+  ctx.tx
+    .update(schema.chats)
+    .set({ fullAccess: on, updatedAt: ctx.now })
+    .where(eq(schema.chats.id, chatId))
+    .run();
+  changed(ctx, row);
 }
 
 /**

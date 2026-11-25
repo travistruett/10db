@@ -1,0 +1,1 @@
+ALTER TABLE `chats` ADD `full_access` integer DEFAULT false NOT NULL;

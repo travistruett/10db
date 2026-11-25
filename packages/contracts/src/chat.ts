@@ -55,6 +55,8 @@ export const ChatDto = z.object({
   planId: ShapeId.nullable(),
   /** How many of the Plan's rows wait for Accept; 0 without a Plan. */
   planWaiting: z.int().nonnegative(),
+  /** Whether the chat runs outside 10db's sandbox, as Claude Code does in a terminal. */
+  fullAccess: z.boolean(),
 });
 export type ChatDto = z.infer<typeof ChatDto>;
 
@@ -75,6 +77,7 @@ export const ChatPatchInput = z
     tabPosition: z.int().nonnegative().nullable().optional(),
     model: z.string().min(1).nullable().optional(),
     effort: z.enum(Effort).nullable().optional(),
+    fullAccess: z.boolean().optional(),
   })
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
 export type ChatPatchInput = z.infer<typeof ChatPatchInput>;

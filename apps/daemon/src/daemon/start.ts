@@ -1962,6 +1962,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     folderHold,
     worktrees: createChatWorktrees({ state, git }),
     reopenBranch: (chatId) => chatWork.reopen(chatId),
+    work: () => chatWork,
     pendingOpens,
     clock,
     dataDir: opts.dataDir,

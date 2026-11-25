@@ -59,6 +59,7 @@ import {
   recentChats,
   searchChats,
   ensurePlanOfChat,
+  setChatFullAccess,
   setChatTitle,
   setChatWork,
   touchChat,
@@ -79,6 +80,7 @@ import type { FolderHold, ServeResult } from '../folder-hold';
 import type { Logger } from '../log';
 import type { PendingOpens } from '../pass';
 import { chatFolder } from './hooks';
+import type { ChatWorkService } from './work-service';
 import { chatWorkCardKey } from './work-card';
 
 // Sessions spec §7.1, §10: a chat's life on the daemon. It is made with its conversation on the
@@ -120,6 +122,8 @@ export const PENDING_OPEN_FOR_CHAT = 'A pass is waiting to open for this chat; C
 export const HANDED_TASK_RUNNING = 'The task this session was handed to is still running';
 /** What a model change while a turn runs is refused with. */
 export const CHANGE_MODEL_BETWEEN_TURNS = 'Change the model between turns.';
+/** What a Full access change while a turn runs is refused with. */
+export const CHANGE_FULL_ACCESS_BETWEEN_TURNS = 'Waits for the turn to end.';
 /** What a model the account doesn't offer is refused with. */
 export const MODEL_NOT_OFFERED = 'Not available on this account';
 
@@ -252,6 +256,8 @@ export interface ChatServiceDeps {
   readonly takeover?: () => ArchiveTakeover | null;
   /** The worktrees of sessions on their own branch; absent where nothing makes one. */
   readonly worktrees?: ChatWorktrees;
+  /** Records a reading or choosing session as Here, read when Full access is turned on (made after this service). */
+  readonly work?: () => Pick<ChatWorkService, 'enterHere'>;
   /** Remakes the worktree of a branch session that has none, once it is open again. */
   readonly reopenBranch?: (chatId: ChatId) => Promise<void>;
   /** Told of each builder message a chat takes, for what listens to a plan's talk (Jev's shadow); it never throws. */
@@ -311,6 +317,27 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       deps.log.warn({ err: error, chatId }, 'a reopened session’s worktree could not be remade');
     });
   };
+  // Full access applies from the next turn: stored, then the warm session closes so the next start reads it.
+  // Turning it on while the session only reads records Here first, as Open in Terminal does.
+  const changeFullAccess = async (chat: ReturnType<typeof getChat>, on: boolean): Promise<void> => {
+    const conv = getConversation(state.db, chat.conversationId);
+    if (conv.state !== null && BUSY.has(conv.state))
+      throw new ConflictError(CHANGE_FULL_ACCESS_BETWEEN_TURNS);
+    if (chat.workPlace === WorkPlace.Moving) throw new ConflictError(MOVING_WORDS);
+    if (
+      on &&
+      (conv.state === ConversationState.TakenOver || conv.state === ConversationState.Sealed)
+    )
+      throw new ConflictError(
+        'Full access isn’t available while the session is in your terminal or handed off.',
+      );
+    if (on) deps.work?.().enterHere(chat.id);
+    state.write((ctx) => {
+      setChatFullAccess(ctx, chat.id, on);
+    });
+    await engine.relocate(chat.conversationId);
+  };
+
   const refuseWhileDoing = (chatId: ChatId): void => {
     if (stoppedForOpen.has(chatId)) throw new ConflictError(PASS_OPENING);
   };
@@ -389,6 +416,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     async patch(id, input) {
       const chat = getChat(state.db, id);
+      if (input.fullAccess !== undefined && input.fullAccess !== chat.fullAccess)
+        await changeFullAccess(chat, input.fullAccess);
       if (input.model !== undefined || input.effort !== undefined) {
         const conv = getConversation(state.db, chat.conversationId);
         if (conv.state !== null && BUSY.has(conv.state))

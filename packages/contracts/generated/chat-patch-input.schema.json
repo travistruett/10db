@@ -46,6 +46,9 @@
           "type": "null"
         }
       ]
+    },
+    "fullAccess": {
+      "type": "boolean"
     }
   },
   "additionalProperties": false
