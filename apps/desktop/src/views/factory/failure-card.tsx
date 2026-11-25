@@ -1,24 +1,23 @@
 import type { WorkstreamDto } from '@10db/contracts';
-import { Box, Button, Group, HoverCard, Stack, Text } from '@mantine/core';
+import { Box, Group, HoverCard, Stack, Text } from '@mantine/core';
 import { useCloseTask, useRetryWorkstream } from '../../daemon/queries';
 import { failureLine } from '../board/task-state';
+import { FailureActions } from './failure-actions';
 import { StatusDot } from './status-dot';
 
 /**
  * A failed line's red dot, which opens a card on hover: what happened and what Retry does, the agent's own
- * reason, then Open, Retry (where the daemon takes it) and Close. The card lives in a portal, so its clicks
- * stop here and never reach the line's own button.
+ * reason, then Retry with Close Task in its menu (`FailureActions`); the line itself opens the task. The card
+ * lives in a portal, so its clicks stop here and never reach the line's own button.
  */
 export function FailureDot({
   run,
   canRetry,
   canClose,
-  onOpen,
 }: {
   readonly run: WorkstreamDto;
   readonly canRetry: boolean;
   readonly canClose: boolean;
-  readonly onOpen: () => void;
 }) {
   const retry = useRetryWorkstream();
   const close = useCloseTask();
@@ -47,36 +46,21 @@ export function FailureDot({
               {refusal.message}
             </Text>
           )}
-          <Group gap={6} justify="flex-end">
-            <Button size="compact-xs" variant="default" onClick={onOpen}>
-              Open
-            </Button>
-            {canRetry ? (
-              <Button
-                size="compact-xs"
-                variant="default"
-                loading={retry.isPending}
-                onClick={() => {
-                  close.reset();
-                  retry.mutate({ id: run.id });
-                }}
-              >
-                Retry
-              </Button>
-            ) : null}
-            {canClose ? (
-              <Button
-                size="compact-xs"
-                variant="default"
-                loading={close.isPending}
-                onClick={() => {
-                  retry.reset();
-                  close.mutate(run.taskId);
-                }}
-              >
-                Close
-              </Button>
-            ) : null}
+          <Group justify="flex-end">
+            <FailureActions
+              canRetry={canRetry}
+              canClose={canClose}
+              retrying={retry.isPending}
+              closing={close.isPending}
+              onRetry={() => {
+                close.reset();
+                retry.mutate({ id: run.id });
+              }}
+              onClose={() => {
+                retry.reset();
+                close.mutate(run.taskId);
+              }}
+            />
           </Group>
         </Stack>
       </HoverCard.Dropdown>

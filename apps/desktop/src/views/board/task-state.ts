@@ -477,14 +477,23 @@ function stateOf(
 ): TaskState | null {
   if (!workstream) return null;
   switch (workstream.state) {
-    case S.Queued:
+    case S.Queued: {
       if (batch?.passId != null)
         return { line: `${PASS_PAGE_QUEUED.state} · ${PASS_PAGE_QUEUED.hint}`, color: 'gray' };
-      if (place === undefined) return { line: 'Queued', color: 'gray' };
+      const queued =
+        place === undefined
+          ? 'Queued'
+          : place === 1
+            ? 'Queued · next in line'
+            : `Queued · ${ordinal(place)} in line`;
+      // A notice says what the run waits for in more words; the wait is the line when there is none.
+      const wait = workstream.notice ? null : (workstream.wait ?? null);
+      if (wait === null) return { line: queued, color: 'gray' };
       return {
-        line: place === 1 ? 'Queued · next in line' : `Queued · ${ordinal(place)} in line`,
-        color: 'gray',
+        line: `${queued} · Waiting ${wait.line}`,
+        color: wait.endless ? 'orange' : 'gray',
       };
+    }
     case S.Held:
       return { line: 'Held: not in the queue', color: 'gray' };
     case S.Starting:
