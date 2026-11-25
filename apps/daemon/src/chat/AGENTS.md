@@ -25,9 +25,7 @@
   never replaces the builder's name.
 - `conversation-files.ts` serves `GET /conversations/:id/files?q=` from `git ls-files` of the checkout the daemon
   resolves from the conversation (a chat's is its project's; a task's comes with Do It), ranked by `file-rank.ts`,
-  which reads the query as text. `session-starts.ts` and `start-facts.ts` build Start from's three rules from a
-  failed task, the base's commits of the last day and the area of `HEAD`'s files; a fact that can't be read
-  offers nothing. `settings.ts` is Settings › Sessions.
+  which reads the query as text. `settings.ts` is Settings › Sessions.
 - A chat's session stays warm after a turn that held Your folder, and its next turn that holds reuses it. Between
   turns, and from any session but the one the chat's hold belongs to (`holdingSession` in `hooks.ts`), its guard
   denies every call. At each turn's end `endJobs` stops what the session's commands left running, from the mark taken

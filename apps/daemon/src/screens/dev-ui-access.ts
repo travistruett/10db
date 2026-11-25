@@ -130,7 +130,6 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/conversations/:conversationId/files': 'The `@` list reads the checkout with git.',
   '/conversations/:conversationId/files/:fileId':
     "A picture the builder sent is the builder's own, kept to the 10db app.",
-  '/projects/:projectId/session-starts': 'Start from reads the checkout with git.',
   '/projects/:projectId/folder': 'Only Sessions draws who holds Your folder, in the 10db app.',
   '/projects/:projectId/chat-models': 'Only Sessions draws it, in the 10db app.',
   '/settings/sessions': 'Only Settings draws it, in the 10db app.',

@@ -18,7 +18,6 @@ import type {
   ChatModelsDto,
   ChatPatchInput,
   ProjectFileMatchDto,
-  SessionStartDto,
   SessionsSettingsDto,
   SessionsSettingsPatch,
   TakeoverCommandDto,
@@ -779,8 +778,6 @@ export interface ApiServices extends PlanRecordServices {
   /** Who holds the project's checkout now, and the branch it is on. */
   projectFolder(projectId: ProjectId): Promise<FolderDto>;
   chatModels(projectId: ProjectId): ChatModelsDto;
-  /** Start from: at most three prompts built by rules from the project's state; none when git fails. */
-  sessionStarts(projectId: ProjectId): Promise<SessionStartDto[]>;
   sessionsSettings(): SessionsSettingsDto;
   setSessionsSettings(input: SessionsSettingsDto): SessionsSettingsDto;
   /** Sets the fields given and keeps the rest. */

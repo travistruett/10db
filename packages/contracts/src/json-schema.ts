@@ -16,7 +16,6 @@ import {
   ChatPatchInput,
   ConversationFilesQuery,
   ProjectFileMatchDto,
-  SessionStartDto,
   SessionsSettingsDto,
   SessionsSettingsPatch,
 } from './chat';
@@ -383,7 +382,6 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'chat-search-page': ChatSearchPage,
   'conversation-files-query': ConversationFilesQuery,
   'project-file-match-dto': ProjectFileMatchDto,
-  'session-start-dto': SessionStartDto,
   'sessions-settings-dto': SessionsSettingsDto,
   'sessions-settings-patch': SessionsSettingsPatch,
   'takeover-command-dto': TakeoverCommandDto,
