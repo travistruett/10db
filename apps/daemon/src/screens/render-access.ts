@@ -183,6 +183,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
     "A session's git state reads its checkout, and no screen Plan draws shows it.",
   '/chats/:chatId/changes':
     "A session's changes read its checkout with git, and no screen Plan draws shows it.",
+  '/chats/:chatId/full-access/preview':
+    "The Full access preview reads the chat's account and its config folder; only the 10db app's confirmation shows it.",
   '/conversations/:conversationId/files': 'The `@` list reads the checkout with git.',
   '/projects/:projectId/chat-models': 'No screen draws the model list.',
   '/projects/:projectId/folder': 'Only Sessions draws who holds Your folder, in the 10db app.',
