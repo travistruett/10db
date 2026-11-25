@@ -868,13 +868,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
     signal: AbortSignal,
   ): Promise<void> {
     try {
-      const section = forYouSection(
-        watchpointsOfRuns(
-          db,
-          members(db, batch.id).map((w) => w.id),
-        ),
+      const hits = watchpointsOfRuns(
+        db,
+        members(db, batch.id).map((w) => w.id),
       );
-      if (section === null) return;
+      if (hits.length === 0) return;
+      const section = forYouSection(hits);
       const call = ghCall(deps, signal);
       const current = await deps.gh.prBody({ repo: target.repo, ref: target.url }, call);
       if (current === null) return;

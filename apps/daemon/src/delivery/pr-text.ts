@@ -121,10 +121,10 @@ export function prBody(input: {
   /** The watchpoints the batch's tasks hit, with the notes written about their files; none leaves the section out. */
   readonly watchpoints?: WatchpointHitsDto['hits'];
 }): string {
-  const forYou = forYouSection(input.watchpoints ?? []);
+  // The markers are always written, so a task that ships into this pull request later has a place to fill.
   const body = fillTemplate(input.template, [
     { heading: 'What and why', text: whatAndWhy(input.tasks) },
-    ...(forYou === null ? [] : [{ heading: FOR_YOU_HEADING, text: forYou }]),
+    { heading: FOR_YOU_HEADING, text: forYouSection(input.watchpoints ?? []) },
     { heading: 'How it was checked', text: howChecked(input.gate, input.ci, input.tasks) },
   ]);
   const budget = input.testBudget ?? [];
@@ -142,10 +142,10 @@ const plain = (text: string): string => text.replaceAll('<!--', '<!- -').replace
 
 /**
  * The "For you" section's text: each watchpoint, its loudness, its files with the agent's reason, and the
- * reviewer's check as a quote, between the markers. Null when no watchpoint was hit.
+ * reviewer's check as a quote, between the markers. With no hit the markers hold nothing, which renders as blank.
  */
-export function forYouSection(hits: WatchpointHitsDto['hits']): string | null {
-  if (hits.length === 0) return null;
+export function forYouSection(hits: WatchpointHitsDto['hits']): string {
+  if (hits.length === 0) return `${FOR_YOU_START}\n${FOR_YOU_END}`;
   const blocks = hits.map((hit) =>
     [
       `**${plain(hit.watchpoint.label)}** (${hit.watchpoint.loudness})`,
