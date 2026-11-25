@@ -6,6 +6,7 @@ export const RailSection = {
   Board: 'board',
   Workbench: 'workbench',
   Knowledge: 'knowledge',
+  Evals: 'evals',
   Settings: 'settings',
 } as const;
 export type RailSection = (typeof RailSection)[keyof typeof RailSection];
@@ -33,6 +34,7 @@ export const RAIL_ITEMS: Readonly<Record<RailSection, RailItem>> = {
     label: 'Knowledge',
     route: '/knowledge',
   },
+  evals: { section: 'evals', label: 'Evals', route: '/evals' },
   settings: { section: 'settings', label: 'Settings', route: '/settings' },
 };
 
@@ -56,6 +58,7 @@ export const RAIL_ORDER: readonly RailEntry[] = [
   item(RailSection.Board),
   item(RailSection.Workbench),
   item(RailSection.Knowledge),
+  item(RailSection.Evals),
   { kind: 'spacer' },
   { kind: 'download-status' },
   item(RailSection.Settings),
