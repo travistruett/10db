@@ -28,6 +28,8 @@ interface Pick {
   /** An area pick's box, in page coordinates, so it follows the scroll. */
   area: PickRect | null;
   note: string;
+  /** The shell took it once: its chip exists, so a refused edit keeps the badge. */
+  added: boolean;
 }
 
 // The limits and kinds `@10db/contracts` names (`PAGE_PICKS_MAX`, `PAGE_PICK_ELEMENTS_MAX`, `PickKind`),
@@ -224,12 +226,13 @@ export function startPicker(config: PickerConfig): void {
     if (!picks.includes(pick)) return;
     try {
       page = (await channel.add(input)) ?? page;
+      pick.added = true;
       // Removed while the shell took it: its chip goes too.
       if (!picks.includes(pick)) void channel.remove(pick.id).catch(() => undefined);
     } catch (error) {
-      // A refused pick leaves no badge without a chip.
+      // A refused pick leaves no badge without a chip; a refused edit keeps both, as they were.
       const index = picks.indexOf(pick);
-      if (index >= 0) picks.splice(index, 1);
+      if (!pick.added && index >= 0) picks.splice(index, 1);
       say(refusalOf(error));
     }
     render();
@@ -274,6 +277,7 @@ export function startPicker(config: PickerConfig): void {
       described: new Map(),
       area: null,
       note: '',
+      added: false,
     };
     track(pick, element);
     picks.push(pick);
@@ -311,6 +315,7 @@ export function startPicker(config: PickerConfig): void {
       described: new Map(),
       area: { ...box, x: box.x + window.scrollX, y: box.y + window.scrollY },
       note: '',
+      added: false,
     };
     for (const element of outermost.slice(0, PAGE_PICK_ELEMENTS_MAX)) track(pick, element);
     picks.push(pick);
