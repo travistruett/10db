@@ -45,25 +45,37 @@ export interface ItemEntryOptions {
 
 const plural = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
 
-/** What the builder answered on a card, in words, and how the line is marked. */
-function answeredLine(
-  card: InboxItemDto,
-): { text: string; tone: 'info' | 'allowed' | 'refused' } | null {
+/** What a permission card asked about: the call when it has one, else its title without the question mark. */
+function askedOf(card: InboxItemDto): string {
+  const summary = card.detail?.['summary'];
+  return typeof summary === 'string' && summary !== '' ? summary : card.title.replace(/\?$/, '');
+}
+
+/** What the builder answered on a card: words, the call it was about, and what follows it. */
+function answeredLine(card: InboxItemDto): {
+  text: string;
+  call?: string;
+  tail?: string;
+  tone: 'info' | 'allowed' | 'refused';
+} | null {
   const choice = card.answer?.choice;
   if (choice === undefined) return null;
   const note = card.answer?.note;
+  const call = askedOf(card);
   switch (choice) {
     case PermissionChoice.AllowOnce:
-      return { text: 'You allowed this once', tone: 'allowed' };
+      return { text: 'You allowed', call, tone: 'allowed' };
     case PermissionChoice.AllowWorkstream:
-      return { text: 'You allowed this for the session', tone: 'allowed' };
+      return { text: 'You allowed', call, tail: ' for the session', tone: 'allowed' };
     case PermissionChoice.AllowProject:
-      return { text: 'You allowed this in the project', tone: 'allowed' };
+      return { text: 'You allowed', call, tail: ' in the project', tone: 'allowed' };
     case PermissionChoice.AllowChat:
-      return { text: 'You allowed this command in this chat', tone: 'allowed' };
+      return { text: 'You allowed', call, tail: ' in this chat', tone: 'allowed' };
     case PermissionChoice.Deny:
       return {
-        text: note === undefined ? 'You said no' : `You said no: ${note}`,
+        text: 'You said no to',
+        call,
+        ...(note === undefined ? {} : { tail: `: ${note}` }),
         tone: 'refused',
       };
     default:

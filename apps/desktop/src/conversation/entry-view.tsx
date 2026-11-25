@@ -2,6 +2,7 @@ import {
   ActionIcon,
   Box,
   Button,
+  Code,
   CopyButton,
   Divider,
   Group,
@@ -154,6 +155,13 @@ export function ConversationEntryView({ entry }: { readonly entry: ConversationE
             style={{ verticalAlign: '-2px' }}
           />{' '}
           {entry.text}
+          {entry.call === undefined ? null : (
+            <>
+              {' '}
+              <Code>{entry.call}</Code>
+            </>
+          )}
+          {entry.tail}
         </Text>
       );
     }

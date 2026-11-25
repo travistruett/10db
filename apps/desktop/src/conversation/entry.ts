@@ -31,6 +31,9 @@ export type ConversationEntry =
       readonly kind: 'notice';
       readonly id: string;
       readonly text: string;
+      /** What the line is about, drawn in mono after `text`, then `tail`. */
+      readonly call?: string;
+      readonly tail?: string;
       /** `allowed` and `refused` are an answered ask: a green check, a red cross. */
       readonly tone: 'info' | 'error' | 'allowed' | 'refused';
     }

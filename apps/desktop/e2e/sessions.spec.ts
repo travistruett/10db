@@ -203,7 +203,7 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   // No in the session: the ring and the badge clear, the builder's task stays and the turn ends; the
   // transcript keeps one line of the answer.
   await card.getByRole('button', { name: /^No/ }).click();
-  await expect(page.getByText('You said no')).toBeVisible();
+  await expect(page.getByText(/You said no to Remove “Hold the line”/)).toBeVisible();
   await expect(sessionRow(page, /Login fails after sleep/)).not.toHaveAttribute(
     'data-state',
     'needs_you',
