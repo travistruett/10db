@@ -8,6 +8,7 @@ import { shortAgo } from '../factory/short-ago';
 import { CardActions } from './card-actions';
 import { cardAnswer } from './card-answer';
 import { CardHeader } from './card-header';
+import headerClasses from './card-header.module.css';
 import { defaultRecording } from './record-decision';
 import { TakeBackModal } from './take-back-modal';
 import { recipientsOf, WaitingDetail } from './waiting-row';
@@ -43,7 +44,14 @@ export function WaitingContent({ item }: { readonly item: InboxItemDto }) {
         icon={IconHourglass}
         kind={`Waiting on ${who}`}
         framed={false}
-        extra={sent.length === 0 ? null : <span>{sent.join(' · ')}</span>}
+        extra={
+          sent.length === 0 ? null : (
+            <>
+              <span className={headerClasses['dot']} aria-hidden />
+              <span>{sent.join(' · ')}</span>
+            </>
+          )
+        }
       />
       <WaitingTaskLink item={item} />
       <WaitingDetail item={item} />
