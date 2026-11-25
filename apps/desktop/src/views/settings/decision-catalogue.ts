@@ -62,21 +62,26 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.Acceptance]: {
     group: DecisionGroup.Delivery,
-    label: 'Acceptance',
-    asks: 'After the final gate passes: is each acceptance criterion met by the change?',
-    onAnswer: 'Met: the run goes on. Not met: it goes back to its build session.',
-    whenUnsure: 'Counted as unclear.',
+    label: 'Acceptance: Is Each Criterion Met?',
+    asks: 'After the final gate passes: for each acceptance criterion of the task, is it met by the change? One yes/no question per criterion.',
+    onAnswer:
+      'Every criterion likely met: the run goes on. A criterion not clearly met: the second opinion reads it.',
+    whenUnsure: 'Counted as not clearly met, so the second opinion reads it.',
     fellBack: 'the run went on',
     mode: DecisionMode.Acting,
+    note: 'Each question goes to the model with the task, its criteria, the change and the gate’s result. Off, or with no account to answer, the run goes on as before.',
   },
   [JudgeDecision.AcceptanceSecond]: {
     group: DecisionGroup.Delivery,
     label: 'Acceptance, Second Opinion',
-    asks: 'The same questions, asked of a stronger model, for a criterion the first call left unclear or not met.',
-    onAnswer: 'It decides the criterion in place of the first call.',
-    whenUnsure: 'Counted as unclear.',
-    fellBack: 'the first call stood',
+    asks: 'For a criterion the first call did not read as met: the same question, asked of a stronger model.',
+    onAnswer:
+      'Met: the run goes on. Not met: the run goes back to its build session. In between: the reviewer is told.',
+    whenUnsure:
+      'Counted as unclear: the reviewer is told, and a run with no reviewer ships with one card.',
+    fellBack: 'the criterion was left unread',
     mode: DecisionMode.Acting,
+    note: 'It waits up to 60 seconds. Off, a criterion the first call did not read as met is left unread.',
   },
   [JudgeDecision.TestValue]: {
     group: DecisionGroup.Delivery,

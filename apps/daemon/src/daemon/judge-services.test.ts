@@ -152,10 +152,15 @@ it('a switch whose default model fails the test is refused and changes nothing; 
   await judgeServices.patchJudge({ accountId: anthropic.id });
   const after = getJudgeConfig(store.db);
   expect(after.accountId).toBe(anthropic.id);
-  const { crosses_limit_second: second, ...rest } = after.decisions;
+  const {
+    crosses_limit_second: second,
+    acceptance_second: acceptanceSecond,
+    ...rest
+  } = after.decisions;
   expect(new Set(Object.values(rest).map((d) => d.model))).toEqual(new Set(['claude-haiku-5-5']));
   // The second opinion on limits moves a step up: the account's Balanced model.
   expect(second.model).toBe('claude-sonnet-5-5');
+  expect(acceptanceSecond.model).toBe('claude-sonnet-5-5');
   // Haiku answers a choice and a yes/no question (it runs crosses_limit); Sonnet answers yes/no questions.
   expect(calledModels.slice(-3).sort()).toEqual([
     'claude-haiku-5-5',
