@@ -260,12 +260,14 @@
                         "path": {
                           "type": "string",
                           "minLength": 1,
-                          "maxLength": 1000
+                          "maxLength": 1000,
+                          "pattern": "^[^\\r\\n]+$"
                         },
                         "note": {
                           "type": "string",
                           "minLength": 1,
-                          "maxLength": 400
+                          "maxLength": 400,
+                          "pattern": "^[^\\r\\n]+$"
                         }
                       },
                       "required": [
@@ -359,12 +361,14 @@
                       "path": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 1000
+                        "maxLength": 1000,
+                        "pattern": "^[^\\r\\n]+$"
                       },
                       "note": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 400
+                        "maxLength": 400,
+                        "pattern": "^[^\\r\\n]+$"
                       }
                     },
                     "required": [

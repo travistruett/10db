@@ -17,13 +17,16 @@ export type WatchpointFileStatus = (typeof WatchpointFileStatus)[keyof typeof Wa
 export const MAX_WATCHPOINT_NOTES = 40;
 export const MAX_WATCHPOINT_NOTE_LENGTH = 400;
 
+/** A note is one line: a lane's words reach a reviewer's brief, where a line break could pass for the brief's own. */
+const ONE_LINE = /^[^\r\n]+$/;
+
 /**
  * One file's reason, from the agent that changed it (the `commit` tool) or a check from the reviewer who
  * read it (`complete_step`, prefixed ✓ or ⚠).
  */
 export const WatchpointNote = z.object({
-  path: z.string().min(1).max(1000),
-  note: z.string().min(1).max(MAX_WATCHPOINT_NOTE_LENGTH),
+  path: z.string().min(1).max(1000).regex(ONE_LINE, 'one line'),
+  note: z.string().min(1).max(MAX_WATCHPOINT_NOTE_LENGTH).regex(ONE_LINE, 'one line'),
 });
 export type WatchpointNote = z.infer<typeof WatchpointNote>;
 
