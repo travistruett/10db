@@ -1,7 +1,7 @@
 import type { ShapeAttachmentDto, ShapeId, ShapeProposalDto } from '@10db/contracts';
 import { Anchor, Button, Loader, Group, Menu, Stack, Text } from '@mantine/core';
 import { IconCheck, IconChevronDown } from '@tabler/icons-react';
-import { createContext, use } from 'react';
+import { createContext, use, useState } from 'react';
 import {
   useApproveAttachment,
   useFigmaPress,
@@ -52,7 +52,11 @@ export function attachmentsOf(
   );
 }
 
-/** A row's attachments: a dim label, the attachment, and under a mock-up its Approve and Ask for Changes. */
+/**
+ * A row's attachments. Each one's versions show as one: the newest with its label, its view and, under a
+ * mock-up, Approve, Ask for Changes and Figma; the older ones fold behind Earlier Versions, so a mock-up
+ * brought back from Figma a few times doesn't stack copies with the same buttons down the row.
+ */
 export function RowAttachments({
   row,
   title,
@@ -62,57 +66,172 @@ export function RowAttachments({
   readonly title: string;
   readonly task?: GoalTaskRef;
 }) {
-  const { shapeId, attachments, onAskForChanges } = use(AttachmentsContext);
+  const { shapeId, attachments } = use(AttachmentsContext);
   const mine = attachmentsOf(row, attachments, task);
   if (mine.length === 0 || shapeId === null) return null;
   return (
     <Stack gap={10}>
-      {mine.map((a) => (
-        <Stack key={a.id} gap={4}>
-          <Group gap={8} wrap="nowrap">
-            <Text fz={12} fw={600} c="dimmed">
-              {KIND_LABEL[a.attachment.kind]}
-            </Text>
-            {a.approved ? (
-              <Text fz={12} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <IconCheck
-                  size={14}
-                  stroke={2}
-                  color="var(--mantine-color-green-filled)"
-                  aria-hidden="true"
-                />
-                Approved
-              </Text>
-            ) : null}
-          </Group>
-          <AttachmentView attachment={a.attachment} title={title} />
-          {a.attachment.kind === 'mockup' &&
-          a.goalId === null &&
-          !(row.kind === 'goal' && a.key === row.key) ? (
-            <Group gap={8} mt={8}>
-              {a.approved ? null : <ApproveButton shapeId={shapeId} attachment={a} title={title} />}
-              <Button
-                variant="default"
-                size="xs"
-                aria-label={`Ask for changes to mock-up: ${title}`}
-                onClick={() => {
-                  onAskForChanges(`Change the mock-up for "${title}": `);
-                }}
-              >
-                Ask for Changes
-              </Button>
-              <FigmaButtons shapeId={shapeId} attachment={a} title={title} />
-              {/* Approved, the undo is a quiet link at the right: the state is what matters. */}
-              {a.approved ? (
-                <Group ml="auto">
+      {versionsOf(mine).map((versions) => (
+        <AttachmentVersions
+          key={versions[0]?.id}
+          row={row}
+          shapeId={shapeId}
+          versions={versions}
+          title={title}
+        />
+      ))}
+    </Stack>
+  );
+}
+
+/** Attachments grouped by kind and key, oldest first, each group where its first version stood. */
+function versionsOf(list: readonly ShapeAttachmentDto[]): ShapeAttachmentDto[][] {
+  const groups = new Map<string, ShapeAttachmentDto[]>();
+  for (const a of list) {
+    const id = `${a.attachment.kind}:${a.key}`;
+    const group = groups.get(id);
+    if (group === undefined) groups.set(id, [a]);
+    else group.push(a);
+  }
+  return [...groups.values()];
+}
+
+function AttachmentVersions({
+  row,
+  shapeId,
+  versions,
+  title,
+}: {
+  readonly row: ShapeProposalDto;
+  readonly shapeId: ShapeId;
+  readonly versions: readonly ShapeAttachmentDto[];
+  readonly title: string;
+}) {
+  const [earlierOpen, setEarlierOpen] = useState(false);
+  const newest = versions.at(-1);
+  if (newest === undefined) return null;
+  const earlier = versions.slice(0, -1).reverse();
+  const approvedEarlier = earlier.find((a) => a.approved);
+  const numbered = versions.length > 1;
+  // A goal's own mock-up is the goal's picture, not a design target: it has no actions.
+  const actionable = (a: ShapeAttachmentDto): boolean =>
+    a.attachment.kind === 'mockup' &&
+    a.goalId === null &&
+    !(row.kind === 'goal' && a.key === row.key);
+  return (
+    <Stack gap={4}>
+      <VersionLabel
+        attachment={newest}
+        label={`${KIND_LABEL[newest.attachment.kind]}${numbered ? ` · Version ${String(versions.length)}` : ''}`}
+      />
+      <AttachmentView attachment={newest.attachment} title={title} />
+      {actionable(newest) ? (
+        <MockupActions shapeId={shapeId} attachment={newest} title={title} />
+      ) : null}
+      {earlier.length > 0 ? (
+        <Group gap={8} mt={6}>
+          <Anchor
+            component="button"
+            type="button"
+            fz={12}
+            c="dimmed"
+            aria-expanded={earlierOpen}
+            onClick={() => {
+              setEarlierOpen((open) => !open);
+            }}
+          >
+            {earlierOpen ? 'Hide Earlier Versions' : `Earlier Versions (${String(earlier.length)})`}
+          </Anchor>
+          {/* The approved version is the design target the task gets, so say so while it is folded away. */}
+          {approvedEarlier !== undefined && !earlierOpen ? (
+            <ApprovedMark
+              text={`Version ${String(versions.indexOf(approvedEarlier) + 1)} Approved`}
+            />
+          ) : null}
+        </Group>
+      ) : null}
+      {earlierOpen
+        ? earlier.map((a) => (
+            <Stack key={a.id} gap={4} mt={6}>
+              <VersionLabel attachment={a} label={`Version ${String(versions.indexOf(a) + 1)}`} />
+              <AttachmentView attachment={a.attachment} title={title} />
+              {a.approved && actionable(a) ? (
+                <Group>
                   <ApproveButton shapeId={shapeId} attachment={a} title={title} />
                 </Group>
               ) : null}
-            </Group>
-          ) : null}
-        </Stack>
-      ))}
+            </Stack>
+          ))
+        : null}
     </Stack>
+  );
+}
+
+function VersionLabel({
+  attachment,
+  label,
+}: {
+  readonly attachment: ShapeAttachmentDto;
+  readonly label: string;
+}) {
+  return (
+    <Group gap={8} wrap="nowrap">
+      <Text fz={12} fw={600} c="dimmed">
+        {label}
+      </Text>
+      {attachment.approved ? <ApprovedMark text="Approved" /> : null}
+    </Group>
+  );
+}
+
+function ApprovedMark({ text }: { readonly text: string }) {
+  return (
+    <Text fz={12} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <IconCheck
+        size={14}
+        stroke={2}
+        color="var(--mantine-color-green-filled)"
+        aria-hidden="true"
+      />
+      {text}
+    </Text>
+  );
+}
+
+/** Under the newest mock-up: Approve, Ask for Changes and Figma, or the quiet undo once approved. */
+function MockupActions({
+  shapeId,
+  attachment,
+  title,
+}: {
+  readonly shapeId: ShapeId;
+  readonly attachment: ShapeAttachmentDto;
+  readonly title: string;
+}) {
+  const { onAskForChanges } = use(AttachmentsContext);
+  return (
+    <Group gap={8} mt={8}>
+      {attachment.approved ? null : (
+        <ApproveButton shapeId={shapeId} attachment={attachment} title={title} />
+      )}
+      <Button
+        variant="default"
+        size="xs"
+        aria-label={`Ask for changes to mock-up: ${title}`}
+        onClick={() => {
+          onAskForChanges(`Change the mock-up for "${title}": `);
+        }}
+      >
+        Ask for Changes
+      </Button>
+      <FigmaButtons shapeId={shapeId} attachment={attachment} title={title} />
+      {/* Approved, the undo is a quiet link at the right: the state is what matters. */}
+      {attachment.approved ? (
+        <Group ml="auto">
+          <ApproveButton shapeId={shapeId} attachment={attachment} title={title} />
+        </Group>
+      ) : null}
+    </Group>
   );
 }
 
