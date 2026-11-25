@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AccountId, JudgeCallId, TaskId, WorkstreamId } from './ids';
+import { AccountId, JudgeCallId, TaskId, TrustPrecedentId, WorkstreamId } from './ids';
 
 /** How long a decision waits for a model before today's rule applies. */
 export const JUDGE_TIMEOUT_MS = 4_000;
@@ -246,6 +246,10 @@ export const JudgeCallDto = z.object({
   costUsd: z.number().nullable(),
   workstreamId: WorkstreamId.nullable(),
   taskId: TaskId.nullable(),
+  /** The precedent that allowed the call; null unless the reading was by precedent. */
+  precedentId: TrustPrecedentId.nullable(),
+  /** The program the shell call runs, as `trust/program-key.ts` names it; null for a call with no key. */
+  programKey: z.string().nullable(),
   createdAt: z.iso.datetime(),
 });
 export type JudgeCallDto = z.infer<typeof JudgeCallDto>;

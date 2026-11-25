@@ -111,7 +111,7 @@ the choice.
 
 | Column | Holds |
 | --- | --- |
-| `id` | `TrustPrecedentId` (`tpr_…`) |
+| `id` | `TrustPrecedentId` (`tpd_…`) |
 | `project_id`, `program_key`, `scope` | unique together. `scope` is `copy` when every example ran in a separate copy, else `project` |
 | `kind` | one line, the builder's to edit; by default `` `make t` with arguments like the examples `` |
 | `examples` | up to 5 calls the builder saw, each at most 200 characters, JSON |

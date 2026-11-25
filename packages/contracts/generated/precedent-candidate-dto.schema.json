@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "programKey": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "copy",
+        "project"
+      ]
+    },
+    "kind": {
+      "type": "string"
+    },
+    "examples": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "runs": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "runsHash": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "skips": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "runCount": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "taskCount": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "topWorry": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "string",
+              "enum": [
+                "destroys_data",
+                "sends_data_out",
+                "reads_secrets",
+                "writes_live"
+              ]
+            },
+            "p": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "limit",
+            "p"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stoppedAtLimit": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "programKey",
+    "scope",
+    "kind",
+    "examples",
+    "runs",
+    "runsHash",
+    "skips",
+    "runCount",
+    "taskCount",
+    "topWorry",
+    "stoppedAtLimit"
+  ]
+}

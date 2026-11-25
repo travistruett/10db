@@ -76,6 +76,8 @@ export const SkippedActionDto = z.object({
   reason: z.string(),
   source: z.enum(SkipSource),
   approval: z.enum(Approval),
+  /** The program the shell call runs, as `trust/program-key.ts` names it; null for a call with no key. */
+  programKey: z.string().nullable(),
   createdAt: z.iso.datetime(),
 });
 export type SkippedActionDto = z.infer<typeof SkippedActionDto>;

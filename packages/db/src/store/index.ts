@@ -87,3 +87,4 @@ export * from './judge-call-stats';
 export * from './judge-config';
 export * from './small-proposal-limit';
 export * from './trust-grants';
+export * from './trust-precedents';

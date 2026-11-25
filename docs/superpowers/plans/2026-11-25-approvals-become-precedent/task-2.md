@@ -4,7 +4,7 @@
 
 ## Files
 
-- `packages/contracts/src/ids.ts`: the `TrustPrecedent` id (`tpr`), with `TrustPrecedentId` exported as
+- `packages/contracts/src/ids.ts`: the `TrustPrecedent` id (`tpd`), with `TrustPrecedentId` exported as
   `TrustGrantId` is.
 - `packages/contracts/src/trust-policy.ts`: everything the index quotes under that path.
 - `packages/contracts/src/json-schema.ts`: the new DTOs, beside `trust-grant-dto`. Regenerate

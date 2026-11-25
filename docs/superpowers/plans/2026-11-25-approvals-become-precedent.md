@@ -62,7 +62,7 @@ merges.
 
 ```ts
 // packages/contracts/src/ids.ts
-TrustPrecedent: idSchema(['tpr'], 'TrustPrecedentId')
+TrustPrecedent: idSchema(['tpd'], 'TrustPrecedentId')
 
 // packages/contracts/src/trust-policy.ts
 export const PrecedentScope = { Copy: 'copy', Project: 'project' } as const; // project covers copies too
@@ -70,35 +70,43 @@ export type PrecedentScope = (typeof PrecedentScope)[keyof typeof PrecedentScope
 export const PrecedentState = { Active: 'active', Paused: 'paused', Declined: 'declined', Revoked: 'revoked' } as const;
 export type PrecedentState = (typeof PrecedentState)[keyof typeof PrecedentState];
 export const PrecedentChoice = { Approve: 'approve', KeepSkipping: 'keep_skipping', Report: 'report' } as const;
+export type PrecedentChoice = (typeof PrecedentChoice)[keyof typeof PrecedentChoice];
 export const PRECEDENT_KIND_MAX = 200;
 export const PRECEDENT_EXAMPLE_MAX = 200;
 export const PRECEDENT_EXAMPLES_MAX = 5;
+export const PROGRAM_KEY_MAX = 300;
+// Each is GrantTarget's chain with its own bound: trim, min 1, max, one line (no Cc, Cf, U+2028, U+2029), no `$defaults`.
+export const PrecedentKind = /* … */.max(PRECEDENT_KIND_MAX);
+export const PrecedentExample = /* … */.max(PRECEDENT_EXAMPLE_MAX);
+export const ProgramKey = /* … */.max(PROGRAM_KEY_MAX);
+/** Drops any naming `$defaults`, turns each run of refused characters into a space, trims, cuts to 200, keeps what `PrecedentExample` accepts, keeps 5. Never throws; idempotent. */
+export function fitPrecedentExamples(raw: readonly string[]): string[];
 export const TrustPrecedentDto = z.object({
   id: TrustPrecedentId, projectId: ProjectId,
-  programKey: z.string().min(1).max(300), scope: z.enum(['copy', 'project']),
-  kind: z.string().min(1).max(PRECEDENT_KIND_MAX),
-  examples: z.array(z.string().max(PRECEDENT_EXAMPLE_MAX)).max(PRECEDENT_EXAMPLES_MAX),
-  runsHash: z.string().nullable(), state: z.enum(['active', 'paused', 'declined', 'revoked']),
+  programKey: ProgramKey, scope: z.enum(PrecedentScope),
+  kind: PrecedentKind,
+  examples: z.array(PrecedentExample).max(PRECEDENT_EXAMPLES_MAX),
+  runsHash: z.string().nullable(), state: z.enum(PrecedentState),
   uses: z.number().int(), lastUsedAt: z.string().nullable(), conflicts: z.number().int(),
   sourceInboxId: InboxItemId.nullable(), createdAt: z.string(), endedAt: z.string().nullable(),
 });
 export const PrecedentCandidateDto = z.object({
-  programKey: z.string(), scope: z.enum(['copy', 'project']), kind: z.string(),
-  examples: z.array(z.string()), runs: z.string().nullable(), runsHash: z.string().nullable(),
+  programKey: z.string(), scope: z.enum(PrecedentScope), kind: z.string(),
+  examples: z.array(z.string()), runs: z.string().nullable(), runsHash: z.string().nullable(), // raw summaries, fitted on approval
   skips: z.number().int(), runCount: z.number().int(), taskCount: z.number().int(),
-  topWorry: z.object({ limit: LimitName, p: z.number() }).nullable(),
+  topWorry: z.object({ limit: z.enum(LimitName), p: z.number() }).nullable(),
   stoppedAtLimit: z.array(z.string()),
 });
 export const PrecedentAnswer = z.object({
   kinds: z.array(z.object({
-    programKey: z.string().min(1), scope: z.enum(['copy', 'project']),
-    choice: z.enum(['approve', 'keep_skipping', 'report']),
-    kind: z.string().min(1).max(PRECEDENT_KIND_MAX).optional(),
+    programKey: z.string().min(1), scope: z.enum(PrecedentScope),
+    choice: z.enum(PrecedentChoice),
+    kind: PrecedentKind.optional(),
   })).min(1).max(50),
 });
 export const PrecedentPatch = z.object({
-  state: z.enum(['active', 'revoked']).optional(), // active approves again, from any state
-  kind: z.string().min(1).max(PRECEDENT_KIND_MAX).optional(),
+  state: z.enum([PrecedentState.Active, PrecedentState.Revoked]).optional(), // active approves again, from any state
+  kind: PrecedentKind.optional(),
   runsHash: z.string().optional(), // Keep on the changed-script notice
 });
 export const PrecedentAllowedCall = z.object({ call: z.string(), at: z.string() });
@@ -117,6 +125,8 @@ export interface PrecedentInput {
   readonly sourceInboxId: InboxItemId | null;
 }
 /** Inserts the row, or moves the one the project, key and scope already have to `input.state` with its kind, examples and hash; `active` sets conflicts to 0. */
+// It fits the examples (drops any naming `$defaults`, flattens each to one line, cuts to 200, keeps what
+// `PrecedentExample` accepts, keeps 5) and never refuses on them; a bad kind or key throws and stores nothing.
 export function approvePrecedent(ctx: WriteContext, input: PrecedentInput): TrustPrecedentDto;
 export function listPrecedents(db: DbReader, projectId: ProjectId): TrustPrecedentDto[];
 export function setPrecedent(ctx: WriteContext, projectId: ProjectId, id: TrustPrecedentId, change: { state?: PrecedentState; kind?: string; runsHash?: string | null }): TrustPrecedentDto | null; // `active` resets conflicts

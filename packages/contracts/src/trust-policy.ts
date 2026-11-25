@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ProjectId, TrustGrantId } from './ids';
+import { InboxItemId, ProjectId, TrustGrantId, TrustPrecedentId } from './ids';
 import { TrustSwitches } from './trust';
 
 type ValueOf<T> = T[keyof T];
@@ -107,3 +107,176 @@ export const TrustGrantDto = z.strictObject({
   createdAt: z.iso.datetime(),
 });
 export type TrustGrantDto = z.infer<typeof TrustGrantDto>;
+
+/** Where a precedent holds: `project` covers every session of the project, copies too; `copy` only sessions in a separate copy. */
+export const PrecedentScope = { Copy: 'copy', Project: 'project' } as const;
+export type PrecedentScope = ValueOf<typeof PrecedentScope>;
+
+/** `declined` is the builder's Keep Skipping; `paused` is three conflicts with a limit. */
+export const PrecedentState = {
+  Active: 'active',
+  Paused: 'paused',
+  Declined: 'declined',
+  Revoked: 'revoked',
+} as const;
+export type PrecedentState = ValueOf<typeof PrecedentState>;
+
+/** The builder's answer to one kind on the proposal card. */
+export const PrecedentChoice = {
+  Approve: 'approve',
+  KeepSkipping: 'keep_skipping',
+  Report: 'report',
+} as const;
+export type PrecedentChoice = ValueOf<typeof PrecedentChoice>;
+
+export const PRECEDENT_KIND_MAX = 200;
+export const PRECEDENT_EXAMPLE_MAX = 200;
+export const PRECEDENT_EXAMPLES_MAX = 5;
+export const PROGRAM_KEY_MAX = 300;
+
+/**
+ * One line: no control, format, line-separator (Zl, U+2028 only) or paragraph-separator (Zp, U+2029 only)
+ * character, the same class `GrantTarget` refuses.
+ */
+const ONE_LINE = /^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+$/u;
+/** A run of the characters `ONE_LINE` refuses. */
+const NOT_ONE_LINE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu;
+
+/**
+ * What a precedent covers, as one line every judge reads: the builder's words. One line as a grant, and never
+ * `$defaults`.
+ */
+export const PrecedentKind = z
+  .string()
+  .trim()
+  .min(1)
+  .max(PRECEDENT_KIND_MAX, {
+    message: `A kind is at most ${String(PRECEDENT_KIND_MAX)} characters`,
+  })
+  .regex(ONE_LINE, {
+    message: 'A kind is one line, with no control or format characters',
+  })
+  .refine((s) => !s.includes('$defaults'), { message: 'A kind cannot name $defaults' });
+export type PrecedentKind = z.infer<typeof PrecedentKind>;
+
+/** A call the builder saw when approving a precedent: the agent's text, one line, shown and never run. */
+export const PrecedentExample = z
+  .string()
+  .trim()
+  .min(1)
+  .max(PRECEDENT_EXAMPLE_MAX, {
+    message: `An example is at most ${String(PRECEDENT_EXAMPLE_MAX)} characters`,
+  })
+  .regex(ONE_LINE, {
+    message: 'An example is one line, with no control or format characters',
+  })
+  .refine((s) => !s.includes('$defaults'), { message: 'An example cannot name $defaults' });
+export type PrecedentExample = z.infer<typeof PrecedentExample>;
+
+/**
+ * Fits raw call summaries to what a precedent stores as its examples, and never throws: drops any that names
+ * `$defaults`, turns each run of control, format or line-separator characters into one space, trims, cuts to
+ * `PRECEDENT_EXAMPLE_MAX`, keeps those `PrecedentExample` accepts, and keeps the first `PRECEDENT_EXAMPLES_MAX`.
+ * A run becomes a space rather than nothing, so the fit can't join two halves into `$defaults`; fitting a fitted
+ * list changes nothing. An example is shown to a judge and the builder only, never run, so one cut mid-command
+ * is fine.
+ */
+export function fitPrecedentExamples(raw: readonly string[]): string[] {
+  const fitted: string[] = [];
+  for (const example of raw) {
+    if (fitted.length >= PRECEDENT_EXAMPLES_MAX) break;
+    if (example.includes('$defaults')) continue;
+    const line = example.replace(NOT_ONE_LINE, ' ').trim().slice(0, PRECEDENT_EXAMPLE_MAX);
+    const parsed = PrecedentExample.safeParse(line);
+    if (parsed.success) fitted.push(parsed.data);
+  }
+  return fitted;
+}
+
+/** A program key: the program a shell call runs, as `trust/program-key.ts` names it. */
+export const ProgramKey = z
+  .string()
+  .trim()
+  .min(1)
+  .max(PROGRAM_KEY_MAX, {
+    message: `A program key is at most ${String(PROGRAM_KEY_MAX)} characters`,
+  })
+  .regex(ONE_LINE, {
+    message: 'A program key is one line, with no control or format characters',
+  })
+  .refine((s) => !s.includes('$defaults'), { message: 'A program key cannot name $defaults' });
+export type ProgramKey = z.infer<typeof ProgramKey>;
+
+/** A standing approval of a kind of command in a project, which every judge weighs and none reads as a limit's clearance. */
+export const TrustPrecedentDto = z.object({
+  id: TrustPrecedentId,
+  projectId: ProjectId,
+  programKey: ProgramKey,
+  scope: z.enum(PrecedentScope),
+  kind: PrecedentKind,
+  examples: z.array(PrecedentExample).max(PRECEDENT_EXAMPLES_MAX),
+  runsHash: z.string().nullable(),
+  state: z.enum(PrecedentState),
+  uses: z.number().int(),
+  lastUsedAt: z.string().nullable(),
+  conflicts: z.number().int(),
+  sourceInboxId: InboxItemId.nullable(),
+  createdAt: z.string(),
+  endedAt: z.string().nullable(),
+});
+export type TrustPrecedentDto = z.infer<typeof TrustPrecedentDto>;
+
+/** A kind the judge keeps doubting, offered on the proposal card. Its examples are raw skip summaries, fitted on approval. */
+export const PrecedentCandidateDto = z.object({
+  programKey: z.string(),
+  scope: z.enum(PrecedentScope),
+  kind: z.string(),
+  examples: z.array(z.string()),
+  runs: z.string().nullable(),
+  runsHash: z.string().nullable(),
+  skips: z.number().int(),
+  runCount: z.number().int(),
+  taskCount: z.number().int(),
+  topWorry: z.object({ limit: z.enum(LimitName), p: z.number() }).nullable(),
+  stoppedAtLimit: z.array(z.string()),
+});
+export type PrecedentCandidateDto = z.infer<typeof PrecedentCandidateDto>;
+
+/** `POST /projects/:projectId/precedents/answer`. */
+export const PrecedentAnswer = z.object({
+  kinds: z
+    .array(
+      z.object({
+        programKey: z.string().min(1),
+        scope: z.enum(PrecedentScope),
+        choice: z.enum(PrecedentChoice),
+        kind: PrecedentKind.optional(),
+      }),
+    )
+    .min(1)
+    .max(50),
+});
+export type PrecedentAnswer = z.infer<typeof PrecedentAnswer>;
+
+/** `PATCH /projects/:projectId/precedents/:precedentId`. */
+export const PrecedentPatch = z.object({
+  /** `active` approves again, from any state. */
+  state: z.enum([PrecedentState.Active, PrecedentState.Revoked]).optional(),
+  kind: PrecedentKind.optional(),
+  /** Keep on the changed-script notice. */
+  runsHash: z.string().optional(),
+});
+export type PrecedentPatch = z.infer<typeof PrecedentPatch>;
+
+/** A call a precedent allowed, newest first. */
+export const PrecedentAllowedCall = z.object({ call: z.string(), at: z.string() });
+export type PrecedentAllowedCall = z.infer<typeof PrecedentAllowedCall>;
+
+/** `GET /projects/:projectId/precedents`: every precedent in every state, and the kinds on offer. */
+export const ProjectPrecedentsDto = z.object({
+  precedents: z.array(
+    TrustPrecedentDto.extend({ lastAllowed: z.array(PrecedentAllowedCall).max(5) }),
+  ),
+  candidates: z.array(PrecedentCandidateDto),
+});
+export type ProjectPrecedentsDto = z.infer<typeof ProjectPrecedentsDto>;
