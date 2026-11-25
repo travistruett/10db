@@ -15,6 +15,7 @@ import { FactoryMode, FactoryView } from './views/factory/factory-view';
 import { inboxSearch } from './views/inbox/inbox-search';
 import { InboxView } from './views/inbox/inbox-view';
 import { KnowledgeView } from './views/knowledge/knowledge-view';
+import { EvalsView } from './views/evals/evals-view';
 import { recordSearch } from './views/sessions/plan/record/record-tabs';
 import { useRenderMode } from './screens/render-context';
 import { PlanScreen } from './views/sessions/plan/plan-screen';
@@ -51,6 +52,14 @@ function KnowledgePage() {
   return (
     <ViewBoundary name="Knowledge">
       <KnowledgeView />
+    </ViewBoundary>
+  );
+}
+
+function EvalsPage() {
+  return (
+    <ViewBoundary name="Evals">
+      <EvalsView />
     </ViewBoundary>
   );
 }
@@ -212,6 +221,11 @@ const knowledgeRoute = createRoute({
   },
   component: KnowledgePage,
 });
+const evalsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/evals',
+  component: EvalsPage,
+});
 const boardRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/board',
@@ -283,6 +297,7 @@ const routeTree = rootRoute.addChildren([
   workbenchRoute,
   sessionsRoute,
   knowledgeRoute,
+  evalsRoute,
   tasksRoute,
   settingsIndexRoute,
   settingsRoute,

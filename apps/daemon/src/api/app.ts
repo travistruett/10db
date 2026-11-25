@@ -83,6 +83,9 @@ import {
   PersonaId,
   PersonaInput,
   PersonaPatch,
+  EvalManifest,
+  EvalSuiteKey,
+  EvalSuiteQuery,
   PersonInput,
   PickSize,
   ProjectId,
@@ -1476,6 +1479,32 @@ export function createApp(deps: ApiDeps) {
     )
     .post('/projects/:projectId/network-hosts/scan', async (c) =>
       c.json(await deps.services.scanNetworkHosts(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/projects/:projectId/evals', async (c) =>
+      c.json(await deps.services.evals(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/evals/manifest',
+      validator('json', (value): EvalManifest => EvalManifest.parse(value)),
+      async (c) => {
+        const result = await deps.services.recordEvalManifest(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.valid('json'),
+        );
+        return c.json(result, result.ok ? 200 : 400);
+      },
+    )
+    .get(
+      '/projects/:projectId/evals/:suiteKey',
+      validator('query', (value): EvalSuiteQuery => EvalSuiteQuery.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.evalSuite(
+            ProjectId.parse(c.req.param('projectId')),
+            EvalSuiteKey.parse(c.req.param('suiteKey')),
+            c.req.valid('query').run,
+          ),
+        ),
     )
     .get('/projects/:projectId/hazard-assessment', (c) =>
       c.json(deps.services.getHazardAssessment(ProjectId.parse(c.req.param('projectId')))),
