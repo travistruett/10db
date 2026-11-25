@@ -336,6 +336,26 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     return startBatchApart(projectId, raw, undefined);
   }
 
+  /**
+   * A local project starts only one task at a time, except a lone fix task sent with the `batchId`
+   * of its own separate copy while that copy is open or failed: it joins or reopens the copy.
+   */
+  function isCopyFixStart(project: ProjectDto, input: BatchStartInput): boolean {
+    if (input.batchId === undefined || input.taskIds.length !== 1) return false;
+    let batch: BatchDto;
+    try {
+      batch = getBatch(db, input.batchId);
+    } catch (error) {
+      if (error instanceof NotFoundError) return false;
+      throw error;
+    }
+    return (
+      batch.projectId === project.id &&
+      (batch.state === BatchState.Open || batch.state === BatchState.Failed) &&
+      getLocalCopy(db, batch.id) !== null
+    );
+  }
+
   /** `apart` is a batch no goal join may offer, the one a task just left. */
   function startBatchApart(
     projectId: ProjectId,
@@ -344,7 +364,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   ): BatchDto[] {
     const input = BatchStartInput.parse(raw);
     const project = getProject(db, projectId);
-    if (project.delivery !== Delivery.PullRequest)
+    if (project.delivery !== Delivery.PullRequest && !isCopyFixStart(project, input))
       throw new InvalidError(`${project.name} delivers locally; start its tasks one at a time`);
     const tasks = input.taskIds.map((id) => getTask(db, id));
     for (const task of tasks) checkStartable(project, task);
@@ -396,12 +416,16 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   } {
     if (input.batchId !== undefined) {
       const copy = copyBatchOf(project, input.batchId);
-      if (copy)
+      if (copy) {
+        // A separate copy admits its tasks as a start does: copies on, a gate, and a review step.
+        if (getLocalCopy(db, copy.id) !== null)
+          for (const task of tasks) refuseLocalCopy(project, task, copy.id);
         return {
           steps: [prepareJoinWorktree(project, copy, tasks)],
           placement: () => WorkspaceMode.Worktree,
           proposals: new Map(),
         };
+      }
       // Anything else is the shared batch's join, or a refusal saying why it can't be.
       return {
         steps: [prepareShared(project, input.title, input.batchId, tasks, ending)],
