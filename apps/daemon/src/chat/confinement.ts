@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { ChatToolName, JudgeKind, ShapeToolName, type WorkPlace } from '@10db/contracts';
 import { isWithinOnEveryReading, stringField } from '../guard';
@@ -213,4 +214,53 @@ export function judgeChatCall(
   // A tool of an MCP server the session runs goes to the session's judge, as Plan's do.
   if (call.toolName.startsWith('mcp__')) return judgeShapeCall(asSession, access);
   return deny(`${call.toolName} is not a tool this chat uses.`);
+}
+
+/**
+ * The PreToolUse answer for a Full access chat's call. The chat runs as Claude Code does in a terminal, so
+ * only what 10db coordinates is settled here and every other call is a bare allow, which leaves it to Claude
+ * Code's own mode (an explicit allow would skip auto mode's checks): 10db's own tools as the chat has them,
+ * and an edit inside the chat's root, which needs the folder hold the turn took. A call after the turn gave
+ * the hold back is refused whoever makes it, a background agent's included.
+ */
+export function judgeFullAccessCall(
+  call: ChatCall,
+  root: string,
+  folder: ChatPlace,
+  review?: () => readonly ShapeReviewTurn[],
+): ShapeVerdict {
+  if (HARNESS_TOOLS.has(call.toolName)) return ALLOW;
+  if (!folder.holds()) {
+    const named =
+      EDIT_TOOLS.has(call.toolName) && typeof call.input === 'object' && call.input !== null
+        ? stringField(call.input, call.toolName === 'NotebookEdit' ? 'notebook_path' : 'file_path')
+        : null;
+    if (named !== null && named !== '') {
+      const path = resolve(call.cwd ?? root, expandHome(named, homedir()));
+      try {
+        if (isWithinOnEveryReading(root, path)) return deny(chatFolderInUse(folder.heldBy()));
+      } catch {
+        return deny(`${path} could not be resolved to one real path; 10db refuses it.`);
+      }
+    }
+    return deny(CHAT_TURN_ENDED);
+  }
+  if (call.toolName.startsWith(OWN_PREFIX)) {
+    const own = call.toolName.slice(OWN_PREFIX.length);
+    if (PLAN_TOOLS.has(own))
+      return judgePlanTool(
+        {
+          toolName: call.toolName,
+          toolInput: call.input,
+          agentId: call.agentId,
+          agentType: call.agentType,
+        },
+        review,
+      );
+    if (!CHAT_TOOLS.has(own)) return deny(`${call.toolName} is not one of this chat's tools.`);
+    // Pushing, opening and merging a pull request go through 10db's own tools, so the builder is asked as
+    // it is on a chat whose judge doesn't settle them.
+    if (JUDGED_CHAT_TOOLS.has(own)) return { decision: 'ask', reason: JUDGED_CHAT_TOOL_ASK };
+  }
+  return ALLOW;
 }

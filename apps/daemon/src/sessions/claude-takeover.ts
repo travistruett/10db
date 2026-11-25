@@ -7,7 +7,7 @@ import { validSessionId, type TakeoverCommand, type TakeoverSpec } from './takeo
 // `apiKeyHelper` where the account allows one, so no key sits in its environment.
 
 /** The Keychain read Claude Code runs to get an account's key. */
-const keyHelper = (account: string): string =>
+export const keyHelper = (account: string): string =>
   `/usr/bin/security find-generic-password -s 10db -a ${singleQuoted(account)} -w`;
 
 /** What the builder is told of Claude Code in their terminal. */

@@ -577,7 +577,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       deps.folderHold.cancelWait(chat.id);
       await engine.stop(conversationId);
       engine.releaseStarts(conversationId);
-      const wait = folder !== undefined && mustWait(chat);
+      const wait =
+        (folder !== undefined || getChat(state.db, chat.id).fullAccess) && mustWait(chat);
       if (wait) engine.holdStarts(conversationId);
       const edit = await engine.redo(conversationId, () => post(conversationId, input));
       if (wait) watchFolder(chat);
@@ -633,8 +634,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     folder: FolderWhileHeld | undefined,
   ): boolean {
     const waiting = deps.folderHold.waiting(chat.id);
-    // A request to read only (an old client's) is read as wait.
-    const parks = folder !== undefined && (waiting || mustWait(chat));
+    // A request to read only (an old client's) is read as wait, and a Full access chat never runs read-only.
+    const choice =
+      folder ?? (getChat(state.db, chat.id).fullAccess ? FolderWhileHeld.Wait : undefined);
+    const parks = choice !== undefined && (waiting || mustWait(chat));
     if (!parks && waiting) deps.folderHold.cancelWait(chat.id);
     // Starts are held before the queue is asked, so the message parks.
     if (parks) engine.holdStarts(conversationId);
@@ -653,7 +656,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   /** Whether a turn of this chat can't take Your folder now: something other than an attended chat holds it. */
   function mustWait(chat: ChatRow): boolean {
     // Only a session working in the checkout takes the hold; one that reads, or has its own branch, never waits.
-    if (getChat(state.db, chat.id).workPlace !== WorkPlace.Here) return false;
+    // A Full access chat takes it wherever it works, so it waits wherever it works.
+    const row = getChat(state.db, chat.id);
+    if (row.workPlace !== WorkPlace.Here && !(row.fullAccess && row.workPlace !== WorkPlace.Moving))
+      return false;
     return (
       !deps.folderHold.holdsTurn(chat.id) &&
       deps.folderHold.blockers(chat.projectId, { kind: FolderAsker.ChatTurn, chatId: chat.id })

@@ -10,7 +10,7 @@ export {
   stampReview,
   type ShapeReviewTurn,
 } from './review-turn';
-export type { ShapeLaunch } from './session-launch';
+export type { FullAccessLaunch, ShapeLaunch } from './session-launch';
 export { gitTrackedFiles } from './ceremony';
 export {
   SHAPE_AGENTS,

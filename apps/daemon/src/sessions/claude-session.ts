@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import type {
   AccountInfo,
@@ -12,12 +13,19 @@ import type {
   SpawnedProcess,
   SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import { AccountKind, JudgeKind, type AccountRefusal, type ModelMarkBasis } from '@10db/contracts';
+import {
+  AccountKind,
+  JudgeKind,
+  Provider,
+  type AccountRefusal,
+  type ModelMarkBasis,
+} from '@10db/contracts';
 import { systemClock, type Clock } from '../clock';
 import {
   AUTOUPDATE_OFF,
   mcpSignInWhere,
   McpSignInWhere,
+  sessionConfigDir,
   staleNeedsAuthCache,
 } from '../environment';
 import type { Logger } from '../log';
@@ -54,16 +62,19 @@ import {
 } from './claude-mapping';
 import { ReportedMode } from '../trust';
 import { renderClaudeAutoMode } from './claude-auto-mode';
-import { claudeQueryOptions } from './claude-query-options';
+import { claudeQueryOptions, fullAccessOptions } from './claude-query-options';
+import { fullAccessEnv } from './full-access';
 import {
   canUseToolBridge,
   createHookCalls,
   createHookCwds,
   isClassifierEscalation,
   measurementHooks,
+  mergeHooks,
   preToolUseHook,
   settingsRecheckHooks,
   type HookCalls,
+  type SettingsSource,
   type ToolGate,
 } from './claude-session-hooks';
 import { judgedVerdict } from './session-judge';
@@ -71,7 +82,10 @@ import { deniedCallOf } from './permission-denied';
 import { contextEvent } from './context-event';
 import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
-import { projectSettingsBillingProblem } from './project-settings';
+import {
+  fullAccessSettingsBillingProblem,
+  projectSettingsBillingProblem,
+} from './project-settings';
 import { settleWithin } from './settle-within';
 import type { SignInCheck, SignInState } from './sign-in-check';
 import {
@@ -354,6 +368,13 @@ export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Optio
   };
 }
 
+/** The settings files a Full access chat loads, each checked again when one changes mid-session. */
+const FULL_ACCESS_SOURCES: readonly SettingsSource[] = [
+  'user_settings',
+  'project_settings',
+  'local_settings',
+];
+
 /**
  * Plan's SDK options (Shape spec §5.2): the profile's options, the project's approved MCP servers over
  * the control channel, and a PreToolUse hook that judges the session's calls and its subagents' alike.
@@ -370,25 +391,29 @@ function exploreQueryOptions(
     readonly spawn: ExploreSpawn | undefined;
     readonly beforeCall: (input: PreToolUseHookInput) => void;
     readonly onDenied: (toolUseId: string, denial: ClaudeDenial) => void;
+    /** A Full access session's settings files are read again after a tool changed one. */
+    readonly recheckSettings: (what: string) => HookJSONOutput;
   },
 ): Options {
   const { spawn, gate } = deps;
-  const { sandboxEnv, ...profileOptions } = claudeQueryOptions(
-    {
-      kind: 'explore',
-      systemPrompt: spec.profile.systemPrompt,
-      tools: spec.profile.tools,
-      allowedTools: spec.profile.allowedTools,
-      disallowedTools: spec.profile.disallowedTools,
-      agents: spec.profile.agents,
-      ...(spec.profile.fileCheckpointing === undefined
-        ? {}
-        : { fileCheckpointing: spec.profile.fileCheckpointing }),
-      setup: { instructions: spec.instructions ?? null, plugins: spec.setup?.plugins ?? [] },
-      autoMode: spec.profile.judge === JudgeKind.Native ? renderClaudeAutoMode(spec.policy) : null,
-    },
-    spec.sandbox,
-  );
+  const full = spec.fullAccess;
+  const exploreProfile = {
+    kind: 'explore',
+    systemPrompt: spec.profile.systemPrompt,
+    tools: spec.profile.tools,
+    allowedTools: spec.profile.allowedTools,
+    disallowedTools: spec.profile.disallowedTools,
+    agents: spec.profile.agents,
+    ...(spec.profile.fileCheckpointing === undefined
+      ? {}
+      : { fileCheckpointing: spec.profile.fileCheckpointing }),
+    setup: { instructions: spec.instructions ?? null, plugins: spec.setup?.plugins ?? [] },
+    autoMode: spec.profile.judge === JudgeKind.Native ? renderClaudeAutoMode(spec.policy) : null,
+  } as const;
+  const { sandboxEnv, ...profileOptions } =
+    full === undefined
+      ? claudeQueryOptions(exploreProfile, spec.sandbox)
+      : fullAccessOptions(exploreProfile, full);
   // `canUseTool` hears nothing of where a call runs; the hook does, by the same tool use id.
   const cwds = createHookCwds();
   return {
@@ -397,7 +422,11 @@ function exploreQueryOptions(
     effort: spec.effort,
     ...(spec.resumeProviderSessionId ? { resume: spec.resumeProviderSessionId } : {}),
     // The updater switch comes last, so neither env moves the pinned copy.
-    env: { ...spec.env, ...sandboxEnv, ...AUTOUPDATE_OFF },
+    env: {
+      ...(full === undefined ? spec.env : fullAccessEnv(spec.env, full)),
+      ...sandboxEnv,
+      ...AUTOUPDATE_OFF,
+    },
     pathToClaudeCodeExecutable: deps.claudePath,
     ...profileOptions,
     canUseTool: canUseToolBridge({
@@ -437,7 +466,11 @@ function exploreQueryOptions(
           },
         }),
       ],
-      ...measurementHooks(spec, deps.logger),
+      ...mergeHooks(
+        measurementHooks(spec, deps.logger),
+        // A tool or a background command can rewrite a settings file this session loads mid-session.
+        full === undefined ? {} : settingsRecheckHooks(deps.recheckSettings, FULL_ACCESS_SOURCES),
+      ),
     },
     abortController: deps.abortController,
     ...(spawn === undefined
@@ -672,13 +705,29 @@ function endedSession(ended: Extract<SessionEvent, { type: 'ended' }>): SessionH
   };
 }
 
+/**
+ * Why the settings a session loads must not be: a lane with no sandbox loads the repo's, and a Full access chat
+ * loads the project's, its local one and the user's from the account's config folder. A sandboxed session loads
+ * none. The repo's committed settings can re-point the endpoint or credentials, which no account check would show.
+ */
+function settingsBillingProblem(session: ClaudeSession): string | null {
+  if (session.profile === 'explore') {
+    if (session.spec.fullAccess === undefined) return null;
+    return fullAccessSettingsBillingProblem(
+      session.spec.cwd,
+      sessionConfigDir(Provider.Claude, session.spec.env, homedir()),
+    );
+  }
+  if ((session.spec.sandbox ?? null) !== null) return null;
+  return projectSettingsBillingProblem(session.spec.cwd);
+}
+
 /** The repo's committed settings can re-point the endpoint or credentials, which no account check would show. */
 function settingsRefusal(
   session: ClaudeSession,
   fixHint: string,
 ): Extract<SessionEvent, { type: 'ended' }> | null {
-  if (session.profile !== 'lane' || (session.spec.sandbox ?? null) !== null) return null;
-  const problem = projectSettingsBillingProblem(session.spec.cwd);
+  const problem = settingsBillingProblem(session);
   if (!problem) return null;
   return {
     type: 'ended',
@@ -699,10 +748,16 @@ function startSession(
   const clock = opts.clock ?? systemClock;
   const log = opts.logger.child(logFields(session));
   const sandboxed = (spec.sandbox ?? null) !== null;
+  const fullAccess = session.profile === 'explore' && session.spec.fullAccess !== undefined;
+  // A Full access session on an API key reads it through Claude Code's `apiKeyHelper`, never the environment.
+  const viaKeyHelper =
+    session.profile === 'explore' && session.spec.fullAccess?.apiKeyHelper != null;
   // A sandboxed session loads no settings file, so only the account can be at fault.
   const fixHint = sandboxed
     ? "Check the project's account."
-    : "Check the project's account and any env block in the repo's .claude/settings.json.";
+    : fullAccess
+      ? "Check the project's account and any env block in the settings files Claude Code loads."
+      : "Check the project's account and any env block in the repo's .claude/settings.json.";
   const events = createChannel<SessionEvent>();
   const input = createChannel<SDKUserMessage>();
   const calls = createHookCalls();
@@ -832,9 +887,9 @@ function startSession(
   const recheckSettings = (what: string): HookJSONOutput => {
     if (haltOutput) return haltOutput;
     if (halted()) return {};
-    const problem = projectSettingsBillingProblem(spec.cwd);
+    const problem = settingsBillingProblem(session);
     if (!problem) return {};
-    const message = `Billing check failed: ${problem}. ${what} the project's settings during the session, which was stopped. ${fixHint}`;
+    const message = `Billing check failed: ${problem}. ${what} ${fullAccess ? 'the settings' : "the project's settings"} during the session, which was stopped. ${fixHint}`;
     // Record the failure so every tool is denied and no prompt goes in now, answer the hook, and only
     // then close the process.
     failure = message;
@@ -887,6 +942,7 @@ function startSession(
             spawn: session.spawn,
             beforeCall,
             onDenied,
+            recheckSettings,
           }),
   });
 
@@ -974,7 +1030,7 @@ function startSession(
       await noAccount();
       return;
     }
-    const refusal = checkAccount(spec.account, seenFrom(account));
+    const refusal = checkAccount(spec.account, seenFrom(account), viaKeyHelper);
     if (refusal) {
       refuse(SessionEndReason.AccountRefused, `${refusal.message}. ${rules.unsent}`, refusal);
       return;
@@ -1122,6 +1178,7 @@ function startSession(
       spec.account,
       init.apiKeySource,
       seenFrom(account ?? {}),
+      viaKeyHelper,
     );
     if (credentials) {
       refuse(

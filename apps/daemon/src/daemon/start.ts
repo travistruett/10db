@@ -370,6 +370,7 @@ import { createChatChanges } from './chat-changes';
 import { createChatMove } from './chat-move';
 import { createChatWorktrees } from './chat-worktrees';
 import {
+  createFullAccessPreparer,
   createReporterPreparer,
   createShapePreparer,
   createTakeoverPreparer,
@@ -430,6 +431,7 @@ import {
 } from '../self-update';
 import {
   codexHomeProviderOf,
+  apiKeyHelperCommand,
   codexHomes,
   connectorProbeRoot,
   markOnboarded,
@@ -1898,6 +1900,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       agentModels: shapeAgentModels(row.kind, requireHarness(row)),
       env: session.env,
       account: session.expect,
+      fullAccess: () => {
+        const taken = launcher.takeover(row, modelId, listAccountModels(db, row.id));
+        return {
+          apiKeyHelper:
+            taken.apiKeyHelperAccount === null
+              ? null
+              : apiKeyHelperCommand(taken.apiKeyHelperAccount),
+          // An API key with no helper stays in the env, where Claude Code would run in auto mode over it.
+          keyInEnv:
+            taken.scrub ||
+            (row.kind === AccountKind.AnthropicApiKey && taken.apiKeyHelperAccount === null),
+          defaultConfigDir: row.configDir === null,
+        };
+      },
       access: {
         checkout: project.repoPath,
         home: homedir(),
@@ -1924,6 +1940,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           worktreeBase: worktreeRoot,
           codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
         });
+  // A Full access chat's session: no sandbox of its own, so it needs none to start.
+  const conversationPrepareFullAccess = createFullAccessPreparer({
+    state,
+    inbox,
+    git,
+    logger: logger.child({ component: 'shape' }),
+    laneSandbox,
+    protectedPaths: guarded,
+    projectEnv: () => launcher.projectEnv(),
+    exportAwsCredentials,
+    builderHome,
+    laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
+    worktreeBase: worktreeRoot,
+    codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
+  });
   // The chat's open sessions: the shape service takes a session's owed planning rules from them.
   const chatLive = createChatLiveSessions();
   const shape = createShapeService({
@@ -2133,6 +2164,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       },
       launch: conversationLaunch,
       ...(conversationPrepare === undefined ? {} : { prepare: conversationPrepare }),
+      prepareFullAccess: conversationPrepareFullAccess,
+      backgroundRunning: (conversationId) =>
+        exploreEngine.view(conversationId).backgroundTasks.length > 0,
       plan: shape.planParts,
       limitsFor: pictureLimitsFor,
       judgeOf: (account, model) => adapter.capabilities(account, model).judge,

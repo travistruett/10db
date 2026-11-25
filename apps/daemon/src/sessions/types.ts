@@ -243,7 +243,28 @@ export interface ExploreProfile {
 
 /** Everything an adapter needs to open a session: the core every session shares, and what it is for. */
 export type LaneSessionSpec = AgentSessionCore & { readonly profile: LaneProfile };
-export type ExploreSessionSpec = AgentSessionCore & { readonly profile: ExploreProfile };
+/**
+ * How a chat the builder turned Full access on for runs: as Claude Code does in a terminal, outside 10db's
+ * sandbox (decision `2026-11-24-a-chat-the-builder-turns-full-access-on-for-runs-as-claude-code-does.md`).
+ * Only a chat's spec can carry it: a lane's type has no such field, and the adapter still refuses an
+ * unsandboxed lane.
+ */
+export interface FullAccessSettings {
+  /** Claude Code's own permission mode: 'auto' where auto mode runs and no key is in the env, else 'default'. */
+  readonly permissionMode: 'auto' | 'default';
+  /** The API-key account's Keychain helper; ANTHROPIC_API_KEY is then left out of the env. */
+  readonly apiKeyHelper: string | null;
+  /** CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1: a key is in the env (Bedrock key). */
+  readonly scrub: boolean;
+  /** The account's config folder is the builder's default one, so Claude Code loads the builder's setup itself. */
+  readonly ownSetup: boolean;
+}
+
+export type ExploreSessionSpec = AgentSessionCore & {
+  readonly profile: ExploreProfile;
+  /** Set only for a Full access chat; absent, the session runs in 10db's sandbox as Plan's does. */
+  readonly fullAccess?: FullAccessSettings;
+};
 export type AgentSessionSpec = LaneSessionSpec | ExploreSessionSpec;
 
 /**
