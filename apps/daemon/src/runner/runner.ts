@@ -4784,6 +4784,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         projectId: row.projectId,
         taskTitle: task.title,
         detail,
+        reviewFollows: reviewFollows(plan, current.stepIndex),
       });
     if (!sentBack) return false;
     // The fix resumes the step's own session when the rigor fixes in it; otherwise it runs fresh, a rung up.

@@ -88,8 +88,11 @@ export function AcceptanceCard({
       <Stack gap="sm">
         {header}
         <Text size="sm">
-          The work shipped. 10db could not confirm these acceptance criteria. Accept the work as it
-          is, or send it back and 10db files a task to meet them.
+          {item.detail?.['reviewFollows'] === true
+            ? 'The work went on to review'
+            : 'The work shipped'}
+          . 10db could not confirm these acceptance criteria. Accept the work as it is, or send it
+          back and 10db files a task to meet them.
         </Text>
         {open.length === 0 ? null : (
           <List size="sm" spacing={4}>

@@ -20,12 +20,15 @@ import {
   type WriteContext,
 } from '@10db/db';
 
-function bodyOf(detail: AcceptanceDetail): string {
+/** The detail key naming whether a Review follows the run, so the card says where the work went. */
+export const ACCEPTANCE_REVIEW_FOLLOWS_KEY = 'reviewFollows';
+
+function bodyOf(detail: AcceptanceDetail, reviewFollows: boolean): string {
   const open = detail.criteria
     .filter((c) => c.verdict !== AcceptanceVerdict.Met)
     .map((c) => `- ${c.criterion} (${c.note})`);
   return [
-    'The run shipped, and 10db could not confirm these criteria:',
+    `${reviewFollows ? 'The work went on to review' : 'The work shipped'}, and 10db could not confirm these criteria:`,
     ...open,
     ...(detail.unasked === null
       ? []
@@ -46,13 +49,15 @@ export function raiseAcceptanceCard(
     projectId: ProjectId;
     taskTitle: string;
     detail: AcceptanceDetail;
+    reviewFollows: boolean;
   },
 ): InboxItemDto {
   const live = openItemsForWorkstream(ctx.tx, input.workstreamId).find(
     (item) => item.kind === InboxKind.Acceptance && item.state === InboxState.Open,
   );
-  const body = bodyOf(input.detail);
-  if (live) return updateInboxItem(ctx, live.id, { body, detail: { ...input.detail } });
+  const body = bodyOf(input.detail, input.reviewFollows);
+  const detail = { ...input.detail, [ACCEPTANCE_REVIEW_FOLLOWS_KEY]: input.reviewFollows };
+  if (live) return updateInboxItem(ctx, live.id, { body, detail });
   return insertInboxItem(ctx, {
     projectId: input.projectId,
     kind: InboxKind.Acceptance,
@@ -65,7 +70,7 @@ export function raiseAcceptanceCard(
     recommendation: null,
     category: 'product',
     urgency: 'normal',
-    detail: { ...input.detail },
+    detail,
     foldKey: null,
     targets: [{ workstreamId: input.workstreamId, sessionId: null }],
   });
