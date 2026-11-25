@@ -416,12 +416,16 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   } {
     if (input.batchId !== undefined) {
       const copy = copyBatchOf(project, input.batchId);
-      if (copy)
+      if (copy) {
+        // A separate copy admits its tasks as a start does: copies on, a gate, and a review step.
+        if (getLocalCopy(db, copy.id) !== null)
+          for (const task of tasks) refuseLocalCopy(project, task, copy.id);
         return {
           steps: [prepareJoinWorktree(project, copy, tasks)],
           placement: () => WorkspaceMode.Worktree,
           proposals: new Map(),
         };
+      }
       // Anything else is the shared batch's join, or a refusal saying why it can't be.
       return {
         steps: [prepareShared(project, input.title, input.batchId, tasks, ending)],

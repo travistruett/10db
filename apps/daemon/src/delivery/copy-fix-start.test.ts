@@ -1,5 +1,5 @@
 import { getBatch, getLocalCopy, listWorkstreams, patchTask, transitionBatch } from '@10db/db';
-import { WorkstreamState, type TaskDto } from '@10db/contracts';
+import { COPY_NEEDS_REVIEW, WorkstreamState, type TaskDto } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 
@@ -46,6 +46,12 @@ describe('a local project with a separate copy', () => {
     expect(() => h.starter.startBatch(h.project.id, { title: 'x', taskIds: [fix.id] })).toThrow(
       /delivers locally/,
     );
+    // A fix task whose process runs no review would land the copy unreviewed.
+    const light = inCopy('Alpha light fix');
+    h.store.write((w) => patchTask(w, light.id, { rigor: 'light' }));
+    expect(() =>
+      h.starter.startBatch(h.project.id, { title: 'x', taskIds: [light.id], batchId: batch.id }),
+    ).toThrow(COPY_NEEDS_REVIEW);
     expect(() =>
       h.starter.startBatch(h.project.id, { title: 'x', taskIds: [fix.id], batchId: batch.id }),
     ).not.toThrow();
