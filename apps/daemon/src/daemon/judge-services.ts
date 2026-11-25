@@ -284,9 +284,14 @@ export function createJudgeServices(deps: {
             : await keychainConflict(() => deps.judge.test(accountId, model));
         if (result.ok) continue;
         const firstDefault = next.decisions?.[JudgeDecision.CrossesLimit]?.model;
+        // Another decision the switch saves on the same model keeps the refusal: it would be saved on a model that failed.
+        const otherUses = Object.entries(next.decisions ?? {}).some(
+          ([decision, c]) => decision !== JudgeDecision.CrossesLimitSecond && c?.model === model,
+        );
         if (
           switching &&
           !secondNamed &&
+          !otherUses &&
           model === second &&
           firstDefault !== undefined &&
           firstDefault !== model
