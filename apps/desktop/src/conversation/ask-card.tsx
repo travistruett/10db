@@ -134,7 +134,7 @@ export function AskCard({
           </Box>
         )}
         {item.body === '' || item.body === call ? null : (
-          <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }}>
+          <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-line' }}>
             {item.body}
           </Text>
         )}
