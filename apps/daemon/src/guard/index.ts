@@ -21,6 +21,7 @@ export { protectedPaths, type ProtectedPath } from './account-rules';
 export { EQUALS_EXPANSION, plainCommandWords } from './plain-command';
 export { plainWordReadings } from './command-forms';
 export { runsInBackground, startsEndlessBackgroundLoop } from './background-loops';
+export { runsOutsideSandbox } from './sandbox-flag';
 export { hazardFor, hazardHit } from './hazards';
 export { firstUnread } from './unread-commands';
 export { unreadableHazard } from './unread-hazards';

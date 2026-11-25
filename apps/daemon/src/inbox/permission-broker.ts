@@ -33,6 +33,7 @@ import {
   hazardHit,
   passGitCall,
   runsInBackground,
+  runsOutsideSandbox,
   startsEndlessBackgroundLoop,
   stringField,
   unreadableHazard,
@@ -138,6 +139,12 @@ type BrokerContext = BrokerOwner & {
      */
     readonly commandsAsk?: boolean;
     /**
+     * Present for an attended chat that may run one command outside its sandbox (`dangerouslyDisableSandbox`):
+     * the builder is asked about that exact command. `mayRun` says why it may not run now (null: it may), at
+     * the call and again at the builder's yes. Absent, such a call is refused.
+     */
+    readonly unsandboxed?: { readonly mayRun: () => string | null };
+    /**
      * Where an allowed Read of the checkout's secret is served from (`LaneSession.secretReadsDir`):
      * Claude Code's deny rule on the secret stays, so the Read runs on a copy there instead.
      */
@@ -228,6 +235,23 @@ const ONCE_OPTIONS: readonly InboxOption[] = permissionOptions(false).filter(
   (o) => o.label === PermissionChoice.AllowOnce || o.label === PermissionChoice.Deny,
 );
 
+/** A chat's card for a command outside the sandbox: allow once, for this exact command in this chat, or deny. */
+const CHAT_ONCE_OPTIONS: readonly InboxOption[] = [
+  { label: PermissionChoice.AllowOnce, description: 'Run this command outside the sandbox once' },
+  {
+    label: PermissionChoice.AllowChat,
+    description:
+      'Run this exact command outside the sandbox again in this chat, until its session restarts',
+  },
+  { label: PermissionChoice.Deny, description: 'Deny; your note is passed to the agent' },
+];
+
+const OUTSIDE_CARD_TITLE = 'Run this outside the sandbox?';
+const OUTSIDE_CARD_WARNING =
+  'It runs with your full rights: it can read and write anywhere you can.';
+const OUTSIDE_NOT_AVAILABLE =
+  'A command outside the sandbox is not available in this session. Run it inside the sandbox.';
+
 const NETWORK_TOOL = 'SandboxNetworkAccess';
 const READ_FAMILY: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS']);
 const EDIT_FAMILY: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -258,6 +282,15 @@ const LOOP_CARD_BODY =
  * its equivalents, because a lane that reads a refusal as being about one spelling tries the next
  * (a `yes` loop denied, then a `while :` loop).
  */
+/** What a chat is told when the builder says no: it invites another way, and carries their note. */
+function chatDenialMessage(toolName: string, summary: string, note: string | undefined): string {
+  const call = summary.length > 300 ? `${summary.slice(0, 300)}…` : summary;
+  const parts = [`The builder said no to this ${toolName} call: ${call}`];
+  if (note) parts.push(`Note from the builder: ${note}`);
+  parts.push('Try another way, or ask them.');
+  return parts.join('\n');
+}
+
 export function denialMessage(toolName: string, summary: string, note: string | undefined): string {
   const call = summary.length > 300 ? `${summary.slice(0, 300)}…` : summary;
   const parts = [
@@ -292,6 +325,13 @@ interface Ask {
   readonly onceOnly?: boolean;
   /** What an unattended lane records it as, when it is skipped. */
   readonly kind?: SkipKind;
+  /** The card's title, where the default `Allow <tool>?` doesn't say it. */
+  readonly title?: string;
+  /**
+   * A chat's command outside the sandbox: only the builder answers it, so no stored rule, carried allowance or
+   * project grant does. The one yes that is remembered is this exact call, for this session.
+   */
+  readonly chatOnce?: boolean;
 }
 
 /** Why an unattended lane skipped what would have been a card, by kind; null where the kind says it. */
@@ -352,6 +392,9 @@ function unlessTooDeep<T>(read: () => T, fallback: T): T {
   }
 }
 
+/** The key a chat's remembered command is looked up by: the tool and the call as the card shows it. */
+const chatCallKey = (toolName: string, summary: string): string => `${toolName}\u0000${summary}`;
+
 function summarize(req: ToolRequest): string {
   return grantCallSummary(req.toolName, req.input);
 }
@@ -389,6 +432,16 @@ export function createPermissionBroker(
   ctx: BrokerContext,
 ): (req: ToolRequest) => Promise<ToolDecision> {
   let allowOnce = ctx.allowOnce ?? null;
+  // The commands outside the sandbox the builder allowed for this session: forgotten when it ends.
+  const chatAllowed = new Set<string>();
+  const isChat = ctx.workstreamId === null;
+  /** Why the chat's command may not run outside the sandbox now; null when it may. */
+  const outsideRefusal = (): string | null => {
+    const outside = ctx.sandbox?.unsandboxed;
+    return outside === undefined ? OUTSIDE_NOT_AVAILABLE : outside.mayRun();
+  };
+  const denied = (toolName: string, summary: string, note: string | undefined): string =>
+    isChat ? chatDenialMessage(toolName, summary, note) : denialMessage(toolName, summary, note);
   const owner: BrokerOwner =
     ctx.workstreamId === null
       ? {
@@ -546,8 +599,17 @@ export function createPermissionBroker(
   async function askPermission(
     req: ToolRequest,
     ask: Ask | null = null,
-    noted?: LimitAt,
+    notedIn?: LimitAt,
   ): Promise<ToolDecision> {
+    const chatOnce = ask?.chatOnce === true;
+    // A command outside the sandbox is the builder's alone, whatever a limit note says about it.
+    const noted = chatOnce ? undefined : notedIn;
+    if (chatOnce) {
+      const remembered = chatAllowed.has(chatCallKey(req.toolName, ask.summary));
+      const refusal = outsideRefusal();
+      if (refusal !== null) return { behavior: 'deny', message: refusal, by: DeniedBy.TenDb };
+      if (remembered) return { behavior: 'allow' };
+    }
     const rules = listPermissionRules(deps.state.db, ctx.projectId, ctx.workstreamId);
     const paths = ask?.realPaths === undefined ? undefined : { realPaths: ask.realPaths };
     const onceOnly = ask?.onceOnly === true;
@@ -557,12 +619,18 @@ export function createPermissionBroker(
     if (
       !judged &&
       !onceOnly &&
+      !chatOnce &&
       unlessTooDeep(() => matchPermissionRule(req, rules, paths, ctx.mcpApproved), undefined)
     ) {
       return { behavior: 'allow' };
     }
     const summary = ask?.summary ?? summarize(req);
-    if (!judged && allowOnce?.toolName === req.toolName && allowOnce.summary === summary) {
+    if (
+      !judged &&
+      !chatOnce &&
+      allowOnce?.toolName === req.toolName &&
+      allowOnce.summary === summary
+    ) {
       const { cardId } = allowOnce;
       allowOnce = null;
       if (cardId !== undefined) recordAllowedWrite(cardId, req, ask);
@@ -572,6 +640,7 @@ export function createPermissionBroker(
     if (
       judged &&
       !onceOnly &&
+      !chatOnce &&
       isGrantedCall(projectGrantedCalls(deps.state.db, ctx.projectId), req.toolName, req.input)
     )
       return { behavior: 'allow' };
@@ -587,17 +656,19 @@ export function createPermissionBroker(
     const grantCall = grantCallSummary(req.toolName, req.input);
     const noteNeeded = judged && !onceOnly && grantTargetOf(null, grantCall, req.toolName) === null;
     // A once-only call offers no rule to store, Always in this project included.
-    const options = onceOnly
-      ? ONCE_OPTIONS
-      : judged
-        ? limitOptions(noteNeeded)
-        : optionsFor(storable);
+    const options = chatOnce
+      ? [...CHAT_ONCE_OPTIONS]
+      : onceOnly
+        ? ONCE_OPTIONS
+        : judged
+          ? limitOptions(noteNeeded)
+          : optionsFor(storable);
     const { item, answer } = deps.inbox.ask({
       projectId: ctx.projectId,
       ...owner,
       sessionId: ctx.sessionId,
       kind: 'permission',
-      title: noted === undefined ? `Allow ${req.toolName}?` : limitCardTitle(noted),
+      title: ask?.title ?? (noted === undefined ? `Allow ${req.toolName}?` : limitCardTitle(noted)),
       body: noted === undefined ? (ask?.body ?? summary) : summary,
       // The service refuses a choice the card does not offer, so a once-only card stores no rule.
       options:
@@ -616,6 +687,7 @@ export function createPermissionBroker(
         ...(judged && !onceOnly ? { [GRANT_CALL_DETAIL]: grantCall } : {}),
         ...(grant === null ? {} : { [MCP_TOOL_GRANT_DETAIL]: grant }),
         ...editDetail(req, ask),
+        ...(chatOnce ? { unsandboxed: true } : {}),
         ...(req.escalated ? { [ESCALATED_KEY]: true } : {}),
         ...(noted?.limit == null ? {} : { [LIMIT_DETAIL]: noted.limit }),
         ...(noteNeeded ? { [NOTE_NEEDED_DETAIL]: true } : {}),
@@ -634,12 +706,19 @@ export function createPermissionBroker(
     const result = await waitOrWithdraw(item, answer, cardGoesWith(req));
     // inbox.answer has already written any rule this choice implies, in the answer's transaction.
     if (ALLOWING.includes(result.choice)) {
+      if (chatOnce) {
+        // The turn may have ended or the checkout moved while the card waited: the yes is read again.
+        const refusal = outsideRefusal();
+        if (refusal !== null) return { behavior: 'deny', message: refusal, by: DeniedBy.TenDb };
+        if (result.choice === PermissionChoice.AllowChat)
+          chatAllowed.add(chatCallKey(req.toolName, summary));
+      }
       recordAllowedWrite(item.id, req, ask);
       return { behavior: 'allow' };
     }
     return {
       behavior: 'deny',
-      message: denialMessage(req.toolName, summary, result.note),
+      message: denied(req.toolName, summary, result.note),
       // The builder answered the card with Deny: the one refusal that is theirs.
       by: DeniedBy.Builder,
     };
@@ -728,6 +807,19 @@ export function createPermissionBroker(
   ): ToolDecision | Ask {
     const command = req.input['command'];
     if (typeof command !== 'string') return { summary: summarize(req) };
+    if (runsOutsideSandbox(req.input)) {
+      if (sandbox.unsandboxed === undefined)
+        return { behavior: 'deny', message: OUTSIDE_NOT_AVAILABLE, by: DeniedBy.TenDb };
+      const why = stringField(req.input, 'description');
+      return {
+        summary: command,
+        title: OUTSIDE_CARD_TITLE,
+        body: [command, why, OUTSIDE_CARD_WARNING]
+          .filter((part) => part !== null && part !== '')
+          .join('\n\n'),
+        chatOnce: true,
+      };
+    }
     let hit: ReturnType<typeof hazardHit>;
     let unread: ReturnType<typeof firstUnread>;
     let unreadable: string | null;

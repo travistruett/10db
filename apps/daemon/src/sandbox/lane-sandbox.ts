@@ -192,6 +192,8 @@ export interface LaneSessionInput {
    * It never gets the Docker socket, whatever the project's switch says.
    */
   readonly readOnly?: boolean;
+  /** A chat's session may run a command outside its sandbox when the hook and the builder allow it. */
+  readonly allowUnsandboxedCommands?: boolean;
   /**
    * A person is in the session (a pass): a Read of one of the checkout's `.env*` files asks the
    * builder on a card instead of being refused, as in Claude Code. The kernel still denies them to
@@ -503,6 +505,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           CLAUDE_ENV_FILE: envFile,
         };
         const settings = buildLaneProfile({
+          ...(input.allowUnsandboxedCommands === true ? { allowUnsandboxedCommands: true } : {}),
           checkout,
           tmpDir,
           home: deps.home,

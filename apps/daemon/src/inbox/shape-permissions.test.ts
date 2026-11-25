@@ -386,3 +386,93 @@ describe("a chat's card never folds", () => {
     expect((await first.answer).choice).toBe(PermissionChoice.AllowOnce);
   });
 });
+
+describe("a chat's command outside the sandbox", () => {
+  const outside = (command: string) =>
+    request('Bash', { command, dangerouslyDisableSandbox: true });
+  let refusal: string | null;
+
+  function chatBroker(owner: ReturnType<typeof conversation>) {
+    return createPermissionBroker(
+      { state, inbox, git: NO_GIT, logger: silentLogger },
+      {
+        projectId: owner.projectId,
+        workstreamId: null,
+        conversationId: owner.conversationId,
+        sessionId: mintId('Session'),
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        signal: new AbortController().signal,
+        sandbox: {
+          fileAccess,
+          hazards: [],
+          commandsAsk: true,
+          unsandboxed: { mayRun: () => refusal },
+        },
+      },
+    );
+  }
+
+  beforeEach(() => {
+    refusal = null;
+  });
+
+  it('asks with three answers, remembers only the exact command for the session, and stores no rule', async () => {
+    const owner = conversation();
+    const broker = chatBroker(owner);
+    const first = broker(outside('pnpm test'));
+    const card = onlyOpenCard();
+    expect(card.title).toBe('Run this outside the sandbox?');
+    expect(card.detail?.['unsandboxed']).toBe(true);
+    expect(card.options.map((o) => o.label)).toEqual([
+      PermissionChoice.AllowOnce,
+      PermissionChoice.AllowChat,
+      PermissionChoice.Deny,
+    ]);
+    inbox.answer(card.id, { choice: PermissionChoice.AllowChat });
+    expect(await first).toEqual({ behavior: 'allow' });
+    // The identical call goes through unasked; another command, and another session, ask again.
+    expect(await broker(outside('pnpm test'))).toEqual({ behavior: 'allow' });
+    expect(openCards()).toEqual([]);
+    void broker(outside('pnpm build')).catch(() => undefined);
+    expect(onlyOpenCard().detail?.['summary']).toBe('pnpm build');
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny, note: 'use the gate' });
+    await settle();
+    void chatBroker(owner)(outside('pnpm test')).catch(() => undefined);
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny });
+    await settle();
+    expect(listPermissionRules(state.db, owner.projectId, null)).toEqual([]);
+  });
+
+  it('denies a yes once the turn no longer holds the checkout, and a remembered call too', async () => {
+    const owner = conversation();
+    const broker = chatBroker(owner);
+    const first = broker(outside('pnpm test'));
+    refusal = 'The turn ended.';
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    expect(await first).toMatchObject({ behavior: 'deny', message: 'The turn ended.' });
+    refusal = null;
+    // The refused yes remembered nothing.
+    const again = broker(outside('pnpm test'));
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    await again;
+    refusal = 'A lane holds the checkout now.';
+    expect(await broker(outside('pnpm test'))).toMatchObject({ behavior: 'deny' });
+  });
+
+  it('tells the chat to try another way, without telling it not to retry', async () => {
+    const pending = chatBroker(conversation())(outside('pnpm test'));
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny, note: 'run the gate' });
+    const decision: ToolDecision = await pending;
+    const message = decision.behavior === 'deny' ? decision.message : '';
+    expect(message).toContain('run the gate');
+    expect(message).toContain('Try another way');
+    expect(message).not.toMatch(/do not retry/i);
+  });
+
+  it('refuses the call where the session has no such hatch', async () => {
+    const owner = conversation();
+    const decision = await shapeBroker(owner)(outside('pnpm test'));
+    expect(decision).toMatchObject({ behavior: 'deny' });
+    expect(openCards()).toEqual([]);
+  });
+});

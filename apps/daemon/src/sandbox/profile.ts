@@ -162,6 +162,11 @@ const LaneSandboxSettingsSchema = z.strictObject({
 export type LaneSandboxSettings = z.infer<typeof LaneSandboxSettingsSchema>;
 
 export interface LaneProfileInput {
+  /**
+   * Claude Code may run a command outside the sandbox when the model asks (`dangerouslyDisableSandbox`).
+   * Only an attended chat's session sets it, and its PreToolUse hook and the builder's yes decide each call.
+   */
+  allowUnsandboxedCommands?: boolean;
   checkout: string;
   tmpDir: string;
   home: string;
@@ -381,7 +386,7 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   const candidate: LaneSandboxSettings = {
     enabled: true,
     failIfUnavailable: true,
-    allowUnsandboxedCommands: false,
+    allowUnsandboxedCommands: input.allowUnsandboxedCommands === true,
     allowAppleEvents: false,
     autoAllowBashIfSandboxed: false,
     filesystem: {

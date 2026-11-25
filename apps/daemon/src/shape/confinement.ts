@@ -89,6 +89,11 @@ export interface ShapeAccess {
   readonly agentModels?: readonly string[];
   /** Who judges the session's calls (`capabilities.judge`); today's rules where absent. */
   readonly judge?: JudgeKind;
+  /**
+   * A chat working in the checkout may run one command outside its sandbox after the builder's yes: a
+   * flagged command is asked about, after the guard that judges every command. Absent, it is refused.
+   */
+  readonly unsandboxed?: 'ask';
 }
 
 /** One tool call as the PreToolUse hook sees it; the SDK sets `agentId` only inside a subagent. */
@@ -123,6 +128,10 @@ const BACKGROUND_REFUSAL =
   'A planning session runs its commands in the foreground only, so each ends before the turn does. Run it without run_in_background.';
 const UNSANDBOXED_REFUSAL =
   'A planning session runs commands only inside its read-only sandbox. Run it without dangerouslyDisableSandbox.';
+const UNSANDBOXED_BACKGROUND_REFUSAL =
+  'A command outside the sandbox runs in the foreground only, so it ends before the turn does. Run it without run_in_background, nohup or &.';
+const UNSANDBOXED_ASK =
+  'This command runs outside the sandbox, so the builder decides whether it runs.';
 const NOT_READ_ONLY =
   'This command is not one 10db reads as read-only, so the builder decides whether it runs. It runs in a sandbox that cannot change the checkout.';
 
@@ -151,6 +160,15 @@ function flagged(input: unknown, key: 'run_in_background' | 'dangerouslyDisableS
     : runsInBackground({ run_in_background: parsed.data[key] });
 }
 
+/** A command's input without its flag for running outside the sandbox. */
+function withoutFlag(input: unknown): unknown {
+  const parsed = CommandFlags.safeParse(input);
+  if (!parsed.success) return input;
+  return Object.fromEntries(
+    Object.entries(parsed.data).filter(([key]) => key !== 'dangerouslyDisableSandbox'),
+  );
+}
+
 /**
  * A command, by the guard a lane's commands meet: what it refuses stays refused, a read-only command
  * runs without asking, and anything else is the builder's call through the broker.
@@ -165,20 +183,24 @@ function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
     return deny(
       `${call.toolName} is not available to the ${call.agentType ?? 'this'} agent: only the session and its code researchers run commands.`,
     );
-  if (flagged(call.toolInput, 'dangerouslyDisableSandbox')) return deny(UNSANDBOXED_REFUSAL);
+  const outside = flagged(call.toolInput, 'dangerouslyDisableSandbox');
+  if (outside && access.unsandboxed !== 'ask') return deny(UNSANDBOXED_REFUSAL);
   // Only a native judge's session runs a command in the background, under the lanes' process tracking: it
   // stops with the session. On 10db's judge, as on the rules, every command runs in the foreground.
   const native = access.judge === JudgeKind.Native;
   // A judge that runs (auto mode or 10db's) takes the calls the rules would card.
   const judged = native || access.judge === JudgeKind.Tendb;
-  if (!native && flagged(call.toolInput, 'run_in_background')) return deny(BACKGROUND_REFUSAL);
+  const background = outside || !native;
+  const backgroundRefusal = outside ? UNSANDBOXED_BACKGROUND_REFUSAL : BACKGROUND_REFUSAL;
+  if (background && flagged(call.toolInput, 'run_in_background')) return deny(backgroundRefusal);
   const command = stringField(call.toolInput, 'command');
-  if (!native && command !== null && startsBackgroundJob(command)) return deny(BACKGROUND_REFUSAL);
+  if (background && command !== null && startsBackgroundJob(command))
+    return deny(backgroundRefusal);
   const verdict = judgePreToolUse({
     judge: JudgeKind.Rules,
     coveredByAllowRule: false,
     toolName: call.toolName,
-    toolInput: call.toolInput,
+    toolInput: outside ? withoutFlag(call.toolInput) : call.toolInput,
     repoPath: access.checkout,
     ...(call.cwd === undefined ? {} : { cwd: call.cwd }),
     // A conversation claims nothing and holds no hazard; every command that is not read-only asks.
@@ -190,6 +212,8 @@ function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
     protectedPaths: commands.protectedPaths,
     fileAccess: commands.fileAccess,
   });
+  // A deny stands; anything else about a command outside the sandbox is the builder's call.
+  if (outside) return verdict.decision === 'deny' ? verdict : ask(UNSANDBOXED_ASK);
   // A command that is not read-only is the judge's call: auto mode's classifier where it runs, else a card.
   if (verdict.decision === 'allow' && verdict.settled === undefined && !judged)
     return ask(NOT_READ_ONLY);

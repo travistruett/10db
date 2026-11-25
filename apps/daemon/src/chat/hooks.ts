@@ -94,7 +94,12 @@ import {
   startingJudge,
 } from '../trust';
 import { digestText } from './brief';
-import { judgeChatCall, judgeFullAccessCall, type ChatPlace } from './confinement';
+import {
+  judgeChatCall,
+  judgeFullAccessCall,
+  outsideSandboxRefusal,
+  type ChatPlace,
+} from './confinement';
 import { workNote } from './work-note';
 import { chatRoot, withWorktreeOnDisk } from './work-root';
 import { JUDGED_CHAT_TOOLS } from './git-rule';
@@ -599,6 +604,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         checkout: launch.cwd,
         firstChange: () => deps.firstChange?.(chat.id),
       };
+      // A Claude chat's sandbox lets one command ask to run outside it, each judged by the hook and then the
+      // builder; Full access has no sandbox, and Codex runs with approvals off.
+      const codexChat = launch.account.harness === Provider.Codex;
+      const asksOutside = full === null && !fullCodex && launch.account.harness === Provider.Claude;
       const shapeId = planOfConversation(state.db, conv.id);
       const plan = deps.plan;
       // Every chat has its plan's folder, derived from the chat until a plan exists. Made before the sandbox,
@@ -620,6 +629,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         signal: ending.signal,
         observer: start.observer,
         limits: limitNotes,
+        ...(asksOutside ? { unsandboxedAsk: { mayRun: () => outsideSandboxRefusal(folder) } } : {}),
       };
       let ready: ShapePrepared | null;
       if (full !== null || fullCodex)
@@ -733,6 +743,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         ...(planFiles === undefined ? {} : { planFilesDir: planFiles }),
         agentModels: launch.agentModels,
         judge,
+        ...(asksOutside ? { unsandboxed: 'ask' as const } : {}),
         ...(setup === null || setup.reads.length === 0
           ? {}
           : {
@@ -831,8 +842,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             judge,
             systemPrompt:
               plan === undefined
-                ? chatSystemPrompt(webOn, fullAgent)
-                : `${chatSystemPrompt(webOn, fullAgent)}\n\n${
+                ? chatSystemPrompt(webOn, fullAgent, codexChat)
+                : `${chatSystemPrompt(webOn, fullAgent, codexChat)}\n\n${
                     shapeId === null
                       ? PLANNING_STUB
                       : plan.systemPrompt(launch.agentModels, subagents, web)

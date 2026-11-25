@@ -13,7 +13,9 @@ import {
 } from '../shape';
 import { CHAT_GIT_REFUSAL } from './git-rule';
 import {
+  BRANCH_RUNS_INSIDE,
   CHAT_MOVING,
+  CHAT_ONLY_RUNS_OUTSIDE,
   CHAT_TURN_ENDED,
   chatFolderInUse,
   judgeChatCall,
@@ -313,6 +315,58 @@ describe("a chat's shell and git", () => {
       access,
     );
     expect('reason' in verdict && verdict.reason).not.toContain('make_branch');
+  });
+});
+
+// A chat's command outside the sandbox: asked about only from the chat itself, working Here, holding the checkout.
+describe("a chat's command outside the sandbox", () => {
+  let asking: ShapeAccess;
+  beforeAll(() => {
+    asking = { ...access, unsandboxed: 'ask' };
+  });
+  const outside = { command: 'pnpm test', dangerouslyDisableSandbox: true };
+  const flagged = (agentId?: string) => ({
+    toolName: 'Bash',
+    input: outside,
+    cwd: checkout,
+    ...(agentId === undefined ? {} : { agentId }),
+  });
+  const moving = placeOf({ place: 'moving', holds: () => true, writable: true });
+  const onBranch = placeOf({ place: 'branch', holds: () => true, writable: true });
+  const unwritable = placeOf({ place: 'here', holds: () => true });
+  const lost = placeOf({ place: 'here', writable: true, current: () => false });
+
+  it.each([
+    ['the chat holding its checkout', flagged(), holding, 'ask', undefined],
+    ['a subagent', flagged('agent-1'), holding, 'deny', CHAT_ONLY_RUNS_OUTSIDE],
+    [
+      'a session that has not chosen a place',
+      flagged(),
+      placeOf({ place: null }),
+      'deny',
+      WAITING_FOR_CHOICE,
+    ],
+    ['a chat that is moving', flagged(), moving, 'deny', CHAT_MOVING],
+    ['a chat on its own branch', flagged(), onBranch, 'deny', BRANCH_RUNS_INSIDE],
+    ['a turn that does not hold the checkout', flagged(), lost, 'deny', CHAT_TURN_ENDED],
+    ['a session opened read-only', flagged(), unwritable, 'deny', undefined],
+  ] as const)('%s', (_name, call, folder, decision, reason) => {
+    const verdict = judgeChatCall(call, asking, folder);
+    expect(verdict).toMatchObject({ decision });
+    if (reason !== undefined) expect(verdict).toMatchObject({ reason });
+  });
+
+  it('leaves an ordinary command from a subagent to run as it does', () => {
+    const verdict = judgeChatCall(
+      { toolName: 'Bash', input: { command: 'git status' }, cwd: checkout, agentId: 'agent-1' },
+      asking,
+      holding,
+    );
+    expect(verdict.decision).toBe('allow');
+  });
+
+  it('refuses the flagged call without the ask, as before', () => {
+    expect(judgeChatCall(flagged(), access, holding).decision).toBe('deny');
   });
 });
 
