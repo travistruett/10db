@@ -23,7 +23,9 @@ export function withoutComments(text: string): string {
 export function within(dir: string, rel: string): string | null {
   if (rel.startsWith('/')) return null;
   const joined = posix.normalize(posix.join(dir, rel));
-  return joined === '..' || joined.startsWith('../') ? null : joined.replace(/^\.\/?/, '');
+  if (joined === '..' || joined.startsWith('../')) return null;
+  // `posix.join` leaves no `./` in front; only the folder itself is `.`. A dot name such as `.agents` stays.
+  return joined === '.' ? '' : joined;
 }
 
 /** The rules of one Makefile by target name; a target named twice keeps both recipes. */

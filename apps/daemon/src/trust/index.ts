@@ -18,6 +18,7 @@ export {
   type LimitAt,
   type LimitVerdict,
 } from './crosses-limit';
+export { callRuns, type CallRuns, type RunText } from './call-runs';
 export {
   grantCallSummary,
   grantTargetOf,
