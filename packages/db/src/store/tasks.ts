@@ -921,9 +921,14 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
  * Remove from the Board and the builder's `remove_task` tool: as `cancelTask`, and also a task with
  * nothing left in it (`isSpentTask`), whose runs were all cancelled, as one an abandoned pass sent
  * back leaves. Every other refusal of `cancelTask` holds: an open task waiting on it, a batch being
- * cut, a task not open.
+ * cut, a task not open. A task whose runs all ended unshipped, one of them failed and the latest
+ * cancelled, is retired as `closeTask` retires a failed one, keeping its runs and its batch's branch.
  */
 export function removeTaskFromBoard(ctx: WriteContext, id: TaskId): TaskDto {
+  if (endedAfterFailure(ctx.tx, id)) {
+    refuseWhileOpenDependents(ctx, getTask(ctx.tx, id), 'remove');
+    return retireTask(ctx, id);
+  }
   return removeUnstarted(ctx, id, false, isSpentTask(ctx.tx, id));
 }
 
@@ -1235,6 +1240,29 @@ export function retireTaskUnconditionally(ctx: WriteContext, id: TaskId): TaskDt
     .where(or(eq(schema.taskDeps.taskId, id), eq(schema.taskDeps.dependsOnId, id)))
     .run();
   return retireTask(ctx, id);
+}
+
+/**
+ * Whether the task's runs all ended without shipping, at least one failed and the latest was cancelled:
+ * Close refuses it, since its latest run didn't fail, and `isSpentTask` does, since one did. It is in no
+ * pass, has no saved work, and no pull request of it is open or merged.
+ */
+function endedAfterFailure(db: DbReader, id: TaskId): boolean {
+  const task = getTask(db, id);
+  if (task.status !== TaskStatus.Open || task.passId != null || task.keptWork === true)
+    return false;
+  if (latestRun(db, id)?.state !== WorkstreamState.Cancelled) return false;
+  const states = db
+    .select({ state: schema.workstreams.state })
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.taskId, id))
+    .all()
+    .map((run) => run.state);
+  const ended: readonly string[] = [WorkstreamState.Cancelled, WorkstreamState.Failed];
+  if (!states.every((state) => ended.includes(state))) return false;
+  if (!states.includes(WorkstreamState.Failed)) return false;
+  const pr = latestPullRequest(db, id);
+  return !pr || pr.state === PullRequestState.Closed;
 }
 
 /**
