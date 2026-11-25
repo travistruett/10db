@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LinearPostId, Provider, type ExternalLink } from '@10db/contracts';
 import { judgeReporterCall, linearToolPrefixes, type ReporterRun } from './reporter-guard';
-import { isLinearUploadUrl } from './reporter-pictures';
 
 const L = 'mcp__claude_ai_Linear__';
 const PR = 'https://github.com/acme/app/pull/7';
@@ -173,27 +172,6 @@ describe('judgeReporterCall', () => {
   ];
   it.each(rows)('%s', (_name, r, c, expected) => {
     expect(decision(r, c)).toBe(expected);
-  });
-
-  it('sends a picture only to an upload URL Linear signed', () => {
-    const signed = (
-      over: { host?: string; bucket?: string; signer?: string; scheme?: string } = {},
-    ) =>
-      `${over.scheme ?? 'https'}://${over.host ?? 'storage.googleapis.com'}/${over.bucket ?? 'linear-uploads-c4-us-east4'}/a/b/c?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=${encodeURIComponent(`${over.signer ?? 'linear-server@linear-1.iam.gserviceaccount.com'}/20261125/auto/storage/goog4_request`)}&X-Goog-Signature=ab`;
-    expect(isLinearUploadUrl(signed())).toBe(true);
-    expect(isLinearUploadUrl(signed({ scheme: 'http' }))).toBe(false);
-    expect(isLinearUploadUrl(signed({ host: 'evil.test' }))).toBe(false);
-    expect(isLinearUploadUrl(signed({ host: 'storage.googleapis.com.evil.test' }))).toBe(false);
-    expect(isLinearUploadUrl(signed({ bucket: 'someone-else' }))).toBe(false);
-    expect(isLinearUploadUrl(signed({ signer: 'me@evil-project.iam.gserviceaccount.com' }))).toBe(
-      false,
-    );
-    expect(isLinearUploadUrl('https://user:pw@storage.googleapis.com/linear-uploads-x/a')).toBe(
-      false,
-    );
-    expect(isLinearUploadUrl('not a url')).toBe(false);
-    const twice = `${signed()}&X-Goog-Credential=${encodeURIComponent('me@evil-project.iam.gserviceaccount.com/x')}`;
-    expect(isLinearUploadUrl(twice)).toBe(false);
   });
 
   it('withholds a body with a key, naming the pattern', () => {

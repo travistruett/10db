@@ -102,4 +102,3 @@ export {
   sweepUnlistedRuns,
 } from './skipped-card';
 export { skipFollowUpStarter } from './skip-follow-up';
-export { picturePlan } from './pr-pictures';
