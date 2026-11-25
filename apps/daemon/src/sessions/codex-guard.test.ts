@@ -783,6 +783,7 @@ describe('judgeHookCall with the session judge', () => {
             judgeNow: () => JudgeKind.Tendb,
             coveredByBuilderRule: () => false,
             floorVerdict: () => ({ decision: 'ask', reason: 'rules' }),
+            readCommitted: null,
             skips: null,
             limits: createLimitNotes(),
             onFloor: () => undefined,

@@ -10,14 +10,17 @@ import {
 import { z } from 'zod';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
+import type { CommittedReader } from '../folders';
 import type { GuardVerdict } from '../guard';
 import type { Judge } from '../judge';
 import type { Logger } from '../log';
 import type { JudgedCallRequest } from '../sessions';
 import {
   callKey,
+  callRuns,
   callSummary,
   crossesLimit,
+  type CallRuns,
   type LimitVerdict,
   isGrantedCall,
   projectGrantedCalls,
@@ -87,6 +90,11 @@ export interface HookJudgeContext {
   readonly coveredByBuilderRule: (req: JudgedCallRequest) => boolean;
   /** The session's own answer on the `rules` floor, a lane's unattended answer and skip included. */
   readonly floorVerdict: (req: JudgedCallRequest) => GuardVerdict;
+  /**
+   * Reads the project's files as committed at `origin/<base>` and unchanged in the checkout, for the make targets
+   * and scripts a shell call runs (`callRuns`); null shows the judge the call alone.
+   */
+  readonly readCommitted: CommittedReader | null;
   /** A lane's skip recorder; null where the builder is in the session. */
   readonly skips: SkipRecorder | null;
   readonly limits: LimitNotes;
@@ -101,13 +109,15 @@ const RULE_SETTLED = "The builder's allow rule covers this call, so it runs, as 
 const GRANT_SETTLED = 'The builder allowed this very call in this project.';
 
 const InputRecord = z.record(z.string(), z.unknown());
+const NO_RUNS: CallRuns = { runs: [], cut: false };
 
 /**
  * The session judge for a call the guard left open, on 10db's judge: the fast path, then `crossesLimit`. An allow
  * settles the call; a limit asks the builder (attended) or is a recorded skip (a lane); a judge that can't answer
- * gives the session's rules answer, and for `FLOOR_BACKOFF_MS` after a timeout or an error asks no model. The judges'
- * verdict on a call is kept for the session, keyed by the call and the allow lines it was judged with, so the same
- * call is answered the same way and a changed grant judges it again. For `FLOOR_BACKOFF_MS` after the second opinion
+ * gives the session's rules answer, and for `FLOOR_BACKOFF_MS` after a timeout or an error asks no model. A shell
+ * call is shown with the committed text of what it runs (`callRuns`). The judges' verdict on a call is kept for the
+ * session, keyed by the call, the allow lines and that text, so the same call is answered the same way and a changed
+ * grant or script judges it again. For `FLOOR_BACKOFF_MS` after the second opinion
  * timed out or failed, a call the first judge leaves unclear skips without asking it.
  */
 export function createHookJudge(
@@ -127,6 +137,22 @@ export function createHookJudge(
     if (settled.size > SETTLED_CALLS_MAX) {
       const [oldest] = settled.keys();
       if (oldest !== undefined) settled.delete(oldest);
+    }
+  };
+
+  // What a shell call runs, as committed and unchanged; a reader that fails shows the call alone.
+  const runsOf = async (
+    req: JudgedCallRequest,
+    input: Readonly<Record<string, unknown>>,
+  ): Promise<CallRuns> => {
+    const command = input['command'];
+    if (ctx.readCommitted === null || req.toolName !== 'Bash' || typeof command !== 'string')
+      return NO_RUNS;
+    try {
+      const checkout = ctx.fastPath.checkout;
+      return await callRuns(command, req.cwd ?? checkout, checkout, ctx.readCommitted);
+    } catch {
+      return NO_RUNS;
     }
   };
 
@@ -152,6 +178,7 @@ export function createHookJudge(
       return { decision: 'allow', settled: GRANT_SETTLED };
     if (judging !== JudgeKind.Tendb) return { decision: 'allow' };
     if (ctx.coveredByBuilderRule(req)) return { decision: 'allow', settled: RULE_SETTLED };
+    const runs = await runsOf(req, input);
     const allow = ctx.allowLines();
     const key = JSON.stringify([
       callKey(req.toolName, input, ctx.fastPath.checkout),
@@ -161,6 +188,8 @@ export function createHookJudge(
       req.hunk,
       allow,
       ctx.builderNotes,
+      // A verdict reached on a script's committed text is not one on the text the checkout holds after an edit.
+      runs,
     ]);
     const known = settled.get(key);
     const now = ctx.clock.now().getTime();
@@ -181,6 +210,7 @@ export function createHookJudge(
           policy: ctx.policy,
           allow,
           notes: ctx.builderNotes,
+          runs,
           secondOpinion: secondDownAt === null || now - secondDownAt >= FLOOR_BACKOFF_MS,
           ...(ctx.workstreamId === null ? {} : { workstreamId: ctx.workstreamId }),
           ...(ctx.taskId === null ? {} : { taskId: ctx.taskId }),

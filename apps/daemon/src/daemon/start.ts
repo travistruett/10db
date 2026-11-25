@@ -244,7 +244,7 @@ import {
   type StateStore,
 } from '../events';
 import { createGit, memoryPinStore, resolveGit, runGit } from '../git';
-import { readComposeServices } from '../folders';
+import { readCommitted, readComposeServices } from '../folders';
 import { createHazardAssessor, subscribeHazardAssessment } from '../hazards';
 import {
   createGh,
@@ -2209,6 +2209,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       clock,
       judge,
       composeServices: (project) => readComposeServices(git, project),
+      readCommitted: (project, checkout) => readCommitted(git, project, checkout),
       firstChange: (chatId) => {
         chatWork.firstChange(chatId);
       },

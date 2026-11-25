@@ -256,6 +256,7 @@ export function chatWorld(
       subagentsOf: (account, model) => adapter.capabilities(account, model).subagents,
       clock,
       composeServices: () => Promise.resolve(null),
+      readCommitted: () => null,
       firstChange: (chatId) => {
         work.firstChange(chatId);
       },

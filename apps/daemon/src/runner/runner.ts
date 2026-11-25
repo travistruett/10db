@@ -230,7 +230,7 @@ import {
   type MigrationsBase,
 } from '../delivery';
 import { createLiveFrames, type LiveFrames, type StateStore } from '../events';
-import { readComposeServices } from '../folders';
+import { readCommitted, readComposeServices } from '../folders';
 import {
   AccountLaunchError,
   KeychainError,
@@ -3461,6 +3461,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               coveredByBuilderRule: (req) =>
                 matchesAllowedTool(req.toolName, req.input, builderRules, checkout),
               floorVerdict: (req) => laneVerdict(req, JudgeKind.Rules),
+              readCommitted: readCommitted(opts.git, project, checkout),
               skips: unattended?.skips ?? null,
               limits: limitNotes,
               onFloor: (detail) => {
