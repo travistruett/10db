@@ -63,15 +63,96 @@ const fixBatches = (root: BatchDto): BatchDto[] =>
 const fixTasks = () =>
   listTasks(h.store.db, h.project.id).filter((t) => t.title.startsWith('Fix CI'));
 
-describe('starting a fix when a required check fails', () => {
-  it('makes one task naming the job, with the end of its log, in a batch on the pull request branch', async () => {
+/**
+ * The head's first failure (job 76) that the watch's first read ran again once, with no fix yet; the
+ * next round reads the rerun's own failure (job 77).
+ */
+async function failsAfterRerun(w: PrWatch, root: BatchDto): Promise<void> {
+  const prUrl = root.prUrl ?? '';
+  fails(prUrl, job('build', '76'));
+  await begin(w);
+  expect(h.gh.reruns).toEqual(['1']);
+  expect(fixBatches(root)).toEqual([]);
+  fails(prUrl, job('build'));
+  await round(w);
+}
+
+/** The rollup GitHub shows for the pull request: the check failing, so the checks card can be raised. */
+const rollup = (prUrl: string, conclusion: string | null): void => {
+  h.gh.setChecks(prUrl, [
+    {
+      __typename: 'CheckRun',
+      name: 'build',
+      status: conclusion === null ? 'IN_PROGRESS' : 'COMPLETED',
+      conclusion,
+      detailsUrl: JOB_LINK,
+    },
+  ]);
+};
+const checksCards = () => h.cards().filter((c) => c.title.startsWith('Pull request checks failed'));
+
+describe('a required check that fails once on a head', () => {
+  it('is run again once before a fix or the card, and fails again into a fix', async () => {
+    const { batch: root } = await shipped(h);
+    const prUrl = root.prUrl ?? '';
+    fails(prUrl, job('build'));
+    rollup(prUrl, 'FAILURE');
+    const w = watcher();
+
+    await begin(w);
+    expect(h.gh.reruns).toEqual(['1']);
+    expect(fixBatches(root)).toEqual([]);
+    expect(checksCards()).toEqual([]);
+
+    // The rerun's own job fails.
+    fails(prUrl, job('build', '78'));
+    h.gh.setJobLog('78', { kind: 'ready', log: 'boom\n' });
+    await round(w);
+    expect(fixBatches(root)).toHaveLength(1);
+    expect(checksCards()).toHaveLength(1);
+    expect(h.gh.reruns).toEqual(['1']);
+  });
+
+  it('that passes on the rerun is a flaky check named with its head, and is never run again', async () => {
     const { batch: root, head } = await shipped(h);
     const prUrl = root.prUrl ?? '';
     fails(prUrl, job('build'));
+    rollup(prUrl, 'FAILURE');
+    const first = watcher();
+    await begin(first);
+    expect(h.gh.reruns).toEqual(['1']);
+
+    h.gh.setRequiredChecks(prUrl, { state: 'passing', failing: [], pending: [], cancelled: [] });
+    rollup(prUrl, 'SUCCESS');
+    await round(first);
+    expect(fixBatches(root)).toEqual([]);
+    expect(checksCards()).toEqual([]);
+    const flaky = h.only(h.cards());
+    expect(flaky.title).toBe('Flaky check: build (1 time)');
+    expect(flaky.body).toContain(head);
+    expect(flaky.detail).toMatchObject({ head, prUrl });
+    expect(getBatch(h.store.db, root.id).notices.map((n) => n.key)).toContain(
+      `checks-failed-rerun:${head}`,
+    );
+    await first.stop();
+
+    // A restart, and the same head fails again: it is the change's now, with no second rerun.
+    fails(prUrl, job('build', '79'));
+    rollup(prUrl, 'FAILURE');
+    h.gh.setJobLog('79', { kind: 'ready', log: 'boom\n' });
+    await begin(watcher());
+    expect(h.gh.reruns).toEqual(['1']);
+    expect(fixBatches(root)).toHaveLength(1);
+  });
+});
+
+describe('starting a fix when a required check fails', () => {
+  it('makes one task naming the job, with the end of its log, in a batch on the pull request branch', async () => {
+    const { batch: root, head } = await shipped(h);
     const log = Array.from({ length: 400 }, (_, i) => `step output ${String(i + 1)}`).join('\n');
     h.gh.setJobLog('77', { kind: 'ready', log: `\u001b[31m${log}\u001b[0m\n` });
 
-    await begin(watcher());
+    await failsAfterRerun(watcher(), root);
 
     const [fix] = fixBatches(root);
     expect(fix).toMatchObject({
@@ -103,10 +184,9 @@ describe('starting a fix when a required check fails', () => {
 
   it('makes no second fix on a second round, after a restart, or after the fix ended on the same head', async () => {
     const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
     const first = watcher();
-    await begin(first);
+    await failsAfterRerun(first, root);
     expect(fixBatches(root)).toHaveLength(1);
 
     await round(first);
@@ -134,7 +214,6 @@ describe('starting a fix when a required check fails', () => {
 
   it('cannot be closed early by a log that prints backticks', async () => {
     const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
     const log = [
       'before',
       '```',
@@ -146,7 +225,7 @@ describe('starting a fix when a required check fails', () => {
     ].join('\n');
     h.gh.setJobLog('77', { kind: 'ready', log });
 
-    await begin(watcher());
+    await failsAfterRerun(watcher(), root);
 
     const lines = h.only(fixTasks()).description.split('\n');
     const open = lines.findIndex((line) => /^`{6,}$/.test(line));
@@ -159,15 +238,20 @@ describe('starting a fix when a required check fails', () => {
 
   it('starts no fix while the pull request conflicts with its base', async () => {
     const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
+    fails(root.prUrl ?? '', job('build', '76'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
     h.gh.setMergeBlocked(root.prUrl ?? '', 'conflicts');
     const w = watcher();
 
     await begin(w);
     expect(fixBatches(root)).toEqual([]);
+    // A conflicting pull request's checks are stale: nothing is run again either.
+    expect(h.gh.reruns).toEqual([]);
 
     h.gh.setMergeBlocked(root.prUrl ?? '', null);
+    await round(w);
+    expect(h.gh.reruns).toEqual(['1']);
+    fails(root.prUrl ?? '', job('build'));
     await round(w);
     expect(fixBatches(root)).toHaveLength(1);
   });
@@ -179,11 +263,10 @@ describe('a refused fix cut', () => {
     const branch = root.branch ?? '';
     // The pull request's branch checked out in the main checkout: the cut refuses it.
     h.git$('switch', '-q', branch);
-    fails(root.prUrl ?? '', job('build'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
     const w = watcher();
 
-    await begin(w);
+    await failsAfterRerun(w, root);
 
     expect(fixBatches(root)).toEqual([]);
     expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_cut');

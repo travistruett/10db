@@ -224,6 +224,7 @@ describe('the pull request watch', () => {
       runId: '1',
       description: null,
     });
+    h.gh.setHead(prUrl, 'a'.repeat(40));
     h.gh.baseFailing.add('e2e');
     h.gh.setChecks(prUrl, [run('e2e', 'FAILURE')]);
     h.gh.setRequiredChecks(prUrl, {
@@ -247,6 +248,8 @@ describe('the pull request watch', () => {
     h.gh.setChecks(prUrl, [run('e2e', 'FAILURE'), run('lint', 'FAILURE')]);
     await round(w);
     expect(h.cards().map((c) => c.title)).toContain('Pull request checks failed for "Alpha": lint');
+    // A check the base fails too is never run again.
+    expect(h.gh.reruns).toEqual([]);
   });
 
   describe('a pull request 10db lands', () => {
