@@ -13,6 +13,7 @@ import { SplitButton } from './split-button';
 import { SectionHeading } from './section-heading';
 import { PathSummary, Pill, RowActions } from './table-cells';
 import { useListPatch } from './use-list-patch';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 type Area = ProjectDto['areas'][number];
 
@@ -163,24 +164,24 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
           </SplitButton>
         }
       />
-      <DataTable<Area>
-        aria-label="Areas"
-        records={project.areas}
-        columns={columns}
-        idAccessor="name"
-        withTableBorder
-        backgroundColor="var(--tendb-color-panel)"
-        borderRadius="md"
-        verticalSpacing="xs"
-        horizontalSpacing="md"
-        highlightOnHover
-        noRecordsText="No areas"
-        rowStyle={() => ({ cursor: 'pointer' })}
-        customRowAttributes={() => ({ 'data-keeps-drawer': '' })}
-        onRowClick={({ record }) => {
-          open(record);
-        }}
-      />
+      <RaisedPanel>
+        <DataTable<Area>
+          aria-label="Areas"
+          records={project.areas}
+          columns={columns}
+          idAccessor="name"
+          backgroundColor="transparent"
+          verticalSpacing="xs"
+          horizontalSpacing="md"
+          highlightOnHover
+          noRecordsText="No areas"
+          rowStyle={() => ({ cursor: 'pointer' })}
+          customRowAttributes={() => ({ 'data-keeps-drawer': '' })}
+          onRowClick={({ record }) => {
+            open(record);
+          }}
+        />
+      </RaisedPanel>
       {adding || editing !== null ? (
         <AreaDrawer
           // A new drawer per area, so one area's draft never leaks into the next.

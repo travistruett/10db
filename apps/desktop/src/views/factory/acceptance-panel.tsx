@@ -9,6 +9,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useAcceptanceFigures } from '../../daemon/acceptance-queries';
 import { notCheckingLine } from '../board/acceptance-line';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 function periodOf(value: string): RigorFiguresPeriod | null {
   return RIGOR_FIGURES_PERIODS.find((p) => String(p) === value) ?? null;
@@ -35,28 +36,30 @@ function RunList({
           None in this period
         </Text>
       ) : (
-        <Table aria-label={`${label} runs`} striped withTableBorder>
-          <Table.Tbody>
-            {rows.map((row, i) => (
-              <Table.Tr key={`${row.taskId}-${row.at}-${String(i)}`}>
-                <Table.Td>
-                  <Anchor
-                    component="button"
-                    type="button"
-                    size="sm"
-                    onClick={() => {
-                      void navigate({ to: '/board', search: { task: row.taskId } });
-                    }}
-                  >
-                    {row.title}
-                  </Anchor>
-                </Table.Td>
-                <Table.Td>{row.by === undefined ? '' : `by ${row.by}`}</Table.Td>
-                <Table.Td>{when(row.at)}</Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+        <RaisedPanel>
+          <Table aria-label={`${label} runs`}>
+            <Table.Tbody>
+              {rows.map((row, i) => (
+                <Table.Tr key={`${row.taskId}-${row.at}-${String(i)}`}>
+                  <Table.Td>
+                    <Anchor
+                      component="button"
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        void navigate({ to: '/board', search: { task: row.taskId } });
+                      }}
+                    >
+                      {row.title}
+                    </Anchor>
+                  </Table.Td>
+                  <Table.Td>{row.by === undefined ? '' : `by ${row.by}`}</Table.Td>
+                  <Table.Td>{when(row.at)}</Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </RaisedPanel>
       )}
     </Stack>
   );

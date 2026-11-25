@@ -20,6 +20,7 @@ import {
   type useLookAgainAtHazards,
 } from '../../daemon/hazard-queries';
 import { Pill } from './table-cells';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 const KIND_LABELS: Readonly<Record<HazardEntryKind, string>> = {
   [HazardEntryKind.Command]: 'Command',
@@ -179,16 +180,16 @@ export function FoundByTendb({ project }: { readonly project: ProjectDto }) {
         </Group>
       </UnstyledButton>
       <Collapse expanded={opened}>
-        <DataTable<HazardAdditionDto>
-          aria-label="Found by 10db"
-          records={additions}
-          columns={columns}
-          withTableBorder
-          backgroundColor="var(--tendb-color-panel)"
-          borderRadius="md"
-          verticalSpacing="xs"
-          horizontalSpacing="md"
-        />
+        <RaisedPanel>
+          <DataTable<HazardAdditionDto>
+            aria-label="Found by 10db"
+            records={additions}
+            columns={columns}
+            backgroundColor="transparent"
+            verticalSpacing="xs"
+            horizontalSpacing="md"
+          />
+        </RaisedPanel>
       </Collapse>
       {undo.error ? (
         <Alert color="red" title="Couldn't undo that">

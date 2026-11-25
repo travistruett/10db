@@ -19,7 +19,6 @@ import {
   Text,
   Tooltip,
   UnstyledButton,
-  Paper,
 } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
 import { useSearch } from '@tanstack/react-router';
@@ -38,6 +37,7 @@ import { MARK_OF_KIND, RowMarkIcon } from '../row-mark';
 import { ACCOUNT_STATUS_LABEL, AccountStatus, accountStatus } from './account-status';
 import { capShare, formatTokens, formatUsd } from './usage-text';
 import { accountUsedBy, harnessLine, usedByCount, usedByText } from './used-by';
+import { RaisedPanel } from '../../../shell/raised-panel';
 
 /** The same tones Overview's account rows use: ready works, anything missing needs the builder, archived is off. */
 const STATUS_TONE: Readonly<Record<AccountStatus, ConnectionTone>> = {
@@ -259,7 +259,7 @@ export function AccountsSection() {
         </Button>
       </Group>
       {/* No column wraps: the table scrolls sideways before a name or status breaks. Usage sits right like any number. */}
-      <Paper withBorder radius="md" bg="var(--tendb-color-panel)" style={{ overflow: 'hidden' }}>
+      <RaisedPanel>
         <Table.ScrollContainer minWidth={860}>
           <Table aria-label="Accounts" verticalSpacing="sm">
             <Table.Thead>
@@ -290,7 +290,7 @@ export function AccountsSection() {
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
-      </Paper>
+      </RaisedPanel>
       {archived.length > 0 ? <ArchivedList accounts={archived} /> : null}
       <AddAccountModal
         opened={adding}

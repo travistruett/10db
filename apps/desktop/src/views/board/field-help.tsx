@@ -18,7 +18,7 @@ export function LabelWithHelp({ label, htmlFor, children }: LabelWithHelpProps) 
   return (
     <Group gap={4} wrap="nowrap" mb={4}>
       <Input.Label htmlFor={htmlFor}>{label}</Input.Label>
-      <HoverCard width={360} shadow="md" position="top-start" withArrow>
+      <HoverCard width={360} position="top-start" withArrow>
         <HoverCard.Target>
           <ActionIcon
             type="button"

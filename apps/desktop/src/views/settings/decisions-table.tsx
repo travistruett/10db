@@ -17,6 +17,7 @@ import {
   modelName,
   statsFor,
 } from './decision-numbers';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 type Row =
   | { readonly kind: 'group'; readonly id: string; readonly label: string }
@@ -159,44 +160,44 @@ export function DecisionsTable({
     },
   ];
   return (
-    <DataTable<Row>
-      aria-label="Decisions"
-      records={records}
-      columns={columns}
-      idAccessor="id"
-      withTableBorder
-      backgroundColor="var(--tendb-color-panel)"
-      borderRadius="md"
-      verticalSpacing="xs"
-      horizontalSpacing="sm"
-      highlightOnHover
-      onRowClick={({ record }) => {
-        if (record.kind === 'decision') onOpen(record.decision);
-      }}
-      rowStyle={(record) =>
-        record.kind === 'group'
-          ? { background: 'var(--mantine-color-default-hover)', cursor: 'default' }
-          : { cursor: 'pointer' }
-      }
-      rowFactory={({ record, rowProps, children }) =>
-        record.kind === 'group' ? (
-          <Table.Tr {...rowProps} onClick={undefined} data-group>
-            <Table.Th
-              scope="rowgroup"
-              colSpan={columns.length}
-              py={8}
-              fz="xs"
-              fw={600}
-              c="dimmed"
-              bg="var(--mantine-color-default-hover)"
-            >
-              {record.label}
-            </Table.Th>
-          </Table.Tr>
-        ) : (
-          <Table.Tr {...rowProps}>{children}</Table.Tr>
-        )
-      }
-    />
+    <RaisedPanel>
+      <DataTable<Row>
+        aria-label="Decisions"
+        records={records}
+        columns={columns}
+        idAccessor="id"
+        backgroundColor="transparent"
+        verticalSpacing="xs"
+        horizontalSpacing="sm"
+        highlightOnHover
+        onRowClick={({ record }) => {
+          if (record.kind === 'decision') onOpen(record.decision);
+        }}
+        rowStyle={(record) =>
+          record.kind === 'group'
+            ? { background: 'var(--mantine-color-default-hover)', cursor: 'default' }
+            : { cursor: 'pointer' }
+        }
+        rowFactory={({ record, rowProps, children }) =>
+          record.kind === 'group' ? (
+            <Table.Tr {...rowProps} onClick={undefined} data-group>
+              <Table.Th
+                scope="rowgroup"
+                colSpan={columns.length}
+                py={8}
+                fz="xs"
+                fw={600}
+                c="dimmed"
+                bg="var(--mantine-color-default-hover)"
+              >
+                {record.label}
+              </Table.Th>
+            </Table.Tr>
+          ) : (
+            <Table.Tr {...rowProps}>{children}</Table.Tr>
+          )
+        }
+      />
+    </RaisedPanel>
   );
 }

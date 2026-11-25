@@ -14,7 +14,7 @@ export function DataSources() {
   const now = useNow();
   const status = useCatalogueStatus();
   return (
-    <Popover width={360} position="bottom-end" shadow="md" withArrow>
+    <Popover width={360} position="bottom-end" withArrow>
       <Popover.Target>
         <Button
           variant="subtle"

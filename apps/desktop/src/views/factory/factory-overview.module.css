@@ -119,12 +119,13 @@
   transform: rotate(90deg);
 }
 
-/* Each project is a card on the Board card's tone, with the same slight depth, apart from the next. */
+/* Each project is a raised thing (DESIGN.md, Elevation), apart from the next. An accordion item is not a
+   Paper, so it reads the level's two tokens directly. */
 .projectCard {
   border: 0;
   border-radius: var(--mantine-radius-md);
   background: var(--tendb-color-card);
-  box-shadow: var(--mantine-shadow-xs);
+  box-shadow: var(--tendb-elevation-raised);
 }
 
 .projectCard[data-active] {

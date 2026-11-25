@@ -10,7 +10,6 @@ import {
   Text,
   Title,
   Tooltip,
-  Paper,
 } from '@mantine/core';
 import { IconPencil, IconRoute, IconTrash, IconUsers } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
@@ -25,6 +24,7 @@ import { AddRouteModal } from './add-route-modal';
 import { HelpHint } from './help-hint';
 import { RouteScope, routeRows, ruleInputs, type RouteRow } from './route-rows';
 import { SettingsSectionKey } from './sections';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 /** Settings › Question Routing: who a question goes to, by scope, most specific first. */
 export function WhoAnswersSection({ project }: { readonly project: ProjectDto }) {
@@ -117,7 +117,7 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
         </EmptyState>
       ) : null}
       {rules.isSuccess && rows.length > 0 ? (
-        <Paper withBorder radius="md" bg="var(--tendb-color-panel)" style={{ overflow: 'hidden' }}>
+        <RaisedPanel>
           <Table.ScrollContainer minWidth={560}>
             <Table verticalSpacing="xs">
               <Table.Thead>
@@ -189,7 +189,7 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
-        </Paper>
+        </RaisedPanel>
       ) : null}
       {save.isError ? (
         <Alert color="red" variant="light">

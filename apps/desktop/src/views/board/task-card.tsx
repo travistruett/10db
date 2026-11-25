@@ -183,8 +183,7 @@ export function TaskCard({
       withBorder
       radius="md"
       p="sm"
-      shadow="xs"
-      bg="var(--tendb-color-card)"
+      variant="raised"
       data-testid="task-card"
       data-keeps-drawer
       {...(colored ? { 'data-state-color': state.color } : {})}
