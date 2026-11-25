@@ -3,14 +3,11 @@ import { Provider } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { mcpToolPrefix } from '../sessions';
 import { OUTBOUND_PATTERNS, SECRET_PATTERN_NAMES } from '../stakeholders';
-import type { ReporterPicture } from './reporter-pictures';
 
 /** The claude.ai connector's prefix, used whenever the connector list is unread. */
 const CONNECTOR_PREFIX = 'mcp__claude_ai_Linear__';
 
 const REPORT_TOOLS: ReadonlySet<string> = new Set(['mcp__10db__report_linear_post']);
-/** The upload tool, allowed only in a run that was offered pictures. */
-const UPLOAD_TOOL = 'mcp__10db__upload_linear_picture';
 
 /** Linear tools that only read. `extract_images` is left out: it fetches URLs. */
 const LINEAR_READS: ReadonlySet<string> = new Set([
@@ -27,9 +24,7 @@ const LINEAR_READS: ReadonlySet<string> = new Set([
 
 /** The keys each allowed Linear write may carry; any other key refuses the call. */
 const WRITE_KEYS: Readonly<Record<string, readonly string[]>> = {
-  save_issue: ['id', 'state', 'links'],
   save_comment: ['issueId', 'body'],
-  prepare_file_upload: ['filename', 'contentType', 'size'],
 };
 
 /** The only Linear tools a snapshot run calls: it reads the linked issue, its comments and its relations. */
@@ -46,10 +41,11 @@ export interface ReporterRun {
   readonly readOnly: boolean;
   readonly linearPrefixes: readonly string[];
   readonly link: ExternalLink;
-  /** The task's PR: the only URL a `10db` link may point at. */
-  readonly prUrl: string | null;
-  /** The pictures the brief offered this run; the only files it may upload. */
-  readonly pictures: readonly ReporterPicture[];
+  /**
+   * 10db writes the comments itself, through the account's Linear server: the agent calls no Linear write.
+   * When false, the agent's `save_comment` carries the text 10db built.
+   */
+  readonly direct: boolean;
   /** Pattern names refused this run. */
   readonly withheld: Set<string>;
   /** Per owed update, the comment 10db built from the agent's body: the only comment text the run may write. */
@@ -108,29 +104,11 @@ function judgeWrite(
       `${tool} takes only ${allowed.join(', ')}; it was given ${extra.join(', ')} too. Send exactly the arguments report_linear_post returned.`,
     );
   switch (tool) {
-    case 'save_issue': {
-      if (field(input, 'id') !== issueId)
-        return refuse(`id must be the linked issue's Linear id ${issueId}.`);
-      const state = field(input, 'state');
-      if (state !== undefined && typeof state !== 'string')
-        return refuse('state must be the status name, a string.');
-      if ('links' in input) {
-        const links = field(input, 'links');
-        const entry = Array.isArray(links) && links.length === 1 ? asRecord(links[0]) : null;
-        if (
-          entry === null ||
-          run.prUrl === null ||
-          field(entry, 'title') !== '10db' ||
-          field(entry, 'url') !== run.prUrl ||
-          Object.keys(entry).some((k) => k !== 'title' && k !== 'url')
-        )
-          return refuse(
-            `links may hold one link, titled 10db, to the task's pull request${run.prUrl === null ? ' (it has none yet)' : ` ${run.prUrl}`}.`,
-          );
-      }
-      return {};
-    }
     case 'save_comment': {
+      if (run.direct)
+        return refuse(
+          '10db writes the comments itself: report_linear_post already wrote it, so do not call save_comment.',
+        );
       const given = field(input, 'issueId');
       if (given !== issueId)
         return refuse(
@@ -149,13 +127,6 @@ function judgeWrite(
         return refuse(`the comment for ${staged[0]} was already written; do not write it again.`);
       return { wrote: staged[0] };
     }
-    case 'prepare_file_upload':
-      // A signed URL alone sends nothing: only 10db's upload tool sends a file, and only an offered picture.
-      return run.pictures.length > 0 && field(input, 'contentType') === 'image/png'
-        ? {}
-        : refuse(
-            'prepare uploads only for the PNG pictures the brief lists (contentType image/png).',
-          );
     default:
       return refuse(`${tool} is not a tool this run may call.`);
   }
@@ -178,15 +149,6 @@ export function judgeReporterCall(
   const { toolName } = call;
   if (toolName.startsWith('mcp__10db__')) {
     if (run.readOnly) return { verdict: deny('A snapshot run may only read Linear.') };
-    if (toolName === UPLOAD_TOOL) {
-      const input = asRecord(call.input);
-      const id = input === null ? undefined : field(input, 'pictureId');
-      return {
-        verdict: run.pictures.some((p) => p.id === id)
-          ? allow()
-          : deny('Upload only a picture your brief lists, by its id.'),
-      };
-    }
     return {
       verdict: REPORT_TOOLS.has(toolName)
         ? allow()
@@ -222,7 +184,7 @@ export function judgeReporterCall(
   if (allowed === undefined)
     return {
       verdict: deny(
-        `This call is refused: ${tool} is not a tool this run may call; it only updates the linked issue ${run.link.issueId}.`,
+        `This call is refused: ${tool} is not a tool this run may call. The reporter's only Linear write is its comment on the linked issue, through report_linear_post; 10db sets status, links and pictures itself.`,
       ),
     };
   const input = asRecord(call.input);

@@ -47,10 +47,9 @@ import type { Logger } from '../log';
 import type { ShapeToolRequest, ShapeVerdict } from '../sessions';
 import { reporterBlockedBy } from './reporter-events';
 import { refreshReporterCard } from './reporter-inbox';
-import { taskPrUrl } from './reporter-brief';
+import type { LinearCommentWriter } from './reporter-writer';
 import { cleanBody, commentText, MIN_BODY_CHARS, parseWrittenLines } from './reporter-comment';
 import { judgeReporterCall, secretIn, type ReporterRun } from './reporter-guard';
-import { reporterPictures, uploadPicture } from './reporter-pictures';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
 import { signInNeeded } from './sign-in-needed';
 import {
@@ -95,6 +94,18 @@ export type ReportedPost =
         readonly arguments: { readonly issueId: string; readonly body: string };
       };
     }
+  | {
+      /** 10db wrote the comment itself, through the account's Linear server. */
+      readonly ok: true;
+      readonly written: true;
+      readonly commentId: string | null;
+    }
+  | {
+      /** 10db's write was refused; the update is owed again. */
+      readonly ok: true;
+      readonly written: false;
+      readonly why: string;
+    }
   | { readonly ok: true; readonly recorded: 'nothing to report' }
   | { readonly ok: true; readonly withheld: string; readonly why: string };
 
@@ -112,11 +123,12 @@ export interface LinearReporter {
   wake(projectId: ProjectId): void;
   /**
    * `report_linear_post`, from a reporter session only: the agent's body for one owed update (or that it has
-   * nothing to report). 10db builds the comment and answers the exact `save_comment` arguments, the only comment
-   * the session's guard lets through.
+   * nothing to report). 10db builds the comment and writes it through the account's Linear server when it can
+   * sign in to it itself; otherwise it answers the exact `save_comment` arguments, the only comment the session's
+   * guard lets through.
    */
-  reportPost(sessionId: SessionId, input: ReportLinearPostInput): ReportedPost;
-  /** `upload_linear_picture`: sends a picture this run was offered to Linear's signed URL. */
+  reportPost(sessionId: SessionId, input: ReportLinearPostInput): Promise<ReportedPost>;
+  /** `upload_linear_picture`: refused, 10db uploads the pictures itself. */
   uploadPicture(sessionId: SessionId, input: UploadLinearPictureInput): Promise<{ ok: true }>;
   /**
    * Reads the task's linked Linear issue, its comments and its named relations through the account's own Linear
@@ -143,6 +155,8 @@ export interface LinearReporterRuns {
     /** The account the session runs on: the one a run that reaches no Linear names. */
     readonly accountId: AccountId;
     readonly linearPrefixes: readonly string[];
+    /** 10db's own way to write a comment, when the account's Linear server accepts 10db's sign-in; else null. */
+    readonly writer: LinearCommentWriter | null;
   }): { readonly posts: readonly LinearPostDto[]; readonly run: Readonly<ReporterRun> };
   /** The session could not be made (its launch, sandbox or sign-in check threw): the run fails with this reason. */
   startFailed(conversationId: ConversationId, message: string): void;
@@ -161,8 +175,6 @@ export interface LinearReporterDeps {
   readonly conversations: { reporterOf(taskId: TaskId, projectId: ProjectId): ConversationId };
   readonly signIns: { list(): Promise<LinearSignInsDto> };
   readonly inbox: InboxService;
-  /** Sends a picture's bytes to Linear's storage. */
-  readonly fetch?: typeof fetch;
 }
 
 /** One run, from its trigger to its settle. */
@@ -175,6 +187,8 @@ interface Flight {
   accountId: AccountId | null;
   /** An allowed Linear call was made: the session's agent is signed in to Linear. */
   reachedLinear: boolean;
+  /** 10db's own way to write this run's comments, when it has one. */
+  writer: LinearCommentWriter | null;
   /** The rows due when the run was triggered: what fails when the session never takes any. */
   readonly due: ReadonlySet<LinearPostId>;
   taken: ReadonlySet<LinearPostId>;
@@ -371,6 +385,7 @@ export function createLinearReporter(
       sessionId: null,
       accountId: null,
       reachedLinear: false,
+      writer: null,
       due: new Set(due.map((p) => p.id)),
       snapshot,
       reads: 0,
@@ -472,7 +487,11 @@ export function createLinearReporter(
 
   /** The run's session never reached Linear: its account's agent is taken as not signed in to it. */
   const missedLinear = (flight: Flight): flight is Flight & { accountId: AccountId } =>
-    flight.guard !== null && flight.accountId !== null && !flight.reachedLinear;
+    flight.guard !== null &&
+    // A run 10db writes for makes no Linear call of its own: it shows nothing about the agent's sign-in.
+    !flight.guard.direct &&
+    flight.accountId !== null &&
+    !flight.reachedLinear;
 
   /**
    * What the run's closing message says of the comments the guard let out: the id Linear gave each, which is
@@ -480,7 +499,8 @@ export function createLinearReporter(
    * recorded without an id: it may exist, and 10db never writes it again.
    */
   const settleWritten = (flight: Flight): void => {
-    if (flight.written.size === 0) return;
+    // 10db's own writes name their ids from Linear's answer; only the agent's carry a closing message.
+    if (flight.written.size === 0 || flight.guard?.direct === true) return;
     const said = listItems(state.db, flight.conversationId, { afterSeq: flight.afterSeq })
       .filter((item) => item.kind === ConversationItemKind.AgentMessage)
       .map((item) => parseItemBody(ConversationItemKind.AgentMessage, item.body).text);
@@ -670,8 +690,7 @@ export function createLinearReporter(
           readOnly: true,
           linearPrefixes: input.linearPrefixes,
           link,
-          prUrl: null,
-          pictures: [],
+          direct: false,
           withheld: new Set(),
           comments: new Map(),
         };
@@ -697,13 +716,13 @@ export function createLinearReporter(
         readOnly: false,
         linearPrefixes: input.linearPrefixes,
         link,
-        prUrl: taskPrUrl(state.db, flight.taskId),
-        pictures: reporterPictures(state.db, flight.taskId, posts),
+        direct: input.writer !== null,
         withheld: new Set(),
         comments: new Map(),
       };
       flight.sessionId = input.sessionId;
       flight.accountId = input.accountId;
+      flight.writer = input.writer;
       flight.taken = new Set(posts.map((p) => p.id));
       flight.guard = guard;
       bySession.set(input.sessionId, flight);
@@ -748,7 +767,7 @@ export function createLinearReporter(
       );
     },
 
-    reportPost(sessionId, input) {
+    async reportPost(sessionId, input) {
       const { flight, guard } = runOf(sessionId);
       if (guard.readOnly) throw new ConflictError('A snapshot run reports nothing.');
       if (!flight.taken.has(input.postId))
@@ -793,22 +812,48 @@ export function createLinearReporter(
         };
       }
       const text = commentText(body, post);
-      guard.comments.set(post.id, { text, written: false });
-      return {
-        ok: true,
-        next: {
-          tool: 'save_comment',
-          arguments: { issueId: guard.link.issueId, body: text },
-        },
-      };
+      const issueId = guard.link.issueId;
+      const writer = flight.writer;
+      if (writer === null) {
+        guard.comments.set(post.id, { text, written: false });
+        return { ok: true, next: { tool: 'save_comment', arguments: { issueId, body: text } } };
+      }
+      // 10db's own write. The row is recorded first, so a crash or a retry never writes the comment twice; the
+      // id is added when Linear answers, and a refusal reopens the row with a try spent.
+      state.write((ctx) => {
+        recordLinearPosts(ctx, [post.id], {
+          state: 'recorded',
+          commentIds: [],
+          statusSet: null,
+          attachmentUrl: null,
+        });
+      });
+      flight.written.add(post.id);
+      refreshCard(flight.projectId);
+      try {
+        const commentId = await writer.postComment({ issueId, body: text });
+        if (commentId !== null)
+          state.write((ctx) => {
+            attachLinearCommentId(ctx, post.id, commentId);
+          });
+        refreshCard(flight.projectId);
+        return { ok: true, written: true, commentId };
+      } catch (error) {
+        const why = error instanceof Error ? error.message : String(error);
+        log.warn({ err: error, taskId: flight.taskId }, 'Linear refused a reporter comment');
+        const due = new Date(clock.now().getTime() + backoffMs(post.tries)).toISOString();
+        state.write((ctx) => {
+          reopenLinearPost(ctx, post.id, why, due, MAX_TRIES);
+        });
+        refreshCard(flight.projectId);
+        return { ok: true, written: false, why };
+      }
     },
 
-    async uploadPicture(sessionId, input) {
-      const { guard } = runOf(sessionId);
-      if (!guard.pictures.some((p) => p.id === input.pictureId))
-        throw new ConflictError('That picture was not offered to this run.');
-      await uploadPicture(state.db, input, deps.fetch ?? fetch);
-      return { ok: true };
+    uploadPicture() {
+      return Promise.reject(
+        new ConflictError('10db uploads the pictures itself; the reporter uploads none.'),
+      );
     },
 
     verdict(sessionId, req) {

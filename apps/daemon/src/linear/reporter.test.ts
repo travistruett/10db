@@ -67,6 +67,11 @@ let reporter: LinearReporter;
 let repo: { path: string; cleanup(): void };
 /** Makes the next launch throw, as an account with no model to run would. */
 let launchError: Error | null = null;
+/** The headers of the account's Linear entry: an Authorization one lets 10db write the comments itself. */
+let linearHeaders: Record<string, string> | null = null;
+/** The comments 10db wrote through its own writer, and the refusal its next write gets. */
+let written: { issueId: string; body: string }[] = [];
+let writeError: string | null = null;
 
 const BODY = 'The run started on this task.';
 
@@ -136,6 +141,14 @@ function makeReporter(): LinearReporter {
             ],
           }),
       },
+      commentWriter: () => ({
+        postComment: (comment) => {
+          written.push(comment);
+          return writeError === null
+            ? Promise.resolve('direct-1')
+            : Promise.reject(new Error(writeError));
+        },
+      }),
       launch: () => {
         if (launchError !== null) throw launchError;
         return {
@@ -158,7 +171,7 @@ function makeReporter(): LinearReporter {
           sandbox: null,
           yourMcpServers: {
             linear: {
-              connect: { type: 'http', url: 'https://mcp.linear.app/mcp', headers: null },
+              connect: { type: 'http', url: 'https://mcp.linear.app/mcp', headers: linearHeaders },
               claudeName: null,
               claudeOAuth: null,
               codex: {
@@ -180,6 +193,9 @@ function makeReporter(): LinearReporter {
 
 beforeEach(async () => {
   launchError = null;
+  linearHeaders = null;
+  written = [];
+  writeError = null;
   ({ store, close: closeStore } = createTestStore());
   repo = tempDir('reporter');
   const bus = createEventBus();
@@ -455,6 +471,50 @@ describe('the Linear reporter', () => {
     expect(answers[0]?.detail).toMatchObject({ isError: true });
     expect(JSON.stringify(answers[0]?.detail)).toContain('write what the update says');
     expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(0);
+  });
+
+  it('writes the comment itself when the account has a Linear sign-in 10db can use, and the agent writes nothing', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    const id = oweOne();
+    book[KEY] = [
+      [
+        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY } },
+        // The agent's own write is refused: 10db has made it.
+        {
+          do: 'tool',
+          toolName: `${PREFIX}save_comment`,
+          input: { issueId: ISSUE, body: BODY },
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    await expect.poll(() => rows()[0]?.commentIds, { timeout: 10_000 }).toEqual(['direct-1']);
+    expect(written).toHaveLength(1);
+    expect(written[0]?.issueId).toBe(ISSUE);
+    expect(written[0]?.body).toContain(BODY);
+    expect(written[0]?.body).toContain(`10db · run_started · attempt 1 · ${id}`);
+    expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(1);
+    expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(0);
+  });
+
+  it('owes an update again when its own write is refused, and does not hold it for a sign-in', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    writeError = 'Issue not found';
+    const id = oweOne();
+    book[KEY] = [
+      [
+        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY } },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.tries, { timeout: 10_000 }).toBe(1);
+    expect(rows()[0]).toMatchObject({
+      state: LinearPostState.Pending,
+      lastError: 'Issue not found',
+    });
   });
 
   it('reads the linked issue for a lane without writing, and says why when it cannot', async () => {

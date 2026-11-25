@@ -22,7 +22,6 @@ import {
   listWorkstreams,
   type DbReader,
 } from '@10db/db';
-import type { ReporterPicture } from './reporter-pictures';
 import { reporterSettings } from './reporter-settings';
 import { linearLinkOf } from './task-link';
 
@@ -89,8 +88,8 @@ export interface ReporterFacts {
   readonly recorded: readonly RecordedRow[];
   readonly workstreams: readonly WorkstreamFacts[];
   readonly prUrl: string | null;
-  /** The before and after pictures this run may upload into its `ended` comment. */
-  readonly pictures: readonly ReporterPicture[];
+  /** 10db writes the comments itself; otherwise the agent makes the one `save_comment` call 10db dictates. */
+  readonly direct: boolean;
 }
 
 function cap(text: string): Capped {
@@ -114,7 +113,7 @@ export function readReporterFacts(
   db: DbReader,
   taskId: TaskId,
   posts: readonly LinearPostDto[],
-  pictures: readonly ReporterPicture[],
+  direct: boolean,
 ): ReporterFacts {
   const task = getTask(db, taskId);
   const linked = linearLinkOf(db, taskId);
@@ -185,24 +184,37 @@ export function readReporterFacts(
       })),
     workstreams,
     prUrl: taskPrUrl(db, taskId),
-    pictures,
+    direct,
   };
 }
 
+/** How the agent's words reach Linear: 10db writes them, or the agent makes the one call 10db dictates. */
+const HAND_OVER = [
+  "Hand each comment to 10db with `report_linear_post`: the update's post id and the comment's body, nothing else. When an update has nothing to say, call `report_linear_post` with its post id and `nothingToReport` true.",
+];
+const HAND_OVER_DIRECT = [
+  ...HAND_OVER,
+  '10db writes the comment to Linear itself. You make no Linear write, and `save_comment` is refused. If 10db answers that Linear refused the write, say nothing more: the update is owed again.',
+];
+const HAND_OVER_AGENT = [
+  ...HAND_OVER,
+  "10db checks the body and returns the exact arguments for Linear's `save_comment`; call `save_comment` with those arguments unchanged, once. Any other `save_comment` is refused, and the refusal says why.",
+  "End your last message with one line per update you handed over: `<post id>: <the comment id save_comment returned>`, or `<post id>: failed: <Linear's words>` when Linear refused the write. 10db records the comment from that line.",
+];
+
 const RULES = [
-  'Name the issue by its Linear id (given above) in every Linear write, never by its identifier.',
+  'Name the issue by its Linear id (given above) wherever a tool asks for it, never by its identifier.',
   'Read the issue (`get_issue`) first, and its comments (`list_comments`) when an update depends on what is said there. 10db knows which updates are already recorded, so an owed update is never already posted: write it.',
-  "Read the statuses of the issue's own team (`list_issue_statuses` for the team `get_issue` shows), with their types and positions. Never move to an earlier position or a lower type.",
-  "If the issue's status changed since the last recorded row's status set, and it isn't what 10db set, comment only.",
-  'Set no completed-type status unless the project note says so.',
-  'Open findings and unverified checks are named in the comment and block a Ready for Release-like status.',
+  'Open findings and unverified checks are named in the comment.',
   'A `run_started` update states run facts only: the task, the attempt, the account or provider when the facts name it, and which step starts. It says nothing about what the work did, what is verified, what is missing or which commit does what, since none of that exists yet.',
   "A `verdict` or `ended` update maps each claim to the commit that does it, using only the commits listed for that run and the implementation report's own pairing of claim and commit. A claim with no listed commit is said to have none. A commit is never named for work the report does not attribute to it.",
   'A `verdict` or `ended` update ends with the deferrals: what was skipped, left undone or not verified, each with the reason the facts give. Say none when the facts record none.',
-  'One comment per update, written for people to read: plain sentences with real line breaks, never a typed `\\n`, and no footer (10db adds it).',
-  "Hand each comment to 10db with `report_linear_post`: the update's post id and the comment's body, nothing else. 10db checks it and returns the exact arguments for Linear's `save_comment`; call `save_comment` with those arguments unchanged, once. Any other `save_comment` is refused, and the refusal says why. When an update has nothing to say, call `report_linear_post` with its post id and `nothingToReport` true.",
-  "End your last message with one line per update you handed over: `<post id>: <the comment id save_comment returned>`, or `<post id>: failed: <Linear's words>` when Linear refused the write. 10db records the comment from that line.",
-  'When the PR opens, add one link titled `10db` to the PR with `save_issue` `links`, unless the issue already has a `10db` link to that URL. Links are append-only, so there is no in-place update; the live state is in the comments and the status.',
+  "One comment per update, written for people to read: plain sentences with real line breaks, never a typed `\\n`, and no footer (10db adds it). Status, links and pictures are 10db's to set: do not write about doing them.",
+];
+
+const rulesFor = (direct: boolean): readonly string[] => [
+  ...RULES,
+  ...(direct ? HAND_OVER_DIRECT : HAND_OVER_AGENT),
   'Change nothing but this issue. Say nothing else.',
 ];
 
@@ -223,7 +235,9 @@ const FENCE_NOTE =
 export function reporterBrief(facts: ReporterFacts): string {
   const { task, link } = facts;
   const out: string[] = [
-    `Rules:\n${RULES.map((r, i) => `${String(i + 1)}. ${r}`).join('\n')}`,
+    `Rules:\n${rulesFor(facts.direct)
+      .map((r, i) => `${String(i + 1)}. ${r}`)
+      .join('\n')}`,
     FENCE_NOTE,
     `Issue: ${link.id}, Linear id ${link.issueId}, ${link.url}`,
     data(
@@ -300,15 +314,5 @@ export function reporterBrief(facts: ReporterFacts): string {
     );
     out.push(lines.join('\n'));
   }
-  out.push(
-    facts.pictures.length === 0
-      ? 'Pictures: none to post.'
-      : [
-          'Pictures for the `ended` comment, each a PNG. Upload them before you write that comment. For each one in turn, call `prepare_file_upload` with its file name, contentType `image/png` and its size, then at once `upload_linear_picture` with its id and the returned `uploadRequest` url and headers, exactly as returned. Finish one before preparing the next: a signed URL lasts 60 seconds. When an upload succeeds, put the returned markdown in the comment under a line naming what it shows. When one fails, prepare it again once; if it fails again, leave it out and say the pictures are in the pull request.',
-          ...facts.pictures.map(
-            (p) => `- ${p.id}: ${p.label}, file name \`${p.name}\`, size ${String(p.size)}`,
-          ),
-        ].join('\n'),
-  );
   return out.join('\n\n');
 }

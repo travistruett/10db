@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { LinearPostId, Provider, TaskScreenId, type ExternalLink } from '@10db/contracts';
+import { LinearPostId, Provider, type ExternalLink } from '@10db/contracts';
 import { judgeReporterCall, linearToolPrefixes, type ReporterRun } from './reporter-guard';
-import { isLinearUploadUrl, type ReporterPicture } from './reporter-pictures';
+import { isLinearUploadUrl } from './reporter-pictures';
 
 const L = 'mcp__claude_ai_Linear__';
 const PR = 'https://github.com/acme/app/pull/7';
@@ -18,8 +18,7 @@ function run(over: Partial<ReporterRun> = {}): ReporterRun {
     readOnly: false,
     linearPrefixes: [L],
     link,
-    prUrl: PR,
-    pictures: [],
+    direct: false,
     withheld: new Set(),
     comments: new Map(),
     ...over,
@@ -37,13 +36,6 @@ const reason = (r: ReporterRun, c: { toolName: string; input: unknown }): string
 
 const call = (toolName: string, input: unknown = {}) => ({ toolName, input });
 
-const picture: ReporterPicture = {
-  id: TaskScreenId.parse('tsc_0193a5b0-0000-7000-8000-000000000001'),
-  name: '1-home-after.png',
-  label: 'After, /',
-  size: 68,
-};
-const offered = (): ReporterRun => run({ pictures: [picture] });
 const upload = (pictureId: string) =>
   call('mcp__10db__upload_linear_picture', { pictureId, uploadUrl: 'x', headers: {} });
 const prepare = call(`${L}prepare_file_upload`, {
@@ -105,30 +97,22 @@ describe('judgeReporterCall', () => {
       'deny',
     ],
     [
-      'save_issue with parentId',
-      run(),
-      call(`${L}save_issue`, { id: 'iss-119', parentId: 'x' }),
+      'a comment when 10db writes them itself',
+      { ...staged('hi'), direct: true },
+      call(`${L}save_comment`, { issueId: 'iss-119', body: 'hi' }),
       'deny',
     ],
+    // Status, links and pictures are 10db's to set, so the agent's only Linear write is its comment.
     [
       'save_issue state',
       run(),
       call(`${L}save_issue`, { id: 'iss-119', state: 'In Review' }),
-      'allow',
+      'deny',
     ],
     [
       'save_issue 10db link',
       run(),
       call(`${L}save_issue`, { id: 'iss-119', links: [{ title: '10db', url: PR }] }),
-      'allow',
-    ],
-    [
-      'save_issue other link',
-      run(),
-      call(`${L}save_issue`, {
-        id: 'iss-119',
-        links: [{ title: '10db', url: 'https://evil.test' }],
-      }),
       'deny',
     ],
     ['delete_comment', run(), call(`${L}delete_comment`, { id: 'c-1' }), 'deny'],
@@ -152,21 +136,13 @@ describe('judgeReporterCall', () => {
     ['a read', run(), call(`${L}get_issue`, { id: 'iss-119' }), 'allow'],
     ['report tool', run(), call('mcp__10db__report_linear_post', {}), 'allow'],
     ['another 10db tool', run(), call('mcp__10db__commit', {}), 'deny'],
-    ['upload an offered picture', offered(), upload(picture.id), 'allow'],
-    [
-      'upload a picture not offered',
-      offered(),
-      upload('tsc_0193a5b0-0000-7000-8000-000000000002'),
-      'deny',
-    ],
-    ['upload with none offered', run(), upload(picture.id), 'deny'],
-    ['prepare a PNG upload when offered', offered(), prepare, 'allow'],
-    ['prepare an upload with none offered', run(), prepare, 'deny'],
-    ['attach a file to Resources', offered(), call(`${L}prepare_attachment_upload`, {}), 'deny'],
+    ['upload a picture', run(), upload('tsc_0193a5b0-0000-7000-8000-000000000001'), 'deny'],
+    ['prepare a PNG upload', run(), prepare, 'deny'],
+    ['attach a file to Resources', run(), call(`${L}prepare_attachment_upload`, {}), 'deny'],
     [
       'snapshot uploads nothing',
-      run({ readOnly: true, pictures: [picture] }),
-      upload(picture.id),
+      run({ readOnly: true }),
+      upload('tsc_0193a5b0-0000-7000-8000-000000000001'),
       'deny',
     ],
     [
