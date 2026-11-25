@@ -125,9 +125,12 @@ import {
   updateNotices,
 } from './notices';
 import { readPrScopes, scopeOf } from './pr-scopes';
+import { watchpointsOfRuns } from './pr-watchpoints';
 import type { RetryMergeOptions } from './pr-watch';
 import {
+  bodyWithForYou,
   bodyWithTestBudget,
+  forYouSection,
   prBody,
   prSubject,
   prTitle,
@@ -855,6 +858,41 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
+   * Replaces the text between the For you markers of the open pull request's body with what the batch's tasks'
+   * newest watchpoint readings say now, so a task that ships into a pull request later joins it. A body whose
+   * markers someone removed is left alone. Best effort, like the test budget lines.
+   */
+  async function addWatchpointsTo(
+    batch: BatchDto,
+    target: { readonly repo: string; readonly url: string },
+    signal: AbortSignal,
+  ): Promise<void> {
+    try {
+      const section = forYouSection(
+        watchpointsOfRuns(
+          db,
+          members(db, batch.id).map((w) => w.id),
+        ),
+      );
+      if (section === null) return;
+      const call = ghCall(deps, signal);
+      const current = await deps.gh.prBody({ repo: target.repo, ref: target.url }, call);
+      if (current === null) return;
+      const body = bodyWithForYou(current, section);
+      if (body === null) return;
+      const file = join(deps.dataDir, 'delivery', `${batch.id}-pr-body.md`);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, body);
+      await deps.gh.prEditBody({ repo: target.repo, url: target.url, bodyFile: file }, call);
+    } catch (error) {
+      deps.logger.warn(
+        { batchId: batch.id, err: error instanceof Error ? error.message : String(error) },
+        'watchpoints not updated in the pull request',
+      );
+    }
+  }
+
+  /**
    * The project's title prefix when it sets one; otherwise the type from the tasks whose work shipped
    * (every task when none finished) and the batch's scope.
    */
@@ -933,6 +971,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
         ci: { repo: target.repo, sha },
         template: await readPrTemplate(deps.git, target.checkout, sha, deps.logger),
         testBudget: await testBudgetFor(batch, target, sha),
+        watchpoints: watchpointsOfRuns(
+          db,
+          members(db, batch.id).map((w) => w.id),
+        ),
       }),
     );
     const prUrl = await deps.gh.prCreate(
@@ -1404,6 +1446,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       if (existing !== null && existing.state === PrState.Open) {
         step = 'gh pr edit';
         await addTestBudgetTo(batch, { repo, url: existing.url, baseSha: base, checkout }, signal);
+        await addWatchpointsTo(batch, { repo, url: existing.url }, signal);
       }
       // 4b. A pull request the batch wants merged by itself, unless an earlier run already closed
       // or merged it.

@@ -36,6 +36,29 @@ describe('prBody', () => {
         'feat: x\n\nTest-budget: splits a table\nValue: protects=x',
         'fix: y\n\n  Test-budget: splits a table\nTest-budget:\n',
       ]),
+      watchpoints: [
+        {
+          watchpoint: {
+            key: 'migrations',
+            label: 'Migrations',
+            why: '',
+            guidance: '',
+            loudness: 'show',
+          },
+          files: [
+            {
+              path: 'db/migrations/0001.sql',
+              status: 'A',
+              added: 4,
+              removed: 0,
+              patch: '',
+              clipped: false,
+              agentNote: 'adds the column nullable first',
+              reviewerNote: '✓ safe on existing rows',
+            },
+          ],
+        },
+      ],
     });
     expect(body).toBe(
       [
@@ -68,6 +91,17 @@ describe('prBody', () => {
         '',
         '- Beta (failed)',
         '- Gamma (cancelled)',
+        '',
+        '## For you',
+        '',
+        '<!-- 10db:for-you -->',
+        '',
+        '**Migrations** (show)',
+        '- `db/migrations/0001.sql` (+4 −0)',
+        '  - Agent: adds the column nullable first',
+        '  > ✓ safe on existing rows',
+        '',
+        '<!-- /10db:for-you -->',
         '',
         '## How it was checked',
         '',

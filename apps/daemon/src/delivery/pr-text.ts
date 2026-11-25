@@ -1,4 +1,4 @@
-import { WorkstreamState, type BatchId } from '@10db/contracts';
+import { WorkstreamState, type BatchId, type WatchpointHitsDto } from '@10db/contracts';
 import { fillTemplate } from './pr-template';
 
 /** Conventional Commits' longest header, as this repo's commitlint and `config-conventional` set it. */
@@ -118,14 +118,57 @@ export function prBody(input: {
   readonly template: string | null;
   /** `testBudgetLines` of the batch's commits; each starts a line, which is what CI looks for. */
   readonly testBudget?: readonly string[];
+  /** The watchpoints the batch's tasks hit, with the notes written about their files; none leaves the section out. */
+  readonly watchpoints?: WatchpointHitsDto['hits'];
 }): string {
+  const forYou = forYouSection(input.watchpoints ?? []);
   const body = fillTemplate(input.template, [
     { heading: 'What and why', text: whatAndWhy(input.tasks) },
+    ...(forYou === null ? [] : [{ heading: FOR_YOU_HEADING, text: forYou }]),
     { heading: 'How it was checked', text: howChecked(input.gate, input.ci, input.tasks) },
   ]);
   const budget = input.testBudget ?? [];
   const reasons = budget.length > 0 ? `\n\n${budget.join('\n')}` : '';
   return `${body}${reasons}\n\n---\n\nShipped by 10db, batch ${input.batch.id}\n`;
+}
+
+/** The pull request section for what the builder watches, and the markers a later task's ship replaces between. */
+const FOR_YOU_HEADING = 'For you';
+const FOR_YOU_START = '<!-- 10db:for-you -->';
+const FOR_YOU_END = '<!-- /10db:for-you -->';
+
+/** A note's text with nothing that could close or open the markers' comments. */
+const plain = (text: string): string => text.replaceAll('<!--', '<!- -').replaceAll('-->', '- ->');
+
+/**
+ * The "For you" section's text: each watchpoint, its loudness, its files with the agent's reason, and the
+ * reviewer's check as a quote, between the markers. Null when no watchpoint was hit.
+ */
+export function forYouSection(hits: WatchpointHitsDto['hits']): string | null {
+  if (hits.length === 0) return null;
+  const blocks = hits.map((hit) =>
+    [
+      `**${plain(hit.watchpoint.label)}** (${hit.watchpoint.loudness})`,
+      ...hit.files.flatMap((file) => [
+        `- \`${file.path}\`${file.added === null ? '' : ` (+${String(file.added)} −${String(file.removed ?? 0)})`}`,
+        ...(file.agentNote === null ? [] : [`  - Agent: ${plain(file.agentNote)}`]),
+        ...(file.reviewerNote === null ? [] : [`  > ${plain(file.reviewerNote)}`]),
+      ]),
+    ].join('\n'),
+  );
+  return [FOR_YOU_START, ...blocks, FOR_YOU_END].join('\n\n');
+}
+
+/**
+ * The body of a pull request that already exists, with the text between its For you markers replaced by
+ * `section`; null when the body has no markers (someone removed them) or already says it.
+ */
+export function bodyWithForYou(body: string, section: string): string | null {
+  const start = body.indexOf(FOR_YOU_START);
+  const end = body.indexOf(FOR_YOU_END, start + FOR_YOU_START.length);
+  if (start < 0 || end < 0) return null;
+  const next = `${body.slice(0, start)}${section}${body.slice(end + FOR_YOU_END.length)}`;
+  return next === body ? null : next;
 }
 
 const word = (state: WorkstreamState): string => state.toLowerCase();
