@@ -14,6 +14,8 @@ import { GoalRow } from './goal-row';
 import { GOAL_STATUS_LOOK } from '../board/goal-status';
 import { groupGoals, verdictLine } from './goal-status';
 import { shortAgo } from './short-ago';
+import { goalBar } from './factory-summary';
+import { StackedBar } from './stacked-bar';
 
 /** "· 3 new since 3h ago": plain text, with no badge, when the goal has items in its window. */
 function newsOf(summary: GoalSummaryDto, now: number): string | undefined {
@@ -76,6 +78,7 @@ export function GoalList({
         line={verdictLine(summary.digest)}
         news={newsOf(summary, now)}
         color={GOAL_STATUS_LOOK[summary.digest.status].color}
+        bar={<StackedBar counts={goalBar(summary.digest.progress)} size="sm" />}
         expanded={expanded}
         onToggle={() => {
           toggleGoal(summary);

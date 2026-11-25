@@ -11,6 +11,8 @@ export interface GoalRowProps {
   readonly news?: string | undefined;
   /** The status dot's color; a row that is not a goal's status (the Done line) has none. */
   readonly color?: MantineColor;
+  /** A small bar of where the goal's tasks stand, between the title and the line. */
+  readonly bar?: ReactNode;
   readonly expanded: boolean;
   readonly onToggle: () => void;
   /** The region under the row; rendered only while the row is open. */
@@ -22,7 +24,16 @@ export interface GoalRowProps {
  * shadow of its own. Rows are separated by hairlines, and the open row's whole area takes the
  * control background. Escape inside the open region closes it and returns to the button.
  */
-export function GoalRow({ title, line, news, color, expanded, onToggle, children }: GoalRowProps) {
+export function GoalRow({
+  title,
+  line,
+  news,
+  color,
+  bar,
+  expanded,
+  onToggle,
+  children,
+}: GoalRowProps) {
   const id = useId();
   const titleId = `${id}-title`;
   const regionId = `${id}-region`;
@@ -72,6 +83,7 @@ export function GoalRow({ title, line, news, color, expanded, onToggle, children
           <Text id={titleId} fw={600} size="sm" style={{ flex: 'none' }}>
             {title}
           </Text>
+          {bar}
           <Text size="sm" c="dimmed" style={{ minWidth: 0 }}>
             {news ? `${line} ${news}` : line}
           </Text>

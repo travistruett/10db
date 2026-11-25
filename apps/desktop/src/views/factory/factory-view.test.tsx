@@ -16,7 +16,7 @@ function goal(
 
 /** The titles of the collapsed rows on screen, top to bottom: each row's text starts with its title. */
 function rowTitles(known: readonly string[]): (string | undefined)[] {
-  return within(screen.getByRole('group', { name: 'Goals' }))
+  return within(screen.getByRole('group', { name: / goals$/ }))
     .getAllByRole('button', { expanded: false })
     .map((row) => known.find((title) => row.textContent.startsWith(title)));
 }
@@ -64,8 +64,9 @@ describe('FactoryView goal list', () => {
       'Idle',
       'Done',
     ]);
-    expect(screen.queryAllByRole('button', { expanded: true })).toEqual([]);
-    expect(screen.queryAllByRole('region')).toEqual([]);
+    const goals = within(screen.getByRole('group', { name: / goals$/ }));
+    expect(goals.queryAllByRole('button', { expanded: true })).toEqual([]);
+    expect(goals.queryAllByRole('region')).toEqual([]);
     // Done goals sit behind one collapsed line and show once it opens.
     expect(screen.queryByRole('button', { name: /^Finished/ })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /^Done/ }));

@@ -264,15 +264,18 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(
     page.getByRole('table', { name: 'Completed runs' }).getByRole('button', { name: TASK }),
   ).toBeVisible();
-  // Factory lists every project's runs by what they need: the finished task is under Done Today, and with
-  // no goals anywhere there is no Goals section to read about.
+  // Factory shows each project as a row with its bar and one line; the finished task is under the project's
+  // merged today, and with no goals anywhere the project holds no goal list.
   await open(page, 'Factory');
-  const doneToday = page.getByRole('group', { name: 'Done Today' });
-  await expect(doneToday.getByRole('button', { name: new RegExp(TASK) }).first()).toBeVisible();
-  await expect(page.getByRole('group', { name: 'Goals' })).toHaveCount(0);
-  await expectAccessible(page, 'factory, live list, dark');
-  // A row opens its task on the Board.
-  await doneToday
+  const projectRow = page.getByRole('button', { name: /^e2e / });
+  await expect(projectRow).toContainText('1 merged today');
+  if ((await projectRow.getAttribute('aria-expanded')) !== 'true') await projectRow.click();
+  const project = page.getByRole('region', { name: 'e2e', exact: true });
+  await expect(project.getByRole('group', { name: /goals$/ })).toHaveCount(0);
+  await project.getByRole('button', { name: /merged today/ }).click();
+  await expectAccessible(page, 'factory, projects, dark');
+  // A line opens its task on the Board.
+  await project
     .getByRole('button', { name: new RegExp(TASK) })
     .first()
     .click();
