@@ -258,13 +258,13 @@ afterEach(async () => {
   closeStore();
 });
 
-const oweOne = (): LinearPostId => {
+const oweOne = (dedupeKey = 'run_started:1:0'): LinearPostId => {
   const row = store.write((ctx) =>
     enqueueLinearPost(ctx, {
       taskId: task.id,
       projectId: project.id,
       event: LinearEventKind.RunStarted,
-      dedupeKey: 'run_started:1:0',
+      dedupeKey,
       attempt: 1,
       detail: {},
       dueAt: new Date(clock.now().getTime() + 30_000).toISOString(),
@@ -348,6 +348,44 @@ describe('the Linear reporter', () => {
       )
       .toBe(LinearPostState.Recorded);
     expect(card()).toBeUndefined();
+  });
+
+  it('does not take the account as signed out when a run that made no Linear call left nothing to hold', async () => {
+    const first = oweOne();
+    // The run records its row without a call the guard counts as Linear's, so nothing is left to hold.
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: {
+            postIds: [first],
+            outcome: {
+              state: 'recorded',
+              commentIds: ['c-1'],
+              statusSet: null,
+              attachmentUrl: null,
+            },
+          },
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    // A later update still gets a session of its own, instead of being held for a sign-in nobody lacks.
+    const second = oweOne('run_started:2:0');
+    book[KEY].push(recordingScript(second));
+    clock.advance(30_000);
+    await expect
+      .poll(
+        () => {
+          clock.advance(0);
+          return rows().find((r) => r.id === second)?.state;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(LinearPostState.Recorded);
   });
 
   it('fails the rows of a run whose session cannot be made, and does not run again before the backoff', async () => {

@@ -467,7 +467,9 @@ export function createLinearReporter(
           );
         });
       // A session whose turn completed without one Linear call had no Linear: a sign-in, not a retry, fixes it.
-      else if (complete && missedLinear(flight)) hold(open, foundSignedOut(flight.accountId));
+      // A run that left no row open (it recorded them all) shows nothing about the account.
+      else if (complete && open.length > 0 && missedLinear(flight))
+        hold(open, foundSignedOut(flight.accountId));
       else fail(open, flight.error ?? reason);
       refreshCard(flight.projectId);
     } catch (error) {
@@ -692,7 +694,7 @@ export function createLinearReporter(
           (p) => input.postIds.includes(p.id) && !flight.failedByAgent.has(p.id),
         );
         // A session that never reached Linear is reporting that it has none: the rows wait for a sign-in.
-        if (missedLinear(flight)) {
+        if (rows.length > 0 && missedLinear(flight)) {
           log.info(
             { taskId: flight.taskId, reason: outcome.reason },
             'a reporter run without Linear held its updates',
