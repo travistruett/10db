@@ -323,6 +323,8 @@ describe('preExistingNamed', () => {
     ['a variable reaches every entry', 'rm -rf "$DIR"', repo, preExisting],
     ['a substitution reaches every entry', 'rm -rf $(cat list)', repo, preExisting],
     ['xargs reaches every entry', 'cat list | xargs rm', repo, preExisting],
+    ['a home path reaches every entry', 'rm -rf ~/Projects/repo/data', repo, preExisting],
+    ['another case names its entry', 'rm -rf DATA', repo, ['data/', 'app/data/']],
     ['a dot-folder tail names its entry', 'rm -rf .venv', '/w/repo/app', ['app/.venv/']],
     ['a pattern reaches every entry', 'rm -f *.txt', repo, preExisting],
     ['the checkout reaches every entry', 'rm -rf .', repo, preExisting],

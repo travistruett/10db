@@ -117,10 +117,12 @@ export function createHookJudge(
   let downAt: { readonly ms: number; readonly detail: string } | null = null;
   let secondDownAt: number | null = null;
   const settled = new Map<string, LimitVerdict>();
-  // Only a decisive verdict is kept: an allow, or a limit the judges named. A call they couldn't settle, or one a
-  // failed judge left to the rules, is judged again next time.
+  // Only a model's decisive verdict is kept: its allow, or a limit it named. The fast path reads the disk each time
+  // (a link made since can lead a write to data that was there before), so its allow is never kept; nor is a call
+  // the judges couldn't settle, or one a failed judge left to the rules.
   const remember = (key: string, verdict: LimitVerdict): void => {
     if (verdict.kind === 'floor' || (verdict.kind === 'limit' && verdict.at.limit === null)) return;
+    if (verdict.kind === 'allow' && verdict.by !== 'model') return;
     settled.set(key, verdict);
     if (settled.size > SETTLED_CALLS_MAX) {
       const [oldest] = settled.keys();
@@ -153,6 +155,8 @@ export function createHookJudge(
     const allow = ctx.allowLines();
     const key = JSON.stringify([
       callKey(req.toolName, input, ctx.fastPath.checkout),
+      // An input that is not an object reads as `{}` above, so the raw input keeps such calls apart.
+      req.input,
       req.cwd,
       req.hunk,
       allow,

@@ -1,4 +1,5 @@
 import {
+  JudgeDecision,
   AccountKind,
   BedrockSettings,
   ConflictError,
@@ -272,15 +273,39 @@ export function createJudgeServices(deps: {
         throw new ConflictError(
           'This daemon was started with TENDB_JUDGE=off, so it cannot test a model',
         );
+      // On a switch, a second opinion the builder didn't name that fails its test falls back to the first judge's
+      // default rather than refusing the switch: the builder never picked it.
+      const second = next.decisions?.[JudgeDecision.CrossesLimitSecond]?.model;
+      const secondNamed = patch.decisions?.[JudgeDecision.CrossesLimitSecond]?.model !== undefined;
       for (const model of models) {
         const result =
           accountId === null
             ? { ok: false as const, error: NO_DECISION_CREDENTIAL }
             : await keychainConflict(() => deps.judge.test(accountId, model));
-        if (!result.ok)
-          throw new InvalidError(
-            `${model} didn't answer a test decision, so it wasn't saved: ${result.error}`,
-          );
+        if (result.ok) continue;
+        const firstDefault = next.decisions?.[JudgeDecision.CrossesLimit]?.model;
+        if (
+          switching &&
+          !secondNamed &&
+          model === second &&
+          firstDefault !== undefined &&
+          firstDefault !== model
+        ) {
+          next = {
+            ...next,
+            decisions: {
+              ...next.decisions,
+              [JudgeDecision.CrossesLimitSecond]: {
+                ...next.decisions?.[JudgeDecision.CrossesLimitSecond],
+                model: firstDefault,
+              },
+            },
+          };
+          continue;
+        }
+        throw new InvalidError(
+          `${model} didn't answer a test decision, so it wasn't saved: ${result.error}`,
+        );
       }
       deps.state.write((ctx) => patchJudgeConfig(ctx, next));
       if (accountId !== config.accountId) deps.onAccountChanged?.();

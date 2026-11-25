@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -169,6 +169,7 @@ function hookJudge(
     readonly now?: JudgeKind;
     readonly surface?: TrustSurface;
     readonly skips?: SkipRecorder | null;
+    readonly preExisting?: readonly string[];
   } = {},
   allowedCommand: string | null = null,
 ) {
@@ -185,7 +186,7 @@ function hookJudge(
         checkout,
         tmpDir: join(root, 'tmp'),
         secretFiles: [join(checkout, '.env')],
-        preExisting: [],
+        preExisting: opts.preExisting ?? [],
         setupReads: [],
       },
       policy: buildTrustPolicy({
@@ -497,6 +498,19 @@ describe('the hook judge, attended', () => {
     await run(judgeCall, bash('pnpm test'));
     await run(judgeCall, bash('pnpm build'));
     expect(sent.map((s) => s.includes(grant))).toEqual([false, true, false]);
+  });
+
+  // Value: protects=a write the fast path allowed is checked again on the disk; fails_when=a remembered fast-path allow lets a write follow a new link onto data that was there before; why_new=escaped bug found in review: the session memory of verdicts; no_claim=other ways a session changes the disk between two calls
+  it('a write the fast path allowed is checked again once its file links to data that was there before', async () => {
+    mkdirSync(join(checkout, 'data'));
+    writeFileSync(join(checkout, 'data', 'app.db'), 'rows');
+    const judgeCall = hookJudge({ preExisting: ['data/'] });
+    const write = request('Write', { file_path: join(checkout, 'foo.txt'), content: 'x' });
+    expect(await run(judgeCall, write)).toMatchObject({ decision: 'allow' });
+    expect(sent).toHaveLength(0);
+    symlinkSync(join(checkout, 'data', 'app.db'), join(checkout, 'foo.txt'));
+    await run(judgeCall, write);
+    expect(sent).toHaveLength(1);
   });
 
   it('two notes on one tool use id are taken in order', () => {

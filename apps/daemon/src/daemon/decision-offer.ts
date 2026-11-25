@@ -67,17 +67,15 @@ export function defaultModelFor(
 }
 
 /**
- * Moves the second opinion on limits to a stronger model the Decisions account lists, when its stored model is the
- * first judge's own (a config saved before the decision existed reads with it) or, on an Anthropic API key or Bedrock
- * account, one the account doesn't list. Writes nothing when the account lists no such model.
+ * Moves the second opinion on limits to the account's default for it when the stored model is one an Anthropic API
+ * key or Bedrock account doesn't list: a config saved before the decision existed reads with OpenRouter's model.
+ * Writes nothing for an OpenRouter account, or when the account lists no such model.
  */
 export function settleSecondOpinionModel(ctx: WriteContext, account: AccountRow | undefined): void {
   if (account === undefined || account.archived) return;
-  const { decisions } = getJudgeConfig(ctx.tx);
-  const stored = decisions[JudgeDecision.CrossesLimitSecond].model;
+  const stored = getJudgeConfig(ctx.tx).decisions[JudgeDecision.CrossesLimitSecond].model;
   const offered = offeredDecisionModels(ctx.tx, account);
-  const sameAsFirst = stored === decisions[JudgeDecision.CrossesLimit].model;
-  if (!sameAsFirst && (offered === null || offered.has(stored))) return;
+  if (offered === null || offered.size === 0 || offered.has(stored)) return;
   const model = defaultSecondOpinionModel(ctx.tx, account);
   if (model === null || model === stored) return;
   patchJudgeConfig(ctx, { decisions: { [JudgeDecision.CrossesLimitSecond]: { model } } });

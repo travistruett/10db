@@ -147,7 +147,7 @@ const PATTERN = /[*?[]/;
  * Where the paths a command acts on can't be read from its text: a variable, a substitution, a list fed through
  * `xargs` or a redirect, or a change of folder. The call is then taken to reach every entry.
  */
-const UNREADABLE_TARGETS = /[$`<]|\b(?:xargs|pushd|popd|cd)\b/;
+const UNREADABLE_TARGETS = /[$`<~]|\b(?:xargs|pushd|popd|cd)\b/;
 
 /** A path relative to the checkout, without `.` or `..` steps; null when it lies outside the checkout. */
 function insideCheckout(path: string, checkout: string): string | null {
@@ -172,21 +172,24 @@ export function preExistingNamed(
     const fromCwd = insideCheckout(posix.resolve(runsIn, t), fastPath.checkout);
     return fromCwd === null ? [] : [fromCwd];
   });
+  const folded = paths.map((p) => p.toLowerCase());
   const broad =
     BROAD_DELETE.test(input) ||
     UNREADABLE_TARGETS.test(input) ||
     tokens.some((t) => PATTERN.test(t)) ||
-    paths.includes('');
+    folded.includes('');
   // A relative path may name an entry from a folder below the checkout: it also names any entry it ends.
   const tails = tokens
+    .map((t) => t.toLowerCase())
     .filter((t) => !t.startsWith('/'))
     .map((t) => t.replace(/^(?:\.\/)+/, '').replace(/\/+$/, ''))
     .filter((t) => t !== '' && t !== '.' && t !== '..' && !t.startsWith('../'));
   const reached = (entry: string): boolean => {
     if (broad) return true;
-    const path = entry.replace(/\/+$/, '');
+    // The Mac's file system ignores case, so `rm -rf DATA` reaches `data/`.
+    const path = entry.replace(/\/+$/, '').toLowerCase();
     return (
-      paths.some((p) => p === path || path.startsWith(`${p}/`) || p.startsWith(`${path}/`)) ||
+      folded.some((p) => p === path || path.startsWith(`${p}/`) || p.startsWith(`${path}/`)) ||
       tails.some((t) => path.endsWith(`/${t}`))
     );
   };
@@ -286,6 +289,9 @@ export async function crossesLimit(
       break;
   }
 
+  // A session stopped while the first judge answered skips nothing.
+  if (req.signal.aborted)
+    return { kind: 'floor', reason: 'stopped', detail: 'Stopped by a cancel or a shutdown' };
   if (req.secondOpinion === false)
     return {
       kind: 'limit',
