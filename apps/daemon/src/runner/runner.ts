@@ -13,6 +13,8 @@ import {
   AcceptanceVerdict,
   EvidenceKind,
   type AcceptanceDetail,
+  type WatchpointDetail,
+  effectiveWatchpoints,
   type EvidenceDto,
   ConflictError,
   currentStep,
@@ -143,6 +145,8 @@ import {
   listPersonas,
   listSessions,
   listEvidence,
+  readProjectWatchpoints,
+  readYourWatchpoints,
   listKinds,
   listTaskFileRows,
   listUndeliveredTaskMessages,
@@ -376,6 +380,14 @@ import {
   checkAcceptance,
   raiseAcceptanceCard,
 } from '../acceptance';
+import {
+  agentNotesOf,
+  newestWatchpointRow,
+  watchpointBuildBrief,
+  watchpointHitsAfter,
+  watchpointReviewBrief,
+  watchpointsForAreas,
+} from '../watchpoints';
 import { FORCED_REVIEW_DIFF_BYTES, forcedReview } from './forced-review';
 import {
   createLaneMessages,
@@ -1664,6 +1676,68 @@ export function createRunner(opts: RunnerOptions): Runner {
     } finally {
       ctl.acceptAbort = null;
     }
+  }
+
+  /**
+   * What the builder's watchpoints make of the run's change after its gate passed, to be recorded in the write that
+   * moves the run on. The base is read again here: the gate's base update moves it, and a diff from the old one
+   * would count the base's own files as the task's. Null when no watchpoint applies, or nothing hit and no earlier
+   * reading did (a reading that hit nothing retires one that did, so the newest row is always the current one).
+   * A change that can't be read is a reading with `skipped` set, and the run goes on.
+   */
+  async function watchpointReadingAfter(
+    id: WorkstreamId,
+    row: WorkstreamRow,
+    checkout: string,
+  ): Promise<WatchpointDetail | null> {
+    const watchpoints = effectiveWatchpoints(
+      readYourWatchpoints(db),
+      readProjectWatchpoints(db, row.projectId),
+    );
+    if (watchpoints.length === 0) return null;
+    let detail: WatchpointDetail;
+    try {
+      const base = getWorkstreamRow(db, id).baseHead;
+      if (base === null) throw new Error('the task has no base to read its changes from');
+      const { head, ranges } = await ownWork(row, checkout, base);
+      detail = await watchpointHitsAfter({
+        watchpoints,
+        head,
+        read: (only, maxBytes) =>
+          diffOfRanges(opts.git, checkout, ranges, maxBytes, only === null ? undefined : { only }),
+      });
+    } catch (error) {
+      opts.logger.warn(
+        { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+        'the changes could not be read for the watchpoints; the run goes on',
+      );
+      detail = { hits: [], head: '', skipped: 'the changes could not be read' };
+    }
+    const earlier = newestWatchpointRow(listEvidence(db, id))?.detail.hits.length ?? 0;
+    return detail.hits.length === 0 && detail.skipped === null && earlier === 0 ? null : detail;
+  }
+
+  /** Records a watchpoint reading as the run's newest, in the write that moves the run on. */
+  function recordWatchpointReading(
+    ctx: WriteContext,
+    id: WorkstreamId,
+    detail: WatchpointDetail | null,
+  ): void {
+    if (detail === null) return;
+    const files = detail.hits.reduce((n, h) => n + h.files.length, 0);
+    insertEvidence(ctx, {
+      workstreamId: id,
+      kind: EvidenceKind.Watchpoint,
+      command: null,
+      exitCode: null,
+      summary:
+        detail.skipped !== null
+          ? "Couldn't read this run's changes for the watchpoints."
+          : `${String(files)} file${files === 1 ? '' : 's'} under ${String(detail.hits.length)} watchpoint${detail.hits.length === 1 ? '' : 's'}.`,
+      logPath: null,
+      commitShas: [],
+      detail,
+    });
   }
 
   function reviewFollows(steps: readonly WorkstreamStep[], at: number): boolean {
@@ -3173,13 +3247,31 @@ export function createRunner(opts: RunnerOptions): Runner {
             // pass that sent the work back shares the step's start time, so it is left out by its flag.
             listEvidence(db, id)
               .filter(
-                (e) =>
+                (e): e is Extract<EvidenceDto, { kind: typeof EvidenceKind.Acceptance }> =>
                   e.kind === EvidenceKind.Acceptance &&
                   e.detail?.sentBack !== true &&
                   (implementStartedAt === null || e.createdAt >= implementStartedAt),
               )
               .at(-1)?.detail ?? null,
           )
+        : null;
+    // A build step is told which watchpoints its task's areas touch; a Review or QA step's first round, what the
+    // newest reading found and what the agent said of each file.
+    const watchpoints = effectiveWatchpoints(
+      readYourWatchpoints(db),
+      readProjectWatchpoints(db, row.projectId),
+    );
+    const watchpointBuild =
+      step.role === StepRole.Implement
+        ? watchpointBuildBrief(watchpointsForAreas(watchpoints, task.areas, project.areas))
+        : null;
+    const reading = newestWatchpointRow(listEvidence(db, id));
+    const watchpointReview =
+      (step.role === StepRole.Review || step.role === StepRole.Qa) &&
+      action.kind === 'start' &&
+      !step.earlier.some((r) => r.verdict === Verdict.Reject) &&
+      reading !== null
+        ? watchpointReviewBrief(reading.detail, agentNotesOf(db, id))
         : null;
     const prompt = buildSessionPrompt({
       provider,
@@ -3248,6 +3340,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       earlierResults: step.earlier,
       testValue,
       acceptance,
+      watchpoints: watchpointBuild,
+      watchpointReview,
       revisedBy: reviser
         ? {
             role: reviser.role,
@@ -4708,11 +4802,13 @@ export function createRunner(opts: RunnerOptions): Runner {
     const step = currentStep(row);
     const forced = await reviewForcedAfter(id, ctl, row, checkout);
     const testValue = await testValueFollowUpsAfter(id, ctl, row, checkout, forced);
+    const watchpoints = await watchpointReadingAfter(id, row, checkout);
     if (stopRequested(ctl) === 'cancelled') {
       cancelNow(id, ctl.fence);
       return;
     }
     opts.state.write((ctx) => {
+      recordWatchpointReading(ctx, id, watchpoints);
       countFinished(ctx, step);
       // Planned again first: a rigor changed while the session ran decides whether a step follows.
       const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
@@ -5181,6 +5277,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         summary: evidence.summary,
       });
       // Information only: a check that passed on less than the step changed says so in its record.
+      const watchpoints = await watchpointReadingAfter(id, row, checkout);
       const note = coverageNote(await coverageOf(row, checkout, head, gateCommand));
       if (note !== null) evidence.summary = `${note}\n\n${evidence.summary}`;
       // The read took time; a cancel that landed meanwhile must not be overwritten.
@@ -5212,6 +5309,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           )
         )
           return;
+        recordWatchpointReading(ctx, id, watchpoints);
         const after = moveAfter(steps, current.stepIndex);
         countFinished(ctx, step);
         if (!reviewFollows(net.steps, current.stepIndex))

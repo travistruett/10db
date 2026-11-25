@@ -1,5 +1,6 @@
 import {
   ProjectWatchpoints,
+  STARTER_WATCHPOINTS,
   YourWatchpoints,
   type Watchpoint,
   type ProjectWatchpointEntry,
@@ -13,17 +14,14 @@ const YOUR_WATCHPOINTS_KEY = 'watchpoints.you';
 const projectKey = (projectId: ProjectId): string => `watchpoints.${projectId}`;
 
 /**
- * The builder's watchpoints. A setting that is missing or doesn't parse reads as none: it is a boundary, and a bad
- * value must never stop a run.
+ * The builder's watchpoints: the starters until the list is first saved. A setting that doesn't parse reads as
+ * none: it is a boundary, and a bad value must never stop a run.
  */
 export function readYourWatchpoints(db: DbReader): Watchpoint[] {
-  const parsed = YourWatchpoints.safeParse(getAppSetting(db, YOUR_WATCHPOINTS_KEY));
+  const stored = getAppSetting(db, YOUR_WATCHPOINTS_KEY);
+  if (stored === undefined) return [...STARTER_WATCHPOINTS];
+  const parsed = YourWatchpoints.safeParse(stored);
   return parsed.success ? parsed.data : [];
-}
-
-/** Whether the builder's list has ever been saved, so a fresh install can start from the starters. */
-export function hasYourWatchpoints(db: DbReader): boolean {
-  return getAppSetting(db, YOUR_WATCHPOINTS_KEY) !== undefined;
 }
 
 export function writeYourWatchpoints(ctx: WriteContext, watchpoints: readonly Watchpoint[]): void {
