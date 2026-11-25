@@ -14,13 +14,11 @@ import type { KeyboardEvent, ReactElement, ReactNode } from 'react';
 import { firstAppSection } from '../views/settings/sections';
 import { AgentDownloadStatus } from './agent-download-status';
 import { FactoryStatusDot } from './factory-status';
-import { DaemonStatus } from './daemon-status';
 import { ProjectSwitcher } from './project-switcher';
 import { RailModeContext, useRailMode } from './rail-mode';
 import {
   RAIL_ITEMS,
   RAIL_ORDER,
-  RailControl,
   RailSection,
   railSectionForPath,
   type RailEntry,
@@ -141,15 +139,6 @@ function SectionLink({
   );
 }
 
-function RailControlView({ control }: { readonly control: RailControl }) {
-  switch (control) {
-    case RailControl.Download:
-      return <AgentDownloadStatus />;
-    case RailControl.Daemon:
-      return <DaemonStatus />;
-  }
-}
-
 function RailEntryView({
   entry,
   current,
@@ -164,8 +153,8 @@ function RailEntryView({
       return <div className={classes['spacer']} />;
     case 'project-tile':
       return <ProjectSwitcher />;
-    case 'control':
-      return <RailControlView control={entry.control} />;
+    case 'download-status':
+      return <AgentDownloadStatus />;
     case 'item': {
       const active = entry.section === current;
       if (entry.section === RailSection.Settings) return <SettingsLink active={active} />;
@@ -189,7 +178,7 @@ function moveWithArrows(event: KeyboardEvent<HTMLElement>): void {
 }
 
 /**
- * The rail: global sections, the project, its sections, then the status controls and Settings. Labelled it is
+ * The rail: global sections, the project, its sections, then the download status and Settings. Labelled it is
  * 200 px wide and the foot is one row; icons only it is 60 px, every name in a tooltip, and the foot stacks.
  */
 export function Rail({ labels }: { readonly labels: boolean }) {
@@ -199,7 +188,7 @@ export function Rail({ labels }: { readonly labels: boolean }) {
   const body = RAIL_ORDER.slice(0, foot);
   const rest = RAIL_ORDER.slice(foot);
   const settings = rest.filter((entry) => entry.kind === 'item');
-  const controls = rest.filter((entry) => entry.kind === 'control');
+  const controls = rest.filter((entry) => entry.kind === 'download-status');
   const footEntries = labels ? [...settings, ...controls] : [...controls, ...settings];
   return (
     <RailModeContext value={{ labels }}>
