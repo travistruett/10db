@@ -4,6 +4,7 @@ import {
   isModelTier,
   JudgeDecision,
   ModelTier,
+  OPENROUTER_ACCEPTANCE_SECOND_MODEL,
   OPENROUTER_SECOND_OPINION_MODEL,
   Provider,
   StepRole,
@@ -42,16 +43,33 @@ export function defaultDecisionModel(
   return tierModel(db, account, ModelTier.Efficient);
 }
 
+/** The decisions that are a stronger second read of an earlier one. */
+type SecondOpinionDecision =
+  typeof JudgeDecision.CrossesLimitSecond | typeof JudgeDecision.AcceptanceSecond;
+
+const SECOND_OPINIONS: readonly SecondOpinionDecision[] = [
+  JudgeDecision.CrossesLimitSecond,
+  JudgeDecision.AcceptanceSecond,
+];
+
+function isSecondOpinion(decision: string): decision is SecondOpinionDecision {
+  return SECOND_OPINIONS.some((d) => d === decision);
+}
+
 /**
- * The model the second opinion on limits starts on: on OpenRouter, the model the replay validated; on an Anthropic
- * API key or Bedrock account, whose first judge is already its Efficient model, the Balanced tier's from its own list.
+ * The model a second opinion starts on: on OpenRouter, the model its replay validated; on an Anthropic API key or
+ * Bedrock account, whose first judge is already its Efficient model, the Balanced tier's from its own list.
  * Null when the account lists no such model.
  */
 export function defaultSecondOpinionModel(
   db: DbReader,
   account: Pick<AccountRow, 'id' | 'kind'>,
+  decision: SecondOpinionDecision,
 ): string | null {
-  if (account.kind === AccountKind.OpenRouter) return OPENROUTER_SECOND_OPINION_MODEL;
+  if (account.kind === AccountKind.OpenRouter)
+    return decision === JudgeDecision.AcceptanceSecond
+      ? OPENROUTER_ACCEPTANCE_SECOND_MODEL
+      : OPENROUTER_SECOND_OPINION_MODEL;
   return tierModel(db, account, ModelTier.Balanced);
 }
 
@@ -61,24 +79,29 @@ export function defaultModelFor(
   account: Pick<AccountRow, 'id' | 'kind'>,
   decision: string,
 ): string | null {
-  return decision === JudgeDecision.CrossesLimitSecond
-    ? (defaultSecondOpinionModel(db, account) ?? defaultDecisionModel(db, account))
+  return isSecondOpinion(decision)
+    ? (defaultSecondOpinionModel(db, account, decision) ?? defaultDecisionModel(db, account))
     : defaultDecisionModel(db, account);
 }
 
 /**
- * Moves the second opinion on limits to the account's default for it when the stored model is one an Anthropic API
- * key or Bedrock account doesn't list: a config saved before the decision existed reads with OpenRouter's model.
- * Writes nothing for an OpenRouter account, or when the account lists no such model.
+ * Moves each second opinion to the account's default for it when the stored model is one an Anthropic API key or
+ * Bedrock account doesn't list: a config saved before the decision existed reads with OpenRouter's model. It
+ * patches only the model, never `enabled`. Writes nothing for an OpenRouter account, or when the account lists no
+ * such model.
  */
 export function settleSecondOpinionModel(ctx: WriteContext, account: AccountRow | undefined): void {
   if (account === undefined || account.archived) return;
-  const stored = getJudgeConfig(ctx.tx).decisions[JudgeDecision.CrossesLimitSecond].model;
   const offered = offeredDecisionModels(ctx.tx, account);
-  if (offered === null || offered.size === 0 || offered.has(stored)) return;
-  const model = defaultSecondOpinionModel(ctx.tx, account);
-  if (model === null || model === stored) return;
-  patchJudgeConfig(ctx, { decisions: { [JudgeDecision.CrossesLimitSecond]: { model } } });
+  if (offered === null || offered.size === 0) return;
+  const decisions = getJudgeConfig(ctx.tx).decisions;
+  for (const decision of SECOND_OPINIONS) {
+    const stored = decisions[decision].model;
+    if (offered.has(stored)) continue;
+    const model = defaultSecondOpinionModel(ctx.tx, account, decision);
+    if (model === null || model === stored) continue;
+    patchJudgeConfig(ctx, { decisions: { [decision]: { model } } });
+  }
 }
 
 /** The launch id of the account's model for `tier`, as routing resolves tiers; null when it lists none. */

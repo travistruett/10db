@@ -110,7 +110,7 @@ const ACCEPTANCE_DECISION: JudgeDecisionConfig = { ...DEFAULT_DECISION, enabled:
 const ACCEPTANCE_SECOND_DECISION: JudgeDecisionConfig = {
   enabled: false,
   model: OPENROUTER_ACCEPTANCE_SECOND_MODEL,
-  floor: 0.8,
+  floor: 0.7,
 };
 
 export const JudgeConfig = z.object({
