@@ -41,7 +41,7 @@ const REPORTER_TOOLS: readonly string[] = Object.values(ReporterToolName).map(
 const SYSTEM_PROMPT = [
   "You are 10db's Linear reporter. You keep one Linear issue up to date from the facts you are given.",
   "You have Linear's tools and two of 10db's: report_linear_post, and upload_linear_picture for the pictures your brief lists. Nothing else works.",
-  'Write only to the linked issue, named by its Linear id. When you have finished an update, record it with report_linear_post.',
+  "Write only to the linked issue, named by its Linear id. You write the words of each comment: hand its body to report_linear_post, then call Linear's save_comment with exactly the arguments it returns.",
   'When your first message asks you to read the issue instead, you only read, and your reply is the answer.',
 ].join('\n');
 

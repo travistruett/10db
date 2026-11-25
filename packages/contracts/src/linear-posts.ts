@@ -62,19 +62,27 @@ export const LinearReporterSettings = z.strictObject({
 });
 export type LinearReporterSettings = z.infer<typeof LinearReporterSettings>;
 
+/** The longest comment body the reporter's agent may hand 10db for one post. */
+export const MAX_COMMENT_BODY_CHARS = 10_000;
+
+/**
+ * What the reporter's agent hands 10db for one owed update: the comment's body and nothing else (10db adds the
+ * footer, writes the comment and records its id), or that the update has nothing to report. Exactly one of the
+ * two is given; the daemon checks it, so the tool's schema stays a plain object.
+ */
 export const ReportLinearPostInput = z.strictObject({
-  postIds: z.array(LinearPostId).min(1),
-  outcome: z.discriminatedUnion('state', [
-    z.strictObject({
-      state: z.literal('recorded'),
-      commentIds: z.array(z.string()),
-      statusSet: z.string().nullable(),
-      attachmentUrl: z.string().nullable(),
-    }),
-    /** Only accepted when the guard refused a write with this pattern in this run. */
-    z.strictObject({ state: z.literal('withheld'), pattern: z.string() }),
-    /** A Linear error that stopped the update, such as an issue that was not found; the row is tried again later. */
-    z.strictObject({ state: z.literal('failed'), reason: z.string().min(1).max(500) }),
-  ]),
+  postId: LinearPostId,
+  body: z.string().max(MAX_COMMENT_BODY_CHARS).optional(),
+  nothingToReport: z.boolean().optional(),
 });
 export type ReportLinearPostInput = z.infer<typeof ReportLinearPostInput>;
+
+/** How a pending row ends when 10db settles it: its comment written, or the text withheld. */
+export type LinearPostOutcome =
+  | {
+      readonly state: 'recorded';
+      readonly commentIds: readonly string[];
+      readonly statusSet: string | null;
+      readonly attachmentUrl: string | null;
+    }
+  | { readonly state: 'withheld'; readonly pattern: string };

@@ -6,8 +6,8 @@ import {
   type LinearEventKind,
   type LinearPostDto,
   type LinearPostId,
+  type LinearPostOutcome,
   type ProjectId,
-  type ReportLinearPostInput,
   type SessionId,
   type TaskId,
 } from '@10db/contracts';
@@ -167,7 +167,7 @@ export function takeLinearPosts(
 export function recordLinearPosts(
   ctx: WriteContext,
   ids: readonly LinearPostId[],
-  outcome: Exclude<ReportLinearPostInput['outcome'], { state: 'failed' }>,
+  outcome: LinearPostOutcome,
 ): void {
   const rows = pendingByIds(ctx, ids);
   if (rows.length === 0) return;
@@ -175,7 +175,7 @@ export function recordLinearPosts(
     outcome.state === 'recorded'
       ? {
           state: LinearPostState.Recorded,
-          commentIds: outcome.commentIds,
+          commentIds: [...outcome.commentIds],
           statusSet: outcome.statusSet,
           attachmentUrl: outcome.attachmentUrl,
         }
@@ -191,6 +191,63 @@ export function recordLinearPosts(
     )
     .run();
   emitChanged(ctx, rows);
+}
+
+/** Adds the id Linear gave a comment to a recorded row that has none yet; any other row is left as it is. */
+export function attachLinearCommentId(
+  ctx: WriteContext,
+  id: LinearPostId,
+  commentId: string,
+): void {
+  const row = ctx.tx
+    .select()
+    .from(schema.linearPosts)
+    .where(
+      and(eq(schema.linearPosts.id, id), eq(schema.linearPosts.state, LinearPostState.Recorded)),
+    )
+    .get();
+  if (row === undefined || row.commentIds.length > 0) return;
+  ctx.tx
+    .update(schema.linearPosts)
+    .set({ commentIds: [commentId] })
+    .where(eq(schema.linearPosts.id, id))
+    .run();
+  emitChanged(ctx, [row]);
+}
+
+/**
+ * A recorded row whose write Linear refused goes back to pending with a try spent (failed at `maxTries`), so the
+ * update is owed again. Only a row recorded without a comment id is reopened: one with an id was written.
+ */
+export function reopenLinearPost(
+  ctx: WriteContext,
+  id: LinearPostId,
+  error: string,
+  dueAt: string,
+  maxTries: number,
+): void {
+  const row = ctx.tx
+    .select()
+    .from(schema.linearPosts)
+    .where(
+      and(eq(schema.linearPosts.id, id), eq(schema.linearPosts.state, LinearPostState.Recorded)),
+    )
+    .get();
+  if (row === undefined || row.commentIds.length > 0) return;
+  const tries = row.tries + 1;
+  const failed = tries >= maxTries;
+  ctx.tx
+    .update(schema.linearPosts)
+    .set({
+      tries,
+      lastError: error,
+      state: failed ? LinearPostState.Failed : LinearPostState.Pending,
+      dueAt: failed ? null : dueAt,
+      recordedAt: null,
+    })
+    .where(eq(schema.linearPosts.id, id))
+    .run();
+  emitChanged(ctx, [row]);
 }
 
 /** tries+1; at `maxTries` the row is failed, else due again at `dueAt`. Rows no longer pending are skipped. */

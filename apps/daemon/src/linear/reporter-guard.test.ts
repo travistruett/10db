@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Provider, TaskScreenId, type ExternalLink } from '@10db/contracts';
+import { LinearPostId, Provider, TaskScreenId, type ExternalLink } from '@10db/contracts';
 import { judgeReporterCall, linearToolPrefixes, type ReporterRun } from './reporter-guard';
 import { isLinearUploadUrl, type ReporterPicture } from './reporter-pictures';
 
@@ -21,9 +21,19 @@ function run(over: Partial<ReporterRun> = {}): ReporterRun {
     prUrl: PR,
     pictures: [],
     withheld: new Set(),
+    comments: new Map(),
     ...over,
   };
 }
+
+const POST = LinearPostId.parse('lnp_0193a5b0-0000-7000-8000-000000000001');
+/** A run whose update has this comment text built by 10db: the only text its `save_comment` may carry. */
+const staged = (text: string, written = false): ReporterRun =>
+  run({ comments: new Map([[POST, { text, written }]]) });
+const reason = (r: ReporterRun, c: { toolName: string; input: unknown }): string => {
+  const { verdict } = judgeReporterCall(r, c);
+  return verdict.decision === 'deny' ? verdict.reason : '';
+};
 
 const call = (toolName: string, input: unknown = {}) => ({ toolName, input });
 
@@ -47,27 +57,51 @@ const decision = (r: ReporterRun, c: { toolName: string; input: unknown }) =>
 describe('judgeReporterCall', () => {
   const rows: [string, ReporterRun, { toolName: string; input: unknown }, 'allow' | 'deny'][] = [
     [
-      'comment by issueId',
-      run(),
+      'the comment 10db built, by issueId',
+      staged('hi'),
       call(`${L}save_comment`, { issueId: 'iss-119', body: 'hi' }),
       'allow',
     ],
     [
-      'comment by identifier',
+      'a comment 10db did not build',
+      staged('hi'),
+      call(`${L}save_comment`, { issueId: 'iss-119', body: 'placeholder' }),
+      'deny',
+    ],
+    [
+      'a comment with no body built at all',
       run(),
+      call(`${L}save_comment`, { issueId: 'iss-119', body: 'hi' }),
+      'deny',
+    ],
+    [
+      'the built comment written twice',
+      staged('hi', true),
+      call(`${L}save_comment`, { issueId: 'iss-119', body: 'hi' }),
+      'deny',
+    ],
+    [
+      'comment by identifier',
+      staged('hi'),
       call(`${L}save_comment`, { issueId: 'AMP-119', body: 'hi' }),
       'deny',
     ],
     [
       'comment on another issue',
-      run(),
+      staged('hi'),
       call(`${L}save_comment`, { issueId: 'iss-7', body: 'hi' }),
       'deny',
     ],
     [
       'comment with an extra key',
-      run(),
+      staged('hi'),
       call(`${L}save_comment`, { issueId: 'iss-119', body: 'hi', parentId: 'x' }),
+      'deny',
+    ],
+    [
+      'comment under the key issue',
+      staged('hi'),
+      call(`${L}save_comment`, { issue: 'iss-119', body: 'hi' }),
       'deny',
     ],
     [
@@ -104,11 +138,11 @@ describe('judgeReporterCall', () => {
     ['extract_images', run(), call(`${L}extract_images`, { markdown: '' }), 'deny'],
     [
       'url and code fence',
-      run(),
+      staged('see https://a.test\n```\nx\n```'),
       call(`${L}save_comment`, { issueId: 'iss-119', body: 'see https://a.test\n```\nx\n```' }),
       'allow',
     ],
-    ['edit by id', run(), call(`${L}save_comment`, { id: 'c-1', body: 'edit' }), 'deny'],
+    ['edit by id', staged('edit'), call(`${L}save_comment`, { id: 'c-1', body: 'edit' }), 'deny'],
     [
       'a read carrying a key',
       run(),
@@ -187,12 +221,34 @@ describe('judgeReporterCall', () => {
   });
 
   it('withholds a body with a key, naming the pattern', () => {
+    const body = 'key sk-ant-abcdefghijklmnopqrstuvwx';
     const out = judgeReporterCall(
-      run(),
-      call(`${L}save_comment`, { issueId: 'iss-119', body: 'key sk-ant-abcdefghijklmnopqrstuvwx' }),
+      staged(body),
+      call(`${L}save_comment`, { issueId: 'iss-119', body }),
     );
     expect(out.verdict.decision).toBe('deny');
     expect(out.withheld).toBe('anthropic_key');
+  });
+
+  it('names the post whose comment an allowed write carries', () => {
+    expect(
+      judgeReporterCall(staged('hi'), call(`${L}save_comment`, { issueId: 'iss-119', body: 'hi' }))
+        .wrote,
+    ).toBe(POST);
+  });
+
+  it('says which part of a refused write was wrong', () => {
+    const r = staged('hi');
+    const write = (input: unknown) => reason(r, call(`${L}save_comment`, input));
+    expect(write({ issueId: 'AMP-119', body: 'hi' })).toContain(
+      'Linear id iss-119, not its key AMP-119',
+    );
+    expect(write({ issueId: 'iss-119', body: 'hi', parentId: 'x' })).toContain('parentId');
+    expect(write({ issue: 'iss-119', body: 'hi' })).toContain('issue');
+    expect(write({ issueId: 'iss-119', body: 'placeholder' })).toContain('report_linear_post');
+    expect(
+      reason(staged('hi', true), call(`${L}save_comment`, { issueId: 'iss-119', body: 'hi' })),
+    ).toContain('already written');
   });
 });
 

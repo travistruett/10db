@@ -5,12 +5,16 @@
 
 const REF = /^\$task:(.+)$/s;
 const OWED = '$owed';
+// The comment 10db built for the last body the script handed it: `$comment.issueId` and `$comment.body`.
+const COMMENT_REF = /^\$comment\.(\w+)$/;
+const OWED_AT = /\$owed\[(\d+)\]/g;
 // A line of the brief's owed updates: `- <post id>: <event>, attempt <n>, {detail}`; a recorded one has `comments [` instead.
 const OWED_LINE = /^- (lnp_[0-9a-f-]{36}): [a-z_]+, attempt \d+, \{/gm;
 
 export class FakeTaskRefs {
   private readonly ids = new Map<string, string>();
   private readonly owed: string[];
+  private readonly comment: { issueId?: string; body?: string } = {};
 
   constructor(prompt = '') {
     this.owed = [...prompt.matchAll(OWED_LINE)].map((m) => m[1] ?? '');
@@ -34,10 +38,18 @@ export class FakeTaskRefs {
     return out;
   }
 
+  /** A message's words with each `$owed[n]` replaced by the nth owed post id. */
+  words(text: string): string {
+    return text.replace(OWED_AT, (whole, n: string) => this.owed[Number(n)] ?? whole);
+  }
+
   private swap(value: unknown): unknown {
     if (typeof value === 'string') {
       const title = REF.exec(value)?.[1];
-      return (title === undefined ? undefined : this.ids.get(title)) ?? value;
+      if (title !== undefined) return this.ids.get(title) ?? value;
+      const comment = COMMENT_REF.exec(value)?.[1];
+      if (comment === 'issueId' || comment === 'body') return this.comment[comment] ?? value;
+      return this.words(value);
     }
     if (Array.isArray(value))
       return value.flatMap((item: unknown) => (item === OWED ? this.owed : [this.swap(item)]));
@@ -52,6 +64,15 @@ export class FakeTaskRefs {
     }
     if (typeof value !== 'object' || value === null) return;
     const record: Record<string, unknown> = { ...value };
+    // The reporter's answer to a comment body: the arguments its `save_comment` must carry.
+    const next = record['next'];
+    const args =
+      typeof next === 'object' && next !== null && 'arguments' in next ? next.arguments : null;
+    if (typeof args === 'object' && args !== null) {
+      if ('issueId' in args && typeof args.issueId === 'string')
+        this.comment.issueId = args.issueId;
+      if ('body' in args && typeof args.body === 'string') this.comment.body = args.body;
+    }
     const id = record['taskId'] ?? record['id'];
     if (typeof record['title'] === 'string' && typeof id === 'string')
       this.ids.set(record['title'], id);

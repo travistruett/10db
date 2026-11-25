@@ -4,6 +4,7 @@ import {
   ConversationItemKind,
   ConversationState,
   harnessOf,
+  InvalidError,
   LinearVia,
   type AccountId,
   type ConversationId,
@@ -19,6 +20,7 @@ import {
   type UploadLinearPictureInput,
 } from '@10db/contracts';
 import {
+  attachLinearCommentId,
   dropPendingLinearPosts,
   failLinearPosts,
   getAccount,
@@ -28,8 +30,10 @@ import {
   insertItem,
   lastItems,
   listItems,
+  listLinearPosts,
   pendingLinearPosts,
   recordLinearPosts,
+  reopenLinearPost,
   setAppSetting,
   takeLinearPosts,
   wakeHeldLinearPosts,
@@ -44,7 +48,8 @@ import type { ShapeToolRequest, ShapeVerdict } from '../sessions';
 import { reporterBlockedBy } from './reporter-events';
 import { refreshReporterCard } from './reporter-inbox';
 import { taskPrUrl } from './reporter-brief';
-import { judgeReporterCall, type ReporterRun } from './reporter-guard';
+import { cleanBody, commentText, MIN_BODY_CHARS, parseWrittenLines } from './reporter-comment';
+import { judgeReporterCall, secretIn, type ReporterRun } from './reporter-guard';
 import { reporterPictures, uploadPicture } from './reporter-pictures';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
 import { signInNeeded } from './sign-in-needed';
@@ -80,6 +85,19 @@ export const REPORTER_STARTER = 'Report the pending Linear updates.';
 const ALLOWED_BY_RULE = "10db's reporter rule allows this call.";
 const SESSION_OVER = 'This reporter run is over; nothing it calls is recorded.';
 
+/** What `report_linear_post` answers the agent. */
+export type ReportedPost =
+  | {
+      readonly ok: true;
+      /** The one Linear write to make, with these arguments unchanged. */
+      readonly next: {
+        readonly tool: 'save_comment';
+        readonly arguments: { readonly issueId: string; readonly body: string };
+      };
+    }
+  | { readonly ok: true; readonly recorded: 'nothing to report' }
+  | { readonly ok: true; readonly withheld: string; readonly why: string };
+
 export interface LinearReporter {
   /** Startup pickup: arms a timer per task with pending rows. */
   start(): void;
@@ -92,8 +110,12 @@ export interface LinearReporter {
    * held rows are due now and its account is no longer taken as signed out.
    */
   wake(projectId: ProjectId): void;
-  /** `report_linear_post`, from a reporter session only. */
-  reportPost(sessionId: SessionId, input: ReportLinearPostInput): { ok: true };
+  /**
+   * `report_linear_post`, from a reporter session only: the agent's body for one owed update (or that it has
+   * nothing to report). 10db builds the comment and answers the exact `save_comment` arguments, the only comment
+   * the session's guard lets through.
+   */
+  reportPost(sessionId: SessionId, input: ReportLinearPostInput): ReportedPost;
   /** `upload_linear_picture`: sends a picture this run was offered to Linear's signed URL. */
   uploadPicture(sessionId: SessionId, input: UploadLinearPictureInput): Promise<{ ok: true }>;
   /**
@@ -156,8 +178,10 @@ interface Flight {
   /** The rows due when the run was triggered: what fails when the session never takes any. */
   readonly due: ReadonlySet<LinearPostId>;
   taken: ReadonlySet<LinearPostId>;
-  /** Rows the session reported failed; the settle leaves them be. */
-  readonly failedByAgent: Set<LinearPostId>;
+  /** Rows whose comment the guard let out: recorded before the write, so a retry or a restart never repeats it. */
+  readonly written: Set<LinearPostId>;
+  /** Where the run's own conversation items begin: its closing message names the comment ids. */
+  readonly afterSeq: number;
   /** A snapshot run's wait: what the lane's start is waiting on, and where the run's own items begin. */
   readonly snapshot: {
     readonly resolve: (result: LinearSnapshot) => void;
@@ -351,7 +375,8 @@ export function createLinearReporter(
       snapshot,
       reads: 0,
       taken: new Set(),
-      failedByAgent: new Set(),
+      written: new Set(),
+      afterSeq: lastItems(state.db, conversationId, 1)[0]?.seq ?? -1,
       error: null,
       guard: null,
       busySeen: false,
@@ -449,13 +474,55 @@ export function createLinearReporter(
   const missedLinear = (flight: Flight): flight is Flight & { accountId: AccountId } =>
     flight.guard !== null && flight.accountId !== null && !flight.reachedLinear;
 
+  /**
+   * What the run's closing message says of the comments the guard let out: the id Linear gave each, which is
+   * recorded on its row, or the words Linear refused it with, which reopen the row. A comment with no line stays
+   * recorded without an id: it may exist, and 10db never writes it again.
+   */
+  const settleWritten = (flight: Flight): void => {
+    if (flight.written.size === 0) return;
+    const said = listItems(state.db, flight.conversationId, { afterSeq: flight.afterSeq })
+      .filter((item) => item.kind === ConversationItemKind.AgentMessage)
+      .map((item) => parseItemBody(ConversationItemKind.AgentMessage, item.body).text);
+    const lines = said.flatMap(parseWrittenLines).filter((l) => flight.written.has(l.postId));
+    const now = clock.now().getTime();
+    const tries = new Map(listLinearPosts(state.db, flight.taskId).map((p) => [p.id, p.tries]));
+    state.write((ctx) => {
+      for (const line of lines) {
+        if ('commentId' in line) attachLinearCommentId(ctx, line.postId, line.commentId);
+        else
+          reopenLinearPost(
+            ctx,
+            line.postId,
+            line.failure,
+            new Date(now + backoffMs(tries.get(line.postId) ?? 0)).toISOString(),
+            MAX_TRIES,
+          );
+      }
+    });
+    const unnamed = [...flight.written].filter((id) => !lines.some((l) => l.postId === id));
+    if (unnamed.length > 0)
+      log.warn(
+        { taskId: flight.taskId, posts: unnamed },
+        'a reporter run wrote comments it gave no id for',
+      );
+  };
+
   const settleRows = (flight: Flight, reason: string, complete: boolean): void => {
+    try {
+      settleWritten(flight);
+    } catch (error) {
+      log.error(
+        { err: error, taskId: flight.taskId },
+        'a reporter run could not record its comments',
+      );
+    }
     try {
       const guard = flight.guard;
       // What the session took; when it never got that far, what was due when the run was triggered.
       const owned = flight.taken.size > 0 ? flight.taken : flight.due;
       const open = pendingLinearPosts(state.db, { taskId: flight.taskId }).filter(
-        (p) => owned.has(p.id) && !flight.failedByAgent.has(p.id),
+        (p) => owned.has(p.id) && !flight.written.has(p.id),
       );
       const [pattern] = guard === null ? [] : [...guard.withheld];
       if (pattern !== undefined)
@@ -606,6 +673,7 @@ export function createLinearReporter(
           prUrl: null,
           pictures: [],
           withheld: new Set(),
+          comments: new Map(),
         };
         flight.sessionId = input.sessionId;
         flight.accountId = input.accountId;
@@ -632,6 +700,7 @@ export function createLinearReporter(
         prUrl: taskPrUrl(state.db, flight.taskId),
         pictures: reporterPictures(state.db, flight.taskId, posts),
         withheld: new Set(),
+        comments: new Map(),
       };
       flight.sessionId = input.sessionId;
       flight.accountId = input.accountId;
@@ -681,35 +750,57 @@ export function createLinearReporter(
 
     reportPost(sessionId, input) {
       const { flight, guard } = runOf(sessionId);
-      const foreign = input.postIds.filter((id) => !flight.taken.has(id));
-      if (foreign.length > 0)
-        throw new ConflictError('Those updates were not given to this session.');
-      if (input.outcome.state === 'withheld' && !guard.withheld.has(input.outcome.pattern))
-        throw new ConflictError('No write of this run was refused for that pattern.');
-      const { outcome } = input;
-      // A row dropped meanwhile is skipped by the store: no error.
-      if (outcome.state === 'failed') {
-        // A row the agent already failed this run is not failed again, so a loop can't spend its tries.
-        const rows = pendingLinearPosts(state.db, { taskId: flight.taskId }).filter(
-          (p) => input.postIds.includes(p.id) && !flight.failedByAgent.has(p.id),
-        );
-        // A session that never reached Linear is reporting that it has none: the rows wait for a sign-in.
-        if (rows.length > 0 && missedLinear(flight)) {
-          log.info(
-            { taskId: flight.taskId, reason: outcome.reason },
-            'a reporter run without Linear held its updates',
-          );
-          hold(rows, foundSignedOut(flight.accountId));
-        } else fail(rows, outcome.reason);
-        for (const row of rows) flight.failedByAgent.add(row.id);
+      if (guard.readOnly) throw new ConflictError('A snapshot run reports nothing.');
+      if (!flight.taken.has(input.postId))
+        throw new ConflictError('That update was not given to this session.');
+      // The row is the record: one already recorded, withheld or written is never made again.
+      const post = pendingLinearPosts(state.db, { taskId: flight.taskId }).find(
+        (p) => p.id === input.postId,
+      );
+      if (post === undefined || flight.written.has(post.id))
+        throw new ConflictError('That update is already recorded; nothing more is written for it.');
+      const nothing = input.nothingToReport === true;
+      if (nothing === (input.body !== undefined))
+        throw new InvalidError('Give the comment body, or nothingToReport true, and not both.');
+      if (input.body === undefined) {
+        state.write((ctx) => {
+          recordLinearPosts(ctx, [post.id], {
+            state: 'recorded',
+            commentIds: [],
+            statusSet: null,
+            attachmentUrl: null,
+          });
+        });
         refreshCard(flight.projectId);
-        return { ok: true };
+        return { ok: true, recorded: 'nothing to report' };
       }
-      state.write((ctx) => {
-        recordLinearPosts(ctx, input.postIds, outcome);
-      });
-      refreshCard(flight.projectId);
-      return { ok: true };
+      const body = cleanBody(input.body);
+      if (body.length < MIN_BODY_CHARS)
+        throw new InvalidError(
+          `The comment is ${String(body.length)} characters; write what the update says (at least ${String(MIN_BODY_CHARS)}), or report nothingToReport.`,
+        );
+      const secret = secretIn(body);
+      if (secret !== null) {
+        // 10db found it, so 10db withholds the row and names the pattern; the agent has none to invent.
+        state.write((ctx) => {
+          recordLinearPosts(ctx, [post.id], { state: 'withheld', pattern: secret });
+        });
+        refreshCard(flight.projectId);
+        return {
+          ok: true,
+          withheld: secret,
+          why: `The body matches ${secret}, so nothing is written for this update.`,
+        };
+      }
+      const text = commentText(body, post);
+      guard.comments.set(post.id, { text, written: false });
+      return {
+        ok: true,
+        next: {
+          tool: 'save_comment',
+          arguments: { issueId: guard.link.issueId, body: text },
+        },
+      };
     },
 
     async uploadPicture(sessionId, input) {
@@ -734,6 +825,43 @@ export function createLinearReporter(
       }
       const judged = judgeReporterCall(flight.guard, { toolName: req.toolName, input: req.input });
       if (judged.withheld !== undefined) flight.guard.withheld.add(judged.withheld);
+      const wrote = judged.wrote;
+      if (wrote !== undefined) {
+        // The row records the comment before Linear gets it: a crash after this leaves a row with no id, never a
+        // comment with no row, and nothing writes it twice. A row no longer pending (dropped, or recorded) is
+        // not written for.
+        const stillOwed = pendingLinearPosts(state.db, { taskId: flight.taskId }).some(
+          (p) => p.id === wrote,
+        );
+        if (!stillOwed)
+          return {
+            decision: 'deny',
+            reason: 'That update is no longer owed, so nothing is written for it.',
+          };
+        try {
+          state.write((ctx) => {
+            recordLinearPosts(ctx, [wrote], {
+              state: 'recorded',
+              commentIds: [],
+              statusSet: null,
+              attachmentUrl: null,
+            });
+          });
+        } catch (error) {
+          log.error(
+            { err: error, taskId: flight.taskId },
+            'a reporter comment could not be recorded',
+          );
+          return {
+            decision: 'deny',
+            reason: '10db could not record this update, so nothing is written. Try the call again.',
+          };
+        }
+        const staged = flight.guard.comments.get(wrote);
+        if (staged !== undefined) staged.written = true;
+        flight.written.add(wrote);
+        refreshCard(flight.projectId);
+      }
       // Only a call the rule allows counts: a signed-out server's sign-in tool is refused, so it does not.
       if (
         judged.verdict.decision === 'allow' &&

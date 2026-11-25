@@ -68,29 +68,21 @@ let repo: { path: string; cleanup(): void };
 /** Makes the next launch throw, as an account with no model to run would. */
 let launchError: Error | null = null;
 
-function recordingScript(postId: LinearPostId): FakeStep[] {
+const BODY = 'The run started on this task.';
+
+/** Hands 10db the body, writes the comment 10db built, and names its id in the closing message. */
+function recordingScript(postId: LinearPostId, closing = `${postId}: comment-1`): FakeStep[] {
   return [
-    {
-      do: 'tool',
-      toolName: `${PREFIX}save_comment`,
-      input: { issueId: ISSUE, body: 'Run started.' },
-      result: JSON.stringify({ id: 'comment-1' }),
-    },
+    { do: 'mcp', tool: 'report_linear_post', args: { postId, body: BODY } },
     // The team key repeats across workspaces, so Linear's own id is the only one accepted.
     { do: 'tool', toolName: `${PREFIX}save_comment`, input: { issueId: 'AMP-1', body: 'x' } },
     {
-      do: 'mcp',
-      tool: 'report_linear_post',
-      args: {
-        postIds: [postId],
-        outcome: {
-          state: 'recorded',
-          commentIds: ['comment-1'],
-          statusSet: null,
-          attachmentUrl: null,
-        },
-      },
+      do: 'tool',
+      toolName: `${PREFIX}save_comment`,
+      input: { issueId: ISSUE, body: '$comment.body' },
+      result: JSON.stringify({ id: 'comment-1' }),
     },
+    { do: 'say', text: closing },
     { do: 'turn_complete' },
   ];
 }
@@ -358,15 +350,7 @@ describe('the Linear reporter', () => {
         {
           do: 'mcp',
           tool: 'report_linear_post',
-          args: {
-            postIds: [first],
-            outcome: {
-              state: 'recorded',
-              commentIds: ['c-1'],
-              statusSet: null,
-              attachmentUrl: null,
-            },
-          },
+          args: { postId: first, nothingToReport: true },
         },
         { do: 'turn_complete' },
       ],
@@ -404,6 +388,73 @@ describe('the Linear reporter', () => {
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
     expect(rows()[0]?.tries).toBe(1);
+  });
+
+  it('records a comment before Linear gets it, so a run that dies after the write never posts it twice', async () => {
+    const id = oweOne();
+    // The write goes out and the run ends without naming the comment's id.
+    book[KEY] = [recordingScript(id, 'Done.')];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    expect(rows()[0]?.commentIds).toEqual([]);
+    // Nothing is owed any more: a new daemon arms no run for it.
+    await reporter.stop();
+    reporter = makeReporter();
+    reporter.start();
+    clock.advance(60 * 60_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(1);
+  });
+
+  it('owes an update again when Linear refused its write, with the reason on the row', async () => {
+    const id = oweOne();
+    book[KEY] = [recordingScript(id, `${id}: failed: Issue not found`), recordingScript(id)];
+    const first = clock.now().getTime() + 30_000;
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.tries, { timeout: 10_000 }).toBe(1);
+    expect(rows()[0]).toMatchObject({
+      state: LinearPostState.Pending,
+      lastError: 'Issue not found',
+      dueAt: new Date(first + 5 * 60_000).toISOString(),
+    });
+    clock.advance(5 * 60_000);
+    await expect
+      .poll(
+        () => {
+          clock.advance(0);
+          return rows()[0]?.state;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(LinearPostState.Recorded);
+    expect(rows()[0]?.commentIds).toEqual(['comment-1']);
+  });
+
+  it('withholds a body that carries a key, and refuses one that says nothing, with no write', async () => {
+    const id = oweOne();
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: id, body: 'placeholder' },
+        },
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: id, body: 'The key is sk-ant-abcdefghijklmnopqrstuvwx' },
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Withheld);
+    // 10db named the pattern itself, and the too-short body was refused with its reason.
+    expect(rows()[0]?.withheldPattern).toBe('anthropic_key');
+    const answers = adapter.observations.filter((o) => o.kind === 'mcp_result');
+    expect(answers[0]?.detail).toMatchObject({ isError: true });
+    expect(JSON.stringify(answers[0]?.detail)).toContain('write what the update says');
+    expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(0);
   });
 
   it('reads the linked issue for a lane without writing, and says why when it cannot', async () => {

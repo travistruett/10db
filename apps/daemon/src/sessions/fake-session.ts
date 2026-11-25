@@ -346,7 +346,7 @@ export function runFakeLaneSession(
         emit({ type: 'activity', kind: 'text', summary: step.summary });
         return 'continue';
       case 'tool': {
-        const input = step.input;
+        const input = taskRefs.resolve(step.input);
         const toolUseId = `fake-tool-${String(index)}`;
         // The hook reads the file before the tool runs; the scripted call does as its use is mapped.
         toolCalls.capture(toolUseId, step.toolName, input, spec.cwd);
@@ -424,7 +424,8 @@ export function runFakeLaneSession(
         );
       case 'say':
         said += 1;
-        for (const event of sayEvents(`fake-msg-${String(said)}`, step.text)) emit(event);
+        for (const event of sayEvents(`fake-msg-${String(said)}`, taskRefs.words(step.text)))
+          emit(event);
         return 'continue';
       case 'think':
         thought += 1;

@@ -27,7 +27,7 @@ export const ReporterToolInputs = {
 /** What the reporter's agent reads about each tool. */
 export const REPORTER_TOOL_DESCRIPTIONS: Readonly<Record<ReporterToolName, string>> = {
   [ReporterToolName.ReportLinearPost]:
-    'Record the updates you made on the issue, by their post ids: the comment ids you wrote, the status you set and any attachment. Or record them as withheld, naming the pattern a refused write matched. Call it once per update you finished.',
+    "Hand 10db the comment for one owed update: its post id and the comment's body, nothing else (no footer; 10db adds it). The result is the exact arguments to give Linear's save_comment, which you then call unchanged. Or give the post id with nothingToReport true when the update has nothing to say. Call it once per owed update.",
   [ReporterToolName.UploadLinearPicture]:
     "Upload one of the pictures your brief lists to Linear. Call Linear's prepare_file_upload first with the picture's file name, contentType image/png and its exact size, then call this at once with the picture's id and the uploadRequest's url and headers exactly as Linear returned them. The signed URL lasts 60 seconds. When it succeeds, put the markdown prepare_file_upload returned in your comment.",
 };

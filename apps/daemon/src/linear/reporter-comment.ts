@@ -1,0 +1,63 @@
+import { LinearPostId } from '@10db/contracts';
+
+// The comment 10db writes for an owed update, built only from the agent's words. The agent hands over a body;
+// 10db cleans it, adds the footer, and is the only author of the text Linear receives.
+
+/** A body shorter than this says nothing a reader can use; the agent reports "nothing to report" instead. */
+export const MIN_BODY_CHARS = 20;
+
+/** The footer an update's comment ends with: it names the row that records the comment. */
+export const footerOf = (p: {
+  readonly id: string;
+  readonly event: string;
+  readonly attempt: number;
+}): string => `10db · ${p.event} · attempt ${String(p.attempt)} · ${p.id}`;
+
+/**
+ * The body as it is written: line ends are real ones (a typed backslash and n, which the agent's tool call can
+ * carry through, becomes a line break) and the ends are trimmed.
+ */
+export function cleanBody(body: string): string {
+  return body
+    .replace(/\r\n?/g, '\n')
+    .replace(/(?<!\\)\\n/g, '\n')
+    .trim();
+}
+
+/** The whole comment: the cleaned body, a blank line, the footer. */
+export const commentText = (
+  body: string,
+  post: { readonly id: string; readonly event: string; readonly attempt: number },
+): string => `${cleanBody(body)}\n\n${footerOf(post)}`;
+
+/** What the agent's closing message says of one update: Linear's comment id, or the words Linear failed with. */
+export type WrittenLine =
+  | { readonly postId: LinearPostId; readonly commentId: string }
+  | { readonly postId: LinearPostId; readonly failure: string };
+
+const WRITTEN_LINE = /^\s*[-*]?\s*`?(lnp_[0-9a-f-]{36})`?\s*:\s*(.+?)\s*$/;
+const COMMENT_ID = /^`?([A-Za-z0-9_-]{4,64})`?$/;
+const FAILED = /^failed\s*:\s*(.+)$/i;
+
+/**
+ * Reads the lines of the agent's closing message, `<post id>: <comment id>` or `<post id>: failed: <Linear's
+ * words>`; any other line is not read.
+ */
+export function parseWrittenLines(text: string): WrittenLine[] {
+  const out: WrittenLine[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const match = WRITTEN_LINE.exec(line);
+    if (match === null) continue;
+    const postId = LinearPostId.safeParse(match[1]);
+    const rest = match[2] ?? '';
+    if (!postId.success) continue;
+    const failure = FAILED.exec(rest)?.[1];
+    if (failure !== undefined) {
+      out.push({ postId: postId.data, failure: failure.slice(0, 500) });
+      continue;
+    }
+    const commentId = COMMENT_ID.exec(rest)?.[1];
+    if (commentId !== undefined) out.push({ postId: postId.data, commentId });
+  }
+  return out;
+}

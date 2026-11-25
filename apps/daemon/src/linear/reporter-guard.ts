@@ -1,4 +1,4 @@
-import type { ExternalLink } from '@10db/contracts';
+import type { ExternalLink, LinearPostId } from '@10db/contracts';
 import { Provider } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { mcpToolPrefix } from '../sessions';
@@ -35,6 +35,12 @@ const WRITE_KEYS: Readonly<Record<string, readonly string[]>> = {
 /** The only Linear tools a snapshot run calls: it reads the linked issue, its comments and its relations. */
 const SNAPSHOT_READS: ReadonlySet<string> = new Set(['get_issue', 'list_comments']);
 
+/** The comment 10db built for one owed update: the text `save_comment` must carry, and whether it went out. */
+export interface StagedComment {
+  readonly text: string;
+  written: boolean;
+}
+
 export interface ReporterRun {
   /** A snapshot run reads and writes nothing: no 10db tool, no Linear write. */
   readonly readOnly: boolean;
@@ -46,6 +52,8 @@ export interface ReporterRun {
   readonly pictures: readonly ReporterPicture[];
   /** Pattern names refused this run. */
   readonly withheld: Set<string>;
+  /** Per owed update, the comment 10db built from the agent's body: the only comment text the run may write. */
+  readonly comments: Map<LinearPostId, StagedComment>;
 }
 
 const allow = (): GuardVerdict => ({ decision: 'allow' });
@@ -75,20 +83,37 @@ function* stringsIn(value: unknown): Generator<string> {
     for (const item of Object.values(value)) yield* stringsIn(item);
 }
 
-/** Why a write is not the one this run may make, or null. Every key must be in the tool's list. */
+/** What a write that passed names: the post whose comment it carries, when it is a comment. */
+interface WriteJudged {
+  readonly wrote?: LinearPostId;
+}
+
+/**
+ * Why a write is not the one this run may make (a sentence that says which part of the call is wrong), or what
+ * it writes. Every key must be in the tool's list.
+ */
 function judgeWrite(
   run: Readonly<ReporterRun>,
   tool: string,
   allowed: readonly string[],
   input: Record<string, unknown>,
-): string | null {
+): { readonly refusal: string } | WriteJudged {
   const issueId = run.link.issueId;
-  if (!Object.keys(input).every((k) => allowed.includes(k))) return 'unlisted key';
+  const refuse = (why: string): { readonly refusal: string } => ({
+    refusal: `This call is refused: ${why}`,
+  });
+  const extra = Object.keys(input).filter((k) => !allowed.includes(k));
+  if (extra.length > 0)
+    return refuse(
+      `${tool} takes only ${allowed.join(', ')}; it was given ${extra.join(', ')} too. Send exactly the arguments report_linear_post returned.`,
+    );
   switch (tool) {
     case 'save_issue': {
-      if (field(input, 'id') !== issueId) return 'wrong issue';
+      if (field(input, 'id') !== issueId)
+        return refuse(`id must be the linked issue's Linear id ${issueId}.`);
       const state = field(input, 'state');
-      if (state !== undefined && typeof state !== 'string') return 'unlisted key';
+      if (state !== undefined && typeof state !== 'string')
+        return refuse('state must be the status name, a string.');
       if ('links' in input) {
         const links = field(input, 'links');
         const entry = Array.isArray(links) && links.length === 1 ? asRecord(links[0]) : null;
@@ -99,21 +124,40 @@ function judgeWrite(
           field(entry, 'url') !== run.prUrl ||
           Object.keys(entry).some((k) => k !== 'title' && k !== 'url')
         )
-          return 'links';
+          return refuse(
+            `links may hold one link, titled 10db, to the task's pull request${run.prUrl === null ? ' (it has none yet)' : ` ${run.prUrl}`}.`,
+          );
       }
-      return null;
+      return {};
     }
-    case 'save_comment':
-      return typeof field(input, 'body') === 'string' && field(input, 'issueId') === issueId
-        ? null
-        : 'wrong issue';
+    case 'save_comment': {
+      const given = field(input, 'issueId');
+      if (given !== issueId)
+        return refuse(
+          given === run.link.id
+            ? `issueId must be the issue's Linear id ${issueId}, not its key ${run.link.id}.`
+            : `issueId must be the linked issue's Linear id ${issueId}; this run writes to that issue only.`,
+        );
+      const body = field(input, 'body');
+      if (typeof body !== 'string') return refuse('body must be a string.');
+      const staged = [...run.comments].find(([, comment]) => comment.text === body);
+      if (staged === undefined)
+        return refuse(
+          'body is not a comment 10db built. Call report_linear_post with the post id and your comment body, then pass the arguments it returns to save_comment unchanged.',
+        );
+      if (staged[1].written)
+        return refuse(`the comment for ${staged[0]} was already written; do not write it again.`);
+      return { wrote: staged[0] };
+    }
     case 'prepare_file_upload':
       // A signed URL alone sends nothing: only 10db's upload tool sends a file, and only an offered picture.
       return run.pictures.length > 0 && field(input, 'contentType') === 'image/png'
-        ? null
-        : 'no picture offered';
+        ? {}
+        : refuse(
+            'prepare uploads only for the PNG pictures the brief lists (contentType image/png).',
+          );
     default:
-      return 'unlisted tool';
+      return refuse(`${tool} is not a tool this run may call.`);
   }
 }
 
@@ -130,7 +174,7 @@ export function secretIn(input: unknown): string | null {
 export function judgeReporterCall(
   run: Readonly<ReporterRun>,
   call: { toolName: string; input: unknown },
-): { verdict: GuardVerdict; withheld?: string } {
+): { verdict: GuardVerdict; withheld?: string; wrote?: LinearPostId } {
   const { toolName } = call;
   if (toolName.startsWith('mcp__10db__')) {
     if (run.readOnly) return { verdict: deny('A snapshot run may only read Linear.') };
@@ -174,21 +218,27 @@ export function judgeReporterCall(
           : deny(`The call carries text that matches ${secret}; it is refused.`),
     };
   }
-  const refusal = `This call is refused: the reporter may only update the linked issue ${run.link.issueId}.`;
   const allowed = Object.hasOwn(WRITE_KEYS, tool) ? WRITE_KEYS[tool] : undefined;
-  if (allowed === undefined) return { verdict: deny(refusal) };
-  const input = asRecord(call.input);
-  if (input === null || judgeWrite(run, tool, allowed, input) !== null)
-    return { verdict: deny(refusal) };
-  if (secret !== null) {
+  if (allowed === undefined)
     return {
       verdict: deny(
-        `Withheld: the text matches ${secret}. Record the update as withheld with report_linear_post.`,
+        `This call is refused: ${tool} is not a tool this run may call; it only updates the linked issue ${run.link.issueId}.`,
       ),
+    };
+  const input = asRecord(call.input);
+  if (input === null)
+    return { verdict: deny('This call is refused: the arguments must be an object.') };
+  const judged = judgeWrite(run, tool, allowed, input);
+  if ('refusal' in judged) return { verdict: deny(judged.refusal) };
+  if (secret !== null) {
+    return {
+      verdict: deny(`Withheld: the text matches ${secret}; nothing is written.`),
       withheld: secret,
     };
   }
-  return { verdict: allow() };
+  return judged.wrote === undefined
+    ? { verdict: allow() }
+    : { verdict: allow(), wrote: judged.wrote };
 }
 
 /**
