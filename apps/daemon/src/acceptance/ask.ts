@@ -47,6 +47,17 @@ export interface AcceptanceInput {
 }
 
 const questionId = (index: number): string => `met_${String(index)}`;
+const judgeableId = (index: number): string => `judgeable_${String(index)}`;
+
+function judgeableQuestion(criterion: string): NoulQuestion {
+  return {
+    instructions: `Do the diff, the gate output and the build's report give enough to judge this acceptance criterion either way: ${criterion}? A criterion about a result 10db didn't see (a CI run, a live run, a measurement the report doesn't give) can't be judged; neither can one whose files the diff was cut before.`,
+    criteria: {
+      true: 'They give enough to judge it.',
+      false: "They don't give enough to judge it.",
+    },
+  };
+}
 
 function criterionQuestion(criterion: string): NoulQuestion {
   return {
@@ -78,20 +89,32 @@ function cappedDiff(diff: DiffSince): {
   return { text, truncated: true, files: diff.files };
 }
 
-/** The criteria text by question id, and the questions: one per criterion not accepted that `only` allows, plus `unasked`. */
+/**
+ * The criteria text by question id, and the questions: one per criterion in `only`, plus `unasked`, and with
+ * `withJudgeable` one for whether each can be judged from the change.
+ */
 function questionsFor(
   criteria: readonly string[],
   only: ReadonlySet<string>,
-): { ids: Map<string, string>; questions: Record<string, NoulQuestion> } {
+  withJudgeable = false,
+): {
+  ids: Map<string, string>;
+  judgeableIds: Map<string, string>;
+  questions: Record<string, NoulQuestion>;
+} {
   const ids = new Map<string, string>();
+  const judgeableIds = new Map<string, string>();
   const questions: Record<string, NoulQuestion> = {};
   criteria.forEach((criterion, index) => {
     if (!only.has(criterion)) return;
     ids.set(questionId(index), criterion);
     questions[questionId(index)] = criterionQuestion(criterion);
+    if (!withJudgeable) return;
+    judgeableIds.set(judgeableId(index), criterion);
+    questions[judgeableId(index)] = judgeableQuestion(criterion);
   });
   questions[UNASKED] = UNASKED_QUESTION;
-  return { ids, questions };
+  return { ids, judgeableIds, questions };
 }
 
 /** A call's probabilities keyed by criterion text instead of question id; the unasked answer set aside. */
@@ -151,14 +174,16 @@ export async function checkAcceptance(
     only: ReadonlySet<string>,
     first: Readonly<Record<string, number>> | null,
   ): ((probabilities: Readonly<Record<string, number>>) => AssessReading) => {
-    const { ids: map } = questionsFor(input.criteria, only);
+    const { ids: map, judgeableIds } = questionsFor(input.criteria, only, first !== null);
     return (probabilities) => {
       const { byText } = byCriterion(map, probabilities);
+      const { byText: judgeable } = byCriterion(judgeableIds, probabilities);
       const results = readAcceptance({
         criteria: [...only],
         accepted: new Set(),
         first: first ?? byText,
         second: first === null ? null : byText,
+        judgeable: first === null ? null : judgeable,
         firstFloor: floors.first,
         secondFloor: floors.second,
       });
@@ -187,9 +212,10 @@ export async function checkAcceptance(
     floors.first,
   );
   let second: ReturnType<typeof byCriterion> | null = null;
+  let judgeable: Record<string, number> | null = null;
   if (needSecond.length > 0) {
     const only = new Set(needSecond);
-    const secondAsk = questionsFor(input.criteria, only);
+    const secondAsk = questionsFor(input.criteria, only, true);
     const secondAnswer = await judge.assess({
       decision: JudgeDecision.AcceptanceSecond,
       state,
@@ -200,8 +226,10 @@ export async function checkAcceptance(
       ...ids,
       signal,
     });
-    if (secondAnswer.kind === 'answered')
+    if (secondAnswer.kind === 'answered') {
       second = byCriterion(secondAsk.ids, secondAnswer.probabilities);
+      judgeable = byCriterion(secondAsk.judgeableIds, secondAnswer.probabilities).byText;
+    }
   }
 
   const criteria = readAcceptance({
@@ -209,6 +237,7 @@ export async function checkAcceptance(
     accepted: input.accepted,
     first: first?.byText ?? null,
     second: second?.byText ?? null,
+    judgeable,
     firstFloor: floors.first,
     secondFloor: floors.second,
   });

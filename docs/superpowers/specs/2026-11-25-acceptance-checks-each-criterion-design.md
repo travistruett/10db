@@ -106,6 +106,10 @@ The questions:
   - instructions: "Does the change meet this acceptance criterion: <criterion>? Read the diff and the gate output.
     A criterion about behavior is met only if the diff makes that behavior happen."
   - criteria: `true` is "The change meets it."; `false` is "The change does not meet it, or only partly."
+- `judgeable_<n>` (the second call only, for each criterion it asks): "Do the diff, the gate output and the build's
+  report give enough to judge this criterion either way? A criterion about a result 10db didn't see (a CI run, a
+  live run, a measurement the report doesn't give) can't be judged; neither can one whose files the diff was cut
+  before."
 - `unasked`: "Does the change do something the task didn't ask for?"
 
 Reading, at floor f (the decision's floor, clamped to at least 0.5). It lives in `acceptance/read.ts`, a pure rule
@@ -113,7 +117,8 @@ table:
 - `acceptance` (cheap): `p ≥ f` is met. Anything else goes to `acceptance_second`, for those criteria only.
 - `acceptance_second` (strong):
   - `p ≥ f` is met;
-  - `p ≤ 1 − f` is not met;
+  - `p ≤ 1 − f` is not met, but only when `judgeable ≥ f`; otherwise it is unclear, noted "can't be judged from
+    the change";
   - anything between is unclear.
 - **No answer** (a fallback, the decision switched off, or stopped) from either call leaves the criteria unread.
   Unread criteria don't hold up the run; it goes on as if the judge weren't ready. The first call reports to the

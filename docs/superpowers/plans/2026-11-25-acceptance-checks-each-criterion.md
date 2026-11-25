@@ -104,6 +104,8 @@ export function readAcceptance(input: {
   accepted: ReadonlySet<string>;
   first: Readonly<Record<string, number>> | null;
   second: Readonly<Record<string, number>> | null;
+  /** The second call's `judgeable_<n>` answers by criterion text; null when not asked. */
+  judgeable: Readonly<Record<string, number>> | null;
   firstFloor: number;
   secondFloor: number;
 }): AcceptanceCriterionResult[];

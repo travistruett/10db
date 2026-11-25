@@ -39,14 +39,17 @@ function result(
 
 /**
  * Each criterion's verdict. The first call settles a criterion only as met; the second reads the rest: met at or
- * above its floor, not met at or below one minus it, unclear between. A call that gave no answer leaves what it was
- * asked unread.
+ * above its floor, not met at or below one minus it, unclear between. A criterion reads not met only when the second
+ * call also found the change enough to judge it either way (`judgeable` at its floor, or not asked): a result 10db
+ * didn't see can't be not met. A call that gave no answer leaves what it was asked unread.
  */
 export function readAcceptance(input: {
   criteria: readonly string[];
   accepted: ReadonlySet<string>;
   first: Probabilities;
   second: Probabilities;
+  /** The second call's answers to whether each criterion can be judged from the change; null when not asked. */
+  judgeable: Probabilities;
   firstFloor: number;
   secondFloor: number;
 }): AcceptanceCriterionResult[] {
@@ -67,12 +70,20 @@ export function readAcceptance(input: {
     // 1 − p is compared to the floor, so a probability of exactly 1 − f is read as not met in floating point.
     if (p >= f2)
       return result(criterion, AcceptanceVerdict.Met, `read as met (${pct(p)}, second opinion)`);
-    if (1 - p >= f2)
+    if (1 - p >= f2) {
+      const j = input.judgeable?.[criterion];
+      if (j !== undefined && j < f2)
+        return result(
+          criterion,
+          AcceptanceVerdict.Unclear,
+          `can't be judged from the change (${pct(j)})`,
+        );
       return result(
         criterion,
         AcceptanceVerdict.NotMet,
         `read as not met (${pct(p)}, second opinion)`,
       );
+    }
     return result(criterion, AcceptanceVerdict.Unclear, `unclear (${pct(p)}, second opinion)`);
   });
 }

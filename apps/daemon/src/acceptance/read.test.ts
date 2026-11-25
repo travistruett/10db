@@ -16,6 +16,7 @@ describe('readAcceptance', () => {
       accepted: none,
       first: null,
       second: null,
+      judgeable: null,
       firstFloor: 0.8,
       secondFloor: 0.7,
       ...over,
@@ -32,6 +33,18 @@ describe('readAcceptance', () => {
   it('reads the second at its floor: met, not met, or unclear between', () => {
     const out = read({ first: {}, second: { [A]: 0.7, [B]: 0.3, [C]: 0.5 } });
     expect(verdicts(out)).toEqual(['met', 'not_met', 'unclear']);
+  });
+
+  it('reads not met only for a criterion the change can be judged on; otherwise unclear', () => {
+    const second = { [A]: 0.05, [B]: 0.05, [C]: 0.9 };
+    const out = read({ first: {}, second, judgeable: { [A]: 0.9, [B]: 0.25, [C]: 0.1 } });
+    expect(verdicts(out)).toEqual(['not_met', 'unclear', 'met']);
+    expect(out[1]?.note).toBe("can't be judged from the change (0.25)");
+    expect(verdicts(read({ first: {}, second, judgeable: { [A]: 0.7, [B]: 0.7 } }))).toEqual([
+      'not_met',
+      'not_met',
+      'met',
+    ]);
   });
 
   it('counts an accepted criterion as met and never asks about it', () => {
