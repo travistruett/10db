@@ -439,7 +439,10 @@ const joinBatch: Command = async ([rawTask, rawBatch], deps) => {
       batchId: batch,
     },
   );
-  deps.out(`Started ${id} in ${batches.map((b) => `${b.id} (${b.state})`).join(', ')}.`);
+  // The daemon answers before it checks the join, so the answer can't say it was refused.
+  deps.out(
+    `Asked to start ${id} in ${batches.map((b) => `${b.id} (${b.state})`).join(', ')}. Not started yet: a refusal after this shows on the Board and in the Inbox.`,
+  );
 };
 
 const runNext: Command = async ([raw], deps) => {
