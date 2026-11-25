@@ -14,7 +14,7 @@ import { DecisionModelDrawer } from './decision-model-drawer';
 import { answersByModel, decisionModelSeries } from './decision-model-series';
 import { DecisionModelsChart } from './decision-models-chart';
 import { DecisionModelsTable } from './decision-models-table';
-import { RaisedPanel } from './raised-panel';
+import { RaisedPanel } from '../../shell/raised-panel';
 import { SectionHeading } from './section-heading';
 import { SettingsSectionKey } from './sections';
 
@@ -92,7 +92,7 @@ export function DecisionModelsView() {
       <>
         <Stack gap="sm">
           <SectionHeading title="Time and Cost" line="Rings mark the model each decision uses." />
-          <RaisedPanel>
+          <RaisedPanel padded>
             <DecisionModelsChart
               points={series.points}
               freeX={series.freeX}

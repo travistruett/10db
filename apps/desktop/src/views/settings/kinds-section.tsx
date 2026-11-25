@@ -8,6 +8,7 @@ import { TiebreakOrder } from './kind-tiebreak-order';
 import { rigorLabel } from './rigor-labels';
 import { ROLES } from './role-labels';
 import { SectionHeading } from './section-heading';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 /** The switches a kind has on, as the short words the list shows. */
 function switchesOf(kind: KindDto): string[] {
@@ -142,27 +143,27 @@ export function KindsSection() {
           {kinds.error.message}
         </Text>
       ) : null}
-      <DataTable<KindDto>
-        aria-label="Kinds"
-        records={list}
-        columns={columns}
-        idAccessor="id"
-        withTableBorder
-        backgroundColor="var(--tendb-color-panel)"
-        borderRadius="md"
-        verticalSpacing="xs"
-        horizontalSpacing="md"
-        // Too narrow a frame scrolls the table sideways instead of squeezing a column.
-        styles={{ table: { minWidth: 920 } }}
-        highlightOnHover
-        fetching={kinds.isPending}
-        noRecordsText="No kinds yet"
-        rowStyle={() => ({ cursor: 'pointer' })}
-        onRowClick={({ record }) => {
-          setAdding(false);
-          setEditing(record);
-        }}
-      />
+      <RaisedPanel>
+        <DataTable<KindDto>
+          aria-label="Kinds"
+          records={list}
+          columns={columns}
+          idAccessor="id"
+          backgroundColor="transparent"
+          verticalSpacing="xs"
+          horizontalSpacing="md"
+          // Too narrow a frame scrolls the table sideways instead of squeezing a column.
+          styles={{ table: { minWidth: 920 } }}
+          highlightOnHover
+          fetching={kinds.isPending}
+          noRecordsText="No kinds yet"
+          rowStyle={() => ({ cursor: 'pointer' })}
+          onRowClick={({ record }) => {
+            setAdding(false);
+            setEditing(record);
+          }}
+        />
+      </RaisedPanel>
       <TiebreakOrder
         kinds={list}
         opened={ordering}

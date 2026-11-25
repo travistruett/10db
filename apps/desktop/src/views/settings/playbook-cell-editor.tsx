@@ -123,7 +123,6 @@ export function PlaybookCellEditor({
       position="bottom-start"
       withArrow
       trapFocus
-      shadow="md"
     >
       <Popover.Target>
         {children(() => {

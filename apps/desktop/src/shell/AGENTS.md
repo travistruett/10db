@@ -95,3 +95,6 @@ jsdom has no layout, so a component that draws into the frame or measures itself
 - `frame.tsx`: `FrameSlots` wraps a component with a title row, a panel and a drawer layer.
 - `sized-observer.ts`: `observeWidthsOf(width)` makes every `ResizeObserver` report `width`, and
   `resetObservedWidth` restores the real one after the test. Use it for a view that measures its container.
+- `RaisedPanel` (`raised-panel.tsx`) is the page-level surface of level 1 (DESIGN.md, Elevation): a
+  `<Paper variant="raised">`, flush and clipped for a table drawn transparent inside it, `padded` for a chart.
+  The variant itself is drawn by `paper.module.css` from `theme.ts`'s two elevation tokens.

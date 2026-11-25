@@ -13,7 +13,7 @@ export function HelpHint({
   readonly children: ReactNode;
 }) {
   return (
-    <HoverCard width={360} shadow="md" position="top-start" withArrow openDelay={150}>
+    <HoverCard width={360} position="top-start" withArrow openDelay={150}>
       <HoverCard.Target>
         <ActionIcon
           type="button"

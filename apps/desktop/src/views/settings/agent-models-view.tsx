@@ -20,7 +20,7 @@ import {
 } from './model-order';
 import { ModelsTable } from './models-table';
 import { rigorLabel } from './rigor-labels';
-import { RaisedPanel } from './raised-panel';
+import { RaisedPanel } from '../../shell/raised-panel';
 import { RightsizingChart } from './rightsizing-chart';
 import { DotsMode, rightsizingSeries } from './rightsizing-series';
 import { ROLES } from './role-labels';
@@ -150,7 +150,7 @@ export function AgentModelsView({ account }: { readonly account: AccountDto }) {
             />
           </Group>
         </Group>
-        <RaisedPanel>
+        <RaisedPanel padded>
           <RightsizingChart
             result={result}
             costLabel={`Cost per task (USD, log scale). ${note}`}
