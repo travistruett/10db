@@ -1,6 +1,12 @@
-import { SkipKind, type SkippedActionDto, type WorkstreamId } from '@10db/contracts';
-import { Group, Stack, Text } from '@mantine/core';
-import { useWorkstreamSkips } from '../../daemon/skip-queries';
+import {
+  Approval,
+  SkipKind,
+  WorkstreamState,
+  type SkippedActionDto,
+  type WorkstreamDto,
+} from '@10db/contracts';
+import { Alert, Button, Group, Stack, Text } from '@mantine/core';
+import { useRunSkippedCalls, useWorkstreamSkips } from '../../daemon/skip-queries';
 import { absoluteTime, fromNow, useNow } from '../../shell/relative';
 
 // Trust line §5: in a task's drawer, what its run skipped while nobody watched and the questions it
@@ -30,17 +36,45 @@ function SkipRow({ skip, now }: { readonly skip: SkippedActionDto; readonly now:
   );
 }
 
-export function TaskSkips({ workstreamId }: { readonly workstreamId: WorkstreamId | undefined }) {
+/**
+ * What the run skipped and the questions it was answered at once. Once the run has ended, Run These Now
+ * starts a follow-up that runs, approved, the calls a follow-up can run.
+ */
+export function TaskSkips({ workstream }: { readonly workstream: WorkstreamDto | undefined }) {
   const now = useNow();
-  const rows = useWorkstreamSkips(workstreamId).data ?? [];
-  if (rows.length === 0) return null;
+  const rows = useWorkstreamSkips(workstream?.id).data ?? [];
+  const run = useRunSkippedCalls();
+  if (workstream === undefined || rows.length === 0) return null;
   const skipped = rows.filter((r) => r.kind !== SkipKind.Question);
   const asked = rows.filter((r) => r.kind === SkipKind.Question);
+  const ended =
+    workstream.state === WorkstreamState.Done || workstream.state === WorkstreamState.Failed;
+  const runnable = ended && skipped.some((r) => r.approval !== Approval.None);
   return (
     <Stack gap={4}>
-      <Text size="xs" fw={600} c="dimmed" tt="uppercase">
-        Skipped While Nobody Was Watching
-      </Text>
+      <Group justify="space-between" wrap="nowrap">
+        <Text size="xs" fw={600} c="dimmed" tt="uppercase">
+          Skipped While Nobody Was Watching
+        </Text>
+        {runnable ? (
+          <Button
+            size="compact-xs"
+            variant="default"
+            loading={run.isPending}
+            disabled={run.isSuccess}
+            onClick={() => {
+              run.mutate(workstream.id);
+            }}
+          >
+            {run.isSuccess ? 'Follow-up Started' : 'Run These Now'}
+          </Button>
+        ) : null}
+      </Group>
+      {run.error === null ? null : (
+        <Alert color="red" title="Couldn't run these">
+          {run.error.message}
+        </Alert>
+      )}
       {skipped.length > 0 ? (
         <Stack gap={6} role="list" aria-label="Skipped calls">
           {skipped.map((skip) => (

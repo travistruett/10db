@@ -27,7 +27,7 @@ const ended = (root: BatchDto): boolean =>
 /**
  * Stops fixing the root batch's pull request, in the caller's write: sets `ciStopped` and raises the
  * card that names the failing checks and offers to rerun them, so a stop never exists without its
- * card. A root that is stopped already, or whose pull request merged or closed, changes nothing.
+ * card. That card replaces the pull request's "checks failed" card, which says the same thing. A root that is stopped already, or whose pull request merged or closed, changes nothing.
  * `note` is the cut's reason when a fix cut was refused.
  */
 export function stopCiFixing(
@@ -39,6 +39,7 @@ export function stopCiFixing(
   const root = getBatch(write.tx, rootId);
   if (root.ciStopped !== null || ended(root)) return;
   patchBatch(write, root.id, { ciStopped: reason });
+  withdrawIn(write, root.projectId, [prCardKey.checks(root.id)]);
   raiseIn(
     write,
     root.projectId,

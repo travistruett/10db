@@ -14,6 +14,7 @@ import {
   type InboxItemDto,
   type InboxOption,
   type SkippedActionDto,
+  type TaskDto,
   Urgency,
 } from '@10db/contracts';
 import {
@@ -50,6 +51,8 @@ import { sourceStateOf } from './skip-follow-up';
 
 /** The item's detail key: the run it lists. Its `skipIds` are the approvable skips it showed. */
 export const SKIPPED_DETAIL = 'skippedRun';
+/** The detail key set when the item lists config the run wrote, or says it couldn't read which. */
+const CONFIG_DETAIL = 'listsConfig';
 
 /** The answers the item offers; the card shows them as written. */
 export const SkippedChoice = {
@@ -214,6 +217,13 @@ export async function raiseSkippedCard(
       return;
     }
     const task = getTask(ctx.tx, row.taskId);
+    const listsConfig = written === null || written.length > 0;
+    // A finished task's skipped calls are in its drawer, which offers Run These Now; only config it
+    // wrote, which waits on the builder's approval, still needs a card.
+    if (task.status !== TaskStatus.Open && !listsConfig) {
+      markListed(ctx, workstreamId, through, null, configHead);
+      return;
+    }
     const skipIds = skips
       .filter((s) => s.kind !== SkipKind.Question && s.approval !== Approval.None)
       .map((s) => s.id);
@@ -258,7 +268,11 @@ export async function raiseSkippedCard(
               DISMISS,
             ],
       recommendation: null,
-      detail: { [SKIPPED_DETAIL]: workstreamId, skipIds },
+      detail: {
+        [SKIPPED_DETAIL]: workstreamId,
+        skipIds,
+        ...(listsConfig ? { [CONFIG_DETAIL]: true } : {}),
+      },
       foldKey: `skipped:${workstreamId}:${through ?? 'none'}:${configHead ?? 'none'}`,
     });
     markListed(ctx, workstreamId, through, item.id, configHead);
@@ -280,8 +294,10 @@ export async function sweepUnlistedRuns(deps: SkippedCardDeps): Promise<void> {
 }
 
 /**
- * Closes every open item of a run whose task has finished or been abandoned: what it lists is
- * nothing a builder can still act on, except calls of a finished task that no follow-up has run. Returns how many it closed.
+ * Closes every open item of a run whose task has finished or been abandoned, which a later run of the
+ * task finishing makes it: the calls it lists are in the task's drawer, which offers Run These Now. An
+ * item of a finished task that lists config the run wrote stays, since that config waits on the
+ * builder's approval. Returns how many it closed.
  */
 export function closeFinishedSkippedCards(
   db: DbReader,
@@ -302,9 +318,7 @@ export function closeFinishedSkippedCards(
       status = TaskStatus.Cancelled;
     }
     if (status === TaskStatus.Open) continue;
-    // A done task's run can still have calls the builder meant to approve: that card stays until
-    // it has none left to run or its follow-up exists.
-    if (status === TaskStatus.Done && stillOffersRun(db, item, run.data)) continue;
+    if (status === TaskStatus.Done && item.detail?.[CONFIG_DETAIL] === true) continue;
     inbox.resolve(
       item.id,
       status === TaskStatus.Done ? 'The task is done.' : 'The task was abandoned.',
@@ -312,12 +326,6 @@ export function closeFinishedSkippedCards(
     closed += 1;
   }
   return closed;
-}
-
-/** Whether a card still offers Run these now: it lists calls to run and no follow-up exists yet. */
-function stillOffersRun(db: DbReader, item: InboxItemDto, run: WorkstreamId): boolean {
-  const ids = z.array(SkippedActionId).safeParse(item.detail?.['skipIds']);
-  return ids.success && ids.data.length > 0 && skipFollowUpOf(db, run) === null;
 }
 
 const SkippedDetail = z.object({
@@ -356,8 +364,27 @@ export function applySkippedChoice(
   // The detail is the item's own JSON, written when it was raised.
   const detail = SkippedDetail.safeParse(item.detail);
   if (!detail.success) return false;
-  const source = detail.data[SKIPPED_DETAIL];
-  const ids = detail.data.skipIds;
+  insertFollowUp(ctx, detail.data[SKIPPED_DETAIL], detail.data.skipIds);
+  return true;
+}
+
+/**
+ * Run These Now from the task's drawer, in the caller's write: the follow-up for every call the run
+ * skipped that a follow-up can run approved, refused as the card's answer is.
+ */
+export function runSkippedCalls(ctx: WriteContext, source: WorkstreamId): TaskDto {
+  const ids = listSkipsForWorkstream(ctx.tx, source)
+    .filter((s) => s.kind !== SkipKind.Question && s.approval !== Approval.None)
+    .map((s) => s.id);
+  return insertFollowUp(ctx, source, ids);
+}
+
+/** The follow-up task, its approvals (exactly `ids`) and its follow-up row. */
+function insertFollowUp(
+  ctx: WriteContext,
+  source: WorkstreamId,
+  ids: readonly SkippedActionId[],
+): TaskDto {
   if (ids.length === 0) throw new ConflictError('Nothing this item lists can be run approved');
   const row = getWorkstreamRow(ctx.tx, source);
   const sourceTask = getTask(ctx.tx, row.taskId);
@@ -406,5 +433,5 @@ export function applySkippedChoice(
     sourceWorkstreamId: source,
     sourceBatchId: row.batchId,
   });
-  return true;
+  return task;
 }

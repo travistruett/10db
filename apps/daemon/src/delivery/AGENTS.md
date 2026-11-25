@@ -21,3 +21,6 @@
   goes through `post` or `postIn`.
 - `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`).
 - A check red on the base too waits, not fixes (`ci-failure-class.ts`, `decisions/2026-11-24-a-red-base-is-one-fix-not-a-fix-per-pull-request.md`); one the change failed reruns once first (`ci-rerun.ts`, `decisions/2026-11-25-a-failed-required-check-is-rerun-once-before-a-fix.md`).
+- The CI cap card replaces the "Pull request checks failed" card: `stopCiFixing` withdraws the root's
+  `prCardKey.checks` card in the write that raises the stop card, and `pr-watch`'s `record` raises no checks card
+  while the root's `ciStopped` is set.

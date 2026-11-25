@@ -1,6 +1,8 @@
 import {
+  InboxKind,
   InboxState,
   passHoldsTasks,
+  WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamState,
   type GoalId,
   type ProjectId,
@@ -162,9 +164,21 @@ export function FactoryOverview({
     rows.filter((r) => r.group === group).map((r) => r.run);
   const needsYou = of(LiveGroup.NeedsYou);
   const failed = of(LiveGroup.Failed);
-  const causes = failureCauses(failed);
   const waiting = of(LiveGroup.Waiting);
   const openCards = inbox.filter((card) => card.state === InboxState.Open);
+  // A failed run whose task's failed card is open shows once, as that card's row, never also in a cause.
+  const failedCardOf = (ws: WorkstreamDto) =>
+    openCards.find(
+      (card) =>
+        card.kind === InboxKind.Flag &&
+        card.title.startsWith(WORKSTREAM_FAILED_TITLE_PREFIX) &&
+        card.targets.some((t) => t.workstreamId === ws.id),
+    );
+  const carded = failed.flatMap((run) => {
+    const card = failedCardOf(run);
+    return card === undefined ? [] : [{ run, card }];
+  });
+  const causes = failureCauses(failed.filter((run) => failedCardOf(run) === undefined));
   // The card the run waits on names it: its next action's, else the first open card that targets it.
   const cardFor = (ws: WorkstreamDto) => {
     const action = ws.nextAction;
@@ -180,7 +194,7 @@ export function FactoryOverview({
           figures={{
             needsYou: needsYou.length + waitingPasses.length,
             failed: failed.length,
-            causes: causes.length,
+            causes: carded.length + causes.length,
             // Across every project the figure is the Mac's lanes in use, out of its cap; for one project, its runs.
             running:
               filter === null && admission !== undefined
@@ -196,6 +210,7 @@ export function FactoryOverview({
           waiting={needsYou.map((run) => ({ run, card: cardFor(run) }))}
           passes={waitingPasses}
           causes={causes}
+          carded={carded}
           others={waiting.filter(waitsOnSomeoneElse).map((run) => ({ run, card: cardFor(run) }))}
           now={now}
           nameOf={nameOf}

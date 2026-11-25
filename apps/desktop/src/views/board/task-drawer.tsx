@@ -429,7 +429,7 @@ export function TaskDrawer({
                 label={<SectionLabel>Implementation Report</SectionLabel>}
               />
               <TaskPictures taskId={task.id} />
-              <TaskSkips workstreamId={workstream?.id} />
+              <TaskSkips workstream={workstream} />
               <TaskSizeLine taskId={task.id} />
               <PlanContextDisclosure taskId={task.id} />
               {offersPlanSession === true ? <OpenPlanSession target={{ taskId: task.id }} /> : null}

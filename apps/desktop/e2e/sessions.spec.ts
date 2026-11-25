@@ -200,6 +200,16 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
     page.getByRole('option', { name: /Workstream failed: Retry login once/ }),
   ).toBeVisible();
   await expect(page.getByRole('option', { name: /Remove “Hold the line”\?/ })).toHaveCount(0);
+  // Factory shows the failed run once: as its card's row, whose Answer opens the Inbox.
+  await page
+    .getByRole('navigation')
+    .getByRole('link', { name: /^Factory/ })
+    .click();
+  const failedRow = page
+    .getByRole('region', { name: 'Needs you and waiting on others' })
+    .getByRole('row', { name: /Retry login once on a 401/ });
+  await expect(failedRow).toHaveCount(1);
+  await expect(failedRow.getByRole('button', { name: 'Answer' })).toBeVisible();
   await page
     .getByRole('navigation')
     .getByRole('link', { name: /^Sessions/ })
