@@ -84,7 +84,7 @@ merges.
 | R5  | **A device has full builder authority;** any full-authority client can make a pairing code.                                                                                                                                   | The daemon runs code with the builder's credentials, so a stolen device token is total anyway. Scopes would add friction and no safety.                                                  |
 | R6  | **Pairing is a one-time code shown with its QR code** (builder's call). 8 Crockford base32 characters, 5 minutes, single use, burned by 5 wrong tries, held in memory. Making a new code cancels the open one.               | One step, no account, works for a phone (camera) and a laptop (typing), and over Screen Sharing to a headless Studio.                                                                    |
 | R7  | **Tokens:** `tdb_<deviceId>_<secret>`, a 32-byte secret, stored only as SHA-256 and compared in constant time. No expiry; Revoke closes the device's sockets at once.                                                          | The norm for revocable personal tokens. An expiry means babysitting.                                                                                                                     |
-| R8  | **The event stream opens with a ticket.** `POST /events/ticket` gives a 30-second, single-use ticket carrying its principal's scope; `?token=` is removed.                                                                      | A token in a URL lands in logs. Every client then takes one path, the desktop and the dev UI included.                                                                                   |
+| R8  | **The event stream opens with a ticket.** `POST /events/ticket` gives a 30-second, single-use ticket carrying its principal's scope (`full` or `dev_ui`; a render token stays off the stream, as today); `?token=` is removed.                                                                      | A token in a URL lands in logs. Every client then takes one path, the desktop and the dev UI included.                                                                                   |
 | R9  | **Push carries only what a lock screen may show:** the card's kind and the task's headline. (Slice 2.)                                                                                                                         | Payloads are encrypted to the browser, but a lock screen is public.                                                                                                                      |
 | R10 | **Lanes, gates and MCP servers can't reach Tailscale** (task S): `/Library/Tailscale` and `tailscaled.socket` are protected reads.                                                                                             | The standalone app's same-user proof is readable by any admin user; with localhost on, a lane holding it could drive `serve` or Funnel.                                                 |
 | R11 | **No stored state names a machine.** The tailnet name is read from Tailscale at start and when it changes, never stored.                                                                                                       | A new host starts clean; sharing carries no stale identity.                                                                                                                               |
@@ -174,6 +174,7 @@ state: **Off**, **Setting up**, **Ready** or **Paused**.
 
 ### 3.4 The certificate
 
+- **The first certificate is the builder's click** (their call, 2026-11-25). 10db can't tell whether a certificate exists without running `tailscale cert`, and the first issue publishes the name for good, so the Certificate step shows the name, the public-logs sentence and **Get Certificate**. 10db probes a name only after that click (it keeps a hash of the name, never the name).
 - The probe runs at most once a minute and backs off to every 10 minutes on failure. Its result is cached; `PUT
 /sharing` and the page's 10 s re-read read the cache and never run it.
 - In the spike the first issue failed for about ten minutes (`SetDNS "_acme-challenge.<fqdn>" … failed to create DNS
@@ -214,7 +215,7 @@ the credential, which sets a **principal** on the context (`thisMac`, `devUi`, `
 | None                         | `/health` (short shape); `/mcp`, whose handler checks the session token, as today   | `/health` (short), `POST /devices/pair`, `GET /app/*`; else 401   |
 | UI token                     | everything, as today; a `full` ticket                                               | 401                                                               |
 | Dev-UI token                 | its reads, as today; a `devUi` ticket                                               | 401                                                               |
-| Render token                 | its reads, as today; a `render` ticket                                              | 401                                                               |
+| Render token                 | its reads, as today; no ticket (off the stream, as today)                           | 401                                                               |
 | MCP session token            | `/mcp` only                                                                         | 401; `/mcp` and `/builder/mcp` are not routed here (404)          |
 | Device token                 | 401                                                                                 | everything the UI token reaches but `/mcp`, `/builder/mcp` and `/screens/claim`; a `full` ticket |
 | Ticket on `/events/stream`   | the socket, with the ticket's scope                                                 | the socket, device tickets only                                   |
@@ -231,7 +232,7 @@ the credential, which sets a **principal** on the context (`thisMac`, `devUi`, `
 
 ### 4.4 `/health`
 
-- With no credential: `{ status, protocolVersion }`, on both listeners.
+- With no credential, or a bearer that is none of 10db's (an MCP session token, a stale token), and with any non-device bearer on the share listener: `{ status, protocolVersion }`.
 - With one: today's full shape (`startedAt`, `commit`, `devUiOrigin`). The desktop's 5 s poll sends its credential.
 
 ## 5. Devices
@@ -259,7 +260,7 @@ the credential, which sets a **principal** on the context (`thisMac`, `devUi`, `
 ### 5.3 Tickets
 
 - `POST /events/ticket` with a credential answers `{ ticket, expiresAt }`: 24 random bytes, 30 s, single use, held
-  in memory, bound to the principal and its scope (`full`, `devUi`, `render`).
+  in memory, bound to the principal and its scope (`full` or `dev_ui`; a render token gets none).
 - The stream's handshake spends the ticket and registers the socket under its principal. The stream's own `full`
   check (who hears live frames) reads the ticket's scope instead of re-reading `?token=`.
 - The desktop app and the dev UI (`apps/desktop/src/daemon/events.ts`) fetch a ticket before each socket open.
