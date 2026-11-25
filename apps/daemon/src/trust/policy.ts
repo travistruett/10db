@@ -1,4 +1,6 @@
 import {
+  COPY_ID_VARIABLE,
+  type CopyId,
   SkipKind,
   TrustPolicy,
   TrustSurface,
@@ -29,6 +31,8 @@ export interface TrustPolicyInput {
   /** Whether the session carries the builder's claude.ai connectors, which act outside the sandbox. */
   readonly claudeConnectors: boolean;
   readonly devAccess: DevAccess;
+  /** The separate copy the session runs in; absent or null outside one. */
+  readonly copyId?: CopyId | null;
 }
 
 /** What of this Mac's dev environment is open to the session (`sessionDevAccess`). */
@@ -91,6 +95,19 @@ function devAccessLines(access: DevAccess): string[] {
   return lines;
 }
 
+/**
+ * What a separate copy owns, for a session that runs in one: none outside a copy. The project's own commands
+ * scope to the copy by its id, as the separate-copy spec asks of them, so what they do to the copy's databases and stack
+ * destroys nothing others have; a command that names anything else is still judged as shared.
+ */
+function copyLines(copyId: CopyId | null): string[] {
+  if (copyId === null) return [];
+  const id = quotedValue(copyId);
+  return [
+    `Separate copy: this session runs in a separate copy of the project, with its own folder (the checkout above), its own branch and its own databases; every command it runs gets ${COPY_ID_VARIABLE}=${id}. The project's own commands (its make targets, scripts and copy wrappers) read that id and act on the copy's own databases and dev stack: the databases, compose projects, containers and volumes whose names hold ${id}, created on first use and removed by 10db's teardown when the copy lands. Running the project's checks, tests, migrations and generators through them, preparing or resetting the copy's databases, and taking the copy's stack down with its volumes destroy nothing others have. Those commands load the project's dev config themselves, so running one is not reading a secret unless it prints or sends a value. Everything else on this Mac stays shared and is judged as shared: a command that names another database, volume or compose project, a docker compose down -v or docker volume rm without the copy's own name (compose names a project after its folder, and the copy's folders have the same names as the builder's), and anything that reaches the builder's folder.`,
+  ];
+}
+
 /** Whether a person is in the session: a lane runs alone; a pass, Plan and chat have the builder in them. */
 export function isAttended(surface: TrustSurface): boolean {
   switch (surface) {
@@ -127,6 +144,7 @@ function environmentLines(input: TrustPolicyInput): string[] {
         ]
       : []),
     ...devAccessLines(input.devAccess),
+    ...copyLines(input.copyId ?? null),
     ...(input.yourMcpServers.length > 0
       ? [
           `Outside the sandbox: the MCP servers ${input.yourMcpServers.join(', ')} are the builder's own and run with the builder's access. Their tools can read and change anything the builder can, so judge each call to them under the four limits and the coordination rules above, as if the session made it directly.`,

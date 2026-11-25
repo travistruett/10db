@@ -2900,6 +2900,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       yourMcpServers: Object.keys(yourServers),
       claudeConnectors,
       devAccess,
+      copyId: sessionCopyId,
     });
     // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
     // starts on 10db's rules.
