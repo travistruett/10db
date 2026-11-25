@@ -7,6 +7,8 @@ describe('eval markers', () => {
     const found = findEvalMarkers([
       'amps/backend/evals/reports/chat.answer/20261013T091955865408Z.json',
       'evals/reports/chat.answer/latest.json',
+      'evals/reports/chat.answer/20269999T999999000000Z.json',
+      `evals/${'a'.repeat(300)}/x.py`,
       'apps/daemon/evals/lane-pipeline/baselines/standard.json',
       'amps/backend/evals/chat/answer.py',
       'amps/backend/evals/chat/__init__.py',

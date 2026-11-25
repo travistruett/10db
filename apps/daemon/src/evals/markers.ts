@@ -29,6 +29,8 @@ const BASELINE = /(?:^|\/)evals\/lane-pipeline\/baselines\/([^/]+)\.json$/u;
 const DEFINITION = /(?:^|\/)evals\/([^/]+)\/([^/]+)\.py$/u;
 const TEST_EVAL = /(?:^|\/)tests\/eval\/test_[^/]*_eval\.py$/u;
 const PROMPT_CASE = /^((?:.*\/)?evals)\/([^/]+)\/prompt\.md$/u;
+/** The longest repository path the contracts carry (`RepoPath`). */
+const MAX_PATH = 300;
 
 /** The ISO time a report's file name holds; the digits after the seconds are a fraction of one. */
 function reportTime(m: RegExpExecArray): string {
@@ -52,11 +54,15 @@ export function findEvalMarkers(tracked: readonly string[]): EvalMarkers {
   const definitions: string[] = [];
   const promptCases = new Map<string, string[]>();
   for (const path of tracked) {
+    // A path longer than the contracts carry could never be shown, so it is never found.
+    if (path.length > MAX_PATH) continue;
     const report = REPORT.exec(path);
     if (report !== null) {
       const at = reportTime(report);
-      // A name that is no real time (month 99) is no report.
-      if (new Date(at).toISOString() === at) reports.push({ path, folder: report[1] ?? '', at });
+      // A name that is no real time (month 99) is no report, and an invalid date can't be formatted.
+      const time = new Date(at);
+      if (!Number.isNaN(time.getTime()) && time.toISOString() === at)
+        reports.push({ path, folder: report[1] ?? '', at });
       continue;
     }
     const baseline = BASELINE.exec(path);
