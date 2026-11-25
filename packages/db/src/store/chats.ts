@@ -12,7 +12,6 @@ import {
   NotFoundError,
   TaskStatus,
   WorkPlace,
-  WorkstreamState,
   type ChatId,
   type ChatWork,
   type ConversationId,
@@ -20,7 +19,7 @@ import {
   type ProjectId,
   type TaskId,
 } from '@10db/contracts';
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { insertItem, listItems } from './conversation-items';
 import { ofActiveProject } from './projects';
@@ -467,29 +466,6 @@ export function chatView(db: DbReader, chatId: ChatId): ChatRowView {
     tasksFiled: filed?.n ?? 0,
     work: workOf(row),
   };
-}
-
-/** The title of the project's task whose run failed most recently since `since`, for Start from. */
-export function latestFailedTaskTitle(
-  db: DbReader,
-  projectId: ProjectId,
-  since: string,
-): string | null {
-  const row = db
-    .select({ title: schema.tasks.title })
-    .from(schema.workstreams)
-    .innerJoin(schema.tasks, eq(schema.tasks.id, schema.workstreams.taskId))
-    .where(
-      and(
-        eq(schema.tasks.projectId, projectId),
-        eq(schema.workstreams.state, WorkstreamState.Failed),
-        gte(schema.workstreams.updatedAt, since),
-      ),
-    )
-    .orderBy(desc(schema.workstreams.updatedAt))
-    .limit(1)
-    .get();
-  return row?.title ?? null;
 }
 
 /**

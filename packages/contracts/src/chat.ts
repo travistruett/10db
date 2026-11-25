@@ -106,17 +106,6 @@ export const ConversationFilesQuery = z.strictObject({
 });
 export type ConversationFilesQuery = z.infer<typeof ConversationFilesQuery>;
 
-/** Where a Start from line comes from: a failed task, commits on the base, or the area last changed. */
-export const SessionStartKind = {
-  FailedTask: 'failed_task',
-  BaseCommits: 'base_commits',
-  RecentArea: 'recent_area',
-} as const;
-export type SessionStartKind = ValueOf<typeof SessionStartKind>;
-
-export const SessionStartDto = z.object({ kind: z.enum(SessionStartKind), text: z.string() });
-export type SessionStartDto = z.infer<typeof SessionStartDto>;
-
 /** Settings › Sessions. */
 export const SessionsSettingsDto = z.object({
   notifyReplies: z.boolean(),

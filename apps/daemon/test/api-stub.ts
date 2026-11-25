@@ -75,7 +75,6 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     stopChatWaiting: none,
     projectFolder: none,
     chatModels: none,
-    sessionStarts: () => Promise.resolve([]),
     sessionsSettings: () => ({ notifyReplies: true, terminalApp: 'terminal' }),
     setSessionsSettings: none,
     patchSessionsSettings: none,

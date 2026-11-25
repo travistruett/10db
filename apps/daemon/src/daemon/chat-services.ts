@@ -5,15 +5,12 @@ import type { ApiServices } from '../api';
 import {
   patchSessionsSettings,
   sessionsSettings,
-  sessionStarts,
   setSessionsSettings,
-  startFacts,
   ChatArchiveWarning,
   ChatWorkConflict,
   type ChatService,
   type ChatWorkService,
   type TitleRowGit,
-  type StartGit,
 } from '../chat';
 import type { StateStore } from '../events';
 import { folderView, type FolderHold } from '../folder-hold';
@@ -42,7 +39,6 @@ export type ChatApiServices = Pick<
   | 'stopChatWaiting'
   | 'projectFolder'
   | 'chatModels'
-  | 'sessionStarts'
   | 'sessionsSettings'
   | 'setSessionsSettings'
   | 'patchSessionsSettings'
@@ -60,7 +56,8 @@ export function createChatApiServices(deps: {
   readonly takeover: TakeoverService;
   readonly folderHold: FolderHold;
   readonly pendingOpens: Pick<PendingOpens, 'view'>;
-  readonly git: StartGit;
+  /** Runs git in a checkout and answers its stdout: the branch Your folder is on. */
+  readonly git: (repo: string, args: readonly string[]) => Promise<string>;
   /** What a session changed, read from its root. */
   readonly changes: ChatChanges;
   /** The title row's git steps. */
@@ -124,18 +121,6 @@ export function createChatApiServices(deps: {
       );
     },
     chatModels: (projectId) => chat.models(projectId),
-    async sessionStarts(projectId) {
-      const project = getProject(state.db, projectId);
-      try {
-        return sessionStarts(
-          await startFacts({ db: state.db, git: deps.git }, project, deps.now()),
-        );
-      } catch (error) {
-        // Start from is a convenience: what can't be read offers nothing, never an error.
-        deps.log.warn({ err: error, projectId }, 'Start from could not read the project');
-        return [];
-      }
-    },
     sessionsSettings: () => sessionsSettings(state.db),
     setSessionsSettings: (input) => setSessionsSettings(state, input),
     patchSessionsSettings: (input) => patchSessionsSettings(state, input),

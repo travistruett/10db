@@ -186,7 +186,6 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/conversations/:conversationId/files': 'The `@` list reads the checkout with git.',
   '/projects/:projectId/chat-models': 'No screen draws the model list.',
   '/projects/:projectId/folder': 'Only Sessions draws who holds Your folder, in the 10db app.',
-  '/projects/:projectId/session-starts': 'Start from reads the checkout with git.',
   '/settings/sessions': 'No screen draws a setting.',
   '/settings/capacity': 'No screen draws a setting.',
   '/admission': 'No screen draws the machine-wide admission gate.',

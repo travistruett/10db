@@ -889,9 +889,6 @@ export function createApp(deps: ApiDeps) {
     .get('/projects/:projectId/chat-models', (c) =>
       c.json(deps.services.chatModels(ProjectId.parse(c.req.param('projectId')))),
     )
-    .get('/projects/:projectId/session-starts', async (c) =>
-      c.json(await deps.services.sessionStarts(ProjectId.parse(c.req.param('projectId')))),
-    )
     .post('/conversations/:conversationId/send-now', (c) =>
       c.json(
         deps.services.sendConversationNow(ConversationId.parse(c.req.param('conversationId'))),
