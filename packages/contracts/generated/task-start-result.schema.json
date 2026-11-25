@@ -140,6 +140,18 @@
                 "evidenceId": {
                   "type": "string",
                   "pattern": "^evd_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "providerSessionId": {
+                  "default": null,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -712,6 +724,11 @@
                   "followUpTaskId",
                   "followUpTitle"
                 ]
+              },
+              "acceptanceSentBack": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
               }
             },
             "required": [

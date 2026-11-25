@@ -159,7 +159,9 @@ export function insertJoinedWorkstream(
   const [first] = plan.steps;
   if (revert === null || !first) return ws;
   const note = insertBuilderNote(ctx, ws.id, revertedWorkNote(revert, first));
-  patchWorkstream(ctx, ws.id, null, { nextAction: { kind: 'fix', evidenceId: note.id } });
+  patchWorkstream(ctx, ws.id, null, {
+    nextAction: { kind: 'fix', evidenceId: note.id, providerSessionId: null },
+  });
   return getWorkstream(ctx.tx, ws.id);
 }
 
@@ -193,7 +195,7 @@ export function actionEntering(ctx: WriteContext, row: WorkstreamRow, to: number
   );
   if (told) return { kind: 'start' };
   const note = insertBuilderNote(ctx, row.id, revertedWorkNote(revert, step));
-  return { kind: 'fix', evidenceId: note.id };
+  return { kind: 'fix', evidenceId: note.id, providerSessionId: null };
 }
 
 /** Starts a task in local delivery: its plan, then its workstream. */
@@ -381,7 +383,7 @@ export function retryWorkstream(
           model: reworked.model,
           effort: reworked.effort,
           nextAction: evidence
-            ? { kind: 'fix', evidenceId: evidence.id }
+            ? { kind: 'fix', evidenceId: evidence.id, providerSessionId: null }
             : { kind: 'revise', reviewStep: row.stepIndex, providerSessionId: null },
         },
         reason: 'retried by the builder',
@@ -414,7 +416,7 @@ export function retryWorkstream(
         // A new note is the fix; otherwise work the builder sent back that ran out of attempts keeps
         // its note, and a gate failure its output, for the restarted step.
         nextAction: evidence
-          ? { kind: 'fix', evidenceId: evidence.id }
+          ? { kind: 'fix', evidenceId: evidence.id, providerSessionId: null }
           : (keptFix ??
             (latest ? { kind: 'continue_from_handoff', handoffId: latest.id } : { kind: 'start' })),
       },

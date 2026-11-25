@@ -65,7 +65,7 @@ export function nextActionOnAnotherAccount(
       return { ...previous, providerSessionId: null };
     case 'resume':
       return failedGate
-        ? { kind: 'fix', evidenceId: failedGate }
+        ? { kind: 'fix', evidenceId: failedGate, providerSessionId: null }
         : nextActionAfterCrash(previous, null, latest);
     case 'start':
     case 'continue_from_handoff':

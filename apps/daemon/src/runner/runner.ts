@@ -4983,7 +4983,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         to: S.Queued,
         fence: ctl.fence,
         patch: {
-          nextAction: { kind: 'fix', evidenceId },
+          nextAction: { kind: 'fix', evidenceId, providerSessionId: null },
           attempt,
           ...(up
             ? {
@@ -5561,7 +5561,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           row,
           { kind: WorkstreamFailure.RetryLimit, reason },
           {
-            nextAction: { kind: 'fix', evidenceId: evidence.id },
+            nextAction: { kind: 'fix', evidenceId: evidence.id, providerSessionId: null },
             stepIndex: targetIndex,
             model: target.model,
             effort: target.effort,
@@ -5591,7 +5591,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         to: S.Queued,
         fence: null,
         patch: {
-          nextAction: { kind: 'fix', evidenceId: evidence.id },
+          nextAction: { kind: 'fix', evidenceId: evidence.id, providerSessionId: null },
           attempt,
           steps: sendBackSteps(row.steps, row.stepIndex, targetIndex, up.step, entryFor(ctx, id)),
           stepIndex: targetIndex,
@@ -5655,7 +5655,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           row,
           { kind: WorkstreamFailure.RetryLimit, reason },
           {
-            nextAction: { kind: 'fix', evidenceId: evidence.id },
+            nextAction: { kind: 'fix', evidenceId: evidence.id, providerSessionId: null },
             ...(targetIndex === null || !failedTarget
               ? {}
               : {
@@ -5692,7 +5692,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         to: S.Queued,
         fence: null,
         patch: {
-          nextAction: { kind: 'fix', evidenceId: evidence.id },
+          nextAction: { kind: 'fix', evidenceId: evidence.id, providerSessionId: null },
           attempt,
           ...(up && target && targetIndex !== null
             ? {

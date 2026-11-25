@@ -229,7 +229,7 @@ export async function recoverOnStartup(opts: {
       row.state === S.Verifying || row.nextAction.kind === 'verify'
         ? { kind: 'verify' }
         : failedGate
-          ? { kind: 'fix', evidenceId: failedGate }
+          ? { kind: 'fix', evidenceId: failedGate, providerSessionId: null }
           : nextActionAfterCrash(row.nextAction, providerSessionId, latestHandoffForStep(db, row));
     const nextAction = pass
       ? withUndelivered(crashAction, untakenMessages(db, row.taskId)[0] ?? null, providerSessionId)

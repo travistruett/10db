@@ -140,6 +140,8 @@ export function serveJudge(initial: {
             crosses_limit: merged(JudgeDecision.CrossesLimit),
             crosses_limit_second: merged(JudgeDecision.CrossesLimitSecond),
             test_value: merged(JudgeDecision.TestValue),
+            acceptance: merged(JudgeDecision.Acceptance),
+            acceptance_second: merged(JudgeDecision.AcceptanceSecond),
           },
         },
       };

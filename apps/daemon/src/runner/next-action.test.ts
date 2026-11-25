@@ -81,9 +81,9 @@ describe('nextActionAfterCrash', () => {
       ],
       [
         'keeps a fix with its gate evidence',
-        { kind: 'fix', evidenceId },
+        { kind: 'fix', evidenceId, providerSessionId: null },
         'p1',
-        { kind: 'fix', evidenceId },
+        { kind: 'fix', evidenceId, providerSessionId: null },
       ],
       [
         'keeps a revise with the step that rejected',
@@ -152,7 +152,7 @@ describe('nextActionOnAnotherAccount', () => {
         { kind: 'resume', providerSessionId: 'p1', reason: 'the usage limit reset' },
         handoff,
         evidenceId,
-        { kind: 'fix', evidenceId },
+        { kind: 'fix', evidenceId, providerSessionId: null },
       ],
       [
         "takes the builder's answer to a fresh session",
@@ -214,10 +214,10 @@ describe('nextActionOnAnotherAccount', () => {
       ],
       [
         'leaves a fix alone',
-        { kind: 'fix', evidenceId },
+        { kind: 'fix', evidenceId, providerSessionId: null },
         handoff,
         evidenceId,
-        { kind: 'fix', evidenceId },
+        { kind: 'fix', evidenceId, providerSessionId: null },
       ],
       [
         'leaves a Ready page of a pass alone',
@@ -279,7 +279,12 @@ describe('withUndelivered', () => {
         { kind: 'revise', reviewStep: 1, providerSessionId: 'p-build' },
       ],
       ['keeps verification', { kind: 'verify' }, messageId, { kind: 'verify' }],
-      ['keeps a fix', { kind: 'fix', evidenceId }, messageId, { kind: 'fix', evidenceId }],
+      [
+        'keeps a fix',
+        { kind: 'fix', evidenceId, providerSessionId: null },
+        messageId,
+        { kind: 'fix', evidenceId, providerSessionId: null },
+      ],
       [
         'leaves a Ready page of a pass on its item when every message was taken',
         { kind: 'pass_review', inboxId },
@@ -348,7 +353,7 @@ describe('resumedSessionOf', () => {
         { kind: 'revise', reviewStep: 1, providerSessionId: null },
         null,
       ],
-      ['names none for a gate fix', { kind: 'fix', evidenceId }, null],
+      ['names none for a gate fix', { kind: 'fix', evidenceId, providerSessionId: null }, null],
     ];
     for (const [name, action, expected] of rows) {
       expect.soft(resumedSessionOf(action), name).toBe(expected);

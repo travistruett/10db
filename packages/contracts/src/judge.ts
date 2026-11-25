@@ -40,6 +40,10 @@ export const JudgeDecision = {
   CrossesLimitSecond: 'crosses_limit_second',
   /** Delivery: does a test a step added earn its place, or duplicate or fold into one that exists? */
   TestValue: 'test_value',
+  /** Acceptance: is each acceptance criterion of a finished task met by its change? One yes/no question per criterion. */
+  Acceptance: 'acceptance',
+  /** Acceptance: the same questions, asked of a stronger model, for a criterion the first call left unclear or not met. */
+  AcceptanceSecond: 'acceptance_second',
 } as const;
 export type JudgeDecision = (typeof JudgeDecision)[keyof typeof JudgeDecision];
 
@@ -92,10 +96,21 @@ const LIMITS_FLOOR = 0.7;
  */
 export const OPENROUTER_SECOND_OPINION_MODEL = 'anthropic/claude-haiku-5.5';
 
+/** The model the acceptance second call starts on for an OpenRouter account. */
+export const OPENROUTER_ACCEPTANCE_SECOND_MODEL = 'anthropic/claude-sonnet-5.5';
+
 const SECOND_OPINION_DECISION: JudgeDecisionConfig = {
   enabled: true,
   model: OPENROUTER_SECOND_OPINION_MODEL,
   floor: LIMITS_FLOOR,
+};
+
+/** Acceptance ships switched off: the builder turns it on in Settings once a replay has passed. */
+const ACCEPTANCE_DECISION: JudgeDecisionConfig = { ...DEFAULT_DECISION, enabled: false };
+const ACCEPTANCE_SECOND_DECISION: JudgeDecisionConfig = {
+  enabled: false,
+  model: OPENROUTER_ACCEPTANCE_SECOND_MODEL,
+  floor: 0.8,
 };
 
 export const JudgeConfig = z.object({
@@ -115,6 +130,10 @@ export const JudgeConfig = z.object({
     [JudgeDecision.CrossesLimit]: shapeDecision(),
     [JudgeDecision.CrossesLimitSecond]: JudgeDecisionConfig.default({ ...SECOND_OPINION_DECISION }),
     [JudgeDecision.TestValue]: shapeDecision(),
+    [JudgeDecision.Acceptance]: JudgeDecisionConfig.default({ ...ACCEPTANCE_DECISION }),
+    [JudgeDecision.AcceptanceSecond]: JudgeDecisionConfig.default({
+      ...ACCEPTANCE_SECOND_DECISION,
+    }),
   }),
 });
 export type JudgeConfig = z.infer<typeof JudgeConfig>;
@@ -138,6 +157,8 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
     [JudgeDecision.CrossesLimit]: { ...DEFAULT_DECISION, floor: LIMITS_FLOOR },
     [JudgeDecision.CrossesLimitSecond]: { ...SECOND_OPINION_DECISION },
     [JudgeDecision.TestValue]: { ...DEFAULT_DECISION },
+    [JudgeDecision.Acceptance]: { ...ACCEPTANCE_DECISION },
+    [JudgeDecision.AcceptanceSecond]: { ...ACCEPTANCE_SECOND_DECISION },
   },
 };
 
@@ -189,6 +210,8 @@ export const JudgeConfigPatch = z
         [JudgeDecision.CrossesLimit]: JudgeDecisionConfigPatch,
         [JudgeDecision.CrossesLimitSecond]: JudgeDecisionConfigPatch,
         [JudgeDecision.TestValue]: JudgeDecisionConfigPatch,
+        [JudgeDecision.Acceptance]: JudgeDecisionConfigPatch,
+        [JudgeDecision.AcceptanceSecond]: JudgeDecisionConfigPatch,
       })
       .partial()
       .strict(),

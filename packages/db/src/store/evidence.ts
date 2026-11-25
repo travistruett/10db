@@ -1,4 +1,5 @@
 import {
+  type AcceptanceDetail,
   EventType,
   EvidenceKind,
   mintId,
@@ -32,6 +33,12 @@ export type NewEvidence =
       readonly exitCode: null;
     })
   | (NewEvidenceBase & {
+      readonly kind: typeof EvidenceKind.Acceptance;
+      readonly command: null;
+      readonly exitCode: null;
+      readonly detail: AcceptanceDetail;
+    })
+  | (NewEvidenceBase & {
       readonly kind: typeof EvidenceKind.Browser;
       readonly command: null;
       readonly exitCode: null;
@@ -60,6 +67,7 @@ export function insertEvidence(ctx: WriteContext, input: NewEvidence): EvidenceD
     id: mintId('Evidence'),
     ...input,
     commitShas: [...input.commitShas],
+    detail: input.kind === EvidenceKind.Acceptance ? input.detail : null,
     createdAt: ctx.now,
   };
   ctx.tx

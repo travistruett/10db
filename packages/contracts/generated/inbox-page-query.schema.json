@@ -24,7 +24,8 @@
         "flag",
         "check",
         "plan",
-        "playbook_move_report"
+        "playbook_move_report",
+        "acceptance"
       ]
     },
     "outcome": {

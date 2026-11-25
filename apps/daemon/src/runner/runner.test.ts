@@ -6106,7 +6106,7 @@ describe('without a gate command', () => {
         state: 'QUEUED',
         currentSessionId: null,
         attempt: before.attempt + 1,
-        nextAction: { kind: 'fix', evidenceId: evidence?.id },
+        nextAction: { kind: 'fix', evidenceId: evidence?.id, providerSessionId: null },
       });
       expect(checkCards().map((c) => c.state)).toEqual(['RESOLVED']);
       expect(activeClaims(engine.store.db, workstream.id).length).toBeGreaterThan(0);
@@ -6146,7 +6146,11 @@ describe('without a gate command', () => {
         });
       });
       await recover();
-      expect(ws(workstream.id).nextAction).toEqual({ kind: 'fix', evidenceId: evidence?.id });
+      expect(ws(workstream.id).nextAction).toEqual({
+        kind: 'fix',
+        evidenceId: evidence?.id,
+        providerSessionId: null,
+      });
 
       // The fix prompt carries the note, and the fixed work comes back for a check.
       await runToWait(workstream.id);
@@ -6211,7 +6215,11 @@ describe('without a gate command', () => {
           });
         });
         await recover();
-        expect(ws(workstream.id).nextAction).toEqual({ kind: 'fix', evidenceId: evidence?.id });
+        expect(ws(workstream.id).nextAction).toEqual({
+          kind: 'fix',
+          evidenceId: evidence?.id,
+          providerSessionId: null,
+        });
       });
     });
 

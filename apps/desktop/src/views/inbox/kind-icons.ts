@@ -21,4 +21,5 @@ export const KIND_ICONS: Readonly<Record<InboxKind, Icon>> = {
   [InboxKind.Check]: IconChecklist,
   [InboxKind.Plan]: IconListDetails,
   [InboxKind.PlaybookMoveReport]: IconSettings,
+  [InboxKind.Acceptance]: IconChecklist,
 };

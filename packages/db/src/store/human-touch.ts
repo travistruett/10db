@@ -366,6 +366,7 @@ export function humanTouchDays(db: DbReader, projectId: ProjectId, now: Date): H
       [InboxKind.Check]: 0,
       [InboxKind.Plan]: 0,
       [InboxKind.PlaybookMoveReport]: 0,
+      [InboxKind.Acceptance]: 0,
     };
     let workstreamFailed = 0;
     for (const c of raised) {
