@@ -85,7 +85,7 @@ export function defaultModelFor(
 }
 
 /**
- * Moves each second opinion to the account's default for it when the stored model is one an Anthropic API key or
+ * Moves each second opinion, and acceptance's first call, to the account's default for it when the stored model is one an Anthropic API key or
  * Bedrock account doesn't list: a config saved before the decision existed reads with OpenRouter's model. It
  * patches only the model, never `enabled`. Writes nothing for an OpenRouter account, or when the account lists no
  * such model.
@@ -101,6 +101,14 @@ export function settleSecondOpinionModel(ctx: WriteContext, account: AccountRow 
     const model = defaultSecondOpinionModel(ctx.tx, account, decision);
     if (model === null || model === stored) continue;
     patchJudgeConfig(ctx, { decisions: { [decision]: { model } } });
+  }
+  // Acceptance's first call defaults to OpenRouter's System One model like the older decisions, so a config saved
+  // before it existed names a model these accounts don't list either.
+  const first = decisions[JudgeDecision.Acceptance].model;
+  if (!offered.has(first)) {
+    const model = defaultDecisionModel(ctx.tx, account);
+    if (model !== null && model !== first)
+      patchJudgeConfig(ctx, { decisions: { [JudgeDecision.Acceptance]: { model } } });
   }
 }
 
