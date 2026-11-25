@@ -45,6 +45,10 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   // Factory draws it: the work per done task by rigor over a period. Database reads only.
   { route: '/projects/:projectId/rigor-figures' },
   { route: '/projects/:projectId/acceptance-figures' },
+  // Evals draws them: a project's committed eval results at HEAD, read from git's object store (no
+  // checkout file, no repository program) and kept in memory. Nothing is written or run.
+  { route: '/projects/:projectId/evals' },
+  { route: '/projects/:projectId/evals/:suiteKey' },
 ];
 
 /** A GET a screen may not read, with why. A route nothing draws is refused as well: less to reach. */

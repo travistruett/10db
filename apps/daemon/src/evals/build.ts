@@ -1,0 +1,153 @@
+import type {
+  EvalFlakyCaseDto,
+  EvalManifestSuite,
+  EvalModelResultDto,
+  EvalResultFormat,
+  EvalRunSummaryDto,
+  EvalsDto,
+  EvalSuiteDetailDto,
+  EvalSuiteDto,
+  StoredEvalManifest,
+} from '@10db/contracts';
+import type { FoundEvals } from './read-results';
+import { runCost, type ParsedRun } from './run-summary';
+
+/** Runs a trend and the flaky-case count look back over. */
+const RECENT_RUNS = 8;
+const MAX_FLAKY = 10;
+
+/** A suite before the manifest is laid over it. */
+interface Candidate {
+  readonly key: string;
+  readonly format: EvalResultFormat | null;
+  /** Oldest first. */
+  readonly runs: readonly ParsedRun[];
+  readonly definitionPaths: readonly string[];
+}
+
+function candidates(found: FoundEvals, manifest: StoredEvalManifest | null): Candidate[] {
+  const out = new Map<string, Candidate>();
+  for (const suite of found.suites) {
+    out.set(suite.key, { ...suite, definitionPaths: [] });
+  }
+  for (const [dir, paths] of found.markers.promptCases) {
+    const key = `plugin-eval:${dir}`;
+    out.set(key, { key, format: null, runs: [], definitionPaths: [...paths].sort() });
+  }
+  for (const suite of manifest?.manifest.suites ?? []) {
+    if (!out.has(suite.key))
+      out.set(suite.key, { key: suite.key, format: null, runs: [], definitionPaths: [] });
+  }
+  return [...out.values()];
+}
+
+const manifestSuite = (
+  manifest: StoredEvalManifest | null,
+  key: string,
+): EvalManifestSuite | undefined => manifest?.manifest.suites.find((s) => s.key === key);
+
+function suiteDto(c: Candidate, manifest: StoredEvalManifest | null): EvalSuiteDto {
+  const named = manifestSuite(manifest, c.key);
+  const newest = c.runs.at(-1);
+  return {
+    key: c.key,
+    label: named?.label ?? c.key,
+    bar: named?.bar ?? null,
+    definitionPaths: [...new Set([...c.definitionPaths, ...(named?.definitionPaths ?? [])])].sort(),
+    format: c.format,
+    runCount: c.runs.length,
+    latest:
+      newest === undefined
+        ? null
+        : { path: newest.path, at: newest.at, passed: newest.passed, models: [...newest.models] },
+    trend: c.runs.slice(-RECENT_RUNS).map((r) => r.passed),
+  };
+}
+
+/** Failing latest first, then passing, then no results; ties by key. */
+const rank = (s: EvalSuiteDto): number => (s.latest === null ? 2 : s.latest.passed ? 1 : 0);
+
+/** What 10db has found of a project's evals, the manifest laid over it. */
+export function buildEvals(
+  found: FoundEvals | null,
+  manifest: StoredEvalManifest | null,
+): EvalsDto {
+  const suites = (found === null ? [] : candidates(found, manifest))
+    .map((c) => suiteDto(c, manifest))
+    .sort((a, b) => rank(a) - rank(b) || a.key.localeCompare(b.key));
+  const linked = new Set(suites.flatMap((s) => s.definitionPaths));
+  return {
+    commit: found?.commit ?? null,
+    assessedAt: manifest?.assessedAt ?? null,
+    suites,
+    unlinked: (found?.markers.definitions ?? []).filter((p) => !linked.has(p)).sort(),
+    gaps: manifest?.manifest.gaps ?? null,
+  };
+}
+
+const summary = (run: ParsedRun): EvalRunSummaryDto => ({
+  path: run.path,
+  at: run.at,
+  passed: run.passed,
+  costUsd: runCost(run.models),
+  models: run.models.map((m: EvalModelResultDto) => m.model),
+});
+
+/** Cases that both passed and failed a trial across the recent runs, the most failed first. */
+function flakyCases(runs: readonly ParsedRun[]): EvalFlakyCaseDto[] {
+  const total = new Map<string, { trials: number; failed: number }>();
+  for (const run of runs.slice(-RECENT_RUNS)) {
+    for (const c of run.cases) {
+      const seen = total.get(c.name) ?? { trials: 0, failed: 0 };
+      seen.trials += c.trials;
+      seen.failed += c.failed;
+      total.set(c.name, seen);
+    }
+  }
+  return [...total]
+    .filter(([, t]) => t.failed > 0 && t.failed < t.trials)
+    .map(([name, t]) => ({ name, failed: t.failed, trials: t.trials }))
+    .sort((a, b) => b.failed - a.failed || a.name.localeCompare(b.name))
+    .slice(0, MAX_FLAKY);
+}
+
+export type SuiteDetailResult =
+  | { readonly kind: 'ok'; readonly detail: EvalSuiteDetailDto }
+  | { readonly kind: 'no_suite' }
+  | { readonly kind: 'no_run' };
+
+/** A suite's drawer: its runs newest first, the run asked for (the newest by default) whole. */
+export function buildSuiteDetail(
+  found: FoundEvals | null,
+  manifest: StoredEvalManifest | null,
+  key: string,
+  runPath: string | undefined,
+): SuiteDetailResult {
+  const c = found === null ? undefined : candidates(found, manifest).find((s) => s.key === key);
+  if (c === undefined) return { kind: 'no_suite' };
+  const shown = runPath === undefined ? c.runs.at(-1) : c.runs.find((r) => r.path === runPath);
+  if (runPath !== undefined && shown === undefined) return { kind: 'no_run' };
+  const named = manifestSuite(manifest, key);
+  return {
+    kind: 'ok',
+    detail: {
+      suite: suiteDto(c, manifest),
+      runs: [...c.runs].reverse().map(summary),
+      run:
+        shown === undefined
+          ? null
+          : {
+              path: shown.path,
+              at: shown.at,
+              passed: shown.passed,
+              fingerprint: shown.fingerprint,
+              repeat: shown.repeat,
+              models: [...shown.models],
+            },
+      flaky: flakyCases(c.runs),
+      coveredPaths: named?.coveredPaths ?? [],
+      freeCommand: named?.freeCommand ?? null,
+      liveCommand: named?.liveCommand ?? null,
+    },
+  };
+}

@@ -475,6 +475,7 @@ import { createAnswerWriter } from './answer-writer-launch';
 import { createAreaNamer } from './area-namer';
 import { systemListeners, type ListenerReader } from './listening-ports';
 import { loopbackProbe, type AddressProbe } from './loopback-probe';
+import { createEvalsService } from '../evals';
 import { createServices } from './services';
 import {
   allSandboxRootsOf,
@@ -3078,6 +3079,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     listeners: opts.listeners ?? systemListeners,
     probe: opts.probe ?? loopbackProbe(),
     hazards: hazardAssessor,
+    evals: createEvalsService({ state, git, logger: logger.child({ module: 'evals' }) }),
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
       git.gitDirs(repoPath).catch(() => undefined);
