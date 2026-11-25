@@ -99,7 +99,7 @@ The state for both decisions:
 - `diff`: the run's own work, from `ownWork` and `diffOfRanges` (as `reviewForcedAfter` reads it). This leaves out
   the builder's own commits in a shared checkout, and base merges. It is capped at `ACCEPTANCE_DIFF_CAP` characters.
   Past the cap it sends the changed-file list and the first hunks of each file, with `truncated: true`.
-- `gate`: the gate's command, its summary tail, and the coverage note when there is one.
+- `gate`: the gate's command and its summary tail.
 
 The questions:
 - `met_<n>` for each criterion:
@@ -261,10 +261,12 @@ A miss tunes the floors or the second model; it doesn't change the rule.
 | Any step has `fixedPlan`, or a gate-less project             | acceptance doesn't run                                                 |
 | Commit Directly with an implement step still to come          | acceptance doesn't run yet                                             |
 | Stop, cancel, Retry or rigor change during the calls          | aborted or dropped at the fence; the next gate re-runs it              |
+| Build account paused during the calls                        | the calls go on (they run on the decisions account); an aborted read stays Verifying and re-runs |
+| Gate fails after a resumed fix finished                       | a fresh fix, escalated only for the gate, never again for the send-back |
 | Shutdown during the calls                                    | recovery re-runs the gate, then acceptance                             |
 | Crash during a resumed acceptance fix                        | it becomes a fresh fix, and the notes stay outstanding                 |
 | Project moved to another account during a fix                | `providerSessionId` is cleared and the fix runs fresh                  |
-| Retry of the run                                             | `acceptanceSentBack` is reset with `sentBack`                          |
+| Retry of the run                                             | `acceptanceSentBack` is reset with `sentBack`; a pending fix drops its session |
 | Builder accepts on the card                                  | those criteria are met for the rest of the run                         |
 | Builder sends back on the card                               | one follow-up task; the run isn't touched                              |
 | Card answered while the Review waits on its own question     | only the acceptance card resolves; the Review stays waiting on its own |
