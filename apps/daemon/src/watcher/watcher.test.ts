@@ -115,6 +115,8 @@ beforeEach(() => {
     clock,
     watch: fake.watch,
     batchMs: 500,
+    // These tests are about what a write cards, not when: a stray cards at its first batch.
+    strayWaitMs: 0,
   });
 });
 afterEach(() => {
@@ -175,6 +177,46 @@ describe('watcher', () => {
       targets: [{ workstreamId: workstream.id, sessionId: null }],
     });
     expect(open[0]?.detail).toMatchObject({ path: 'docs/stray.md', candidates: [workstream.id] });
+  });
+
+  // Value: protects=an ordinary write outside every claim cards only once it has outlasted the wait, and a
+  // sensitive one at once; fails_when=a stray that settles within the wait still raises a card, or the wait
+  // holds back a sensitive path's card; why_new=claims (core): six copy cards for make api-client's generated
+  // files each closed by themselves within two minutes; no_claim=the step end cards what still waits
+  it("holds an ordinary write outside every claim for the wait and cards it only if it hasn't settled, while a sensitive write cards at once", async () => {
+    watcher.stop();
+    watcher = createWatcher({
+      state,
+      inbox,
+      git: createGit(),
+      logger: silentLogger,
+      clock,
+      watch: fake.watch,
+      batchMs: 500,
+    });
+    running();
+    watcher.sync();
+    for (const rel of ['docs/stray.md', 'docs/settled.md', '.mcp.json']) {
+      touch(rel);
+      emit(rel);
+    }
+    clock.advance(500);
+    await watcher.flush();
+    expect(flags().map((c) => c.body)).toEqual(['.mcp.json']);
+
+    // One of the writes is committed within the wait, which settles it.
+    execFileSync('git', ['add', 'docs/settled.md'], { cwd: repo.path, env: isolatedGitEnv() });
+    execFileSync('git', ['commit', '-q', '-m', 'Add settled.md'], {
+      cwd: repo.path,
+      env: isolatedGitEnv(),
+    });
+    // The production wait is three minutes from the batch that first saw the write.
+    clock.advance(3 * 60_000 - 1_000);
+    await watcher.flush();
+    expect(flags()).toHaveLength(1);
+    clock.advance(1_000);
+    await watcher.flush();
+    expect(flags().map((c) => c.body)).toEqual(['.mcp.json', 'docs/stray.md']);
   });
 
   // Value: protects=a stray card names the run that left the file; fails_when=a failed run's leftover is pinned
@@ -471,6 +513,7 @@ describe('watcher on the real file system', () => {
       clock: systemClock,
       watch: systemWatch,
       batchMs: 50,
+      strayWaitMs: 0,
     });
     try {
       running();

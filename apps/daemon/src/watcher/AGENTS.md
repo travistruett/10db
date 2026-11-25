@@ -44,3 +44,10 @@
     `worktree.guessremote`. Every other key, `extensions.worktreeconfig` and the rest of `branch.<name>.*`
     included, raises a card whose body lists the changed keys, lowercase as git prints them. `.git/config.worktree`
     and `.git/worktrees/*/config.worktree` are sensitive and diffed the same way against an empty start.
+- **A stray to an ordinary path waits** (`dueStrays`, `strayWaitMs`, 3 minutes unless given): the real-time batch
+  holds a write outside every claim to a path that can't change what runs, with the lanes its card would name, and a
+  timer reads it again once it has waited. It is carded then only if git still reports it, it is still outside every
+  claim and allowed by no card, and one of those lanes (or, with none, any of the project's workstreams) could still
+  own it, as `couldBeOwned` would judge its card. The step end cards whatever still waits, since it reads every change
+  in the checkout. A sensitive path, and a path whose card is already open, card at once. Most watcher tests pass
+  `strayWaitMs: 0`, since they test what a write cards, not when.
