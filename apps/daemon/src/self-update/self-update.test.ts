@@ -5,7 +5,7 @@ import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
-import { createStatusService, type StatusService } from '../status';
+import { createStatusService, STATUS_HYSTERESIS_MS, type StatusService } from '../status';
 import {
   createSelfUpdate,
   SELF_UPDATE_APPLYING_KEY,
@@ -57,6 +57,8 @@ interface World {
   busy: number;
   /** The shaping conversations whose turn runs: part of `busy`, named. */
   shapes: { id: ShapeId; title: string }[];
+  /** The gates with a process running: part of `busy`, named. */
+  gates: { label: string }[];
   /** How long a staged build waits for an idle moment before the factory drains for it. */
   waitLimitMs: number;
   /** When the drain began, as the update told the factory; null while it does not drain. */
@@ -145,6 +147,7 @@ function make(
     },
     midSession: () => world.busy,
     shapeTurns: () => world.shapes,
+    gates: () => world.gates,
     waitLimitMs: () => world.waitLimitMs,
     drain: {
       begin: (since) => {
@@ -201,6 +204,7 @@ beforeEach(() => {
     applyAnswers: Promise.resolve(),
     busy: 0,
     shapes: [],
+    gates: [],
     waitLimitMs: WAIT_LIMIT_MS,
     drainedSince: null,
     busyAfterPause: null,
@@ -237,6 +241,31 @@ describe('tick', () => {
     expect(await update.tick()).toBe('no-newer-build');
     expect(world.calls).toEqual(['stage']);
     expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toBeUndefined();
+  });
+});
+
+describe('a drain past its limit', () => {
+  it('installs over lanes but not over a running gate, which it names, until the gate ends', async () => {
+    world.busy = 2;
+    world.gates = [{ label: 'batch “Add billing”' }];
+    const update = make();
+    expect(await update.tick()).toBe('busy');
+    clock.advance(WAIT_LIMIT_MS);
+    expect(await update.tick()).toBe('draining');
+    clock.advance(10 * 60_000);
+    expect(await update.tick()).toBe('draining');
+    expect(world.calls).not.toContain('apply');
+    clock.advance(STATUS_HYSTERESIS_MS);
+    expect(
+      statusService
+        .current()
+        .lines.map((line) => line.line)
+        .join('\n'),
+    ).toContain('Add billing');
+
+    world.gates = [];
+    expect(await update.tick()).toBe('applying');
+    expect(world.calls).toContain('apply');
   });
 });
 

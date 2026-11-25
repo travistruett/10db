@@ -23,6 +23,7 @@ import { GhError, GhFailure, SIGN_IN_IN_SETTINGS } from '../github';
 import { cardsResolvedByEvent, resolveStaleCards, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { StatusService } from '../status';
+import { GATE_TIMEOUT_CAP_MS } from '../verify';
 import { CardTier } from '../inbox';
 
 /**
@@ -38,6 +39,12 @@ export const SHAPE_HOLD_ALERT_MS = 5 * 60_000;
  * never waits behind one long step while nothing else may start.
  */
 const DRAIN_LIMIT_MS = 10 * 60_000;
+/**
+ * How long past the drain limit a running gate may hold the install: a gate is stopped by its own
+ * timeout, which never exceeds this, so the wait is bounded even when a gate row is left behind.
+ */
+const GATE_WAIT_MAX_MS = GATE_TIMEOUT_CAP_MS;
+const GATE_HOLD_STATUS_KEY = 'update-gate';
 /** The card an earlier version raised for the shaping hold; one left open is withdrawn at start. */
 export const SHAPE_HOLD_FOLD_KEY = 'self-update-shape-turn';
 const SHAPE_HOLD_STATUS_KEY = 'update-shape-turn';
@@ -172,6 +179,12 @@ export interface SelfUpdateDeps {
    * lane, gate or job. A drain that only these hold has no lane to blame, so the builder is told.
    */
   shapeTurns(): readonly { readonly id: ShapeId; readonly title: string }[];
+  /**
+   * The gates with a process running, each named by its task or batch: part of `midSession`. A
+   * restart kills a gate and its suite starts over from zero, so past the drain limit the install
+   * waits for these, where it installs over lanes and sessions.
+   */
+  gates(): readonly { readonly label: string }[];
   /** How long a staged build waits for an idle moment before the factory drains for it. */
   waitLimitMs(): number;
   /**
@@ -445,6 +458,47 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     names: string;
   } | null = null;
 
+  let gateHold: string | null = null;
+
+  function releaseGateHold(): void {
+    if (gateHold === null) return;
+    gateHold = null;
+    deps.status.release(GATE_HOLD_STATUS_KEY);
+  }
+
+  /**
+   * Whether a running gate keeps the install from starting past the drain limit, and, if so, the
+   * status line says what it waits for. A gate that outlives its own timeout stops holding.
+   */
+  function gateHoldsInstall(): boolean {
+    const since = drainingSince;
+    const gates = deps.gates();
+    const expired =
+      since !== null &&
+      deps.clock.now().getTime() - since.getTime() >= DRAIN_LIMIT_MS + GATE_WAIT_MAX_MS;
+    if (gates.length === 0 || expired) {
+      releaseGateHold();
+      return false;
+    }
+    const names = gates.map((gate) => gate.label).join(', ');
+    if (names !== gateHold) {
+      gateHold = names;
+      logger.info(
+        { gates: names },
+        'the update has drained for its limit but waits for a running gate: a restart would start its suite over',
+      );
+      deps.status.hold(GATE_HOLD_STATUS_KEY, {
+        kind: StatusKind.UpdateHold,
+        label: 'Update waiting on a gate',
+        line: `Holding new work: an update waits for the gate of ${names}`,
+        details: `An update to ${short(available ?? '')} installs over lanes and sessions after the drain limit, but not over a gate, which a restart would kill and start again from zero. It installs once the gate of ${names} ends, or at its timeout. Nothing new starts meanwhile.`,
+        busiest: [],
+        culprits: [],
+      });
+    }
+    return true;
+  }
+
   function releaseShapeHold(): void {
     if (shapeHold?.reported) deps.status.release(SHAPE_HOLD_STATUS_KEY);
     shapeHold = null;
@@ -508,6 +562,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
 
   function endDrain(): void {
     releaseShapeHold();
+    releaseGateHold();
     if (drainingSince === null) return;
     drainingSince = null;
     logger.info({}, 'the update no longer waits: lanes start again');
@@ -783,6 +838,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return TickResult.Off;
     }
     if (deps.midSession() > 0 && !drainedPastLimit()) return waitOrDrain();
+    if (deps.midSession() > 0 && gateHoldsInstall()) return TickResult.Draining;
     releaseShapeHold();
     return install(runningCommit, { head: build.head, commit: build.commit }, build);
   }
@@ -833,6 +889,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       if (running > 0 && !drainedPastLimit()) {
         deps.resume();
         return TickResult.Busy;
+      }
+      if (running > 0 && gateHoldsInstall()) {
+        deps.resume();
+        return TickResult.Draining;
       }
       if (running > 0) {
         logger.info(
