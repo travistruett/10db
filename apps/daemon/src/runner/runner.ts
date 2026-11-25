@@ -3135,13 +3135,21 @@ export function createRunner(opts: RunnerOptions): Runner {
       !step.earlier.some((r) => r.verdict === Verdict.Reject)
         ? testValueBrief(await testValueFlags(row, checkout))
         : null;
+    const implementStartedAt =
+      row.steps.slice(0, row.stepIndex).findLast((s) => s.role === StepRole.Implement)?.startedAt ??
+      null;
     const acceptance =
       step.role === StepRole.Review &&
       action.kind === 'start' &&
       !step.earlier.some((r) => r.verdict === Verdict.Reject)
         ? acceptanceBrief(
+            // Only this implement step's pass counts: an earlier pass's unclear criteria were since changed.
             listEvidence(db, id)
-              .filter((e) => e.kind === EvidenceKind.Acceptance)
+              .filter(
+                (e) =>
+                  e.kind === EvidenceKind.Acceptance &&
+                  (implementStartedAt === null || e.createdAt >= implementStartedAt),
+              )
               .at(-1)?.detail ?? null,
           )
         : null;
@@ -4728,7 +4736,15 @@ export function createRunner(opts: RunnerOptions): Runner {
   ): boolean {
     const task = getTask(ctx.tx, row.taskId);
     const named = new Set(task.acceptanceCriteria);
-    const criteria = read.criteria.filter((c) => named.has(c.criterion));
+    // A criterion the builder accepted while the calls ran counts as met.
+    const accepted = acceptedCriteria(ctx.tx, id);
+    const criteria = read.criteria
+      .filter((c) => named.has(c.criterion))
+      .map((c) =>
+        accepted.has(c.criterion)
+          ? { ...c, verdict: AcceptanceVerdict.Met, note: 'accepted on its card' }
+          : c,
+      );
     const step = current.steps[current.stepIndex];
     if (!step) return false;
     const { reviewRounds, fixBy } = rowProcess(
@@ -4742,13 +4758,22 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
     const sentBack = move === AcceptanceMove.SendBack;
     const detail: AcceptanceDetail = { criteria, unasked: read.unasked, sentBack };
-    const notMet = criteria.filter((c) => c.verdict === AcceptanceVerdict.NotMet).length;
+    const count = (v: AcceptanceVerdict): number => criteria.filter((c) => c.verdict === v).length;
+    const counted = [
+      `${String(count(AcceptanceVerdict.NotMet))} of ${String(criteria.length)} criteria not met`,
+      ...(count(AcceptanceVerdict.Unclear) > 0
+        ? [`${String(count(AcceptanceVerdict.Unclear))} unclear`]
+        : []),
+      ...(count(AcceptanceVerdict.Unread) > 0
+        ? [`${String(count(AcceptanceVerdict.Unread))} unread`]
+        : []),
+    ];
     const record = insertEvidence(ctx, {
       workstreamId: id,
       kind: EvidenceKind.Acceptance,
       command: null,
       exitCode: null,
-      summary: `Acceptance: ${String(notMet)} of ${String(criteria.length)} criteria read as not met`,
+      summary: `Acceptance: ${counted.join(', ')}`,
       logPath: null,
       commitShas: [...commitShas],
       detail,
