@@ -199,9 +199,11 @@ export async function recoverOnStartup(opts: {
       report.parked.push(ws.id);
       continue;
     }
-    // A check or plan card is not an agent's question: it is answered by its own handler.
+    // A check, plan or acceptance card is not an agent's question: it is answered by its own handler.
     const open = waiting
-      ? openItemsForWorkstream(db, ws.id).find((i) => i.kind !== 'check' && i.kind !== 'plan')
+      ? openItemsForWorkstream(db, ws.id).find(
+          (i) => i.kind !== 'check' && i.kind !== 'plan' && i.kind !== 'acceptance',
+        )
       : undefined;
     if (open) {
       const nextAction: NextAction = { kind: 'answer', inboxId: open.id, providerSessionId };

@@ -595,6 +595,33 @@ export function insertRetryLimitFollowUp(
 }
 
 /**
+ * Files what the builder sent back from an acceptance card: a task in the project's Ready column (planned, no
+ * human column) touching the source's areas, with the criteria the card listed and the builder's note. The source
+ * run is untouched.
+ */
+export function insertAcceptanceFollowUp(
+  ctx: WriteContext,
+  sourceId: TaskId,
+  input: { readonly criteria: readonly string[]; readonly note: string },
+): TaskDto {
+  const source = getTask(ctx.tx, sourceId);
+  const project = getProject(ctx.tx, source.projectId);
+  const title = `Meet the acceptance criteria of ${source.title}`;
+  return writeTask(ctx, source.projectId, {
+    landing: taskLandingFor(project),
+    workspaceMode: placementFor(project, undefined),
+    reason: null,
+    title: Title.parse(title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title),
+    description: `${input.note}\n\nSent back from the acceptance check of the task "${source.title}" (${source.id}).`,
+    acceptanceCriteria: input.criteria.length > 0 ? [...input.criteria] : [title],
+    areas: source.areas,
+    dependsOn: [],
+    proposalId: null,
+    boardColumnId: null,
+  });
+}
+
+/**
  * Adds the findings of a later rejection at the retry limit to the follow-up task an earlier one filed, while
  * that task is still open and unstarted; once it has started, was removed or is gone, the findings stay on
  * the step and nothing is written. A task shipped at its limit never files a second follow-up for the one

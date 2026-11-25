@@ -4,12 +4,15 @@ import {
   AcceptanceVerdict,
   InboxKind,
   InboxState,
+  type InboxAnswer,
   type InboxItemDto,
   type ProjectId,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
   answeredItemsForWorkstream,
+  getWorkstreamRow,
+  insertAcceptanceFollowUp,
   insertInboxItem,
   openItemsForWorkstream,
   updateInboxItem,
@@ -79,4 +82,27 @@ export function acceptedCriteria(db: DbReader, workstreamId: WorkstreamId): Set<
       if (c.verdict !== AcceptanceVerdict.Met) accepted.add(c.criterion);
   }
   return accepted;
+}
+
+/**
+ * Acts on the answer to an acceptance card inside the write that closes it. Accept changes nothing here:
+ * `acceptedCriteria` reads the answered card from then on. Send back files one Ready follow-up task for the
+ * criteria the card listed, with the builder's note, and leaves the original run as it is.
+ */
+export function applyAcceptanceAnswer(
+  ctx: WriteContext,
+  item: InboxItemDto,
+  answer: Pick<InboxAnswer, 'choice' | 'note'>,
+): void {
+  if (answer.choice !== AcceptanceChoice.SendBack) return;
+  const target = item.targets[0];
+  if (!target) return;
+  const detail = AcceptanceDetail.safeParse(item.detail);
+  const criteria = detail.success
+    ? detail.data.criteria
+        .filter((c) => c.verdict !== AcceptanceVerdict.Met)
+        .map((c) => c.criterion)
+    : [];
+  const taskId = getWorkstreamRow(ctx.tx, target.workstreamId).taskId;
+  insertAcceptanceFollowUp(ctx, taskId, { criteria, note: (answer.note ?? '').trim() });
 }

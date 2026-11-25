@@ -386,6 +386,7 @@ export function humanTouchDays(db: DbReader, projectId: ProjectId, now: Date): H
       check: byKind[InboxKind.Check],
       plan: byKind[InboxKind.Plan],
       moveReport: byKind[InboxKind.PlaybookMoveReport],
+      acceptance: byKind[InboxKind.Acceptance],
       cards: total,
       tasksRan,
       cardsPerTask: tasksRan === 0 ? null : total / tasksRan,

@@ -2065,7 +2065,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       outcome.kind !== 'parked' &&
       !(outcome.kind === 'stopped' && outcome.reason === 'cancelled')
     ) {
-      const open = openItemsForWorkstream(db, id)[0];
+      // The acceptance card is the builder's to read; the run never waits on it.
+      const open = openItemsForWorkstream(db, id).find((i) => i.kind !== InboxKind.Acceptance);
       if (open) {
         park(id, ctl.fence, open.id, outcome.providerSessionId);
         return;

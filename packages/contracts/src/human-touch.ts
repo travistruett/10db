@@ -25,6 +25,7 @@ export const HumanTouchDayDto = z.object({
   check: z.int().nonnegative(),
   plan: z.int().nonnegative(),
   moveReport: z.int().nonnegative(),
+  acceptance: z.int().nonnegative(),
   /** Every card raised that day: the sum of the kinds above. */
   cards: z.int().nonnegative(),
   /** Tasks with a session running at some point of the day. */
