@@ -306,18 +306,18 @@ export function preToolUseHook(hook: {
 /** The settings files whose change mid-session is checked again: a lane's is the project's only. */
 export type SettingsSource = 'user_settings' | 'project_settings' | 'local_settings';
 
-/** Both sets of hooks, each event's list of the first followed by the second's. */
+/** Both sets of hooks: for each event the two sets share, the first's list then the second's. */
 export function mergeHooks(
   first: NonNullable<Options['hooks']>,
   second: NonNullable<Options['hooks']>,
 ): NonNullable<Options['hooks']> {
-  const merged: NonNullable<Options['hooks']> = { ...first };
-  for (const [event, matchers] of Object.entries(second) as [
-    keyof typeof merged,
-    NonNullable<Options['hooks']>[keyof NonNullable<Options['hooks']>],
-  ][])
-    merged[event] = [...(merged[event] ?? []), ...(matchers ?? [])];
-  return merged;
+  return {
+    ...first,
+    ...second,
+    PostToolUse: [...(first.PostToolUse ?? []), ...(second.PostToolUse ?? [])],
+    PostToolUseFailure: [...(first.PostToolUseFailure ?? []), ...(second.PostToolUseFailure ?? [])],
+    ConfigChange: [...(first.ConfigChange ?? []), ...(second.ConfigChange ?? [])],
+  };
 }
 
 /** A tool can write the loaded settings mid-session, where no billing check would look again. */
