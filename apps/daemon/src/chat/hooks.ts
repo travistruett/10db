@@ -85,6 +85,7 @@ import {
   buildTrustPolicy,
   FloorReason,
   floorNoticeText,
+  floorWhy,
   judgeForCall,
   projectGrantLines,
   projectLiveSystems,
@@ -554,6 +555,12 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       // A Codex chat runs Codex's own full-access mode, still under 10db's guard hook and judge.
       const fullCodex = chat.fullAccess && launch.account.harness === Provider.Codex;
       const fullAgent = full !== null ? 'claude' : fullCodex ? 'codex' : null;
+      // Codex's judge is 10db's alone, so a Full access turn it can't judge never starts: the builder reads why
+      // in the thread and turns Full access off to go on in the sandbox.
+      if (fullCodex && (deps.judge === undefined || judge === JudgeKind.Rules))
+        throw new InvalidError(
+          `Full access on Codex needs 10db’s judge, and it is off: ${floorWhy(FloorReason.NoJudge)} Turn Full access off to continue in the sandbox.`,
+        );
       // A Full access session can write wherever its turn holds the folder, which every one of its turns does.
       const writable = full !== null || fullCodex || writesNow(chat, launch.cwd);
       const folder: ChatPlace = {
