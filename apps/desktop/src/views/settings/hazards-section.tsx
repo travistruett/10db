@@ -11,6 +11,7 @@ import { SectionHeading } from './section-heading';
 import { SplitButton } from './split-button';
 import { Pill, RowActions } from './table-cells';
 import { useListPatch } from './use-list-patch';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 type Hazard = ProjectDto['hazards'][number];
 
@@ -150,24 +151,24 @@ export function HazardsSection({ project }: { readonly project: ProjectDto }) {
         }
       />
       <HazardLookStatus project={project} look={look} />
-      <DataTable<Hazard>
-        aria-label="Hazards"
-        records={project.hazards}
-        columns={columns}
-        idAccessor="name"
-        withTableBorder
-        backgroundColor="var(--tendb-color-panel)"
-        borderRadius="md"
-        verticalSpacing="xs"
-        horizontalSpacing="md"
-        highlightOnHover
-        noRecordsText="No hazards"
-        rowStyle={() => ({ cursor: 'pointer' })}
-        customRowAttributes={() => ({ 'data-keeps-drawer': '' })}
-        onRowClick={({ record }) => {
-          open(record);
-        }}
-      />
+      <RaisedPanel>
+        <DataTable<Hazard>
+          aria-label="Hazards"
+          records={project.hazards}
+          columns={columns}
+          idAccessor="name"
+          backgroundColor="transparent"
+          verticalSpacing="xs"
+          horizontalSpacing="md"
+          highlightOnHover
+          noRecordsText="No hazards"
+          rowStyle={() => ({ cursor: 'pointer' })}
+          customRowAttributes={() => ({ 'data-keeps-drawer': '' })}
+          onRowClick={({ record }) => {
+            open(record);
+          }}
+        />
+      </RaisedPanel>
       <FoundByTendb project={project} />
       {adding || editing !== null ? (
         <HazardDrawer

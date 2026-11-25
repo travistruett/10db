@@ -1,6 +1,7 @@
 import { CARD_TYPE_DAYS, type CardTypeDto, type ProjectId } from '@10db/contracts';
 import { Alert, Badge, Loader, Stack, Table, Text, Title } from '@mantine/core';
 import { useCardTypes } from '../../daemon/card-types-queries';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 const COLUMNS = [
   'Card type',
@@ -60,22 +61,24 @@ export function CardTypesPanel({ projectId }: { readonly projectId: ProjectId | 
             No Inbox card was raised in the last 30 days.
           </Text>
         ) : (
-          <Table.ScrollContainer minWidth={720}>
-            <Table aria-label="Inbox Card Types" striped withTableBorder>
-              <Table.Thead>
-                <Table.Tr>
-                  {COLUMNS.map((name, index) => (
-                    <Table.Th key={`${name}-${String(index)}`}>{name}</Table.Th>
+          <RaisedPanel>
+            <Table.ScrollContainer minWidth={720}>
+              <Table aria-label="Inbox Card Types">
+                <Table.Thead>
+                  <Table.Tr>
+                    {COLUMNS.map((name, index) => (
+                      <Table.Th key={`${name}-${String(index)}`}>{name}</Table.Th>
+                    ))}
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {types.data.types.map((card) => (
+                    <TypeRow key={card.type} card={card} />
                   ))}
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {types.data.types.map((card) => (
-                  <TypeRow key={card.type} card={card} />
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          </RaisedPanel>
         )
       ) : null}
     </Stack>

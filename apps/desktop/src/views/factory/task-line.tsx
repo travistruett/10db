@@ -2,7 +2,7 @@ import { WorkstreamState, type WorkstreamDto } from '@10db/contracts';
 import { Box, Text, UnstyledButton } from '@mantine/core';
 import type { ReactNode } from 'react';
 import classes from './factory-overview.module.css';
-import { StepProgress } from './stacked-bar';
+import { ModelBadge, StepProgress, stepLabel } from './stacked-bar';
 import { StatusDot } from './status-dot';
 import { STEP_LABEL } from './task-rows';
 
@@ -52,9 +52,9 @@ export const LineTone = { You: 'you', Plain: 'plain' } as const;
 export type LineTone = (typeof LineTone)[keyof typeof LineTone];
 
 /**
- * One task inside a project: its mark, title, what it is doing (a running run's step segments, step and
- * model) and when. The line opens the task; the mark sits outside that button, so a failure's hover card is
- * its own target, and an action sits beside it as its own button.
+ * One task inside a project, on the card's shared columns: its mark, title, step segments, state (the step
+ * in words while it runs), model and when. The line opens the task; the mark sits outside that button, so a
+ * failure's hover card is its own target. Actions, where a line has them, sit after the columns.
  */
 export function TaskLine({
   mark,
@@ -64,16 +64,19 @@ export function TaskLine({
   tone = LineTone.Plain,
   when,
   action,
+  compact = false,
   onOpen,
 }: {
   readonly mark: ReactNode;
   readonly title: string;
-  /** Shows the step segments when the run is under way. */
+  /** Shows the step segments, step and model when the run is under way. */
   readonly run?: WorkstreamDto | undefined;
   readonly detail: string;
   readonly tone?: LineTone;
   readonly when: string;
   readonly action?: ReactNode;
+  /** Outside a project card: no bar or model columns, so the title and state take the room. */
+  readonly compact?: boolean;
   readonly onOpen: () => void;
 }) {
   const running =
@@ -81,23 +84,35 @@ export function TaskLine({
     (run.state === S.Running ||
       run.state === S.Starting ||
       run.state === S.Verifying ||
-      run.state === S.HandingOff) &&
-    run.steps[run.stepIndex] !== undefined;
+      run.state === S.HandingOff)
+      ? run
+      : undefined;
+  const step = running?.steps[running.stepIndex];
   return (
     <div className={classes['line']}>
-      <span className={classes['lineMark']}>{mark}</span>
-      <UnstyledButton className={classes['lineOpen']} onClick={onOpen}>
-        <span className={classes['clip']}>{title}</span>
-        {running ? (
-          <StepProgress run={run} />
-        ) : (
-          <Text component="span" size="xs" c={tone === LineTone.You ? 'yellow' : 'dimmed'} truncate>
-            {detail}
+      <div className={classes['cols']} data-compact={compact || undefined}>
+        <span className={classes['lineMark']}>{mark}</span>
+        <UnstyledButton className={classes['lineOpen']} onClick={onOpen}>
+          <span className={`${classes['lineTitle'] ?? ''} ${classes['clip'] ?? ''}`}>{title}</span>
+          <span className={classes['lineProgress']}>
+            {running === undefined || step === undefined ? null : <StepProgress run={running} />}
+          </span>
+          <Text
+            component="span"
+            size="xs"
+            c={tone === LineTone.You ? 'yellow' : 'dimmed'}
+            truncate
+            className={classes['lineState']}
+          >
+            {running === undefined ? detail : (stepLabel(running) ?? detail)}
           </Text>
-        )}
-        <span className={classes['when']}>{when}</span>
-      </UnstyledButton>
-      <span className={classes['lineAction']}>{action}</span>
+          <span className={classes['lineModel']}>
+            {step === undefined ? null : <ModelBadge model={step.model} />}
+          </span>
+          <span className={classes['when']}>{when}</span>
+        </UnstyledButton>
+      </div>
+      {action === undefined ? null : <span className={classes['lineAction']}>{action}</span>}
     </div>
   );
 }

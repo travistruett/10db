@@ -12,13 +12,30 @@
   color: var(--mantine-color-dimmed);
 }
 
-/* A task line inside a project: mark, then a button over title, what it is doing and when, then an action slot. */
+/*
+ * The columns every row inside a project card shares, so goal rows and task lines line up and the eye can run
+ * down one edge: chevron, dot, title, bar, a flexible middle, step progress, state, model, when. A goal row
+ * fills them directly; a task line's button takes them through a subgrid.
+ */
+.cols {
+  display: grid;
+  grid-template-columns: 16px 16px 220px 140px minmax(0, 1fr) 120px 160px 150px 56px;
+  column-gap: 10px;
+  align-items: center;
+  padding-inline: 8px;
+}
+
+/* Lines with their own actions, outside a project card: the title and the state take the room. */
+.cols[data-compact] {
+  grid-template-columns: 0 16px 0 0 minmax(0, 1fr) 0 minmax(0, 240px) 0 56px;
+}
+
+/* A task line: the columns (mark, then a button over title, step, state, model and when), then any actions. */
 .line {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   height: 40px;
-  padding-inline: 8px;
   border-radius: var(--mantine-radius-md);
 }
 
@@ -26,14 +43,24 @@
   background: var(--mantine-color-default-hover);
 }
 
-.lineOpen {
+.line > .cols {
   flex: 1;
   min-width: 0;
   align-self: stretch;
+}
+
+.lineMark {
+  grid-column: 2;
+  justify-self: center;
+  display: inline-flex;
+}
+
+.lineOpen {
+  grid-column: 3 / -1;
+  align-self: stretch;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px 56px;
+  grid-template-columns: subgrid;
   align-items: center;
-  column-gap: 16px;
   font-size: var(--mantine-font-size-sm);
   border-radius: var(--mantine-radius-sm);
 }
@@ -43,19 +70,48 @@
   outline-offset: 2px;
 }
 
-.lineMark {
-  flex: none;
-  width: 16px;
-  display: inline-flex;
-  justify-content: center;
+.lineTitle {
+  grid-column: 1 / 4;
+}
+
+.lineProgress {
+  grid-column: 4;
+}
+
+.lineState {
+  grid-column: 5;
+}
+
+.lineModel {
+  grid-column: 6;
+  min-width: 0;
+  display: flex;
+}
+
+.lineOpen > .when {
+  grid-column: 7;
 }
 
 .lineAction {
   flex: none;
-  min-width: 52px;
   display: flex;
   gap: 6px;
   justify-content: flex-end;
+  padding-inline-end: 8px;
+}
+
+/* A goal row on the same columns: the status runs to the news, or to the edge when there is none. */
+.goalStatus {
+  grid-column: 5 / -1;
+}
+
+.goalStatus[data-news] {
+  grid-column: 5 / 8;
+}
+
+.goalNews {
+  grid-column: 8 / -1;
+  text-align: right;
 }
 
 /* An open project's chevron turns a quarter, from right to down. */
@@ -63,12 +119,13 @@
   transform: rotate(90deg);
 }
 
-/* Each project is a card on the Board card's tone, with the same slight depth, apart from the next. */
+/* Each project is a raised thing (DESIGN.md, Elevation), apart from the next. An accordion item is not a
+   Paper, so it reads the level's two tokens directly. */
 .projectCard {
   border: 0;
   border-radius: var(--mantine-radius-md);
   background: var(--tendb-color-card);
-  box-shadow: var(--mantine-shadow-xs);
+  box-shadow: var(--tendb-elevation-raised);
 }
 
 .projectCard[data-active] {

@@ -19,7 +19,6 @@ import {
   TextInput,
   Title,
   VisuallyHidden,
-  Paper,
 } from '@mantine/core';
 import { IconArrowDown, IconArrowUp, IconPencil, IconTrash } from '@tabler/icons-react';
 import { useState } from 'react';
@@ -32,6 +31,7 @@ import {
 } from '../../daemon/queries';
 import { SYSTEM_HINT } from '../board/column-hints';
 import { HelpHint } from './help-hint';
+import { RaisedPanel } from '../../shell/raised-panel';
 
 const PLANNED = 'planned';
 
@@ -196,7 +196,7 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
       </Group>
       {/* Your columns first, as on the board, then the state columns: listed so the order matches the
           board, but fixed, because their order is the order work moves in. */}
-      <Paper withBorder radius="md" bg="var(--tendb-color-panel)" style={{ overflow: 'hidden' }}>
+      <RaisedPanel>
         <Table.ScrollContainer minWidth={520}>
           <Table aria-label="Board columns" verticalSpacing="xs">
             <Table.Thead>
@@ -310,7 +310,7 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
-      </Paper>
+      </RaisedPanel>
       {patch.error ? (
         <Alert color="red" title="Couldn't change the column">
           {patch.error.message}
