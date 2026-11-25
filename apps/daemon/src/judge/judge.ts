@@ -16,9 +16,10 @@ import { getJudgeConfig, insertJudgeCall, listAccountModels } from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
-import { askModel, type ModelQuestion } from './ask';
+import { askModel, askModelNouls, type ModelQuestion } from './ask';
+import type { NoulQuestion } from './noul-questions';
 import type { BedrockClientFactory } from './bedrock';
-import { ModelApi, modelApi, optionsText, type ModelAnswer } from './openrouter';
+import { ModelApi, modelApi, optionsText } from './openrouter';
 import { NO_DECISION_CREDENTIAL, secretsOf, type JudgeCredential } from './credential';
 import type { JudgeCallHealth } from './outage';
 import { untilAborted } from './until-aborted';
@@ -58,6 +59,67 @@ export type JudgeAnswer =
       readonly callId: JudgeCallId;
     };
 
+/** A decision asked as yes/no questions about a structured state. */
+export interface AssessRequest {
+  readonly decision: AskedDecision;
+  /** The content the questions are about, as named fields. */
+  readonly state: Readonly<Record<string, unknown>>;
+  /** By question id; each question carries its whole meaning, since the id is not sent as a question. */
+  readonly questions: Readonly<Record<string, NoulQuestion>>;
+  /** What the call's row records of the answers at the decision's floor; pure, so the caller can read them again. */
+  readonly read: (probabilities: Readonly<Record<string, number>>, floor: number) => AssessReading;
+  /** How long this call may take; the judge's own timeout when absent. */
+  readonly timeoutMs?: number;
+  /**
+   * A second opinion: its failures are its own, so they neither raise the judge's outage card nor show as the
+   * account falling back to rules.
+   */
+  readonly secondary?: boolean;
+  readonly workstreamId?: WorkstreamId;
+  readonly taskId?: TaskId;
+  readonly signal?: AbortSignal;
+}
+
+/** What a call's row records of its answers. */
+export interface AssessReading {
+  readonly answer: string;
+  readonly confidence: number;
+  readonly outcome: JudgeOutcome;
+}
+
+export type AssessAnswer =
+  | {
+      readonly kind: 'answered';
+      /** Each question's probability of yes, by id. */
+      readonly probabilities: Readonly<Record<string, number>>;
+      /** The decision's floor when it was asked, so the caller reads the answers at the level the row did. */
+      readonly floor: number;
+      readonly model: string;
+      readonly latencyMs: number;
+      readonly costUsd: number | null;
+      readonly callId: JudgeCallId;
+    }
+  | Extract<JudgeAnswer, { readonly kind: 'fallback' }>;
+
+/** What a call's row holds of its answer, whatever was asked. */
+interface LoggedAnswer {
+  readonly answer: string | null;
+  readonly confidence: number | null;
+  readonly probabilities?: Readonly<Record<string, number>>;
+  readonly outcome: JudgeOutcome;
+  readonly costUsd: number | null;
+}
+
+type Decided<T> =
+  | {
+      readonly kind: 'answered';
+      readonly answer: T;
+      readonly floor: number;
+      readonly latencyMs: number;
+      readonly callId: JudgeCallId;
+    }
+  | Extract<JudgeAnswer, { readonly kind: 'fallback' }>;
+
 /** What a decision asks of the judge. */
 export interface Judge {
   /**
@@ -71,6 +133,11 @@ export interface Judge {
    * today's rule. The caller records what it did with an answer through `recordJudgeOutcome`.
    */
   choose(req: JudgeRequest): Promise<JudgeAnswer>;
+  /**
+   * Asks the decision's model yes/no questions and logs the call with every probability and what `read` makes of
+   * them. Never throws; a call that can't answer is a `fallback`, as for `choose`.
+   */
+  assess(req: AssessRequest): Promise<AssessAnswer>;
   /**
    * Whether `decision` can be asked now: the daemon isn't off, the master switch and the decision's are on, and
    * the key reads within `JUDGE_TIMEOUT_MS`. Calls no model and logs nothing.
@@ -120,8 +187,8 @@ const FALLBACK_OUTCOME = {
   stopped: 'stopped',
 } as const satisfies Record<string, JudgeOutcome>;
 
-type Attempt =
-  | { readonly kind: 'answered'; readonly answer: ModelAnswer; readonly latencyMs: number }
+type Attempt<T> =
+  | { readonly kind: 'answered'; readonly answer: T; readonly latencyMs: number }
   | {
       readonly kind: 'fallback';
       readonly reason: 'no_key' | 'timeout' | 'error' | 'stopped';
@@ -133,6 +200,35 @@ const TEST_STATE =
   'The change renames one local variable in one file; the tests that cover it pass.';
 const TEST_QUESTION = 'Does this change need an independent code review before it ships?';
 const TEST_OPTIONS = ['review', 'skip'] as const;
+
+/** What every call carries to its transport, whatever it asks. */
+type Transport = Pick<
+  ModelQuestion,
+  'model' | 'api' | 'price' | 'credential' | 'bedrockClient' | 'fetch' | 'signal'
+>;
+
+/** The choice a request asks, as the transport takes it. */
+function choiceOf(
+  req: JudgeRequest,
+): Pick<ModelQuestion, 'state' | 'question' | 'options' | 'criteria'> {
+  return {
+    state: req.state,
+    question: req.question,
+    options: req.options,
+    ...(req.criteria === undefined ? {} : { criteria: req.criteria }),
+  };
+}
+
+/**
+ * The OpenRouter endpoint yes/no questions go to: a System One model's own, the decisions endpoint for a model its
+ * list names, and chat for every other model. With the list unread a model is asked as a chat model, since only
+ * System One is known to answer a `noul`.
+ */
+function noulApi(model: string, decisionModels: () => ReadonlySet<string> | null): ModelApi {
+  const api = modelApi(model, decisionModels);
+  if (api !== ModelApi.Decisions) return api;
+  return decisionModels() === null ? ModelApi.Chat : ModelApi.Decisions;
+}
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown error';
@@ -159,13 +255,17 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       : { inputUsdPerMillion: row.inputPrice, outputUsdPerMillion: row.outputPrice };
   }
 
-  /** One call to `model`, bounded by `timeoutMs` on the injected clock and by the caller's signal. */
-  async function attempt(
+  /**
+   * One call to `model`, bounded by `timeoutMs` on the injected clock and by the caller's signal; `send` asks the
+   * question on the transport it is handed.
+   */
+  async function attempt<T>(
     model: string,
     accountId: AccountId | null,
-    q: Pick<JudgeRequest, 'state' | 'question' | 'options' | 'criteria' | 'signal'>,
+    q: { readonly signal?: AbortSignal | undefined },
     timeoutMs: number,
-  ): Promise<Attempt> {
+    send: (transport: Transport) => Promise<T>,
+  ): Promise<Attempt<T>> {
     const controller = new AbortController();
     const timeout = { fired: false };
     const timer = deps.clock.setTimeout(() => {
@@ -195,16 +295,12 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       const price =
         credential.kind === AccountKind.OpenRouter ? undefined : listedPrice(accountId, model);
       const answer = await untilAborted(
-        askModel({
+        send({
           model,
           api:
             credential.kind === AccountKind.OpenRouter
               ? modelApi(model, deps.decisionModelIds)
               : ModelApi.Chat,
-          state: q.state,
-          question: q.question,
-          options: q.options,
-          ...(q.criteria === undefined ? {} : { criteria: q.criteria }),
           ...(price === undefined ? {} : { price }),
           credential,
           ...(deps.bedrockClient === undefined ? {} : { bedrockClient: deps.bedrockClient }),
@@ -243,31 +339,43 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     }
   }
 
-  async function choose(req: JudgeRequest): Promise<JudgeAnswer> {
+  /**
+   * One logged call of `decision`: the config, the switches, the call and its row. `logged` turns an answer into
+   * the row's answer, confidence and outcome. Never throws.
+   */
+  async function decide<T>(
+    req: {
+      readonly decision: AskedDecision;
+      readonly state: string;
+      readonly question: string;
+      readonly workstreamId?: WorkstreamId | undefined;
+      readonly taskId?: TaskId | undefined;
+      readonly signal?: AbortSignal | undefined;
+      readonly timeoutMs?: number | undefined;
+      readonly secondary?: boolean | undefined;
+    },
+    send: (transport: Transport) => Promise<T>,
+    logged: (answer: T, floor: number) => LoggedAnswer,
+  ): Promise<Decided<T>> {
     let model = '';
+    // A second opinion's health is not the judge's: it reports nothing.
+    const health = (h: JudgeCallHealth): void => {
+      if (req.secondary !== true) deps.onCallHealth?.(h);
+    };
     try {
       const config = getJudgeConfig(deps.state.db);
       const decision = config.decisions[req.decision];
       model = decision.model;
-      const log = (fields: {
-        readonly answer: string | null;
-        readonly confidence: number | null;
-        readonly outcome: JudgeOutcome;
-        readonly latencyMs: number | null;
-        readonly costUsd: number | null;
-        readonly model?: string;
-      }): JudgeCallId =>
+      const log = (fields: LoggedAnswer & { readonly latencyMs: number | null }): JudgeCallId =>
         deps.state.write((ctx) =>
           insertJudgeCall(ctx, {
             decision: req.decision,
-            model: fields.model ?? model,
+            model,
             state: req.state,
-            question:
-              req.criteria === undefined
-                ? req.question
-                : `${req.question}\nOptions:${optionsText(req)}`,
+            question: req.question,
             answer: fields.answer,
             confidence: fields.confidence,
+            probabilities: fields.probabilities ?? null,
             outcome: fields.outcome,
             latencyMs: fields.latencyMs,
             costUsd: fields.costUsd,
@@ -279,7 +387,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         reason: keyof typeof FALLBACK_OUTCOME,
         detail: string,
         latencyMs: number | null,
-      ): JudgeAnswer => ({
+      ): Decided<T> => ({
         kind: 'fallback',
         reason,
         detail,
@@ -293,11 +401,11 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       });
 
       if (deps.off) {
-        deps.onCallHealth?.({ kind: 'off' });
+        health({ kind: 'off' });
         return fallback('off', 'Started with TENDB_JUDGE=off', null);
       }
       // One decision switched off says nothing of the judge's health: only the whole judge off does.
-      if (!config.enabled) deps.onCallHealth?.({ kind: 'off' });
+      if (!config.enabled) health({ kind: 'off' });
       if (!config.enabled || !decision.enabled)
         return fallback('off', 'Switched off in Settings', null);
 
@@ -305,14 +413,19 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         model,
         config.accountId,
         req,
-        deps.timeoutMs ?? JUDGE_TIMEOUT_MS,
+        req.timeoutMs ?? deps.timeoutMs ?? JUDGE_TIMEOUT_MS,
+        send,
       );
       // A decision's own calls say whether the account is answering; a test of another model does not.
-      if (config.accountId !== null && !(result.kind === 'fallback' && result.reason === 'stopped'))
+      if (
+        req.secondary !== true &&
+        config.accountId !== null &&
+        !(result.kind === 'fallback' && result.reason === 'stopped')
+      )
         lastFallbacks.set(config.accountId, result.kind === 'fallback' ? result.detail : null);
       if (result.kind === 'fallback') {
         if (result.reason !== 'stopped')
-          deps.onCallHealth?.({
+          health({
             kind: 'failed',
             reason: result.reason,
             detail: result.detail,
@@ -321,23 +434,16 @@ export function createJudge(deps: JudgeDeps): JudgeService {
           });
         return fallback(result.reason, result.detail, result.latencyMs);
       }
-      deps.onCallHealth?.({ kind: 'answered' });
-      const { answer } = result;
-      // Provisional: the decision that acts on the answer replaces it with `acted` or `below_floor`.
+      health({ kind: 'answered' });
       const callId = log({
-        answer: answer.choice,
-        confidence: answer.confidence,
-        outcome: answer.confidence >= decision.floor ? 'acted' : 'below_floor',
+        ...logged(result.answer, decision.floor),
         latencyMs: result.latencyMs,
-        costUsd: answer.costUsd,
       });
       return {
         kind: 'answered',
-        choice: answer.choice,
-        confidence: answer.confidence,
-        model: answer.model,
+        answer: result.answer,
+        floor: decision.floor,
         latencyMs: result.latencyMs,
-        costUsd: answer.costUsd,
         callId,
       };
     } catch (error) {
@@ -351,6 +457,74 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         callId: mintId('JudgeCall'),
       };
     }
+  }
+
+  async function choose(req: JudgeRequest): Promise<JudgeAnswer> {
+    const decided = await decide(
+      {
+        ...req,
+        question:
+          req.criteria === undefined
+            ? req.question
+            : `${req.question}\nOptions:${optionsText(req)}`,
+      },
+      (transport) => askModel({ ...transport, ...choiceOf(req) }),
+      // Provisional: the decision that acts on the answer replaces it with `acted` or `below_floor`.
+      (answer, floor) => ({
+        answer: answer.choice,
+        confidence: answer.confidence,
+        outcome: answer.confidence >= floor ? 'acted' : 'below_floor',
+        costUsd: answer.costUsd,
+      }),
+    );
+    if (decided.kind === 'fallback') return decided;
+    const { answer } = decided;
+    return {
+      kind: 'answered',
+      choice: answer.choice,
+      confidence: answer.confidence,
+      model: answer.model,
+      latencyMs: decided.latencyMs,
+      costUsd: answer.costUsd,
+      callId: decided.callId,
+    };
+  }
+
+  async function assess(req: AssessRequest): Promise<AssessAnswer> {
+    const decided = await decide(
+      {
+        ...req,
+        state: JSON.stringify(req.state, null, 2),
+        question: Object.entries(req.questions)
+          .map(([id, q]) => `${id}: ${q.instructions}`)
+          .join('\n'),
+      },
+      (transport) =>
+        askModelNouls({
+          ...transport,
+          api:
+            transport.credential.kind === AccountKind.OpenRouter
+              ? noulApi(transport.model, deps.decisionModelIds)
+              : transport.api,
+          state: req.state,
+          questions: req.questions,
+        }),
+      (answer, floor) => ({
+        ...req.read(answer.probabilities, floor),
+        probabilities: answer.probabilities,
+        costUsd: answer.costUsd,
+      }),
+    );
+    if (decided.kind === 'fallback') return decided;
+    return {
+      kind: 'answered',
+      probabilities: decided.answer.probabilities,
+      floor: decided.floor,
+      model: decided.answer.model,
+      latencyMs: decided.latencyMs,
+      costUsd: decided.answer.costUsd,
+      callId: decided.callId,
+    };
   }
 
   async function ready(decision: JudgeDecision): Promise<boolean> {
@@ -380,8 +554,15 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     const result = await attempt(
       model ?? getJudgeConfig(deps.state.db).decisions[JudgeDecision.ShapeRecord].model,
       account,
-      { state: TEST_STATE, question: TEST_QUESTION, options: TEST_OPTIONS },
+      {},
       TEST_TIMEOUT_MS,
+      (transport) =>
+        askModel({
+          ...transport,
+          state: TEST_STATE,
+          question: TEST_QUESTION,
+          options: TEST_OPTIONS,
+        }),
     );
     if (result.kind === 'fallback')
       return {
@@ -399,6 +580,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
   return {
     off: deps.off,
     choose,
+    assess,
     ready,
     test,
     lastFallback: (account) => lastFallbacks.get(account) ?? null,

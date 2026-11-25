@@ -1,4 +1,5 @@
 import {
+  JudgeDecision,
   AccountKind,
   BedrockSettings,
   ConflictError,
@@ -29,6 +30,7 @@ import {
 } from '@10db/db';
 import {
   defaultDecisionModel,
+  defaultModelFor,
   offeredDecisionModels,
   accountDecisionModelList,
 } from './decision-offer';
@@ -121,15 +123,17 @@ function switchedTo(
     account,
     Object.values(named).flatMap((c) => (c?.model === undefined ? [] : [c.model])),
   );
-  const fallback = defaultDecisionModel(db, account);
-  if (fallback === null)
+  if (defaultDecisionModel(db, account) === null)
     throw new InvalidError(
       `"${account.label}" has no model list yet; check the account in Settings › Accounts first`,
     );
   const decisions = Object.fromEntries(
     Object.keys(config.decisions).map((decision) => [
       decision,
-      { ...named[decision], model: named[decision]?.model ?? fallback },
+      {
+        ...named[decision],
+        model: named[decision]?.model ?? defaultModelFor(db, account, decision) ?? undefined,
+      },
     ]),
   );
   return JudgeConfigPatch.parse({ ...patch, decisions });
@@ -269,15 +273,44 @@ export function createJudgeServices(deps: {
         throw new ConflictError(
           'This daemon was started with TENDB_JUDGE=off, so it cannot test a model',
         );
+      // On a switch, a second opinion the builder didn't name that fails its test falls back to the first judge's
+      // default rather than refusing the switch: the builder never picked it.
+      const second = next.decisions?.[JudgeDecision.CrossesLimitSecond]?.model;
+      const secondNamed = patch.decisions?.[JudgeDecision.CrossesLimitSecond]?.model !== undefined;
       for (const model of models) {
         const result =
           accountId === null
             ? { ok: false as const, error: NO_DECISION_CREDENTIAL }
             : await keychainConflict(() => deps.judge.test(accountId, model));
-        if (!result.ok)
-          throw new InvalidError(
-            `${model} didn't answer a test decision, so it wasn't saved: ${result.error}`,
-          );
+        if (result.ok) continue;
+        const firstDefault = next.decisions?.[JudgeDecision.CrossesLimit]?.model;
+        // Another decision the switch saves on the same model keeps the refusal: it would be saved on a model that failed.
+        const otherUses = Object.entries(next.decisions ?? {}).some(
+          ([decision, c]) => decision !== JudgeDecision.CrossesLimitSecond && c?.model === model,
+        );
+        if (
+          switching &&
+          !secondNamed &&
+          !otherUses &&
+          model === second &&
+          firstDefault !== undefined &&
+          firstDefault !== model
+        ) {
+          next = {
+            ...next,
+            decisions: {
+              ...next.decisions,
+              [JudgeDecision.CrossesLimitSecond]: {
+                ...next.decisions?.[JudgeDecision.CrossesLimitSecond],
+                model: firstDefault,
+              },
+            },
+          };
+          continue;
+        }
+        throw new InvalidError(
+          `${model} didn't answer a test decision, so it wasn't saved: ${result.error}`,
+        );
       }
       deps.state.write((ctx) => patchJudgeConfig(ctx, next));
       if (accountId !== config.accountId) deps.onAccountChanged?.();

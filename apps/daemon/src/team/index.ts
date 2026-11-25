@@ -31,3 +31,4 @@ export {
   sendBackTarget,
   type StepEntry,
 } from './step-flow';
+export { builderNotesOf } from './builder-notes';

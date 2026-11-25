@@ -4,11 +4,15 @@ import { z } from 'zod';
 import {
   ERROR_DETAIL_CHARS,
   messagesBody,
+  messagesNoulsBody,
+  parseMessagesNouls,
   parseMessagesResponse,
   scrubbed,
+  type MessagesNouls,
   type MessagesQuestion,
 } from './anthropic';
 import { JudgeCallError } from './credential';
+import type { NoulAnswers } from './noul-questions';
 import type { ModelAnswer } from './openrouter';
 
 const BEDROCK_VERSION = 'bedrock-2023-05-31';
@@ -28,7 +32,9 @@ const profileClients = new Map<string, BedrockRuntimeClient>();
 /** The SDK's error carries the HTTP status here; it is read at the boundary, not cast. */
 const SdkErrorMetadata = z.object({ $metadata: z.object({ httpStatusCode: z.number() }) });
 
-export interface BedrockQuestion extends MessagesQuestion {
+/** What a Bedrock call carries, whatever it asks. */
+export interface BedrockCall {
+  readonly model: string;
   readonly region: string;
   /** Null: sign with `bearerToken`. */
   readonly awsProfile: string | null;
@@ -38,12 +44,25 @@ export interface BedrockQuestion extends MessagesQuestion {
   readonly signal: AbortSignal;
 }
 
+export type BedrockQuestion = MessagesQuestion & BedrockCall;
+export type BedrockNouls = MessagesNouls & BedrockCall;
+
+/** One InvokeModel call with Anthropic's choice body (see `invokeBedrock`). */
+export async function askBedrock(q: BedrockQuestion): Promise<ModelAnswer> {
+  return parseMessagesResponse('Bedrock', q, await invokeBedrock(q, messagesBody(q)));
+}
+
+/** Yes/no questions in one InvokeModel call (see `invokeBedrock`). */
+export async function askBedrockNouls(q: BedrockNouls): Promise<NoulAnswers> {
+  return parseMessagesNouls('Bedrock', q, await invokeBedrock(q, messagesNoulsBody(q)));
+}
+
 /**
  * One InvokeModel call on Bedrock's runtime with Anthropic's body. A profile signs with SigV4 through the shared AWS
  * config; a bearer token (a Bedrock API key) goes to the client's `token` option with the bearer scheme preferred,
  * the same path `AWS_BEARER_TOKEN_BEDROCK` takes. Throws JudgeCallError, or what the SDK throws.
  */
-export async function askBedrock(q: BedrockQuestion): Promise<ModelAnswer> {
+async function invokeBedrock(q: BedrockCall, body: Record<string, unknown>): Promise<unknown> {
   const auth =
     q.awsProfile !== null
       ? { credentials: fromIni({ profile: q.awsProfile }) }
@@ -64,17 +83,15 @@ export async function askBedrock(q: BedrockQuestion): Promise<ModelAnswer> {
         modelId: q.model,
         contentType: 'application/json',
         accept: 'application/json',
-        body: JSON.stringify({ anthropic_version: BEDROCK_VERSION, ...messagesBody(q) }),
+        body: JSON.stringify({ anthropic_version: BEDROCK_VERSION, ...body }),
       }),
       { abortSignal: q.signal },
     );
-    let value: unknown;
     try {
-      value = JSON.parse(new TextDecoder().decode(result.body));
+      return JSON.parse(new TextDecoder().decode(result.body));
     } catch {
       throw new JudgeCallError('Bedrock did not answer with JSON');
     }
-    return parseMessagesResponse('Bedrock', q, value);
   } catch (error) {
     if (error instanceof JudgeCallError || q.signal.aborted) throw error;
     const status = SdkErrorMetadata.safeParse(error).data?.$metadata.httpStatusCode;

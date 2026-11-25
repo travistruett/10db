@@ -327,6 +327,7 @@ import {
 import {
   actionEntering,
   advanceSteps,
+  builderNotesOf,
   countSendBack,
   failStep,
   moveAfter,
@@ -2878,6 +2879,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       ...open,
       compose: open.docker ? await readComposeServices(opts.git, project) : null,
     };
+    // Read as each session starts: a Retry or Send back note reaches every judge of the next session's calls.
+    const builderNotes = builderNotesOf(db, id);
     const policy = buildTrustPolicy({
       surface: pass === null ? TrustSurface.Lane : TrustSurface.Pass,
       projectName: project.name,
@@ -2892,6 +2895,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       switches,
       approved,
       grants: projectGrantLines(db, project.id),
+      builderNotes,
       yourMcpServers: Object.keys(yourServers),
       claudeConnectors,
       devAccess,
@@ -2910,7 +2914,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         ? 'default'
         : lanePermissionMode;
     // What the checkout held before this session, so 10db's judge tells it from what the session makes.
-    const preExisting =
+    const preExistingRead =
       laneSession === null || !tendbReady
         ? []
         : await opts.git
@@ -2918,10 +2922,11 @@ export function createRunner(opts: RunnerOptions): Runner {
             .catch((error: unknown) => {
               opts.logger.warn(
                 { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
-                "the checkout's untracked files could not be read; 10db's judge reads none",
+                "the checkout's untracked files could not be read; 10db's judge is told so",
               );
-              return [];
+              return null;
             });
+    const preExisting = preExistingRead ?? [];
     const startFloor =
       laneSession === null
         ? null
@@ -3438,6 +3443,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 tmpDir: laneSession.tmpDir,
                 secretFiles: laneSession.fileAccess.secretFiles ?? [],
                 preExisting,
+                ...(preExistingRead === null ? { preExistingUnknown: true } : {}),
                 setupReads: laneSession.fileAccess.setupReads ?? [],
               },
               policy,
@@ -3447,6 +3453,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                   ...projectGrantLines(opts.state.db, project.id),
                 ]),
               ],
+              builderNotes,
               judgeNow: (req) => judgeForCall(sessionJudge, req.reportedMode ?? null, tendbReady),
               coveredByBuilderRule: (req) =>
                 matchesAllowedTool(req.toolName, req.input, builderRules, checkout),

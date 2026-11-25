@@ -38,6 +38,8 @@ export interface FastPathContext {
    * them (an ignored folder once, ending in `/`).
    */
   readonly preExisting: readonly string[];
+  /** Set when the checkout's untracked entries could not be read, so `preExisting` is empty for want of a list. */
+  readonly preExistingUnknown?: boolean;
   /**
    * The folders the session's profile opens of its setup (`FileAccessContext.setupReads`): its setup dir and the
    * builder's kept skill and plugin folders, less any that is or lies in a secret. Only a Markdown file there, a

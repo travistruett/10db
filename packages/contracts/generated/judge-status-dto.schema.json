@@ -293,6 +293,33 @@
                 "floor"
               ]
             },
+            "crosses_limit_second": {
+              "default": {
+                "enabled": true,
+                "model": "anthropic/claude-haiku-5.5",
+                "floor": 0.7
+              },
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "floor": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "enabled",
+                "model",
+                "floor"
+              ]
+            },
             "test_value": {
               "default": {
                 "enabled": true,

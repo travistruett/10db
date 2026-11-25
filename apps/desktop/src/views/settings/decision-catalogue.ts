@@ -74,13 +74,25 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   [JudgeDecision.CrossesLimit]: {
     group: DecisionGroup.Trust,
     label: 'Limits',
-    asks: 'Check calls against the four limits. On accounts without Claude Code’s auto mode (Codex, an older model), 10db’s judge decides whether each call crosses a limit.',
+    asks: 'Check calls against the four limits. On accounts without Claude Code’s auto mode (Codex, an older model), 10db’s judge asks one yes/no question per limit of each call.',
     onAnswer:
-      'Allow: the call runs. A limit, or unsure: a card asks you, or a lane nobody watches skips the call.',
-    whenUnsure: 'Treated as a limit.',
+      'Every limit unlikely: the call runs. A limit likely: a card asks you, or a lane nobody watches skips the call. In between: the second opinion decides.',
+    whenUnsure:
+      'Sure enough is read both ways: a limit at or above it stops the call, and every limit below one minus it lets the call run.',
     fellBack: "10db's rules decided",
     mode: DecisionMode.Acting,
-    note: 'Each call it checks goes to the model through OpenRouter with the project’s limits and up to 12 000 characters of its input, and is kept in the recent decisions for 30 days. Off, 10db’s rules decide and say so.',
+    note: 'Each call it checks goes to the model with the session’s setting, what you allowed or wrote on the run, and up to 12 000 characters of its input, and is kept in the recent decisions for 30 days. Off, 10db’s rules decide and say so.',
+  },
+  [JudgeDecision.CrossesLimitSecond]: {
+    group: DecisionGroup.Trust,
+    label: 'Second Opinion on Limits',
+    asks: 'For a call the Limits judge left between yes and no: the same questions, asked of a stronger model.',
+    onAnswer:
+      'Every limit unlikely: the call runs. A limit likely: a card asks you, or a lane skips the call.',
+    whenUnsure: 'Still in between: the call is stopped as a limit with no name.',
+    fellBack: 'the call was stopped',
+    mode: DecisionMode.Acting,
+    note: 'It waits up to 20 seconds. Off, a call the Limits judge leaves in between is stopped, as before.',
   },
   [JudgeDecision.TaskRigor]: {
     group: DecisionGroup.Sizing,

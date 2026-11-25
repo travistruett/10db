@@ -48,6 +48,7 @@ import {
   deleteAppSetting,
   getWorkstreamRow,
   deleteJudgeCallsBefore,
+  findAccountRow,
   lanesByAccount,
   getAccountRow,
   listModelProfiles,
@@ -113,6 +114,7 @@ import {
 } from '../judge';
 import { createBenchmarkServices } from './benchmark-services';
 import { createSizingService } from '../sizing';
+import { settleSecondOpinionModel } from './decision-offer';
 import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
 import {
   createLinearImport,
@@ -953,6 +955,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   giveOpenRouterHomes(state, join(opts.dataDir, 'accounts'));
   // The key an older version kept in its own item is not used any more; an OpenRouter account holds its own.
   if (opts.judgeOff !== true) removeLegacyOpenRouterKey(judgeKeychain, logger);
+  // A config saved before the second opinion on limits existed reads with OpenRouter's model for it.
+  if (opts.judgeOff !== true)
+    state.write((ctx) => {
+      const decisions = getJudgeConfig(ctx.tx).accountId;
+      settleSecondOpinionModel(
+        ctx,
+        decisions === null ? undefined : findAccountRow(ctx.tx, decisions),
+      );
+    });
   openRouterSync?.start();
   state.write((ctx) =>
     deleteJudgeCallsBefore(

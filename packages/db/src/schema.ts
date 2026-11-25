@@ -1561,6 +1561,10 @@ export const judgeCalls = sqliteTable(
     question: text('question').notNull(),
     answer: text('answer'),
     confidence: real('confidence'),
+    /** Each yes/no question's probability of yes, by question id; null for a choice. */
+    probabilities: text('probabilities', { mode: 'json' }).$type<
+      Readonly<Record<string, number>>
+    >(),
     outcome: text('outcome').$type<JudgeOutcome>().notNull(),
     latencyMs: integer('latency_ms'),
     costUsd: real('cost_usd'),

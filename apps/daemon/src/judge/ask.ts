@@ -1,9 +1,11 @@
 import { AccountKind } from '@10db/contracts';
-import { askAnthropic } from './anthropic';
-import { askBedrock, type BedrockClientFactory } from './bedrock';
+import { askAnthropic, askAnthropicNouls } from './anthropic';
+import { askBedrock, askBedrockNouls, type BedrockClientFactory } from './bedrock';
 import type { JudgeCredential } from './credential';
+import type { NoulAnswers, NoulsAsked } from './noul-questions';
 import {
   askOpenRouter,
+  askOpenRouterNouls,
   type ModelAnswer,
   type ModelApi,
   type OpenRouterQuestion,
@@ -38,6 +40,36 @@ export function askModel(q: ModelQuestion): Promise<ModelAnswer> {
       });
     case AccountKind.Bedrock:
       return askBedrock({
+        ...rest,
+        ...(price === undefined ? {} : { price }),
+        ...(bedrockClient === undefined ? {} : { client: bedrockClient }),
+        region: credential.region,
+        awsProfile: credential.awsProfile,
+        bearerToken: credential.bearerToken,
+      });
+  }
+}
+
+/** Yes/no questions on the API the credential's account speaks, with the transport fields `askModel` takes. */
+export interface ModelNouls
+  extends
+    NoulsAsked,
+    Pick<ModelQuestion, 'credential' | 'api' | 'price' | 'bedrockClient' | 'fetch' | 'signal'> {}
+
+/** One call asking yes/no questions. Throws a typed JudgeCallError or OpenRouterError, or what the transport throws. */
+export function askModelNouls(q: ModelNouls): Promise<NoulAnswers> {
+  const { credential, api, price, bedrockClient, ...rest } = q;
+  switch (credential.kind) {
+    case AccountKind.OpenRouter:
+      return askOpenRouterNouls({ ...rest, api, key: credential.key });
+    case AccountKind.AnthropicApiKey:
+      return askAnthropicNouls({
+        ...rest,
+        ...(price === undefined ? {} : { price }),
+        key: credential.key,
+      });
+    case AccountKind.Bedrock:
+      return askBedrockNouls({
         ...rest,
         ...(price === undefined ? {} : { price }),
         ...(bedrockClient === undefined ? {} : { client: bedrockClient }),
