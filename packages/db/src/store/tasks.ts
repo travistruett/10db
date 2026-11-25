@@ -30,6 +30,7 @@ import {
   WorkstreamState,
   type GoalId,
   type KindDto,
+  type BatchId,
   type BoardColumnId,
   type CiStopped,
   type PassId,
@@ -726,7 +727,8 @@ export function setTaskStatus(ctx: WriteContext, id: TaskId, status: TaskStatus)
 /**
  * Whether every dependency is done: finished, or an open task whose failed run shipped anyway and
  * whose pull request has merged. A finished task whose work is in a separate copy that has not landed
- * is not done: its dependents wait for the landing.
+ * is not done, unless the dependent's own latest run is in that same copy: the dependency's work is
+ * already on its branch and the copy lands them together.
  */
 export function dependenciesDone(db: DbReader, taskId: TaskId): boolean {
   const deps = db
@@ -735,13 +737,28 @@ export function dependenciesDone(db: DbReader, taskId: TaskId): boolean {
     .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.dependsOnId))
     .where(eq(schema.taskDeps.taskId, taskId))
     .all();
+  if (deps.length === 0) return true;
+  const ownBatchId =
+    db
+      .select({ batchId: schema.workstreams.batchId })
+      .from(schema.workstreams)
+      .where(eq(schema.workstreams.taskId, taskId))
+      .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+      .limit(1)
+      .get()?.batchId ?? null;
   return deps.every(({ id, status }) =>
-    status === TaskStatus.Done ? !waitsForLanding(db, id) : mergedDespiteFailure(db, id),
+    status === TaskStatus.Done
+      ? !waitsForLanding(db, id, ownBatchId)
+      : mergedDespiteFailure(db, id),
   );
 }
 
-/** Whether the task's latest run is in a separate copy whose batch has not shipped. */
-function waitsForLanding(db: DbReader, taskId: TaskId): boolean {
+/**
+ * Whether the task's latest run is in a separate copy whose batch has not shipped, unless that copy
+ * is the dependent's own (`dependentBatchId`): the dependency's work is already on its branch and the
+ * copy lands them together.
+ */
+function waitsForLanding(db: DbReader, taskId: TaskId, dependentBatchId: BatchId | null): boolean {
   const latest = db
     .select({ batchId: schema.workstreams.batchId, batchState: schema.batches.state })
     .from(schema.workstreams)
@@ -752,6 +769,7 @@ function waitsForLanding(db: DbReader, taskId: TaskId): boolean {
     .get();
   return (
     latest?.batchId != null &&
+    latest.batchId !== dependentBatchId &&
     latest.batchState !== BatchState.Shipped &&
     isLocalCopy(db, latest.batchId)
   );
