@@ -244,11 +244,11 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(
     page.getByRole('table', { name: 'Completed runs' }).getByRole('button', { name: TASK }),
   ).toBeVisible();
-  // Factory shows each project as a row with its bar and one line; the finished task is under the project's
-  // merged today, and with no goals anywhere the project holds no goal list.
+  // Factory shows each project as a row with its bar, whose verdict is the row's name; the finished task is
+  // under the project's merged today, and with no goals anywhere the project holds no goal list.
   await open(page, 'Factory');
   const projectRow = page.getByRole('button', { name: /^e2e / });
-  await expect(projectRow).toContainText('1 merged today');
+  await expect(projectRow).toHaveAccessibleName(/1 merged today/);
   if ((await projectRow.getAttribute('aria-expanded')) !== 'true') await projectRow.click();
   const project = page.getByRole('region', { name: /^e2e / });
   await expect(project.getByRole('group', { name: /goals$/ })).toHaveCount(0);
