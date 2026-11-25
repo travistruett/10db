@@ -1355,14 +1355,23 @@ export const prCards = {
     };
   },
   /** A check passed on a rerun of the commit it failed on: nothing to fix in a pull request, but a test to fix. */
-  flakyCheck: (name: string, occurrences: number): Card => ({
+  /** `seen`: the head and pull request it last flaked on. */
+  flakyCheck: (
+    name: string,
+    occurrences: number,
+    seen?: { readonly head: string; readonly prUrl: string | null },
+  ): Card => ({
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
     title: `Flaky check: ${name} (${String(occurrences)} time${occurrences === 1 ? '' : 's'})`,
-    body: `The required check ${name} failed and then passed on a rerun of the same commit, ${String(occurrences)} time${occurrences === 1 ? '' : 's'} so far. A check that passes on a rerun hides a test that needs a code fix (never a retry in the test); find which test it is in the failed run's log.`,
+    body: `The required check ${name} failed and then passed on a rerun of the same commit, ${String(occurrences)} time${occurrences === 1 ? '' : 's'} so far. A check that passes on a rerun hides a test that needs a code fix (never a retry in the test); find which test it is in the failed run's log.${seen === undefined ? '' : `\n\nLast seen on ${seen.head} of ${seen.prUrl ?? 'its pull request'}.`}`,
     foldKey: prCardKey.flakyCheck(name),
-    detail: { check: name, occurrences },
+    detail: {
+      check: name,
+      occurrences,
+      ...(seen === undefined ? {} : { head: seen.head, prUrl: seen.prUrl }),
+    },
   }),
   /** The base branch fails checks that pull requests fail too: one card however many wait on it. */
   baseRed: (input: {
