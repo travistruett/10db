@@ -152,6 +152,7 @@ import type { SizingService } from '../sizing';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
 import {
   createFailedRestarts,
+  runSkippedCalls,
   workstreamChanges,
   type BatchStarter,
   type PassOpened,
@@ -350,6 +351,8 @@ export function createServices(deps: {
   /** The port the API listens on; null until it does. */
   readonly daemonPort: () => number | null;
   readonly starter: BatchStarter;
+  /** Starts each Run These Now follow-up its source now lets start. */
+  readonly startFollowUps: () => void;
   /** The sizing in flight, which a start from the Board, the API or the builder's MCP waits for. */
   readonly sizing: Pick<SizingService, 'settled'>;
   /** How long that wait is at most. */
@@ -825,6 +828,12 @@ export function createServices(deps: {
     listWorkstreamSkips(id) {
       getWorkstream(db, id);
       return listSkipsForWorkstream(db, id);
+    },
+    runSkippedCalls(id) {
+      getWorkstream(db, id);
+      const followUp = deps.state.write((ctx) => runSkippedCalls(ctx, id));
+      deps.startFollowUps();
+      return followUp;
     },
     retryWorkstream(id, note) {
       const ws = deps.starter.retry(id, note);

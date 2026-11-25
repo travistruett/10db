@@ -398,7 +398,9 @@ export function createPrWatch(input: {
     )
       heldBack.delete(batch.id);
     if (next.state === PullRequestState.Open && next.checks === PullRequestChecks.Failing) {
-      if (cardChecks.length > 0) {
+      // A stopped fix's card names the failing checks and stands in for this one.
+      const stopped = getBatch(write.tx, batch.id).ciStopped !== null;
+      if (!stopped && cardChecks.length > 0) {
         const card = prCards.checksFailed(batch, cardChecks);
         // A failing spell raises its card once. A spell the base alone held back raises it when
         // the pull request's own check fails; a card dismissed since stays dismissed.
@@ -407,7 +409,7 @@ export function createPrWatch(input: {
         // An open card names the checks that fail now and links their latest runs, however they
         // changed since it was raised.
         rewriteIn(write, batch.projectId, card);
-      } else heldBack.add(batch.id);
+      } else if (!stopped) heldBack.add(batch.id);
     } else if (
       // An unknown read keeps the last known checks, so it says nothing new about them.
       next.state !== PullRequestState.Unknown &&

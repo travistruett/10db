@@ -220,6 +220,8 @@ describe('takeOut', () => {
         heard.set(root, onChange);
         return { close: () => undefined };
       },
+      // A stray cards at its first batch, so a write after the put-back shows at once.
+      strayWaitMs: 0,
     });
     const strays = () =>
       listInbox(db, { states: [InboxState.Open] }).filter((i) =>
