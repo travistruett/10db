@@ -25,6 +25,8 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
 - Mantine components and theme tokens only; see `DESIGN.md`. A side panel that slides over the content is
   `SurfaceDrawer` (`src/shell/surface-drawer.tsx`), never Mantine's `Drawer`. Use the Mantine MCP server for
   component docs (pinned to our Mantine version).
+- A Mantine `Modal`'s close button is named by the theme (`components.Modal` in `src/theme.ts`), so axe's button-name
+  rule passes every modal's; a modal passes `closeButtonProps` only to name it differently.
 - Dark by default; every view must work in light mode too.
 - The React Compiler is on; don't hand-write `useMemo`/`useCallback` for render performance.
 - Tests: few (dec_01a1efc1). The core e2e flows (`e2e/AGENTS.md`) are the check. A view or component no flow

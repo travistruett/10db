@@ -1,6 +1,7 @@
 import {
   createTheme,
   defaultVariantColorsResolver,
+  Modal,
   MultiSelect,
   NavLink,
   SegmentedControl,
@@ -127,6 +128,8 @@ export const theme = createTheme({
   },
   fontFamilyMonospace: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   components: {
+    // Mantine gives a modal's close button no accessible name; naming it here names every modal's, present and future.
+    Modal: Modal.extend({ defaultProps: { closeButtonProps: { 'aria-label': 'Close' } } }),
     Select: Select.extend({ defaultProps: { checkIconPosition: 'right' } }),
     MultiSelect: MultiSelect.extend({ defaultProps: { checkIconPosition: 'right' } }),
     Switch: Switch.extend({ defaultProps: { withThumbIndicator: false } }),

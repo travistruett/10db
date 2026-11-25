@@ -154,13 +154,16 @@ test('a fence highlights under a script policy with no eval or WebAssembly, and 
     [],
   );
 
-  // The link asks first, naming the address's host, and Cancel leaves the page where it was.
+  // The link asks first, naming the address's host, and Cancel leaves the page where it was. The dialog's enter
+  // animation moves Cancel for its first frames, so Cancel is clicked once the dialog is fully opaque. Its title
+  // blanks as it closes, so the wait is for the dialog to unmount, not for a locator by its name to stop matching.
   const before = page.url();
   await page.getByRole('link', { name: 'docs' }).click();
   const confirm = page.getByRole('dialog', { name: 'Open example.com in your browser?' });
   await expect(confirm).toBeVisible();
+  await expect(confirm).toHaveCSS('opacity', '1');
   await confirm.getByRole('button', { name: 'Cancel' }).click();
-  await expect(confirm).toBeHidden();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(page.url()).toBe(before);
   expect(page.context().pages()).toHaveLength(1);
 });
