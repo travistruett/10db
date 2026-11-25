@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn parses_caps_and_drops_by_rule() {
-        let long_note = format!(r#"{{"note": "{}"}}"#, "x".repeat(2_001));
+        let long_note = pick_json(&format!(r#"{{"note": "{}"}}"#, "x".repeat(2_001)));
         let cases: &[(&str, String, Result<(), PickRefusal>)] = &[
             ("a plain pick", pick_json("{}"), Ok(())),
             (

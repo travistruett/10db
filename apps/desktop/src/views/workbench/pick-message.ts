@@ -1,5 +1,6 @@
 import {
   PAGE_PICKS_MAX,
+  TASK_MESSAGE_PICTURES_MAX,
   PickKind,
   type PagePick,
   type PickArrived,
@@ -99,8 +100,16 @@ function elementLines(element: PickElement): string[] {
  * as it is.
  */
 export function picksMessage(draft: Draft): Draft {
-  const picks = draft.picks ?? [];
-  if (picks.length === 0) return draft;
+  const all = draft.picks ?? [];
+  if (all.length === 0) return draft;
+  // Pictures pasted after the picks arrived could leave no room for every crop: the last crops go.
+  let room = Math.max(0, TASK_MESSAGE_PICTURES_MAX - draft.pictures.length);
+  const picks = all.map((p) => {
+    if (p.crop === null) return p;
+    if (room === 0) return { ...p, crop: null };
+    room -= 1;
+    return p;
+  });
   const first = picks[0]?.pick;
   const head =
     first === undefined

@@ -36,6 +36,8 @@ export function usePreviewPicks(): void {
         sessionDrafts.set(key, withoutPick(sessionDrafts.get(key), pickId));
       },
       showComposer: ({ taskId }) => {
+        // The window comes back to what it last focused, often the composer's input: let go of it first.
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
         askPicksFocus(taskId);
         void go.current({ to: '/workbench', search: { task: taskId } });
         void bringWindowForward();

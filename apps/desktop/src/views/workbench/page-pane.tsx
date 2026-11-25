@@ -33,6 +33,7 @@ import { RetryTurn } from './retry-turn';
 import { PageThread } from './page-thread';
 import { SignOffLine } from './sign-off-line';
 import { TurnLogDrawer } from './turn-log-drawer';
+import { focusIsPreviews } from './preview-focus';
 import { useWorkbenchKeys } from './use-workbench-keys';
 import { WorkbenchKey } from './workbench-keys';
 
@@ -144,6 +145,8 @@ export function PagePane(props: PagePaneProps) {
     focusAsked.current = composerFocus;
     const moved = shownBefore.current !== page.taskId;
     shownBefore.current = page.taskId;
+    // A page the Preview asked for takes the cursor on its picks, never in its input.
+    if (focusIsPreviews()) return;
     if (asked || (moved && !document.activeElement?.closest(`[${QUEUE_ATTRIBUTE}]`)))
       input.current?.focus();
   }, [page.taskId, composerFocus]);

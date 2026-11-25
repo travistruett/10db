@@ -7,7 +7,14 @@ import type { PickKind as Kind, PickRect } from '@10db/contracts';
 import { getElementAtPoint, isElementGrabbable } from 'react-grab/primitives';
 import { channel, refusalOf } from './channel';
 import { createOverlay, place, type Overlay } from './overlay';
-import { boxOf, describe, elementTitle, type PagePickInput, type PickElementInput } from './pick';
+import {
+  boxOf,
+  describe,
+  describeNow,
+  elementTitle,
+  type PagePickInput,
+  type PickElementInput,
+} from './pick';
 
 export interface PickerConfig {
   readonly repoPath: string;
@@ -193,7 +200,7 @@ export function startPicker(config: PickerConfig): void {
         Promise.race([
           pick.described.get(element) ?? describe(element, config.repoPath),
           sleep(LOOKUP_WAIT_MS),
-        ]).then((described) => described ?? describe(element, config.repoPath)),
+        ]).then((described) => described ?? describeNow(element)),
       ),
     );
     const input: PagePickInput = {
@@ -213,9 +220,16 @@ export function startPicker(config: PickerConfig): void {
       },
       engine: 'WebKit',
     };
+    // Removed while its lookup ran: nothing goes.
+    if (!picks.includes(pick)) return;
     try {
       page = (await channel.add(input)) ?? page;
+      // Removed while the shell took it: its chip goes too.
+      if (!picks.includes(pick)) void channel.remove(pick.id).catch(() => undefined);
     } catch (error) {
+      // A refused pick leaves no badge without a chip.
+      const index = picks.indexOf(pick);
+      if (index >= 0) picks.splice(index, 1);
       say(refusalOf(error));
     }
     render();
@@ -460,6 +474,10 @@ export function startPicker(config: PickerConfig): void {
   };
   window.addEventListener('scroll', redraw, true);
   window.addEventListener('resize', redraw);
+  // ⌥ let go in another window never reaches this one.
+  window.addEventListener('blur', () => {
+    passthrough = false;
+  });
 
   // The shell's calls (Pick on Page spec §5): drop picks the draft sent, removed or refused, and flash one.
   Object.defineProperty(window, '__tendbPicker', {

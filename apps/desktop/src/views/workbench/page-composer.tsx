@@ -7,6 +7,7 @@ import { PAGE_IMAGES } from './page-images';
 import { PickChips } from './pick-chips';
 import { picksMessage, withoutPick } from './pick-message';
 import { pageComposerPhase, pagePhase } from './page-composer-phase';
+import { focusIsPreviews } from './preview-focus';
 import type { PageStatus } from './page-status';
 
 /** What a page's composer asks the daemon to do; each rejects with the daemon's words. */
@@ -71,8 +72,12 @@ export function PageComposer({
     firstMessage,
   });
   const picksHead = useRef<HTMLDivElement>(null);
+  // The Preview's ask: the picks take the cursor, or, with none yet, nothing in the composer holds it.
+  // It runs on a page the ask selected too, which mounts a new composer; an ask long past moves nothing.
   useEffect(() => {
-    if (picksFocus > 0) picksHead.current?.focus();
+    if (picksFocus === 0 || !focusIsPreviews()) return;
+    if (picksHead.current !== null) picksHead.current.focus();
+    else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   }, [picksFocus]);
   // A pick sent leaves the Preview too; one whose send failed comes back into the draft with its badge.
   const settle = async (sent: Draft, go: (message: Draft) => Promise<void>) => {

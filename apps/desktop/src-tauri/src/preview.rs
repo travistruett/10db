@@ -26,6 +26,8 @@ use crate::snapshot;
 const MAIN: &str = "main";
 const LABEL_PREFIX: &str = "preview-";
 const PAGE_LABEL_MAX: usize = 120;
+/// The largest crop sent, under what the UI parses (8 MiB of base64).
+const CROP_MAX_BYTES: usize = 6 * 1024 * 1024;
 
 /// How many picks' targets a window remembers; older ones are dropped, and a late update for one is too.
 const TARGETS_MAX: usize = 64;
@@ -395,6 +397,8 @@ pub async fn add_pick(
                 .await
                 .ok()
                 .flatten()
+                // A crop the UI would refuse goes as none, so the pick still arrives.
+                .filter(|png| png.len() <= CROP_MAX_BYTES)
                 .map(|png| base64::engine::general_purpose::STANDARD.encode(png))
         }
         None => None,

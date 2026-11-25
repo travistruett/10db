@@ -71,14 +71,21 @@ export function elementTitle(element: Element): string {
   return text === '' ? tag : `${tag} “${text.length > 28 ? `${text.slice(0, 28)}…` : text}”`;
 }
 
-/** The element as a pick names it, its source looked up from React's own records. */
-export async function describe(element: Element, repoPath: string): Promise<PickElementInput> {
-  const base = {
+/** The element as a pick names it without its source, for a lookup that took too long. */
+export function describeNow(element: Element): PickElementInput {
+  return {
     tag: element.tagName.toLowerCase().slice(0, 40),
     selector: safeSelector(element),
     text: textOf(element),
     rect: rectOf(element),
+    component: null,
+    source: null,
   };
+}
+
+/** The element as a pick names it, its source looked up from React's own records. */
+export async function describe(element: Element, repoPath: string): Promise<PickElementInput> {
+  const base = describeNow(element);
   try {
     const context = await getElementContext(element);
     const file = context.filePath === null ? null : relativeSource(context.filePath, repoPath);
