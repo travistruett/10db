@@ -192,9 +192,9 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await page.keyboard.press('Meta+j');
   await expect(page).toHaveURL(/\/sessions\?chat=/);
   await page.getByRole('navigation').getByRole('link', { name: 'Inbox' }).click();
-  // The list has loaded (a row, or the empty state) before the absence of the chat's card means anything.
+  // The list has loaded once a card that is not the chat's is in it; the chat's card is then left out for real.
   await expect(
-    page.getByRole('listbox').or(page.getByText('Nothing needs you')).first(),
+    page.getByRole('option', { name: /Workstream failed: Retry login once/ }),
   ).toBeVisible();
   await expect(page.getByRole('option', { name: /Remove “Hold the line”\?/ })).toHaveCount(0);
   await page
