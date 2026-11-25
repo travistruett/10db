@@ -26,7 +26,7 @@ import { EmptyState } from '../../shell/empty-state';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useNow } from '../../shell/relative';
 import { useSelectedProject } from '../../shell/selected-project';
-import { canRetryRun } from '../board/task-state';
+import { canCloseRun, canRetryRun } from '../board/task-state';
 import { useNewPlan } from '../sessions/start-fresh-tab';
 import { pageStatus } from '../workbench/page-status';
 import { passTitle } from '../workbench/pass-title';
@@ -113,6 +113,9 @@ export function FactoryOverview({
     const batch = ws.batchId === null ? undefined : batches.get(ws.batchId);
     return task !== undefined && canRetryRun(task, ws, batch);
   };
+  // Close, as the task drawer offers it: the daemon closes a failed run's task and refuses any other.
+  const canClose = (ws: WorkstreamDto): boolean =>
+    canCloseRun(ws, ws.batchId === null ? undefined : batches.get(ws.batchId));
   const open = (ws: WorkstreamDto): void => {
     select(ws.projectId);
     void navigate({ to: '/board', search: { task: ws.taskId } });
@@ -172,7 +175,7 @@ export function FactoryOverview({
 
   return (
     <Container size={ContentWidth.Page} w="100%">
-      <Stack gap={26}>
+      <Stack gap={32}>
         <GlanceTiles
           figures={{
             needsYou: needsYou.length + waitingPasses.length,
@@ -197,6 +200,7 @@ export function FactoryOverview({
           now={now}
           nameOf={nameOf}
           canRetry={canRetry}
+          canClose={canClose}
           onOpen={open}
           onOpenInbox={openInbox}
           onOpenPass={openPass}
@@ -217,6 +221,8 @@ export function FactoryOverview({
           goalOf={new Map([...tasks.values()].map((t) => [t.id, t.goalId ?? null]))}
           linkedGoalId={linkedGoalId}
           now={now}
+          canRetry={canRetry}
+          canClose={canClose}
           onOpen={open}
           onOpenPass={openPass}
         />

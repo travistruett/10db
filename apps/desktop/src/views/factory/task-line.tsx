@@ -1,9 +1,10 @@
 import { WorkstreamState, type WorkstreamDto } from '@10db/contracts';
-import { Box, UnstyledButton } from '@mantine/core';
+import { Box, Text, UnstyledButton } from '@mantine/core';
 import type { ReactNode } from 'react';
 import classes from './factory-overview.module.css';
 import { StepProgress } from './stacked-bar';
 import { StatusDot } from './status-dot';
+import { STEP_LABEL } from './task-rows';
 
 const S = WorkstreamState;
 
@@ -41,12 +42,19 @@ export function doing(ws: WorkstreamDto): string {
   }
 }
 
-export const LineTone = { You: 'you', Failed: 'failed', Plain: 'plain' } as const;
+/** A failed line's quiet detail: the step it stopped at. Its dot's hover card says the rest. */
+export function failedAt(run: WorkstreamDto): string {
+  const step = run.steps[run.stepIndex];
+  return step === undefined ? 'Failed' : `Failed at ${STEP_LABEL[step.role]}`;
+}
+
+export const LineTone = { You: 'you', Plain: 'plain' } as const;
 export type LineTone = (typeof LineTone)[keyof typeof LineTone];
 
 /**
- * One task inside a project: its mark, title, step pips while it runs, what it is doing and when. The whole
- * line opens the task; an action (Retry) sits beside it as its own button.
+ * One task inside a project: its mark, title, what it is doing (a running run's step segments, step and
+ * model) and when. The line opens the task; the mark sits outside that button, so a failure's hover card is
+ * its own target, and an action sits beside it as its own button.
  */
 export function TaskLine({
   mark,
@@ -54,42 +62,39 @@ export function TaskLine({
   run,
   detail,
   tone = LineTone.Plain,
-  detailTitle,
   when,
   action,
   onOpen,
 }: {
   readonly mark: ReactNode;
   readonly title: string;
-  /** Shows step pips when the run is under way. */
+  /** Shows the step segments when the run is under way. */
   readonly run?: WorkstreamDto | undefined;
   readonly detail: string;
   readonly tone?: LineTone;
-  /** The detail's tooltip, such as a failure's raw reason. */
-  readonly detailTitle?: string | undefined;
   readonly when: string;
   readonly action?: ReactNode;
   readonly onOpen: () => void;
 }) {
-  const showPips =
+  const running =
     run !== undefined &&
     (run.state === S.Running ||
       run.state === S.Starting ||
       run.state === S.Verifying ||
-      run.state === S.HandingOff);
+      run.state === S.HandingOff) &&
+    run.steps[run.stepIndex] !== undefined;
   return (
     <div className={classes['line']}>
+      <span className={classes['lineMark']}>{mark}</span>
       <UnstyledButton className={classes['lineOpen']} onClick={onOpen}>
-        <span className={classes['lineMark']}>{mark}</span>
         <span className={classes['clip']}>{title}</span>
-        <span>{showPips ? <StepProgress run={run} /> : null}</span>
-        <span
-          className={`${classes['lineDetail'] ?? ''} ${classes['clip'] ?? ''}`}
-          data-tone={tone}
-          title={detailTitle}
-        >
-          {detail}
-        </span>
+        {running ? (
+          <StepProgress run={run} />
+        ) : (
+          <Text component="span" size="xs" c={tone === LineTone.You ? 'yellow' : 'dimmed'} truncate>
+            {detail}
+          </Text>
+        )}
         <span className={classes['when']}>{when}</span>
       </UnstyledButton>
       <span className={classes['lineAction']}>{action}</span>

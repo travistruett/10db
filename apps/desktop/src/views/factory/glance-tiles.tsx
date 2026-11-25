@@ -31,9 +31,15 @@ function Tile({
   readonly label: string;
 }) {
   return (
-    <Paper radius="md" px={14} py={12} bg="var(--tendb-color-panel)">
+    <Paper radius="md" px={16} py={14} bg="var(--tendb-color-panel)">
       <Group gap={8} align="baseline">
-        <Text fz={24} fw={600} lh={1} c="bright" style={{ fontVariantNumeric: 'tabular-nums' }}>
+        <Text
+          fz={24}
+          fw={600}
+          lh={1}
+          c={n === 0 ? 'dimmed' : 'bright'}
+          style={{ fontVariantNumeric: 'tabular-nums' }}
+        >
           {n}
         </Text>
         {of === undefined ? null : (
@@ -53,7 +59,7 @@ function Tile({
 /** Factory's five figures at a glance: what needs the builder, what broke, what runs, what waits to merge, what merged. */
 export function GlanceTiles({ figures: f }: { readonly figures: GlanceFigures }) {
   return (
-    <SimpleGrid component="section" aria-label="At a glance" cols={5} spacing={10}>
+    <SimpleGrid component="section" aria-label="At a glance" cols={5} spacing={12}>
       <Tile
         n={f.needsYou}
         mark={<WaitRing />}

@@ -12,12 +12,12 @@
   color: var(--mantine-color-dimmed);
 }
 
-/* A task line inside a project: mark, title, step progress, what it is doing, when, and an action slot. */
+/* A task line inside a project: mark, then a button over title, what it is doing and when, then an action slot. */
 .line {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 34px;
+  gap: 10px;
+  height: 40px;
   padding-inline: 8px;
   border-radius: var(--mantine-radius-md);
 }
@@ -31,9 +31,9 @@
   min-width: 0;
   align-self: stretch;
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) 80px 220px 56px;
+  grid-template-columns: minmax(0, 1fr) 340px 56px;
   align-items: center;
-  column-gap: 10px;
+  column-gap: 16px;
   font-size: var(--mantine-font-size-sm);
   border-radius: var(--mantine-radius-sm);
 }
@@ -44,27 +44,17 @@
 }
 
 .lineMark {
+  flex: none;
+  width: 16px;
   display: inline-flex;
   justify-content: center;
 }
 
-.lineDetail {
-  font-size: var(--mantine-font-size-xs);
-  color: var(--mantine-color-dimmed);
-}
-
-.lineDetail[data-tone='you'] {
-  color: var(--mantine-color-yellow-filled);
-}
-
-.lineDetail[data-tone='failed'] {
-  color: var(--mantine-color-red-filled);
-}
-
 .lineAction {
   flex: none;
-  width: 52px;
+  min-width: 52px;
   display: flex;
+  gap: 6px;
   justify-content: flex-end;
 }
 
@@ -84,4 +74,22 @@
 .projectCard[data-active] {
   border: 0;
   background: var(--tendb-color-card);
+}
+
+.projectCard + .projectCard {
+  margin-top: var(--mantine-spacing-lg);
+}
+
+/* A project's header and its open area take a step more room than Mantine's default. */
+.projectControl {
+  padding-inline-end: var(--mantine-spacing-lg);
+}
+
+.projectLabel {
+  padding-block: var(--mantine-spacing-md);
+}
+
+.projectContent {
+  padding: var(--mantine-spacing-lg);
+  padding-top: var(--mantine-spacing-xs);
 }

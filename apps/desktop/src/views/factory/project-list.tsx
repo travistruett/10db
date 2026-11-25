@@ -11,7 +11,6 @@ import { Accordion, Box, Collapse, Group, Stack, Text, Title, UnstyledButton } f
 import { IconChevronDown, IconChevronRight, IconTools } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
 import { ProjectTile } from '../../shell/project-tile';
-import { failureLine } from '../board/task-state';
 import { useSelectedProject } from '../../shell/selected-project';
 import {
   barCounts,
@@ -26,7 +25,8 @@ import { GoalList } from './goal-list';
 import { LiveGroup, lastMoment } from './live-groups';
 import { shortAgo } from './short-ago';
 import { BarLegend, StackedBar } from './stacked-bar';
-import { doing, LineTone, RunMark, TaskLine } from './task-line';
+import { doing, failedAt, LineTone, RunMark, TaskLine } from './task-line';
+import { FailureDot } from './failure-card';
 import { STATE_COLORS } from './workstream-state';
 
 /** A goal in one of these opens its project's row, as a run that needs the builder or runs would. */
@@ -58,6 +58,10 @@ export interface ProjectListProps {
   readonly goalOf: ReadonlyMap<TaskId, GoalId | null>;
   readonly linkedGoalId: GoalId | undefined;
   readonly now: number;
+  /** Whether the daemon takes a retry of this failed run. */
+  readonly canRetry: (ws: WorkstreamDto) => boolean;
+  /** Whether the daemon closes this failed run's task. */
+  readonly canClose: (ws: WorkstreamDto) => boolean;
   readonly onOpen: (ws: WorkstreamDto) => void;
   readonly onOpenPass: (projectId: ProjectId) => void;
 }
@@ -79,6 +83,7 @@ function Fold({
   return (
     <>
       <div className={classes['line']}>
+        <span className={classes['lineMark']}>{mark}</span>
         <UnstyledButton
           className={classes['lineOpen']}
           aria-expanded={open}
@@ -86,12 +91,10 @@ function Fold({
             setOpen(!open);
           }}
         >
-          <span className={classes['lineMark']}>{mark}</span>
           <span className={classes['clip']}>{label}</span>
-          <span />
-          <span className={`${classes['lineDetail'] ?? ''} ${classes['clip'] ?? ''}`}>
+          <Text component="span" size="xs" c="dimmed" truncate>
             {detail}
-          </span>
+          </Text>
           <span className={classes['when']}>
             <Chevron size={14} stroke={1.5} aria-hidden />
           </span>
@@ -110,39 +113,47 @@ function Work({
   rows,
   passes,
   now,
+  canRetry,
+  canClose,
   onOpen,
   onOpenPass,
 }: {
   readonly rows: readonly LiveRow[];
   readonly passes: readonly BusyPass[];
   readonly now: number;
+  readonly canRetry: (ws: WorkstreamDto) => boolean;
+  readonly canClose: (ws: WorkstreamDto) => boolean;
   readonly onOpen: (ws: WorkstreamDto) => void;
   readonly onOpenPass: (projectId: ProjectId) => void;
 }) {
   const of = (group: LiveGroup): WorkstreamDto[] =>
     rows.filter((r) => r.group === group).map((r) => r.run);
   const line = (run: WorkstreamDto, group: LiveGroup) => {
-    const tone =
-      group === LiveGroup.NeedsYou
-        ? LineTone.You
-        : group === LiveGroup.Failed
-          ? LineTone.Failed
-          : LineTone.Plain;
+    const failed = group === LiveGroup.Failed;
     return (
       <TaskLine
         key={run.id}
-        // A finished run whose pull request is open is in review: blue, never done's green.
-        mark={<RunMark color={group === LiveGroup.InReview ? 'blue' : STATE_COLORS[run.state]} />}
+        mark={
+          failed ? (
+            <FailureDot
+              run={run}
+              canRetry={canRetry(run)}
+              canClose={canClose(run)}
+              onOpen={() => {
+                onOpen(run);
+              }}
+            />
+          ) : (
+            // A finished run whose pull request is open is in review: blue, never done's green.
+            <RunMark color={group === LiveGroup.InReview ? 'blue' : STATE_COLORS[run.state]} />
+          )
+        }
         title={run.taskTitle}
         run={run}
         detail={
-          group === LiveGroup.InReview
-            ? 'Pull request open'
-            : group === LiveGroup.Failed
-              ? failureLine(run, false)
-              : doing(run)
+          group === LiveGroup.InReview ? 'Pull request open' : failed ? failedAt(run) : doing(run)
         }
-        tone={tone}
+        tone={group === LiveGroup.NeedsYou ? LineTone.You : LineTone.Plain}
         when={shortAgo(lastMoment(run), now)}
         onOpen={() => {
           onOpen(run);
@@ -238,7 +249,7 @@ function ProjectItem({
           <GoalList project={project} list={goals} linkedGoalId={props.linkedGoalId} />
         ) : null}
         {hasGoals && loose.length + passes.length > 0 ? (
-          <Text size="xs" fw={600} c="dimmed" pt={10} pb={4}>
+          <Text size="xs" fw={600} c="dimmed" pt={16} pb={6}>
             Not in a goal
           </Text>
         ) : null}
@@ -246,6 +257,8 @@ function ProjectItem({
           rows={loose}
           passes={passes}
           now={props.now}
+          canRetry={props.canRetry}
+          canClose={props.canClose}
           onOpen={props.onOpen}
           onOpenPass={props.onOpenPass}
         />
@@ -298,7 +311,7 @@ export function ProjectList(props: ProjectListProps) {
     )
     .map((e) => e.project.id);
   return (
-    <Stack component="section" aria-labelledby="factory-projects" gap={8}>
+    <Stack component="section" aria-labelledby="factory-projects" gap={12}>
       <Group justify="space-between" align="baseline">
         <Title id="factory-projects" order={2} fz={14} fw={600} c="bright">
           Projects
@@ -313,7 +326,13 @@ export function ProjectList(props: ProjectListProps) {
         keepMounted={false}
         // Folded points right and open points down, as the goal rows inside do.
         chevron={<IconChevronRight size={16} stroke={1.5} />}
-        classNames={{ chevron: classes['chevron'], item: classes['projectCard'] }}
+        classNames={{
+          chevron: classes['chevron'],
+          item: classes['projectCard'],
+          control: classes['projectControl'],
+          label: classes['projectLabel'],
+          content: classes['projectContent'],
+        }}
       >
         {ranked.map((entry) => (
           <ProjectItem key={entry.project.id} entry={entry} props={props} />
