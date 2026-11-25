@@ -1,5 +1,5 @@
 import type { StepRole } from '@10db/contracts';
-import { Badge, Group, Progress, Text, Tooltip, type MantineColor } from '@mantine/core';
+import { Badge, Group, Progress, Stack, Text, Tooltip, type MantineColor } from '@mantine/core';
 import { BAR_ORDER, BarPart, type BarCounts } from './factory-summary';
 import { STEP_LABEL } from './task-rows';
 
@@ -23,30 +23,47 @@ const PART_COLORS: Readonly<Record<BarPart, MantineColor>> = {
 };
 
 /**
- * A bar split by where work stands, one section per state. Decorative: the line beside it says the same
- * counts in words, and each section's tooltip names its part.
+ * A bar split by where work stands, one section per state. Decorative: the words beside it say the same
+ * counts. Each section's tooltip names its part, unless the bar sits in a hover card's target that lists
+ * every part (`tips` off).
  */
 export function StackedBar({
   counts,
   size = 'md',
   labels = BAR_LABELS,
+  tips = true,
 }: {
   readonly counts: BarCounts;
   readonly size?: 'sm' | 'md';
   readonly labels?: Readonly<Record<BarPart, string>>;
+  readonly tips?: boolean;
 }) {
   const total = BAR_ORDER.reduce((n, part) => n + counts[part], 0);
   return (
-    <Progress.Root size={6} w={size === 'sm' ? 140 : '100%'} style={{ flex: 'none' }} aria-hidden>
-      {BAR_ORDER.filter((part) => counts[part] > 0).map((part) => (
-        <Tooltip key={part} label={`${labels[part]}: ${String(counts[part])}`}>
+    <Progress.Root
+      size={6}
+      w="100%"
+      maw={size === 'sm' ? 140 : undefined}
+      style={{ flex: 'none' }}
+      aria-hidden
+    >
+      {BAR_ORDER.filter((part) => counts[part] > 0).map((part) => {
+        const section = (
           <Progress.Section
+            key={part}
             value={(counts[part] / total) * 100}
             color={PART_COLORS[part]}
             striped={part === BarPart.InReview}
           />
-        </Tooltip>
-      ))}
+        );
+        return tips ? (
+          <Tooltip key={part} label={`${labels[part]}: ${String(counts[part])}`}>
+            {section}
+          </Tooltip>
+        ) : (
+          section
+        );
+      })}
     </Progress.Root>
   );
 }
@@ -66,19 +83,31 @@ export function BarSwatch({ part }: { readonly part: BarPart }) {
   );
 }
 
-/** The key under the Projects heading: each part's swatch and name. */
-export function BarLegend() {
+/** What a project's bar is made of: its verdict on top, then every part's swatch, name and count. */
+export function BarBreakdown({
+  counts,
+  verdict,
+}: {
+  readonly counts: BarCounts;
+  readonly verdict: string;
+}) {
   return (
-    <Group gap={12} aria-hidden>
+    <Stack gap={6}>
+      <Text size="sm" fw={600} c="bright">
+        {verdict}
+      </Text>
       {BAR_ORDER.map((part) => (
-        <Group key={part} gap={5} wrap="nowrap">
+        <Group key={part} gap={8} wrap="nowrap">
           <BarSwatch part={part} />
-          <Text fz={11} c="dimmed">
+          <Text size="xs" style={{ flex: 1 }}>
             {BAR_LABELS[part]}
+          </Text>
+          <Text size="xs" c={counts[part] === 0 ? 'dimmed' : 'bright'} ff="monospace">
+            {counts[part]}
           </Text>
         </Group>
       ))}
-    </Group>
+    </Stack>
   );
 }
 
@@ -105,11 +134,11 @@ export function StepProgress({
   };
 }) {
   return (
-    <Group grow gap={4} w={120} wrap="nowrap" aria-hidden>
+    <Group grow gap={4} w="100%" maw={120} wrap="nowrap" aria-hidden>
       {run.steps.map((step, i) => (
         <Tooltip key={`${String(i)}-${step.role}`} label={STEP_LABEL[step.role]}>
           <Progress
-            size="xs"
+            size="sm"
             color="blue"
             value={i <= run.stepIndex ? 100 : 0}
             striped={i === run.stepIndex}
