@@ -52,6 +52,7 @@ import {
   NO_DECISION_CREDENTIAL,
   type JudgeCredential,
   type JudgeService,
+  JudgeTestKind,
 } from '../judge';
 
 /** The judge's side of the HTTP API: its config, the account it runs on, the account test and the call log. */
@@ -66,7 +67,6 @@ export type JudgeApiServices = Pick<
   | 'listDecisionModels'
 >;
 
-/** The models a patch sets that differ from the ones saved, each once. */
 /** The AWS profile a Bedrock account signs with, or null when it has none or is another kind. */
 function awsProfileOf(account: AccountRow): string | null {
   if (account.kind !== AccountKind.Bedrock) return null;
@@ -74,28 +74,48 @@ function awsProfileOf(account: AccountRow): string | null {
   return settings.success ? settings.data.awsProfile : null;
 }
 
-function newModels(config: JudgeConfig, patch: JudgeConfigPatch): string[] {
-  const models = new Set<string>();
-  for (const [decision, now] of Object.entries(config.decisions)) {
-    const changes: Record<string, { readonly model?: string | undefined } | undefined> =
-      patch.decisions ?? {};
-    const model = changes[decision]?.model;
-    if (model !== undefined && model !== now.model) models.add(model);
-  }
-  return [...models];
+/** A model a patch leaves a decision on, and how that decision asks it. */
+interface ModelTest {
+  readonly model: string;
+  readonly kind: JudgeTestKind;
 }
 
-/** Every distinct model a patch leaves the decisions on, once. */
-function decisionModels(config: JudgeConfig, patch: JudgeConfigPatch): string[] {
+/** The limits decisions ask yes/no questions; every other decision asks a choice. */
+function testKind(decision: string): JudgeTestKind {
+  return decision === JudgeDecision.CrossesLimit || decision === JudgeDecision.CrossesLimitSecond
+    ? JudgeTestKind.Nouls
+    : JudgeTestKind.Choice;
+}
+
+function distinctTests(tests: readonly ModelTest[]): ModelTest[] {
+  const seen = new Map(tests.map((t) => [`${t.kind}\u0000${t.model}`, t]));
+  return [...seen.values()];
+}
+
+/** The models a patch sets that differ from the ones saved, each once per way it is asked. */
+function newModels(config: JudgeConfig, patch: JudgeConfigPatch): ModelTest[] {
   const changes: Record<string, { readonly model?: string | undefined } | undefined> =
     patch.decisions ?? {};
-  return [
-    ...new Set(
-      Object.entries(config.decisions).map(
-        ([decision, now]) => changes[decision]?.model ?? now.model,
-      ),
-    ),
-  ];
+  return distinctTests(
+    Object.entries(config.decisions).flatMap(([decision, now]) => {
+      const model = changes[decision]?.model;
+      return model !== undefined && model !== now.model
+        ? [{ model, kind: testKind(decision) }]
+        : [];
+    }),
+  );
+}
+
+/** Every distinct model a patch leaves the decisions on, once per way it is asked. */
+function decisionModels(config: JudgeConfig, patch: JudgeConfigPatch): ModelTest[] {
+  const changes: Record<string, { readonly model?: string | undefined } | undefined> =
+    patch.decisions ?? {};
+  return distinctTests(
+    Object.entries(config.decisions).map(([decision, now]) => ({
+      model: changes[decision]?.model ?? now.model,
+      kind: testKind(decision),
+    })),
+  );
 }
 
 /** A decision may name only a model the account offers; an OpenRouter account's test decision is its check. */
@@ -267,9 +287,14 @@ export function createJudgeServices(deps: {
         accountId === null ? null : (account ?? findAccountRow(deps.state.db, accountId) ?? null);
       let next: JudgeConfigPatch = patch;
       if (switching) next = switchedTo(deps.state.db, account, config, patch);
-      const models = switching ? decisionModels(config, next) : newModels(config, patch);
-      if (current !== null && !switching) refuseUnoffered(deps.state.db, current, models);
-      if (deps.off && models.length > 0)
+      const tests = switching ? decisionModels(config, next) : newModels(config, patch);
+      if (current !== null && !switching)
+        refuseUnoffered(
+          deps.state.db,
+          current,
+          tests.map((t) => t.model),
+        );
+      if (deps.off && tests.length > 0)
         throw new ConflictError(
           'This daemon was started with TENDB_JUDGE=off, so it cannot test a model',
         );
@@ -277,11 +302,11 @@ export function createJudgeServices(deps: {
       // default rather than refusing the switch: the builder never picked it.
       const second = next.decisions?.[JudgeDecision.CrossesLimitSecond]?.model;
       const secondNamed = patch.decisions?.[JudgeDecision.CrossesLimitSecond]?.model !== undefined;
-      for (const model of models) {
+      for (const { model, kind } of tests) {
         const result =
           accountId === null
             ? { ok: false as const, error: NO_DECISION_CREDENTIAL }
-            : await keychainConflict(() => deps.judge.test(accountId, model));
+            : await keychainConflict(() => deps.judge.test(accountId, model, kind));
         if (result.ok) continue;
         const firstDefault = next.decisions?.[JudgeDecision.CrossesLimit]?.model;
         // Another decision the switch saves on the same model keeps the refusal: it would be saved on a model that failed.
@@ -309,7 +334,9 @@ export function createJudgeServices(deps: {
           continue;
         }
         throw new InvalidError(
-          `${model} didn't answer a test decision, so it wasn't saved: ${result.error}`,
+          kind === JudgeTestKind.Nouls
+            ? `${model} didn't answer a test yes/no question, which the limits decisions ask, so it wasn't saved: ${result.error}`
+            : `${model} didn't answer a test decision, so it wasn't saved: ${result.error}`,
         );
       }
       deps.state.write((ctx) => patchJudgeConfig(ctx, next));

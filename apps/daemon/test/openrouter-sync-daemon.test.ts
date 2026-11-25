@@ -5,6 +5,7 @@ import type { Keychain } from '../src/environment';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
+import { noulAnswer } from './fake-noul-answers';
 import { createMemoryKeychain, tempDir, waitForAsync } from './fixtures';
 
 const KEY = 'sk-or-v1-0123456789abcdef-NEVER-SHOWN';
@@ -35,7 +36,9 @@ const decisionModel = {
   endpoints: ['/api/alpha/decisions'],
 };
 
-function answer(url: string): Response {
+function answer(url: string, body: unknown): Response {
+  const nouls = noulAnswer(url, body);
+  if (nouls !== null) return nouls;
   // The second opinion's model is a chat model on OpenRouter; it answers the test decision there.
   if (url.endsWith('/chat/completions'))
     return Response.json({
@@ -95,7 +98,7 @@ async function start(
     fetch: (input, init) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       requests.push({ url, authorization: new Headers(init?.headers).get('authorization') });
-      return Promise.resolve(answer(url));
+      return Promise.resolve(answer(url, init?.body));
     },
     ...QUIET,
   });

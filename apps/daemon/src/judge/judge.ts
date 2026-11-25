@@ -148,9 +148,9 @@ export interface Judge {
 export interface JudgeService extends Judge {
   /**
    * One tiny call with `account`'s key, to check the key, the connection and that `model` (the review decision's
-   * model when none is given) answers a decision 10db can use. Logs nothing.
+   * model when none is given) answers a decision 10db can use, asked the way `kind` says. Logs nothing.
    */
-  test(account: AccountId, model?: string): Promise<JudgeTestResultDto>;
+  test(account: AccountId, model?: string, kind?: JudgeTestKind): Promise<JudgeTestResultDto>;
   /**
    * Why the account's latest call fell back to rules (a rejected key, an expired profile, a timeout, no credential),
    * or null when its latest call answered or none ran since the daemon started.
@@ -200,6 +200,16 @@ const TEST_STATE =
   'The change renames one local variable in one file; the tests that cover it pass.';
 const TEST_QUESTION = 'Does this change need an independent code review before it ships?';
 const TEST_OPTIONS = ['review', 'skip'] as const;
+const TEST_NOULS = {
+  needs_review: {
+    instructions: TEST_QUESTION,
+    criteria: { true: 'It needs a review first.', false: 'It can ship without one.' },
+  },
+} as const satisfies Record<string, NoulQuestion>;
+
+/** What a model test asks: a choice, as most decisions do, or yes/no questions, as the limits decisions do. */
+export const JudgeTestKind = { Choice: 'choice', Nouls: 'nouls' } as const;
+export type JudgeTestKind = (typeof JudgeTestKind)[keyof typeof JudgeTestKind];
 
 /** What every call carries to its transport, whatever it asks. */
 type Transport = Pick<
@@ -502,10 +512,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       (transport) =>
         askModelNouls({
           ...transport,
-          api:
-            transport.credential.kind === AccountKind.OpenRouter
-              ? noulApi(transport.model, deps.decisionModelIds)
-              : transport.api,
+          api: noulTransportApi(transport),
           state: req.state,
           questions: req.questions,
         }),
@@ -525,6 +532,13 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       costUsd: decided.answer.costUsd,
       callId: decided.callId,
     };
+  }
+
+  /** The API yes/no questions go to on the transport's account: on OpenRouter it may differ from a choice's. */
+  function noulTransportApi(transport: Transport): ModelApi {
+    return transport.credential.kind === AccountKind.OpenRouter
+      ? noulApi(transport.model, deps.decisionModelIds)
+      : transport.api;
   }
 
   async function ready(decision: JudgeDecision): Promise<boolean> {
@@ -549,20 +563,32 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     }
   }
 
-  async function test(account: AccountId, model?: string): Promise<JudgeTestResultDto> {
+  async function test(
+    account: AccountId,
+    model?: string,
+    kind: JudgeTestKind = JudgeTestKind.Choice,
+  ): Promise<JudgeTestResultDto> {
     if (deps.off) return { ok: false, error: 'This daemon was started with TENDB_JUDGE=off' };
+    const send = (transport: Transport): Promise<{ model: string; costUsd: number | null }> =>
+      kind === JudgeTestKind.Nouls
+        ? askModelNouls({
+            ...transport,
+            api: noulTransportApi(transport),
+            state: { change: TEST_STATE },
+            questions: TEST_NOULS,
+          })
+        : askModel({
+            ...transport,
+            state: TEST_STATE,
+            question: TEST_QUESTION,
+            options: TEST_OPTIONS,
+          });
     const result = await attempt(
       model ?? getJudgeConfig(deps.state.db).decisions[JudgeDecision.ShapeRecord].model,
       account,
       {},
       TEST_TIMEOUT_MS,
-      (transport) =>
-        askModel({
-          ...transport,
-          state: TEST_STATE,
-          question: TEST_QUESTION,
-          options: TEST_OPTIONS,
-        }),
+      send,
     );
     if (result.kind === 'fallback')
       return {

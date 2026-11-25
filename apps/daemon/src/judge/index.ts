@@ -7,6 +7,7 @@ export {
   type JudgeAnswer,
   type JudgeRequest,
   type JudgeService,
+  JudgeTestKind,
 } from './judge';
 export { fenced } from './fenced-text';
 export type { NoulQuestion } from './noul-questions';
