@@ -22,8 +22,9 @@ import {
   INSTALL_SUMMARY,
   PNPM_LOCKFILE,
   removeBrokenInstall,
+  ROOT_PACKAGE,
 } from './install-health';
-import { templateKey, type NodeModulesTemplates } from './node-modules-template';
+import { templateKey, templateKeysIn, type NodeModulesTemplates } from './node-modules-template';
 
 export { INSTALL_SUMMARY, PNPM_LOCKFILE };
 
@@ -53,8 +54,15 @@ const quoted = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
  * switched off) or where pnpm writes (`.npmrc` and workspace settings can name a store, a modules
  * directory and a virtual store, so all three are given on the command line).
  */
-export function installCommand(pnpm: string, mode: InstallMode = 'frozen'): string {
+export function installCommand(
+  pnpm: string,
+  mode: InstallMode = 'frozen',
+  packageDir: string = ROOT_PACKAGE,
+): string {
+  // A package below the root installs from its own folder, where its lockfile is.
+  const enter = packageDir === ROOT_PACKAGE ? [] : [`cd ${quoted(packageDir)} &&`];
   return [
+    ...enter,
     // A blocked registry host answers every request with a refusal; the default retries, a minute
     // apart, would keep the cut waiting for minutes before it says so.
     'pnpm_config_fetch_retries=1 pnpm_config_fetch_retry_mintimeout=1000 pnpm_config_fetch_retry_maxtimeout=5000',
@@ -151,6 +159,11 @@ export interface WorktreeDependencies {
      * (`decisions/2026-11-17-a-copys-node-modules-is-cloned-from-a-template-made-once-per-lockfile.md`).
      */
     readonly makeTemplate?: true;
+    /**
+     * The pnpm package to refresh, relative to the worktree: `.` (the default) for a lockfile at its
+     * root, or a folder below it that holds its own, such as `amps/frontend`.
+     */
+    readonly packageDir?: string;
   }): Promise<DependencyRefresh>;
 }
 
@@ -203,13 +216,17 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
     async refresh({
       owner,
       project,
-      path,
+      path: worktree,
       signal,
       seeded = true,
       mode = 'frozen',
       startOver: asked,
       makeTemplate,
+      packageDir = ROOT_PACKAGE,
     }) {
+      // The package's own folder: everything below reads and writes there, while the install's sandbox
+      // is the whole worktree, which holds what the package's lockfile may name beside it.
+      const path = join(worktree, packageDir);
       // Not pnpm's, or (seeded) the main checkout had no install to bring in line.
       if (!existsSync(join(path, PNPM_LOCKFILE))) return { kind: 'skipped' };
       if (seeded && !existsSync(join(path, 'node_modules'))) return { kind: 'skipped' };
@@ -218,9 +235,11 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         deps.dataDir,
         'logs',
         'install',
-        `${owner.kind}-${owner.id}-${String(deps.clock.now().getTime())}.log`,
+        `${owner.kind}-${owner.id}-${String(deps.clock.now().getTime())}${
+          packageDir === ROOT_PACKAGE ? '' : `-${packageDir.replaceAll('/', '_')}`
+        }.log`,
       );
-      const checkouts = [...new Set([...deps.checkouts(), path])];
+      const checkouts = [...new Set([...deps.checkouts(), worktree])];
       const pnpm = await deps.resolvePnpm(env, checkouts);
       if (pnpm === null) {
         const tail =
@@ -272,7 +291,9 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           checkInstall(path).kind === 'whole'
         )
           await templates.capture({ key, path });
-        const inUse = deps.checkouts().flatMap((checkout) => templateKey(checkout, version) ?? []);
+        const inUse = [...deps.checkouts(), worktree].flatMap((checkout) =>
+          templateKeysIn(checkout, version),
+        );
         await templates.sweep(new Set([key, ...inUse]));
         return result;
       };
@@ -333,8 +354,8 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         const attemptLog =
           attempt === 1 ? logPath : logPath.replace(/\.log$/, `-retry${String(attempt - 1)}.log`);
         const result = await deps.gate.run({
-          project: { repoPath: path, sandboxLoopback: project.sandboxLoopback },
-          command: installCommand(pnpm, mode),
+          project: { repoPath: worktree, sandboxLoopback: project.sandboxLoopback },
+          command: installCommand(pnpm, mode, packageDir),
           copyId: owner.kind === 'batch' ? deps.copyIdOf(BatchId.parse(owner.id)) : null,
           logPath: attemptLog,
           timeoutMs: deps.timeoutMs,
