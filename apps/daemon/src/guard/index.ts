@@ -15,7 +15,14 @@ export {
   realPathReadings,
   resolveInRepo,
 } from './paths';
-export { parseShell, splitCommand, stripCommandPrefixes, type ShellSegment } from './shell-words';
+export {
+  commandName,
+  leadingWords,
+  parseShell,
+  splitCommand,
+  stripCommandPrefixes,
+  type ShellSegment,
+} from './shell-words';
 export { READ_COMMANDS, readOnlyShellRefusal } from './read-only';
 export { protectedPaths, type ProtectedPath } from './account-rules';
 export { EQUALS_EXPANSION, plainCommandWords } from './plain-command';

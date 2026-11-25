@@ -619,12 +619,13 @@ export function createPermissionBroker(
     const noted = chatOnce ? undefined : notedIn;
     if (chatOnce) {
       const key = chatCallKey(req.toolName, ask.summary, req.cwd);
-      const seen = chatAllowed.get(key);
       const outside = ctx.sandbox?.unsandboxed;
-      if (outside?.remembers() === false) chatAllowed.clear();
-      // Anything that may have changed since (a change, another command allowed to run outside, a job still
-      // running) makes the same command ask again.
-      const unchanged = seen !== undefined && seen === outside?.changes();
+      const remembers = outside?.remembers() !== false;
+      if (!remembers) chatAllowed.clear();
+      const seen = chatAllowed.get(key);
+      // Anything that may have changed since (a change, another command allowed to run outside, a job started
+      // or still running) makes the same command ask again.
+      const unchanged = remembers && seen !== undefined && seen === outside?.changes();
       const remembered = unchanged && !outside.background();
       const refusal = outsideRefusal();
       if (refusal !== null) return { behavior: 'deny', message: refusal, by: DeniedBy.TenDb };
