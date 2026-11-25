@@ -36,6 +36,9 @@ migration and a write per tick. After a restart the first tick finds every wait 
 wait is skipped by the sweep and its card kept, and the card's own `since` carries the count across the
 restart.
 
+The tests sit on the scheduler's wait recording and on the sweep's rule table (`stalls/rules.test.ts`), the two
+places where a wrong reason or a missed stall would leave work stuck without a word.
+
 A condition card, not a notice, because a stall needs the builder to choose a way out, and only once per stall.
 The left-out kinds (lane, account, the Mac's load, checkout, a pass, parked, a copy being made) each have their
 own card or status line already, or are the builder's own choice.
