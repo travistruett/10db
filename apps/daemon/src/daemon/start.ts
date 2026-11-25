@@ -593,6 +593,8 @@ export interface DaemonOptions {
   readonly aaKey?: () => string | null;
   /** `TENDB_BENCHMARKS=off`: the key is neither read nor written, and the status says off. */
   readonly benchmarksOff?: boolean;
+  /** Sharing finds and runs no Tailscale CLI (`TENDB_TAILSCALE=off`). */
+  readonly tailscaleOff?: boolean;
   readonly fetch?: typeof fetch;
   /** The `fetch` a Plan session's Figma tools post a mock-up with and read assets with; the real one by default. */
   readonly figmaFetch?: typeof fetch;
