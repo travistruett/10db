@@ -8,10 +8,17 @@ import {
   WorkstreamId,
   type AcceptanceCriterionResult,
 } from '@10db/contracts';
-import { createTestStore, getJudgeConfig, openDatabase, patchJudgeConfig } from '@10db/db';
+import {
+  createTestStore,
+  getJudgeConfig,
+  getWorkstreamRow,
+  openDatabase,
+  patchJudgeConfig,
+} from '@10db/db';
 import { z } from 'zod';
 import { checkAcceptance } from '../src/acceptance';
 import { systemClock } from '../src/clock';
+import { diffOfRanges, runCommits } from '../src/delivery';
 import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
 import { createJudge, type Judge, type JudgeCredential } from '../src/judge';
@@ -288,8 +295,26 @@ interface Outcome {
 }
 
 const outcomes: Outcome[] = [];
+
+/** The run's own changes up to the commit the check would have read, or null when its ranges can't be read. */
+async function ownDiff(c: Case): Promise<Awaited<ReturnType<typeof diffOfRanges>> | null> {
+  try {
+    const row = getWorkstreamRow(db, WorkstreamId.parse(c.workstreamId));
+    const { ranges } = await runCommits({ db, git }, row, repo, c.base, c.head);
+    if (ranges.length === 0) return null;
+    return await diffOfRanges(git, repo, ranges, 240_000);
+  } catch {
+    return null;
+  }
+}
+let unreadable = 0;
 for (const c of sample) {
-  const diff = await git.diffSince(repo, c.base, c.head, 240_000);
+  // The run's own ranges, as the runner reads them: main's merges and the builder's commits are left out.
+  const diff = await ownDiff(c);
+  if (diff === null) {
+    unreadable += 1;
+    continue;
+  }
   const read = await checkAcceptance(
     { judge, floors },
     {
@@ -346,6 +371,7 @@ const lines = [
   `Unreviewed runs with an unclear criterion      ${pct(unreviewed.filter((o) => has(o, AcceptanceVerdict.Unclear)).length, unreviewed.length)}`,
   `Unreviewed runs it would send back             ${pct(unreviewed.filter(sendsBack).length, unreviewed.length)}`,
   `Runs it could not read (no answer)             ${String(outcomes.filter((o) => o.results === null).length)}`,
+  `Runs skipped (their own commits can't be read) ${String(unreadable)}`,
   '',
   'Reopened after Done, for a hand label:',
   ...reopenedOut.map((o) => {
