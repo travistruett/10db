@@ -265,7 +265,9 @@ import {
   createPermissionBroker,
   raiseGateHostCards,
   createProjectMcpReader,
+  flagFailedRun,
   flagMcpFailure,
+  withdrawFailedCard,
   type InboxService,
   type WaitObserver,
   BY_ANSWER,
@@ -364,7 +366,6 @@ import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
 import { checkCoverage, coverageNote, type CheckCoverage } from './check-coverage';
 import { planOf, raisePlanApproval, waitsForPlanApproval } from './plan-approval';
-import { flagFailedRun, withdrawFailedCard } from './failed-card';
 import { outstandingFixEvidence } from './fix-evidence';
 import { shipsAtRetryLimit } from './limit-ship';
 import {

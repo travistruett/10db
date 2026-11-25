@@ -18,4 +18,3 @@ export { endTurnSteps, finishEndedTurn, passOfWorkstream, queueUntaken } from '.
 export { raisePassCheck, raiseTurnFailed } from './pass-check';
 export { startTurnChecks, TURN_CHECK_TIMEOUT_MS, withTurnChecks } from './turn-checks';
 export { yieldClaimsWhileWaiting } from './claim-yield';
-export { flagFailedRun } from './failed-card';

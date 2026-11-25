@@ -40,7 +40,14 @@ function SkipRow({ skip, now }: { readonly skip: SkippedActionDto; readonly now:
  * What the run skipped and the questions it was answered at once. Once the run has ended, Run These Now
  * starts a follow-up that runs, approved, the calls a follow-up can run.
  */
-export function TaskSkips({ workstream }: { readonly workstream: WorkstreamDto | undefined }) {
+export function TaskSkips({
+  workstream,
+  earlier = false,
+}: {
+  readonly workstream: WorkstreamDto | undefined;
+  /** An earlier run of the task than the one the drawer shows: its heading says so. */
+  readonly earlier?: boolean;
+}) {
   const now = useNow();
   const rows = useWorkstreamSkips(workstream?.id).data ?? [];
   const run = useRunSkippedCalls();
@@ -54,7 +61,9 @@ export function TaskSkips({ workstream }: { readonly workstream: WorkstreamDto |
     <Stack gap={4}>
       <Group justify="space-between" wrap="nowrap">
         <Text size="xs" fw={600} c="dimmed" tt="uppercase">
-          Skipped While Nobody Was Watching
+          {earlier
+            ? `Skipped by an earlier run, ${absoluteTime(workstream.createdAt)}`
+            : 'Skipped While Nobody Was Watching'}
         </Text>
         {runnable ? (
           <Button

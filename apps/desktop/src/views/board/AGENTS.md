@@ -13,5 +13,6 @@
 - A task with a Linear link has a **Linear** tab in its drawer (`linear-tab.tsx`, from `GET /tasks/:taskId/linear-posts`, refetched on `linear_post.changed`): the issue's link and the reporter's updates newest first with their state. A follow-up of a linked task (Run these now) shows its source's issue, named as such, with only the updates made for the follow-up itself; the daemon says which issue (`linearLinkOf`) in the same response. The card's Linear id link is laid over the card's bottom, a sibling of its button like the Inbox link, never inside it.
 - The drawer's Skipped While Nobody Was Watching (`task-skips.tsx`) offers Run These Now once the run has ended and
   it skipped a call a follow-up can run approved (`POST /workstreams/:id/skips/run`): a finished task's skip card
-  closes, so the drawer is where those calls are run from. A refusal (a follow-up exists, the run is retried) shows
+  closes, so the drawer is where those calls are run from. Each earlier run of the task that skipped something has a
+  section of its own, newest first, with its own Run These Now, since a folded failed card speaks only for the newest. A refusal (a follow-up exists, the run is retried) shows
   under the heading.

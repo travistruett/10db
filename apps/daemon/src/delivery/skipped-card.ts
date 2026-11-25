@@ -51,7 +51,7 @@ import { sourceStateOf } from './skip-follow-up';
 
 /** The item's detail key: the run it lists. Its `skipIds` are the approvable skips it showed. */
 export const SKIPPED_DETAIL = 'skippedRun';
-/** The detail key set when the item lists config the run wrote, or says it couldn't read which. */
+/** The detail key set when the item lists config the run wrote. */
 const CONFIG_DETAIL = 'listsConfig';
 
 /** The answers the item offers; the card shows them as written. */
@@ -217,7 +217,8 @@ export async function raiseSkippedCard(
       return;
     }
     const task = getTask(ctx.tx, row.taskId);
-    const listsConfig = written === null || written.length > 0;
+    // Config git couldn't list is unknown, not written: such a card still closes with its task.
+    const listsConfig = written !== null && written.length > 0;
     // A finished task's skipped calls are in its drawer, which offers Run These Now; only config it
     // wrote, which waits on the builder's approval, still needs a card.
     if (task.status !== TaskStatus.Open && !listsConfig) {

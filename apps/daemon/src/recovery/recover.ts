@@ -31,7 +31,7 @@ import {
 import { batchCardFields, checkoutOf, runCommits, type DeliveryJobs } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
-import type { InboxService } from '../inbox';
+import { flagFailedRun, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { Clock } from '../clock';
 import {
@@ -39,7 +39,6 @@ import {
   liveCheckCard,
   livePlanCard,
   nextActionAfterCrash,
-  flagFailedRun,
   passOfWorkstream,
   planOf,
   raiseBuilderCheck,

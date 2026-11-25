@@ -43,6 +43,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
+import { withdrawFailedCard } from '../inbox';
 import type { EventBus } from '../events';
 import { foldHandEdits } from './hand-edits';
 import { pageMatcher, passBranch, passKeptRef, readKeptRef, type PassWorkDeps } from './kept-work';
@@ -364,6 +365,12 @@ export function finishSignOff(
     });
   if (path.length > 0) {
     setTaskStatus(ctx, input.taskId, 'done');
+    // The task's card for an earlier run's failure has nothing left to ask.
+    withdrawFailedCard(ctx, {
+      id: input.workstreamId,
+      taskId: input.taskId,
+      projectId: getTask(ctx.tx, input.taskId).projectId,
+    });
     releaseClaims(ctx, input.workstreamId);
     clearLease(ctx, input.workstreamId);
   }
