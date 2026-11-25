@@ -3143,11 +3143,13 @@ export function createRunner(opts: RunnerOptions): Runner {
       action.kind === 'start' &&
       !step.earlier.some((r) => r.verdict === Verdict.Reject)
         ? acceptanceBrief(
-            // Only this implement step's pass counts: an earlier pass's unclear criteria were since changed.
+            // Only this implement step's pass counts: an earlier pass's unclear criteria were since changed. The
+            // pass that sent the work back shares the step's start time, so it is left out by its flag.
             listEvidence(db, id)
               .filter(
                 (e) =>
                   e.kind === EvidenceKind.Acceptance &&
+                  e.detail?.sentBack !== true &&
                   (implementStartedAt === null || e.createdAt >= implementStartedAt),
               )
               .at(-1)?.detail ?? null,
