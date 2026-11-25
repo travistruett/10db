@@ -303,7 +303,7 @@ push_subscriptions id, device_id → devices.id (on delete cascade), endpoint (u
 
 ## 8. Docs and the decision
 
-- A new decision, `docs/architecture/decisions/2026-11-25-a-shared-mac-answers-on-its-tailnet-address.md`, amending
+- A new decision, "A shared Mac answers on its tailnet address", written with slice 1 and amending
   `2026-10-29-dev-ui-over-the-factory.md`: the dev UI's origin stays loopback, and the share listener adds the
   tailnet origin for device clients only. `tests/repo/src/dev-ui-origin.test.ts` keeps checking the dev UI and
   learns the share listener's list.
