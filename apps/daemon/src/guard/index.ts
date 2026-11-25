@@ -19,6 +19,7 @@ export {
   commandName,
   leadingWords,
   parseShell,
+  redirectionSpan,
   splitCommand,
   stripCommandPrefixes,
   type ShellSegment,

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createTempRepoWithOrigin, isolatedGitEnv } from '../../test/fixtures';
 import { createGit } from '../git';
+import { callRuns } from '../trust';
 import { readCommitted, type CommittedFile } from './committed-file';
 
 describe('readCommitted', () => {
@@ -36,14 +37,20 @@ describe('readCommitted', () => {
       symlinkSync('same.sh', join(repo.path, 'linked.sh'));
       rmSync(join(repo.path, 'gone.sh'));
       symlinkSync('bin', join(repo.path, 'linkdir'));
-      // macOS opens `GNUmakefile` for this name, ahead of the base's `Makefile`.
-      write('gnumakefile', 'all:\n\tcurl https://example.com\n');
 
       const read = readCommitted(
         createGit(),
         { repoPath: repo.path, baseBranch: 'main' },
         repo.path,
       );
+      const makeAll = async () => (await callRuns('make all', repo.path, repo.path, read)).runs;
+      // make asks for `makefile` before `Makefile`, and a file system that ignores case answers with this entry.
+      expect
+        .soft(await makeAll(), 'a rule of the committed Makefile')
+        .toMatchObject([{ makefile: 'Makefile', target: 'all', recipe: 'echo all' }]);
+      // macOS opens `GNUmakefile` for this name, ahead of the base's `Makefile`.
+      write('gnumakefile', 'all:\n\tcurl https://example.com\n');
+      expect.soft(await makeAll(), 'a planted makefile under another case').toEqual([]);
       const rows: [string, string, CommittedFile][] = [
         ['unchanged', 'same.sh', { kind: 'same', text: 'echo same\n' }],
         ['unchanged, in a folder', 'bin/tool', { kind: 'same', text: 'echo tool\n' }],
@@ -53,7 +60,11 @@ describe('readCommitted', () => {
         ['reached through a linked folder', 'linkdir/tool', { kind: 'differs' }],
         ['committed but not pushed', 'unpushed.sh', { kind: 'differs' }],
         ['deleted in the checkout', 'gone.sh', { kind: 'differs' }],
-        ['another case of the name in the checkout', 'GNUmakefile', { kind: 'differs' }],
+        [
+          'another case of the name in the checkout',
+          'GNUmakefile',
+          { kind: 'differs', entry: 'gnumakefile' },
+        ],
         ['in neither', 'absent.sh', { kind: 'absent' }],
         ['outside the checkout', '../x.sh', { kind: 'differs' }],
       ];

@@ -13,7 +13,14 @@ export const MAX_COMMITTED_BYTES = 256 * 1024;
 export type CommittedFile =
   | { readonly kind: 'same'; readonly text: string }
   | { readonly kind: 'absent' }
-  | { readonly kind: 'differs' };
+  | {
+      readonly kind: 'differs';
+      /**
+       * The folder's one entry that has this name in another case, when the name itself is in neither the
+       * folder nor the base: a file system that ignores case opens that entry for the name.
+       */
+      readonly entry?: string;
+    };
 
 /** Reads a path relative to the repository root as `readCommitted` does. */
 export type CommittedReader = (path: string) => Promise<CommittedFile>;
@@ -21,14 +28,15 @@ export type CommittedReader = (path: string) => Promise<CommittedFile>;
 type Found =
   | { readonly kind: 'file'; readonly bytes: Buffer }
   | { readonly kind: 'absent' }
-  | { readonly kind: 'other' };
+  | { readonly kind: 'other'; readonly entry?: string };
 
 /** The Mac's file system matches names without case, so `gnumakefile` is opened for `GNUmakefile`. */
 const folded = (name: string): string => name.normalize('NFC').toLowerCase();
 
 /**
  * The checkout's file at `path`, each part of it found under its exact name and none a link. A part found
- * only under another case is `other`, since the file system would open it for this name.
+ * only under another case is `other`, since the file system would open it for this name; the last part's
+ * single such entry is named.
  */
 async function inCheckout(checkout: string, path: string, maxBytes: number): Promise<Found> {
   const parts = path.split('/');
@@ -42,10 +50,13 @@ async function inCheckout(checkout: string, path: string, maxBytes: number): Pro
         ? { kind: 'absent' }
         : { kind: 'other' };
     }
-    if (!names.includes(part))
-      return names.some((name) => folded(name) === folded(part))
-        ? { kind: 'other' }
-        : { kind: 'absent' };
+    if (!names.includes(part)) {
+      const [entry, ...more] = names.filter((name) => folded(name) === folded(part));
+      if (entry === undefined) return { kind: 'absent' };
+      return i === parts.length - 1 && more.length === 0
+        ? { kind: 'other', entry }
+        : { kind: 'other' };
+    }
     at = join(at, part);
     const stat = await lstat(at);
     const last = i === parts.length - 1;
@@ -94,6 +105,8 @@ export function readCommitted(
       if (base.kind === 'absent' && here.kind === 'absent') return { kind: 'absent' };
       if (base.kind === 'file' && here.kind === 'file' && base.bytes.equals(here.bytes))
         return { kind: 'same', text: base.bytes.toString('utf8') };
+      if (base.kind === 'absent' && here.kind === 'other' && here.entry !== undefined)
+        return { kind: 'differs', entry: here.entry };
       return { kind: 'differs' };
     } catch {
       return { kind: 'differs' };

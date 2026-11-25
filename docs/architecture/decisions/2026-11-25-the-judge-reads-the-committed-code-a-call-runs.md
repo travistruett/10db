@@ -24,10 +24,22 @@ shown only when the checkout holds the same bytes at that exact path, as a regul
 A file the lane edited, created, deleted, replaced by a link, or committed but has not pushed is not shown; nor is
 a name the Mac's case-insensitive file system would open for another (`gnumakefile` for `GNUmakefile`). A
 Makefile that is not shown shows nothing of its targets, and a changed `GNUmakefile` hides a `Makefile` behind it.
+One case passes: where the folder's only entry of that name is the exact `Makefile`, make's earlier `makefile`
+opens that entry or nothing, so the reader names the entry and the walk reads `Makefile`. A `MAKEFILE` or
+`gnumakefile` entry, or an exact `makefile` the base lacks, still shows nothing.
 
-Nothing is shown for a segment whose program or arguments the shell fills in, one that starts with `VAR=value`,
+Only the first command of a line is followed, past the `cd`s that certainly move it. A command that runs earlier
+in the same call can write the script or the Makefile (`cp e x.sh && ./x.sh`, `git checkout other -- Makefile &&
+make x`), or change the shell (`export MAKEFLAGS=…`, a function named `make`, `PATH`), after the reader compared
+the bytes, so the committed text would not be what runs. For the same reason a command that holds a substitution
+or a here-document shows nothing: the shell runs those first. A `cd` is followed only as a plain command joined
+to the next by `&&`, `;` or a newline; one in a subshell, a pipeline, the background or a conditional's body, or
+before `||`, stops the walk. The same holds on each recipe line.
+
+Nothing is shown for a command whose program or arguments the shell fills in, one that starts with `VAR=value`,
 `make -f`, any other make option, a make with no target, a dynamic include, an interpreter's option (`-c`, `-m`),
-a `cd` that can't be read (and nothing after it), or a call that runs outside the checkout. The bounds: 3 levels
+a `cd` that can't be read, or a call that runs outside the checkout. A redirection among make's arguments is
+passed over and the targets after it are read. The bounds: 3 levels
 deep, 12 files, a script of at most 16 KiB (whole or not at all), 24,000 characters in all; past a bound the
 judge is told some of what the call runs is left out.
 

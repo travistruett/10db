@@ -1,6 +1,6 @@
 import { posix } from 'node:path';
 import type { CommittedFile, CommittedReader } from '../folders';
-import { leadingWords, parseShell } from '../guard';
+import { leadingWords, parseShell, redirectionSpan } from '../guard';
 import { MAKEFILE_NAMES, parseRules, within, withoutComments, type MakeRule } from './make-rules';
 
 /** What a call runs, as committed on the base: a make target's rule, or a repository script whole. */
@@ -58,7 +58,8 @@ const MAKE_QUIET_OPTIONS: ReadonlySet<string> = new Set([
   '--no-print-directory',
 ]);
 const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
-const REDIRECTION = /^(?:\d+|&)?[<>]/;
+/** The separators after which the next command runs in the folder a `cd` before them moved to, or not at all. */
+const CD_APPLIES: ReadonlySet<string> = new Set(['&&', ';', '\n']);
 const INCLUDE = /^(-?include|sinclude)\s+(.*)$/;
 const VARIABLE_ASSIGNMENT =
   /^(?:(?:export|override)\s+)*([A-Za-z_][A-Za-z0-9_.-]*)\s*(?::::=|::=|:=|\?=|\+=|!=|=)/;
@@ -124,10 +125,12 @@ function recipeCommands(recipe: string): string[] {
  * The committed text of the make targets and repository scripts a shell command runs, read through `read` (the
  * base's text where the checkout holds it unchanged): `make [-C dir] target` and what the target needs, the
  * `$(MAKE)` and `make` calls and scripts on its recipe lines; a script named by a path (`./x`, `.agents/bin/x`, an
- * absolute path in the checkout) or right after an interpreter (`python3 x.py`), shown whole and not followed. A
- * segment whose words the shell fills in, that starts with `VAR=value`, or a make option that may change what it
- * reads, shows nothing; a `cd` that can't be read stops the walk. Bounded by `RUNS_MAX_DEPTH`, `RUNS_MAX_READS`,
- * `RUNS_MAX_SCRIPT_BYTES` and `RUNS_MAX_CHARS`. `cwd` outside `checkout` shows nothing.
+ * absolute path in the checkout) or right after an interpreter (`python3 x.py`), shown whole and not followed.
+ * Only the first command of a line is followed, past the `cd`s that certainly move it: a command before it could
+ * write the file or change the shell, so the text would not be what runs. A command that holds a substitution,
+ * whose words the shell fills in, that starts with `VAR=value`, or a make option that may change what it reads,
+ * shows nothing. Bounded by `RUNS_MAX_DEPTH`, `RUNS_MAX_READS`, `RUNS_MAX_SCRIPT_BYTES` and `RUNS_MAX_CHARS`.
+ * `cwd` outside `checkout` shows nothing.
  */
 export async function callRuns(
   command: string,
@@ -198,11 +201,19 @@ export async function callRuns(
   async function makefileIn(dir: string): Promise<Makefile | null> {
     if (makefiles.has(dir)) return makefiles.get(dir) ?? null;
     let found: Makefile | null = null;
-    for (const name of MAKEFILE_NAMES) {
+    for (const [i, name] of MAKEFILE_NAMES.entries()) {
       const path = within(dir, name);
       if (path === null) break;
       const file = await readOnce(path);
       if (file.kind === 'absent') continue;
+      // Where the folder holds only `Makefile`, make's earlier `makefile` opens that entry or nothing,
+      // by the file system. Either way `Makefile` is what it reads.
+      if (
+        file.kind === 'differs' &&
+        file.entry !== undefined &&
+        MAKEFILE_NAMES.slice(i + 1).some((later) => later === file.entry)
+      )
+        continue;
       if (file.kind === 'same') {
         const text = await withIncludes(dir, file.text, new Set([path]));
         if (text !== null) found = { path, rules: parseRules(text), variables: variablesOf(text) };
@@ -252,7 +263,13 @@ export async function callRuns(
     for (let i = 0; i < args.length; i++) {
       const word = args[i] ?? '';
       if (dynamic[i] === true) return;
-      if (REDIRECTION.test(word)) break;
+      const redirection = redirectionSpan(args, i);
+      if (redirection > 0) {
+        if (redirection === 2 && dynamic[i + 1] === true) return;
+        i += redirection - 1;
+        continue;
+      }
+      if (/[<>]/.test(word)) return;
       let into: string | undefined;
       if (word === '-C' || word === '--directory') {
         i += 1;
@@ -286,41 +303,47 @@ export async function callRuns(
     add({ kind: 'script', path, text: file.text });
   }
 
-  /** Follows one shell command line run in `dir`, `depth` calls below the builder's call. */
+  /**
+   * Follows one shell command line run in `dir`, `depth` calls below the builder's call: the first command of
+   * the line, past the `cd`s that certainly move it. Anything else that runs first may write the file, or change
+   * the shell's functions and environment, so what comes after it is not followed.
+   */
   async function walk(line: string, from: string, depth: number) {
     const parsed = parseShell(line);
     if (!parsed.certain) return;
     let dir = from;
     for (const segment of parsed.segments) {
+      if (segment.words.length === 0 && segment.nested.length === 0) continue;
       const lead = leadingWords(segment.words);
       const offset = segment.words.length - lead.command.length;
       const dynamic = segment.dynamicWords.slice(offset);
       const [program = '', ...args] = lead.command;
+      // A substitution or here-document of the segment runs before its command.
+      if (!segment.wordsCertain || lead.outOfOrder || segment.nested.length > 0) return;
       if (program === 'cd') {
-        const into = args.length === 1 && dynamic[1] !== true ? (args[0] ?? '') : null;
-        const next =
-          !segment.wordsCertain || lead.outOfOrder || into === null || into === '-'
-            ? null
-            : repoPath(dir, into, checkout);
+        // A `cd` moves what follows only as a plain command of this shell that the next one waits on: not in a
+        // conditional's body, a subshell, a pipeline or the background, and not where `||` runs the next.
+        const into =
+          offset === 0 &&
+          args.length === 1 &&
+          dynamic[1] !== true &&
+          CD_APPLIES.has(segment.separator)
+            ? (args[0] ?? '')
+            : null;
+        const next = into === null || into === '-' ? null : repoPath(dir, into, checkout);
         if (next === null) return;
         dir = next;
         continue;
       }
-      if (program === 'pushd' || program === 'popd') return;
-      if (
-        !segment.wordsCertain ||
-        lead.hiddenByRedirection ||
-        program === '' ||
-        dynamic[0] === true ||
-        ASSIGNMENT_WORD.test(program)
-      )
-        continue;
+      if (lead.hiddenByRedirection || dynamic[0] === true) return;
       if (MAKES.has(program)) await make(args, dynamic.slice(1), dir, depth);
       else if (INTERPRETERS.has(program)) {
         const [path] = args;
         if (path !== undefined && !path.startsWith('-') && dynamic[1] !== true)
           await script(repoPath(dir, path, checkout));
-      } else if (program.includes('/')) await script(repoPath(dir, program, checkout));
+      } else if (program.includes('/') && !ASSIGNMENT_WORD.test(program))
+        await script(repoPath(dir, program, checkout));
+      return;
     }
   }
 

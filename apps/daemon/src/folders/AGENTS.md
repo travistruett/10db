@@ -14,6 +14,7 @@
   `refs/remotes/origin/<base>` (`Git.bytesAt`, then `fileAt` to tell a missing path from a link or one over 256
   KiB), given only while the checkout holds the same bytes at that path. The checkout's side finds each part of the
   path by its exact name in its folder's listing and `lstat`s it, so a link anywhere on the path, or a name only
-  another case of which is there (the Mac opens `gnumakefile` for `GNUmakefile`), is `differs`. A path in neither
+  another case of which is there (the Mac opens `gnumakefile` for `GNUmakefile`), is `differs`; when the base lacks the name too, `differs` names the folder's one such entry, which
+  lets `callRuns` pass from make's `makefile` to a committed `Makefile`. A path in neither
   is `absent`; anything else, a git error included, is `differs`. It never throws.
   `dev-services.ts` (`readComposeServices`) reads the compose files at the same base for the judge's environment.
