@@ -13,6 +13,7 @@ export * from './conversations';
 export * from './decisions';
 export * from './events';
 export * from './evidence';
+export * from './gate-history';
 export * from './goal-digest';
 export * from './goal-removal';
 export * from './folder-lanes';

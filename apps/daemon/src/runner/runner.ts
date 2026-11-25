@@ -346,6 +346,7 @@ import {
 } from '../test-value';
 import {
   BlockedRun,
+  gateTimeoutFor,
   type GateRequest,
   type GateResult,
   type GateRunner,
@@ -4696,7 +4697,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       command: gateCommand,
       copyId,
       logPath,
-      timeoutMs: opts.limits.gateTimeoutMs,
+      timeoutMs: gateTimeoutFor(db, project.id, gateCommand, opts.limits.gateTimeoutMs),
       // The project env: the login shell without billing switches, and never the account's credentials.
       env: opts.launcher.projectEnv(),
       // The hosts and read paths the lane's own sandbox opens.
@@ -4753,11 +4754,20 @@ export function createRunner(opts: RunnerOptions): Runner {
     // as a failure: a loaded Mac makes tests time out, and a fix session cannot repair that. A rerun
     // that passes lets the step go on with no attempt used; one that fails is the failure it was.
     let flaky: readonly FlakyTest[] = [];
+    // The full command's own run: a rerun of failing files passes in seconds and says nothing of
+    // how long the command takes, so the event below records this one.
+    const fullRun = result;
     if (result.exitCode !== 0 && !result.timedOut && !result.aborted && !gateAbort.signal.aborted) {
       const outcome = await rerunFlaky({
         checkout,
         output: result.tail,
         run: async (command) => {
+          // The first run's process has ended: a drain must not see a running gate while the
+          // rerun waits behind it.
+          await recording.catch(() => undefined);
+          opts.state.write((ctx) => {
+            patchWorkstream(ctx, id, ctl.fence, { gatePid: null, gatePidStart: null });
+          });
           await opts.hold?.untilClear(gateAbort.signal);
           const again: GateRequest = {
             ...request,
@@ -4805,8 +4815,10 @@ export function createRunner(opts: RunnerOptions): Runner {
           entityId: id,
           data: {
             run,
-            exitCode: result.exitCode,
-            durationMs: result.durationMs,
+            projectId: project.id,
+            command: gateCommand,
+            exitCode: fullRun.exitCode,
+            durationMs: fullRun.durationMs,
             aborted: result.aborted,
           },
         });

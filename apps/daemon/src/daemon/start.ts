@@ -41,6 +41,7 @@ import {
   getChat,
   countBatchesInFlight,
   countWaitingOnCard,
+  listRunningGates,
   isLaneWaitingOnCard,
   getBatch,
   getInboxItem,
@@ -3177,6 +3178,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         rollback: installer.rollback,
         midSession: midSessionCount,
         shapeTurns: () => shape.runningTurns(),
+        gates: () =>
+          listRunningGates(state.db).map((gate) => ({
+            label: `${gate.kind} “${gate.title}”`,
+          })),
         waitLimitMs: () => selfUpdateWaitMinutes(state.db) * 60_000,
         drain: {
           begin: (since) => {
