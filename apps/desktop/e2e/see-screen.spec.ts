@@ -77,9 +77,9 @@ async function ask(page: Page, text: string): Promise<void> {
 const DRAWN_SCREEN_COLOURS = 16;
 
 /**
- * The daemon settles every `see_screen` 20 s after asking (`renderTimeoutMs` in `screens/broker.ts`), with
- * the picture or the reason there is none. The window's own draw budget sits inside those 20 s, and the
- * session replies once it has that answer, so 30 s is the deadline plus room for the reply.
+ * The daemon answers every `see_screen` within 20 s of asking (`renderTimeoutMs` in `screens/broker.ts`),
+ * with the picture or the reason there is none. The window's own draw budget sits inside those 20 s, and
+ * the session replies once it has that answer, so 30 s is the deadline plus room for the reply.
  */
 const CAPTURE_REPLY_WAIT_MS = 30_000;
 
