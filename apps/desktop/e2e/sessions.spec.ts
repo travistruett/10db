@@ -728,12 +728,20 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await page.getByRole('menuitem', { name: 'Bring Back from Figma' }).click();
   await expect(page.getByText('Brought back from Figma.', { exact: true })).toBeVisible();
   await expect(panel.getByRole('button', { name: /^Approve mock-up/ })).toBeVisible();
+  // Only the newest version is drawn with its buttons; the approved first one folds behind Earlier Versions,
+  // which says it is the approved one while folded.
   const versions = panel.locator('iframe[title^="Mockup"]');
-  await expect(versions).toHaveCount(2);
-  await expect(versions.nth(1).contentFrame().getByText('Dense board, from Figma')).toBeVisible();
+  await expect(panel.getByText('Mock-up · Version 2', { exact: true })).toBeVisible();
+  await expect(versions).toHaveCount(1);
+  await expect(versions.nth(0).contentFrame().getByText('Dense board, from Figma')).toBeVisible();
   await expect(
-    versions.nth(1).contentFrame().locator('img[src^="data:image/svg+xml;base64,"]'),
+    versions.nth(0).contentFrame().locator('img[src^="data:image/svg+xml;base64,"]'),
   ).toHaveCount(1);
+  await expect(panel.getByText('Version 1 Approved', { exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: 'Earlier Versions (1)' }).click();
+  await expect(versions).toHaveCount(2);
+  await expect(panel.getByRole('button', { name: /^Figma actions for mock-up/ })).toHaveCount(1);
+  await panel.getByRole('button', { name: 'Hide Earlier Versions' }).click();
 
   // Design Review reads each task that has a mock-up and a page area; with no browser in this daemon the
   // pictures are missing, the review still runs, and its finding lands on the row.
