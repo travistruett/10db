@@ -5,7 +5,6 @@ import {
   ChatModelsDto,
   ChatSearchPage,
   ProjectFileMatchDto,
-  SessionStartDto,
   type ChatId,
   type ChatPatchInput,
   type ConversationId,
@@ -28,13 +27,11 @@ export const chatKeys = {
   models: (projectId: ProjectId) => ['chat-models', projectId] as const,
   files: (conversationId: ConversationId, q: string) =>
     ['conversation-files', conversationId, q] as const,
-  starts: (projectId: ProjectId) => ['session-starts', projectId] as const,
   search: (q: string) => ['chats', 'search', q] as const,
 } as const;
 
 const ChatList = z.array(ChatDto);
 const FileMatches = z.array(ProjectFileMatchDto);
-const SessionStarts = z.array(SessionStartDto);
 
 /** How many sessions Recent lists. */
 export const RECENT_SESSIONS = 6;
@@ -103,23 +100,6 @@ export function useChatModels(projectId: ProjectId | null) {
           ),
     enabled: projectId !== null,
   });
-}
-
-/** The lines a fresh tab offers to start from, built by the daemon from the project's state. */
-export function useSessionStarts(projectId: ProjectId | null) {
-  const { client } = useDaemon();
-  const query = useQuery({
-    queryKey: projectId === null ? ['session-starts', 'none'] : chatKeys.starts(projectId),
-    queryFn: async () =>
-      projectId === null
-        ? []
-        : readJson(
-            await client.projects[':projectId']['session-starts'].$get({ param: { projectId } }),
-            SessionStarts,
-          ),
-    enabled: projectId !== null,
-  });
-  return query.data ?? [];
 }
 
 /** The tracked files `q` matches, for an `@` mention; a plain function, since `Mentions` asks for it. */

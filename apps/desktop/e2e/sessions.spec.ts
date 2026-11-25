@@ -119,7 +119,7 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await expect(page.getByRole('button', { name: /^Project: sessions/ })).toBeVisible();
   await page.keyboard.press('Meta+t');
   await expect(page).toHaveURL(/\/sessions\?fresh=/);
-  await expect(page.getByText(/A chat reads sessions/)).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();
   await scan(page, [1280, 480], 'a fresh tab');
 
   // The first line, then an @ file, then Enter: the session is a row in the panel, named by the agent once
@@ -271,14 +271,11 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await expect(sessionRow(page, /Login fails after sleep/)).toBeVisible();
   await scan(page, [480], 'the conversation at 480');
 
-  // Archive, from the ⋯ menu: the row is gone, and Recent does not list it on a fresh tab.
+  // Archive, from the ⋯ menu: the row is gone.
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole('button', { name: 'More session actions' }).click();
   await page.getByRole('menuitem', { name: 'Archive' }).click();
   await expect(sessionRow(page, /Login fails after sleep/)).toHaveCount(0);
-  await expect(
-    page.getByRole('region', { name: 'Recent' }).getByText('Login fails after sleep'),
-  ).toHaveCount(0);
 
   // The announcer said a reply and a question, and nothing it should not.
   const announced = await page.evaluate(

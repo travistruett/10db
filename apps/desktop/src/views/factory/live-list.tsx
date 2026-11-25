@@ -5,8 +5,8 @@ import {
   type ProjectViewDto,
   type WorkstreamDto,
 } from '@10db/contracts';
-import { Alert, Button, Stack, Text, UnstyledButton } from '@mantine/core';
-import { IconTools } from '@tabler/icons-react';
+import { Alert, Button, Stack, UnstyledButton } from '@mantine/core';
+import { IconBuildingFactory2, IconPlus, IconTools } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useNewPlan } from '../sessions/start-fresh-tab';
@@ -21,6 +21,7 @@ import {
   useWorkstreams,
 } from '../../daemon/queries';
 import { canRetryRun } from '../board/task-state';
+import { EmptyState } from '../../shell/empty-state';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useNow } from '../../shell/relative';
 import { ProjectTile } from '../../shell/project-tile';
@@ -236,15 +237,13 @@ export function LiveList({
   }
   if (groups.length === 0 && passRows.length === 0) {
     return (
-      <Stack align="flex-start" gap="xs" className={classes['empty']}>
-        <Text size="sm">Nothing is running.</Text>
-        <Text size="sm" c="dimmed">
-          Start ready tasks from the Board, or plan new work.
-        </Text>
-        <Button onClick={newPlan} size="xs" mt={4}>
-          New Session
-        </Button>
-      </Stack>
+      <EmptyState
+        icon={IconBuildingFactory2}
+        title="Nothing is running"
+        action={{ label: 'New Session', icon: IconPlus, onClick: newPlan }}
+      >
+        Start a ready task from the Board, or plan new work in a session.
+      </EmptyState>
     );
   }
 

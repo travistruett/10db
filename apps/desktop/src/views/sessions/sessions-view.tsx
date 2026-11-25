@@ -244,13 +244,6 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     closedTabs.take(chat.id);
   };
 
-  /** A recent session opens in this fresh tab's place. */
-  const openRecent = async (tab: FreshTabState, chat: ChatDto): Promise<void> => {
-    await bringBack(chat);
-    dropFresh(tab.id);
-    onSearch({ chat: chat.id }, true);
-  };
-
   /** A session the panel's search found opens where it is, whether it was open, closed or archived. */
   const openFound = async (chat: ChatDto): Promise<void> => {
     await bringBack(chat);
@@ -481,9 +474,6 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
               }}
               onChatMade={(chat, send) => {
                 chatMade(selected.tab, chat, send);
-              }}
-              onOpenRecent={(chat) => {
-                void openRecent(selected.tab, chat);
               }}
             />
           ) : projects.isSuccess ? (
