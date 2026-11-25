@@ -1,8 +1,4 @@
 /* Factory under Live. Mantine draws the parts; this module lays out the task lines' fixed columns. */
-.page {
-  max-width: 1120px;
-}
-
 .clip {
   overflow: hidden;
   white-space: nowrap;
@@ -75,4 +71,17 @@
 /* An open project's chevron turns a quarter, from right to down. */
 .chevron[data-rotate] {
   transform: rotate(90deg);
+}
+
+/* Each project is a card on the Board card's tone, with the same slight depth, apart from the next. */
+.projectCard {
+  border: 0;
+  border-radius: var(--mantine-radius-md);
+  background: var(--tendb-color-card);
+  box-shadow: var(--mantine-shadow-xs);
+}
+
+.projectCard[data-active] {
+  border: 0;
+  background: var(--tendb-color-card);
 }

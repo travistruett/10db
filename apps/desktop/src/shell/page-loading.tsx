@@ -1,5 +1,6 @@
 import { Group, Paper, Skeleton, Stack } from '@mantine/core';
 import { useEffect, useState } from 'react';
+import { CONTENT_WIDTH_PX, ContentWidth } from './content-width';
 
 /** A load faster than this shows nothing, so a quick page never flashes placeholders. */
 export const PAGE_LOADING_DELAY_MS = 300;
@@ -14,7 +15,7 @@ const DEFAULT_ROWS: Readonly<Record<PageLoadingShape, number>> = {
 };
 
 /** Placeholder rows stop here on a wide window, so they read as rows and not as progress bars. */
-const MAX_ROW_WIDTH = 720;
+const MAX_ROW_WIDTH = CONTENT_WIDTH_PX[ContentWidth.Reading];
 
 /** The widths of a transcript's placeholder lines. */
 const LINE_WIDTHS = ['90%', '70%', '80%'] as const;

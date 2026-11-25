@@ -1,8 +1,10 @@
 import {
+  Container,
   createTheme,
   defaultVariantColorsResolver,
   MultiSelect,
   NavLink,
+  rem,
   SegmentedControl,
   Select,
   Switch,
@@ -12,6 +14,7 @@ import {
   type VariantColorsResolver,
 } from '@mantine/core';
 import segmented from './segmented-control.module.css';
+import { CONTENT_WIDTH_PX, ContentWidth, isContentWidth } from './shell/content-width';
 import tooltip from './tooltip.module.css';
 import {
   SelenizedDark,
@@ -127,6 +130,14 @@ export const theme = createTheme({
   },
   fontFamilyMonospace: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   components: {
+    // A content width is a Container size: `<Container size={ContentWidth.Page}>`, centred, with no padding
+    // of its own, since the content area already has it.
+    Container: Container.extend({
+      defaultProps: { px: 0 },
+      vars: (_, { size }) => ({
+        root: isContentWidth(size) ? { '--container-size': rem(CONTENT_WIDTH_PX[size]) } : {},
+      }),
+    }),
     Select: Select.extend({ defaultProps: { checkIconPosition: 'right' } }),
     MultiSelect: MultiSelect.extend({ defaultProps: { checkIconPosition: 'right' } }),
     Switch: Switch.extend({ defaultProps: { withThumbIndicator: false } }),
@@ -223,7 +234,11 @@ function schemeVariables(
 export const cssVariablesResolver: CSSVariablesResolver = (t) => {
   const names = Object.keys(t.colors);
   return {
-    variables: {},
+    // The content widths, for stylesheets that cannot import them (DESIGN.md, Content width).
+    variables: {
+      '--tendb-width-reading': rem(CONTENT_WIDTH_PX[ContentWidth.Reading]),
+      '--tendb-width-page': rem(CONTENT_WIDTH_PX[ContentWidth.Page]),
+    },
     light: {
       ...schemeVariables(names, SelenizedLight),
       ...boardVariables(SelenizedLight, 'light'),

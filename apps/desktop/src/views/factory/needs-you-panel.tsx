@@ -1,6 +1,5 @@
 import { InboxKind, type InboxItemDto, type ProjectId, type WorkstreamDto } from '@10db/contracts';
-import { Alert, Button, Group, Paper, Stack, Table, Text, Title } from '@mantine/core';
-import { IconClock } from '@tabler/icons-react';
+import { Alert, Avatar, Button, Group, Paper, Stack, Table, Text, Title } from '@mantine/core';
 import { useState, type ReactNode } from 'react';
 import { useRetryWorkstream } from '../../daemon/queries';
 import { ProjectTile } from '../../shell/project-tile';
@@ -42,7 +41,8 @@ export interface NeedsYouProps {
   readonly waiting: readonly WaitingRun[];
   readonly passes: readonly WaitingPass[];
   readonly causes: readonly FailureCause[];
-  readonly onOthers: readonly WorkstreamDto[];
+  /** Runs waiting on a question someone other than the builder holds, with the card that asks it. */
+  readonly others: readonly WaitingRun[];
   readonly now: number;
   readonly nameOf: (id: ProjectId) => string;
   readonly canRetry: (ws: WorkstreamDto) => boolean;
@@ -65,7 +65,7 @@ function Need({
 }: {
   readonly mark: ReactNode;
   readonly kind: string;
-  readonly tone: 'you' | 'failed';
+  readonly tone: 'you' | 'failed' | 'other';
   readonly title: string;
   readonly sub: string;
   readonly subTitle?: string | undefined;
@@ -80,7 +80,12 @@ function Need({
       </Table.Td>
       <Table.Td style={{ maxWidth: 0 }}>
         <Group gap={8} wrap="nowrap" align="baseline">
-          <Text fz={11} fw={600} c={tone === 'you' ? 'yellow' : 'red'} style={{ flex: 'none' }}>
+          <Text
+            fz={11}
+            fw={600}
+            c={tone === 'you' ? 'yellow' : tone === 'failed' ? 'red' : 'dimmed'}
+            style={{ flex: 'none' }}
+          >
             {kind}
           </Text>
           <Text size="sm" fw={500} c="bright" truncate>
@@ -252,28 +257,18 @@ function Cause({
   );
 }
 
-/** "Waiting on Mark Ellis: 2 questions, the oldest 3h ago": what the builder waits on someone else for. */
-function othersLine(runs: readonly WorkstreamDto[], now: number): string | null {
-  const names = [...new Set(runs.flatMap((r) => r.waitingOn?.names ?? []))];
-  const oldest = runs.map(lastMoment).sort()[0];
-  if (names.length === 0 || oldest === undefined) return null;
-  const n = runs.length;
-  return `Waiting on ${joinNames(names)}: ${String(n)} ${n === 1 ? 'question' : 'questions'}, the oldest ${shortAgo(oldest, now)}`;
-}
-
 /**
  * What needs the builder, across projects: runs waiting on their answer, Workbench pages waiting on them, and
- * failed runs grouped by what stopped them. Under it, one dim line for what waits on someone else. Draws
- * nothing while nothing needs the builder and nobody else holds a question.
+ * failed runs grouped by what stopped them. Under it, apart and unlit, each question out with someone else,
+ * named by its person and its own words. Draws nothing while neither has anything.
  */
 export function NeedsYouPanel(props: NeedsYouProps) {
   const retry = useRetryWorkstream();
   const [retryingKey, setRetryingKey] = useState<string | null>(null);
-  const { waiting, passes, causes, onOthers, now, nameOf } = props;
+  const { waiting, passes, causes, others, now, nameOf } = props;
   const failed = causes.reduce((n, c) => n + c.runs.length, 0);
   const asks = waiting.length + passes.length;
-  const others = othersLine(onOthers, now);
-  if (asks + failed === 0 && others === null) return null;
+  if (asks + failed + others.length === 0) return null;
 
   async function retryAll(key: string, runs: readonly WorkstreamDto[]): Promise<void> {
     setRetryingKey(key);
@@ -296,17 +291,17 @@ export function NeedsYouPanel(props: NeedsYouProps) {
     .join(' · ');
 
   return (
-    <Stack component="section" aria-labelledby="factory-needs-you" gap={8}>
-      <Group gap={8} align="baseline">
-        <Title id="factory-needs-you" order={2} fz={14} fw={600} c="bright">
-          Needs you
-        </Title>
-        {meta === '' ? null : (
+    <Stack component="section" aria-label="Needs you and waiting on others" gap={8}>
+      {asks + failed > 0 ? (
+        <Group gap={8} align="baseline">
+          <Title order={2} fz={14} fw={600} c="bright">
+            Needs you
+          </Title>
           <Text size="xs" c="dimmed">
             {meta}
           </Text>
-        )}
-      </Group>
+        </Group>
+      ) : null}
       {retry.error === null ? null : (
         <Alert
           color="red"
@@ -325,7 +320,7 @@ export function NeedsYouPanel(props: NeedsYouProps) {
           bg="var(--tendb-color-panel)"
           style={{ '--ring-gap': 'var(--tendb-color-panel)' }}
         >
-          <Table verticalSpacing={10} horizontalSpacing={10} layout="fixed">
+          <Table verticalSpacing={12} horizontalSpacing="md" layout="fixed">
             <Table.Tbody>
               {waiting.map(({ run, card }) => (
                 <Need
@@ -395,13 +390,48 @@ export function NeedsYouPanel(props: NeedsYouProps) {
           </Table>
         </Paper>
       ) : null}
-      {others === null ? null : (
-        <Group gap={8} px={14} wrap="nowrap">
-          <IconClock size={14} stroke={1.5} color="var(--mantine-color-dimmed)" aria-hidden />
-          <Text size="xs" c="dimmed">
-            {others}
-          </Text>
-        </Group>
+      {others.length === 0 ? null : (
+        <Stack gap={8} mt={asks + failed > 0 ? 'md' : 0}>
+          <Group gap={8} align="baseline">
+            <Title order={2} fz={14} fw={600} c="bright">
+              Waiting on others
+            </Title>
+            <Text size="xs" c="dimmed">
+              nothing for you to do until they answer
+            </Text>
+          </Group>
+          <Paper radius="md" px="xs" withBorder bg="transparent">
+            <Table verticalSpacing={12} horizontalSpacing="md" layout="fixed">
+              <Table.Tbody>
+                {others.map(({ run, card }) => {
+                  const names = run.waitingOn?.names ?? [];
+                  return (
+                    <Need
+                      key={run.id}
+                      mark={<Avatar size={20} radius="xl" color="gray" name={names[0] ?? '?'} />}
+                      kind={joinNames(names)}
+                      tone="other"
+                      title={card?.title ?? 'A question about this task'}
+                      sub={run.taskTitle}
+                      project={nameOf(run.projectId)}
+                      when={shortAgo(lastMoment(run), now)}
+                    >
+                      <Button
+                        size="compact-xs"
+                        variant="default"
+                        onClick={() => {
+                          props.onOpen(run);
+                        }}
+                      >
+                        Open
+                      </Button>
+                    </Need>
+                  );
+                })}
+              </Table.Tbody>
+            </Table>
+          </Paper>
+        </Stack>
       )}
     </Stack>
   );
