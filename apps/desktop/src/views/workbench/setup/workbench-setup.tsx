@@ -13,6 +13,7 @@ import { AreasSection, PageRows, SplitRows } from './areas-section';
 import { settingDrafts, settingsPatch, type SettingDraft } from './setting-drafts';
 import { SettingRows, type SettingChange } from './setting-rows';
 import { areasAfter, areasChanged, newPagesOf, setupPatch } from './setup-rules';
+import { CONTENT_WIDTH_PX, ContentWidth } from '../../../shell/content-width';
 
 function SettingsLink() {
   return (
@@ -78,7 +79,7 @@ export function WorkbenchSetup({ project, onCancel, onApplied }: WorkbenchSetupP
 
   if (read.isPending)
     return (
-      <Stack gap="md" maw={720}>
+      <Stack gap="md" w="100%" maw={CONTENT_WIDTH_PX[ContentWidth.Reading]} mx="auto">
         {heading}
         <Group gap="sm">
           <Loader size="sm" />
@@ -90,7 +91,7 @@ export function WorkbenchSetup({ project, onCancel, onApplied }: WorkbenchSetupP
     );
   if (read.isError)
     return (
-      <Stack gap="md" maw={720}>
+      <Stack gap="md" w="100%" maw={CONTENT_WIDTH_PX[ContentWidth.Reading]} mx="auto">
         {heading}
         <Text size="sm" c="red" role="alert">
           {`The setup could not be read: ${read.error.message}`}
@@ -170,7 +171,7 @@ export function WorkbenchSetup({ project, onCancel, onApplied }: WorkbenchSetupP
     project.leftOutPages,
   );
   return (
-    <Stack gap="lg" maw={720}>
+    <Stack gap="lg" w="100%" maw={CONTENT_WIDTH_PX[ContentWidth.Reading]} mx="auto">
       {heading}
       {!offered ? null : (
         <Stack gap="sm">

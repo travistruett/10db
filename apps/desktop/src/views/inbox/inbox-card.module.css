@@ -1,5 +1,5 @@
 /* In the Inbox's content a card's text keeps a reading measure; its action bar still spans the pane. */
 .content {
   width: 100%;
-  max-width: 760px;
+  max-width: var(--tendb-width-reading);
 }
