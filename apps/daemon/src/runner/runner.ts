@@ -194,7 +194,12 @@ import {
   recordPlanPacked,
   RESULT_NUDGE,
 } from '../briefing';
-import { snapshotSection, type LinearSnapshot } from '../linear';
+import {
+  isLaneLinearRead,
+  laneLinearPrefixes,
+  snapshotSection,
+  type LinearSnapshot,
+} from '../linear';
 import { handoffStands, nextUnaskedRun, workLeftIn, type UnaskedRun } from './handoff-rule';
 import {
   unready,
@@ -2874,6 +2879,12 @@ export function createRunner(opts: RunnerOptions): Runner {
           : 'default';
     // A plan account takes the builder's claude.ai connectors under the same switch as the servers.
     const claudeConnectors = yours.connectorsOn && account.kind === AccountKind.ClaudeSubscription;
+    // The tool prefixes of the builder's own Linear in this session, whose reads the guard settles.
+    const linearPrefixes = laneLinearPrefixes({
+      remote: yours.remote,
+      connectors: claudeConnectors,
+      harness: provider,
+    });
     // A step that only reads has the engine's socket in its sandbox, but the guard refuses every docker
     // command in it, so Docker is closed to it too.
     const open = sessionDevAccess(project, { sandboxed: true, writes: !readOnly });
@@ -3400,6 +3411,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         judge,
         coveredByAllowRule: matchesAllowedTool(req.toolName, req.input, allowedTools, checkout),
         webOn: switches.web,
+        linearRead: isLaneLinearRead(linearPrefixes, req.toolName, req.input),
       });
       if (unattended === null) return verdict;
       const answer = answerUnattended({
