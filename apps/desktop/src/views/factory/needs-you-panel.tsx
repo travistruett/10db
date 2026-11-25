@@ -17,6 +17,7 @@ import {
   Text,
   Title,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
 import { useState, type ReactNode } from 'react';
 import { useCloseTask, useRetryWorkstream } from '../../daemon/queries';
@@ -26,7 +27,9 @@ import { joinNames } from '../inbox/route-line';
 import type { FailureCause } from './factory-summary';
 import { lastMoment } from './live-groups';
 import { shortAgo } from './short-ago';
+import { FailureActions } from './failure-actions';
 import { FailureDot } from './failure-card';
+import classes from './factory-overview.module.css';
 import { failedAt, TaskLine } from './task-line';
 
 const KIND_LABELS: Readonly<Record<InboxKind, string>> = {
@@ -97,6 +100,7 @@ function Need({
   subTip,
   project,
   when,
+  onOpen,
   children,
 }: {
   readonly kind: string;
@@ -109,10 +113,20 @@ function Need({
   readonly subTip?: string | undefined;
   readonly project: string;
   readonly when: string;
+  /** Opens what the row is about: a click anywhere on the row but its own buttons, or its title. */
+  readonly onOpen: () => void;
   readonly children: ReactNode;
 }) {
   return (
-    <Table.Tr>
+    <Table.Tr
+      className={classes['needRow']}
+      onClick={(event) => {
+        // The row's buttons and their menus (which bubble through their portals) act on their own.
+        if (event.target instanceof Element && event.target.closest('a, button, [role="menu"]'))
+          return;
+        onOpen();
+      }}
+    >
       <Table.Td w={120} style={{ verticalAlign: 'top' }}>
         <Badge
           size="xs"
@@ -120,21 +134,23 @@ function Need({
           color={color}
           maw="100%"
           mt={3}
-          // A person's name keeps its own case.
-          tt={avatar === undefined ? undefined : 'none'}
+          tt="none"
           leftSection={
             avatar === undefined ? undefined : (
               <Avatar size={12} radius="xl" color="gray" name={avatar} />
             )
           }
         >
-          {kind}
+          {/* A person's name keeps its own case; a kind reads in sentence case. */}
+          {avatar === undefined ? sentenceCase(kind) : kind}
         </Badge>
       </Table.Td>
       <Table.Td style={{ maxWidth: 0 }}>
-        <Text size="sm" fw={500} c="bright" truncate>
-          {title}
-        </Text>
+        <UnstyledButton onClick={onOpen} maw="100%" display="block">
+          <Text size="sm" fw={500} c="bright" truncate>
+            {title}
+          </Text>
+        </UnstyledButton>
         <Tooltip label={subTip} disabled={subTip === undefined} multiline maw={420} withArrow>
           <Text size="xs" c="dimmed" truncate mt={2}>
             {sub}
@@ -158,14 +174,22 @@ function Need({
           {when}
         </Text>
       </Table.Td>
-      {/* Room for a carded failure's four actions: Open, Answer, Retry and Close. */}
-      <Table.Td w={250}>
+      {/* Room for a carded failure's Answer beside the Retry split button. */}
+      <Table.Td w={220}>
         <Group gap={6} justify="flex-end" wrap="nowrap">
           {children}
         </Group>
       </Table.Td>
     </Table.Tr>
   );
+}
+
+/** "Settings Moved" as "Settings moved": every word after the first lower case but an acronym. */
+function sentenceCase(text: string): string {
+  return text
+    .split(' ')
+    .map((word, i) => (i === 0 || word === word.toUpperCase() ? word : word.toLowerCase()))
+    .join(' ');
 }
 
 /** The agent's own reason, cut to its first sentence. */
@@ -181,8 +205,9 @@ function titlesOf(runs: readonly WorkstreamDto[]): string {
 }
 
 /**
- * One failed run's row: its failure's first sentence, Open, and Retry and Close where they apply. A run
- * with its task's open failed card is titled by the card and adds Answer, which opens it in the Inbox.
+ * One failed run's row: its failure's first sentence, and Retry and Close where they apply; the row opens
+ * the task. A run with its task's open failed card is titled by the card and adds Answer, which opens it in
+ * the Inbox.
  */
 function FailedRun({
   run,
@@ -200,7 +225,7 @@ function FailedRun({
   readonly retrying: boolean;
   readonly onRetry: (runs: readonly WorkstreamDto[]) => void;
   readonly closing: boolean;
-  readonly onClose: (run: WorkstreamDto) => void;
+  readonly onClose: (runs: readonly WorkstreamDto[]) => void;
   readonly onAnswer?: () => void;
 }) {
   const retryable = props.canRetry(run);
@@ -214,45 +239,27 @@ function FailedRun({
       subTip={run.failureReason === null ? undefined : line}
       project={props.nameOf(run.projectId)}
       when={shortAgo(lastMoment(run), props.now)}
+      onOpen={() => {
+        props.onOpen(run);
+      }}
     >
-      <Button
-        size="compact-xs"
-        variant="default"
-        onClick={() => {
-          props.onOpen(run);
-        }}
-      >
-        Open
-      </Button>
       {onAnswer === undefined ? null : (
         <Button size="compact-xs" variant="default" onClick={onAnswer}>
           Answer
         </Button>
       )}
-      {retryable ? (
-        <Button
-          size="compact-xs"
-          variant="default"
-          loading={retrying}
-          onClick={() => {
-            onRetry([run]);
-          }}
-        >
-          Retry
-        </Button>
-      ) : null}
-      {props.canClose(run) ? (
-        <Button
-          size="compact-xs"
-          variant="default"
-          loading={closing}
-          onClick={() => {
-            onClose(run);
-          }}
-        >
-          Close
-        </Button>
-      ) : null}
+      <FailureActions
+        canRetry={retryable}
+        canClose={props.canClose(run)}
+        retrying={retrying}
+        closing={closing}
+        onRetry={() => {
+          onRetry([run]);
+        }}
+        onClose={() => {
+          onClose([run]);
+        }}
+      />
     </Need>
   );
 }
@@ -271,12 +278,13 @@ function Cause({
   readonly retrying: boolean;
   readonly onRetry: (runs: readonly WorkstreamDto[]) => void;
   readonly closing: boolean;
-  readonly onClose: (run: WorkstreamDto) => void;
+  readonly onClose: (runs: readonly WorkstreamDto[]) => void;
 }) {
   const [shown, setShown] = useState(false);
   const [first] = cause.runs;
   if (first === undefined) return null;
   const retryable = cause.runs.filter(props.canRetry);
+  const closable = cause.runs.filter(props.canClose);
   const project = props.nameOf(cause.projectId);
   const when = shortAgo(lastMoment(first), props.now);
   if (cause.runs.length === 1)
@@ -300,10 +308,14 @@ function Cause({
         sub={titlesOf(cause.runs)}
         project={project}
         when={when}
+        onOpen={() => {
+          setShown(!shown);
+        }}
       >
         <Button
-          size="compact-xs"
-          variant="default"
+          size="xs"
+          variant="subtle"
+          color="gray"
           aria-expanded={shown}
           onClick={() => {
             setShown(!shown);
@@ -311,18 +323,20 @@ function Cause({
         >
           {shown ? 'Hide' : 'Show'}
         </Button>
-        {retryable.length > 0 ? (
-          <Button
-            size="compact-xs"
-            variant="default"
-            loading={retrying}
-            onClick={() => {
-              onRetry(retryable);
-            }}
-          >
-            Retry All
-          </Button>
-        ) : null}
+        <FailureActions
+          retryLabel="Retry All"
+          closeLabel="Close All"
+          canRetry={retryable.length > 0}
+          canClose={closable.length > 0}
+          retrying={retrying}
+          closing={closing}
+          onRetry={() => {
+            onRetry(retryable);
+          }}
+          onClose={() => {
+            onClose(closable);
+          }}
+        />
       </Need>
       {shown ? (
         <Table.Tr>
@@ -337,9 +351,6 @@ function Cause({
                       run={run}
                       canRetry={props.canRetry(run)}
                       canClose={props.canClose(run)}
-                      onOpen={() => {
-                        props.onOpen(run);
-                      }}
                     />
                   }
                   title={run.taskTitle}
@@ -349,32 +360,18 @@ function Cause({
                   when={shortAgo(lastMoment(run), props.now)}
                   compact
                   action={
-                    <>
-                      {props.canRetry(run) ? (
-                        <Button
-                          size="compact-xs"
-                          variant="default"
-                          loading={retrying}
-                          onClick={() => {
-                            onRetry([run]);
-                          }}
-                        >
-                          Retry
-                        </Button>
-                      ) : null}
-                      {props.canClose(run) ? (
-                        <Button
-                          size="compact-xs"
-                          variant="default"
-                          loading={closing}
-                          onClick={() => {
-                            onClose(run);
-                          }}
-                        >
-                          Close
-                        </Button>
-                      ) : null}
-                    </>
+                    <FailureActions
+                      canRetry={props.canRetry(run)}
+                      canClose={props.canClose(run)}
+                      retrying={retrying}
+                      closing={closing}
+                      onRetry={() => {
+                        onRetry([run]);
+                      }}
+                      onClose={() => {
+                        onClose([run]);
+                      }}
+                    />
                   }
                   onOpen={() => {
                     props.onOpen(run);
@@ -398,6 +395,7 @@ export function NeedsYouPanel(props: NeedsYouProps) {
   const retry = useRetryWorkstream();
   const closeTask = useCloseTask();
   const [retryingKey, setRetryingKey] = useState<string | null>(null);
+  const [closingKey, setClosingKey] = useState<string | null>(null);
   const { waiting, passes, causes, carded, others, now, nameOf } = props;
   const failed = carded.length + causes.reduce((n, c) => n + c.runs.length, 0);
   const causeCount = carded.length + causes.length;
@@ -412,6 +410,17 @@ export function NeedsYouPanel(props: NeedsYouProps) {
       // The mutation keeps its error, which the alert above the rows shows.
     } finally {
       setRetryingKey(null);
+    }
+  }
+
+  async function closeAll(key: string, runs: readonly WorkstreamDto[]): Promise<void> {
+    setClosingKey(key);
+    try {
+      for (const run of runs) await closeTask.mutateAsync(run.taskId);
+    } catch {
+      // The mutation keeps its error, which the alert above the rows shows.
+    } finally {
+      setClosingKey(null);
     }
   }
 
@@ -477,16 +486,10 @@ export function NeedsYouPanel(props: NeedsYouProps) {
                   sub={card === undefined ? 'Open the task to see what it asks' : run.taskTitle}
                   project={nameOf(run.projectId)}
                   when={shortAgo(lastMoment(run), now)}
+                  onOpen={() => {
+                    props.onOpen(run);
+                  }}
                 >
-                  <Button
-                    size="compact-xs"
-                    variant="default"
-                    onClick={() => {
-                      props.onOpen(run);
-                    }}
-                  >
-                    Open
-                  </Button>
                   <Button
                     size="compact-xs"
                     variant="default"
@@ -507,6 +510,9 @@ export function NeedsYouPanel(props: NeedsYouProps) {
                   sub={`${String(pass.pages)} ${pass.pages === 1 ? 'page' : 'pages'} waiting on you`}
                   project={nameOf(pass.projectId)}
                   when=""
+                  onOpen={() => {
+                    props.onOpenPass(pass.projectId);
+                  }}
                 >
                   <Button
                     size="compact-xs"
@@ -534,10 +540,10 @@ export function NeedsYouPanel(props: NeedsYouProps) {
                     closeTask.reset();
                     void retryAll(run.id, runs);
                   }}
-                  closing={closeTask.isPending && closeTask.variables === run.taskId}
-                  onClose={(r) => {
+                  closing={closingKey === run.id}
+                  onClose={(runs) => {
                     retry.reset();
-                    closeTask.mutate(r.taskId);
+                    void closeAll(run.id, runs);
                   }}
                   onAnswer={() => {
                     props.onOpenInbox(run.projectId);
@@ -554,12 +560,10 @@ export function NeedsYouPanel(props: NeedsYouProps) {
                     closeTask.reset();
                     void retryAll(cause.key, runs);
                   }}
-                  closing={
-                    closeTask.isPending && cause.runs.some((r) => r.taskId === closeTask.variables)
-                  }
-                  onClose={(run) => {
+                  closing={closingKey === cause.key}
+                  onClose={(runs) => {
                     retry.reset();
-                    closeTask.mutate(run.taskId);
+                    void closeAll(cause.key, runs);
                   }}
                 />
               ))}
@@ -592,16 +596,11 @@ export function NeedsYouPanel(props: NeedsYouProps) {
                       sub={run.taskTitle}
                       project={nameOf(run.projectId)}
                       when={shortAgo(lastMoment(run), now)}
+                      onOpen={() => {
+                        props.onOpen(run);
+                      }}
                     >
-                      <Button
-                        size="compact-xs"
-                        variant="default"
-                        onClick={() => {
-                          props.onOpen(run);
-                        }}
-                      >
-                        Open
-                      </Button>
+                      {null}
                     </Need>
                   );
                 })}

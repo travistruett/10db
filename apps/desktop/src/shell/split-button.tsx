@@ -7,6 +7,8 @@ export interface SplitButtonProps {
   readonly size?: 'xs' | 'sm';
   /** Why the action is off, said as its tooltip; null leaves it on. */
   readonly disabledReason?: string | null;
+  /** The primary action is under way. */
+  readonly loading?: boolean;
   readonly onClick: () => void;
   readonly leftSection?: ReactNode;
   /** What the action does, said as its tooltip while it is on. */
@@ -22,6 +24,7 @@ export function SplitButton({
   children,
   size = 'sm',
   disabledReason = null,
+  loading = false,
   onClick,
   leftSection,
   hint,
@@ -36,6 +39,7 @@ export function SplitButton({
           size={size}
           leftSection={leftSection}
           disabled={disabledReason !== null}
+          loading={loading}
           onClick={onClick}
           style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
         >

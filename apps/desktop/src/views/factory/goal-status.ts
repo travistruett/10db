@@ -38,36 +38,55 @@ export function progressLine(digest: GoalDigestDto): string {
   return inReview > 0 ? `${line} · ${String(inReview)} in review` : line;
 }
 
-/** A goal's one-line verdict, as the collapsed row says it. */
-export function verdictLine(digest: GoalDigestDto): string {
+/** Who a goal waiting on someone else waits on, by name, or the status's own label when no name is known. */
+function waitingOn(digest: GoalDigestDto, label: string): string {
+  const names = [...new Set(digest.waitingOnSomeone.flatMap((c) => c.names))];
+  return names.length > 0 ? `Waiting on ${joinNames(names)}` : label;
+}
+
+/** The status a goal row shows: "Waiting on Mark Ellis", "Running", "Not started". */
+export function goalStatusWord(digest: GoalDigestDto): string {
   const label = GOAL_STATUS_LOOK[digest.status].label;
-  const total = digest.progress.total;
+  if (digest.status === G.WaitingOnSomeone) return waitingOn(digest, label);
+  return label.charAt(0) + label.slice(1).toLowerCase();
+}
+
+/**
+ * The mechanics behind a goal's status, one piece each, in the verdict's order: its progress, its open
+ * cards or questions and how long they have waited, a lane it waits for, its open pull requests.
+ */
+export function goalDetails(digest: GoalDigestDto): string[] {
   switch (digest.status) {
     case G.Failed:
     case G.Idle:
     case G.Running:
     case G.Paused:
     case G.Done:
-      return `${label} · ${progressLine(digest)}`;
+      return [progressLine(digest)];
     case G.WaitingOnYou:
-      return `${label} · ${plural(openCards(digest), 'card')} · ${progressLine(digest)}`;
+      return [plural(openCards(digest), 'card'), progressLine(digest)];
     case G.WaitingOnSomeone: {
-      const names = [...new Set(digest.waitingOnSomeone.flatMap((c) => c.names))];
       const since = digest.waitingOnSomeone.map((c) => c.at).sort()[0];
+      const questions = plural(digest.waitingOnSomeone.length, 'question');
       return [
-        names.length > 0 ? `Waiting on ${joinNames(names)}` : label,
-        plural(digest.waitingOnSomeone.length, 'question'),
-        ...(since === undefined ? [] : [elapsedWords(since)]),
+        since === undefined ? questions : `${questions} · ${elapsedWords(since)}`,
         progressLine(digest),
-      ].join(' · ');
+      ];
     }
     case G.Queued:
-      return `${label} · ${progressLine(digest)} · waiting for a lane`;
+      return [progressLine(digest), 'waiting for a lane'];
     case G.Shipping:
-      return `${label} · ${progressLine(digest)} · ${plural(digest.openPullRequests, 'pull request')} open`;
+      return [progressLine(digest), `${plural(digest.openPullRequests, 'pull request')} open`];
     case G.NotStarted:
-      return `${label} · ${plural(total, 'task')}`;
+      return [plural(digest.progress.total, 'task')];
   }
+}
+
+/** A goal's one-line verdict: its status and every detail, as the row's accessible name says it. */
+export function verdictLine(digest: GoalDigestDto): string {
+  const label = GOAL_STATUS_LOOK[digest.status].label;
+  const head = digest.status === G.WaitingOnSomeone ? waitingOn(digest, label) : label;
+  return [head, ...goalDetails(digest)].join(' · ');
 }
 
 export interface GoalGroups {
