@@ -42,7 +42,7 @@ export interface TakeoverServers {
   /** The temp dirs the servers' sandboxes use, for the startup sweep to leave alone. */
   readonly tempDirs: readonly string[];
   /** Removes the servers' sandboxes and sealed files. */
-  remove(): void;
+  remove(): Promise<void>;
 }
 
 export interface PrepareDeps {
@@ -63,7 +63,7 @@ export interface PreparedTakeover {
   readonly notes: readonly string[];
   readonly tempDirs: readonly string[];
   /** Removes this set's servers and files; the folder and other sets stay. */
-  remove(): void;
+  remove(): Promise<void>;
 }
 
 export interface PrepareInput {
@@ -86,7 +86,7 @@ export async function prepareTakeover(
   signal.throwIfAborted();
   const servers = await deps.servers(input.project, folder, source);
   const written: string[] = [];
-  const remove = (): void => {
+  const remove = (): Promise<void> => {
     for (const file of written.splice(0)) {
       try {
         unlinkSync(file);
@@ -94,7 +94,7 @@ export async function prepareTakeover(
         // Already gone, or the agent replaced it: the folder's removal takes what is left.
       }
     }
-    servers.remove();
+    return servers.remove();
   };
   try {
     signal.throwIfAborted();
@@ -156,7 +156,7 @@ export async function prepareTakeover(
     const scriptFile = write('takeover', 'command', script, 0o700);
     return { script: scriptFile, line, notes, tempDirs: servers.tempDirs, remove };
   } catch (error) {
-    remove();
+    await remove();
     throw error;
   }
 }

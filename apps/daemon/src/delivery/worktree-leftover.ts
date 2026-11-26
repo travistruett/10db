@@ -1,4 +1,5 @@
-import { lstatSync, readdirSync, realpathSync, rmdirSync, rmSync } from 'node:fs';
+import { lstatSync, readdirSync, realpathSync, rmdirSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { InvalidError } from '@10db/contracts';
 import { samePath, surelyInside } from '../git';
 import { realPathOf } from '../guard';
@@ -6,9 +7,10 @@ import { realPathOf } from '../guard';
 /**
  * The builder's Delete directory answer: deletes `path` and everything in it, but only a real directory
  * under the worktree root `root` (not the root itself), and never a link. Throws an InvalidError saying
- * why when it is anything else. A path that is already gone counts as deleted.
+ * why when it is anything else. A path that is already gone counts as deleted. The directory may be a
+ * whole worktree with its installs and build output, so the event loop never waits on the removal.
  */
-export function deleteStrayDirectory(root: string, path: string): void {
+export async function deleteStrayDirectory(root: string, path: string): Promise<void> {
   let stat: ReturnType<typeof lstatSync>;
   try {
     stat = lstatSync(path);
@@ -19,7 +21,7 @@ export function deleteStrayDirectory(root: string, path: string): void {
     throw new InvalidError(`10db deletes only a directory, and ${path} is a link or a file`);
   if (!surelyInside(path, root) || samePath(realpathSync(path), realPathOf(root)))
     throw new InvalidError(`10db deletes only inside its worktree root, and ${path} is not`);
-  rmSync(path, { recursive: true, force: true });
+  await rm(path, { recursive: true, force: true });
 }
 
 /**

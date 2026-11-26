@@ -1,18 +1,23 @@
 import {
+  InboxItemDto,
   PassOpenedDto,
   PicturesStatusDto,
   ProjectDto,
+  SAVE_DEV_LOGIN_TOOL,
+  SignInCheckDto,
+  SignInSetupChoice,
   TaskDto,
   TaskScreensDto,
 } from '@10db/contracts';
-import { latestEventSeq } from '@10db/db';
+import { getProject, latestEventSeq } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 import { FakeCamera } from './fake-camera';
-import { createTempRepo, tempDir, waitForAsync, type TempDir } from './fixtures';
+import { createTempRepo, tempDir, waitFor, waitForAsync, type TempDir } from './fixtures';
 import { pngOfSize } from './png';
 
 // Workbench spec §10, §11, §13: a daemon with a fake browser takes a task's pictures, serves them to the
@@ -31,6 +36,9 @@ let data: TempDir;
 let repo: TempDir;
 let daemon: RunningDaemon;
 let cam: FakeCamera;
+let adapter: FakeAdapter;
+/** The dev login the sign-in setup task's lane writes once the test lets it. */
+const WORKING_LOGIN = `echo ${APP}/people?token=abc`;
 /** The event log's head as each shot was asked. */
 let shotAtSeq: number[];
 
@@ -46,32 +54,48 @@ beforeEach(async () => {
 });
 /** The daemon on the test's data dir, with the fake browser; called again for a restart. */
 function startDaemon(): Promise<RunningDaemon> {
+  adapter = new FakeAdapter({
+    "10db's pictures can sign in to demo": [
+      [
+        { do: 'consume' },
+        { do: 'mcp', tool: SAVE_DEV_LOGIN_TOOL, args: { command: 'echo x; exit 3' } },
+        // It would sign in, but for the real person's email it names.
+        {
+          do: 'mcp',
+          tool: SAVE_DEV_LOGIN_TOOL,
+          args: { command: `echo ${APP}/people?as=ops@ampsio.com` },
+        },
+        { do: 'await_signal', name: 'save-working' },
+        { do: 'mcp', tool: SAVE_DEV_LOGIN_TOOL, args: { command: WORKING_LOGIN } },
+        { do: 'turn_complete' },
+      ],
+    ],
+    'People: UI work': [[{ do: 'consume' }, { do: 'await_message', contains: 'never sent' }]],
+    'People: tidy': [
+      [
+        {
+          do: 'tool',
+          toolName: 'Write',
+          input: { file_path: 'src/people/page.tsx', content: 'tidy\n' },
+        },
+        {
+          do: 'mcp',
+          tool: 'commit',
+          args: {
+            opId: 'op-pictures-01',
+            paths: ['src/people/page.tsx'],
+            message: 'Tidy people',
+          },
+        },
+        { do: 'turn_complete' },
+      ],
+    ],
+  });
   return startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
-    adapter: new FakeAdapter({
-      'People: UI work': [[{ do: 'consume' }, { do: 'await_message', contains: 'never sent' }]],
-      'People: tidy': [
-        [
-          {
-            do: 'tool',
-            toolName: 'Write',
-            input: { file_path: 'src/people/page.tsx', content: 'tidy\n' },
-          },
-          {
-            do: 'mcp',
-            tool: 'commit',
-            args: {
-              opId: 'op-pictures-01',
-              paths: ['src/people/page.tsx'],
-              message: 'Tidy people',
-            },
-          },
-          { do: 'turn_complete' },
-        ],
-      ],
-    }),
+    adapter,
     logLevel: 'warn',
     caffeinate: () => null,
     watch: false,
@@ -142,5 +166,83 @@ describe("a task's pictures over HTTP", () => {
       browser: { state: 'ready', problem: null },
       signIn: null,
     });
+  });
+});
+
+// Value: protects=the sign-in check masks secrets, runs only against the project's own address, and
+// raises one card per project that the next success withdraws; fails_when=a token reaches output or a
+// card, a foreign address is signed in to, or a failure raises a second card;
+// why_new=core: secrets and the one-card-per-project rule; no_claim=a real project's login works.
+describe("a project's sign-in check", () => {
+  const signInCards = async () =>
+    (await api().get('/inbox?state=OPEN', z.array(InboxItemDto))).filter((i) =>
+      i.title.includes("can't sign in"),
+    );
+  const check = (id: string) =>
+    api().post(`/projects/${id}/pictures/sign-in-check`, SignInCheckDto, {});
+  const setLogin = (id: string, devLoginCommand: string) =>
+    api().patch(`/projects/${id}`, ProjectDto, { devLoginCommand });
+
+  it('loads the first routed page signed in, and a failure raises one card that the next success withdraws', async () => {
+    const p = await project();
+    await setLogin(p.id, `echo ${APP}/people?token=secret123456789 boom; exit 3`);
+    const failed = await check(p.id);
+    expect(failed).toMatchObject({ state: 'failed', exitCode: 3, picture: null });
+    expect(failed.output).not.toContain('secret123456789');
+    await check(p.id);
+    expect(await signInCards()).toHaveLength(1);
+    expect(cam.signIns).toEqual([]);
+
+    // A changed command is checked by itself: the card goes once it signs in. It is told the address
+    // it signs in on.
+    await setLogin(p.id, `test "$TENDB_APP_URL" = "${APP}" && echo ${APP}/people?token=abc`);
+    await waitForAsync(async () => ((await signInCards()).length === 0 ? true : undefined));
+    const ok = await check(p.id);
+    expect(ok).toMatchObject({ state: 'signed_in', problem: null, route: '/people' });
+    expect(ok.picture).toBe(pngOfSize(1440, 900, 1).toString('base64'));
+    expect(cam.shots.at(-1)).toMatchObject({ appUrl: APP, route: '/people' });
+  });
+
+  it('offers a project with no dev login a setup task, and saves only a command that signs in', async () => {
+    const p = await project({ defaultRigor: 'light' });
+    const offer = await waitForAsync(async () =>
+      (await api().get('/inbox?state=OPEN', z.array(InboxItemDto))).find(
+        (i) => i.projectId === p.id && i.options.some((o) => o.label === SignInSetupChoice.SetUp),
+      ),
+    );
+    await api().post(`/inbox/${offer.id}/answer`, InboxItemDto, {
+      choice: SignInSetupChoice.SetUp,
+    });
+
+    // A command that fails its check, and one naming a real person's email, are not saved.
+    await waitFor(() =>
+      adapter.observations.filter((o) => o.kind === 'mcp_result').length === 2 ? true : undefined,
+    );
+    expect(getProject(daemon.state.db, p.id).devLoginCommand).toBeNull();
+    expect(cam.signIns).toEqual([]);
+
+    adapter.signal('save-working');
+    await waitFor(() =>
+      getProject(daemon.state.db, p.id).devLoginCommand === WORKING_LOGIN ? true : undefined,
+    );
+    // Once the saved command signs in, the project's one sign-in card is gone.
+    await waitForAsync(async () =>
+      (await api().get('/inbox?state=OPEN', z.array(InboxItemDto))).some(
+        (i) => i.projectId === p.id && i.title.includes('sign'),
+      )
+        ? undefined
+        : true,
+    );
+  });
+
+  it("never runs against an address that is not the project's own", async () => {
+    const p = await project();
+    // A command that prints another host's address, or the daemon's own port, is not signed in at.
+    await setLogin(p.id, `echo http://localhost:${new URL(daemon.url).port}/people`);
+    expect(await check(p.id)).toMatchObject({ state: 'failed', picture: null });
+    await setLogin(p.id, 'echo http://elsewhere.example/people');
+    expect(await check(p.id)).toMatchObject({ state: 'failed', picture: null });
+    expect(cam.signIns).toEqual([]);
+    expect(cam.shots).toEqual([]);
   });
 });

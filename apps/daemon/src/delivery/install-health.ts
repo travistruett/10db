@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, readFileSync, rmSync, type Dirent } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, type Dirent } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { isAbsolute, join, normalize } from 'node:path';
 import { parse, parseAllDocuments } from 'yaml';
 import { z } from 'zod';
@@ -249,8 +250,9 @@ export function madeByAnotherPnpm(path: string, version: string | null): boolean
 /**
  * Removes the copy's root `node_modules`, so the install that follows starts as the first one of a
  * copy did, which worked. A link is removed, never followed. The workspace packages' own
- * `node_modules` hold only links into the root one, which the install makes again.
+ * `node_modules` hold only links into the root one, which the install makes again. The event loop
+ * never waits on it: a project's install is as large as the project makes it.
  */
-export function removeBrokenInstall(path: string): void {
-  rmSync(join(path, 'node_modules'), { recursive: true, force: true });
+export async function removeBrokenInstall(path: string): Promise<void> {
+  await rm(join(path, 'node_modules'), { recursive: true, force: true });
 }

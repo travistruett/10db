@@ -22,5 +22,6 @@ export function writeSecretRead(dir: string, text: string): string {
 }
 
 export function removeSecretReadsDir(dir: string): void {
+  // eslint-disable-next-line no-restricted-syntax -- one file per Read a person allowed, no lane writes it
   rmSync(dir, { recursive: true, force: true });
 }

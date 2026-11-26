@@ -62,6 +62,8 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       current.copyTeardownCommand === seed.copyTeardownCommand
         ? next.copyTeardownCommand
         : current.copyTeardownCommand,
+    copyAppCommand:
+      current.copyAppCommand === seed.copyAppCommand ? next.copyAppCommand : current.copyAppCommand,
     appUrl: current.appUrl === seed.appUrl ? next.appUrl : current.appUrl,
     devLoginCommand:
       current.devLoginCommand === seed.devLoginCommand

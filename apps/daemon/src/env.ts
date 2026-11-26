@@ -47,6 +47,9 @@ const DaemonEnv = z.object({
   // Set by the desktop shell: the daemon runs its normal shutdown when stdin reaches EOF, which is how
   // it learns the shell died without a clean Quit.
   TENDB_PARENT_STDIN: z.enum(['0', '1']).optional(),
+  // `off` keeps the daemon from watching its own main thread, which otherwise kills the process after
+  // 15 s without a beat so the supervisor starts it again. Set it to stop at a debugger breakpoint.
+  TENDB_WATCHDOG: z.enum(['on', 'off']).optional(),
   // `off` keeps the daemon from reading the Artificial Analysis key and from syncing benchmarks. Set
   // for every daemon that is not the installed app (e2e, live acceptance, `pnpm dev`): the free
   // quota is shared, and a throwaway daemon with no earlier sync would spend it.

@@ -767,7 +767,7 @@ async function runSession(
   try {
     return await runOnLane(world, steps, opts, launch, laneSession);
   } finally {
-    laneSession.dispose();
+    await laneSession.dispose();
   }
 }
 
@@ -936,7 +936,7 @@ async function runExplore(
       spec,
     };
   } finally {
-    laneSession.dispose();
+    await laneSession.dispose();
   }
 }
 
@@ -1466,8 +1466,8 @@ describe.skipIf(!live)(
         expect(outputs[7]).toMatch(new RegExp(`TMPDIR=${lanesRoot}/[A-Za-z0-9]{6}(?![A-Za-z0-9])`));
         expect(outputs[7]).toContain('own-written');
       } finally {
-        claudeLane.dispose();
-        codexLane?.dispose();
+        await claudeLane.dispose();
+        await codexLane?.dispose();
       }
     });
 

@@ -3415,10 +3415,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     };
     let saidLeftAutoMode = false;
     if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
-    const dispose = (): void => {
+    /** Never rejects: a temp dir that stays is logged, and the next start's sweep takes it. */
+    const dispose = async (): Promise<void> => {
       opts.laneTempDirs?.delete(id);
       try {
-        laneSession?.dispose();
+        await laneSession?.dispose();
       } catch (error) {
         opts.logger.warn(
           { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
@@ -3428,14 +3429,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     };
     const stopping = stopRequested(ctl);
     if (stopping) {
-      dispose();
+      await dispose();
       releaseStart();
       return { kind: 'stopped', reason: stopping, providerSessionId: savedResumeId };
     }
     // The project moved while this lane waited for its start: give the slot back and start over there.
     // So does a hold that came on meanwhile: starting over is what waits for it, with the slot free.
     if (getProject(db, row.projectId).accountId !== ctl.accountId || opts.hold?.holding()) {
-      dispose();
+      await dispose();
       releaseStart();
       return { kind: 'moved' };
     }
@@ -3446,7 +3447,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const handNote = pass && !openPassTurn(db, task.id) ? await foldForTurn(id) : null;
     const stoppedFolding = stopRequested(ctl);
     if (stoppedFolding) {
-      dispose();
+      await dispose();
       releaseStart();
       return { kind: 'stopped', reason: stoppedFolding, providerSessionId: savedResumeId };
     }
@@ -3663,7 +3664,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         );
       }
     } catch (error) {
-      dispose();
+      await dispose();
       releaseStart();
       throw error;
     }
@@ -4069,7 +4070,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         ),
       });
     } catch (error) {
-      dispose();
+      await dispose();
       releaseStart();
       throw error;
     }
@@ -4779,7 +4780,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       // and hold the Mac busy.
       await stopLaneProcesses(laneSession, id, opts.logger);
       // Only once the lane process is gone: a command still running could swap a part of the tree.
-      dispose();
+      await dispose();
       ctl.handle = null;
       ctl.requestHandoff = null;
       ctl.endWaits = null;

@@ -2277,6 +2277,9 @@ export function createApp(deps: ApiDeps) {
     .get('/projects/:projectId/pictures', (c) =>
       c.json(deps.services.picturesStatus(ProjectId.parse(c.req.param('projectId')))),
     )
+    .post('/projects/:projectId/pictures/sign-in-check', async (c) =>
+      c.json(await deps.services.checkSignIn(ProjectId.parse(c.req.param('projectId')))),
+    )
     .post('/projects/:projectId/preview/sign-in', async (c) =>
       c.json(
         PreviewSignInDto.parse(

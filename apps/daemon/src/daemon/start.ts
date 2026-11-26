@@ -36,6 +36,7 @@ import {
   type ProjectId,
   type ShapeId,
   type SystemCheckDto,
+  type TaskId,
 } from '@10db/contracts';
 import {
   addStockHazardCommands,
@@ -43,6 +44,7 @@ import {
   getChat,
   countBatchesInFlight,
   countWaitingOnCard,
+  listOpenByFoldKeyPrefix,
   listRunningGates,
   isLaneWaitingOnCard,
   getBatch,
@@ -62,6 +64,7 @@ import {
   getJudgeConfig,
   getProject,
   getSession,
+  getTask,
   listPermissionRules,
   listActiveProjects,
   listProjects,
@@ -276,11 +279,16 @@ import {
 } from '../github';
 import { createGithubServices } from './github-services';
 import {
+  applySignInSetupChoice,
+  cannotSignInCard,
   CardTier,
+  clearPictureSignInCard,
   createInboxService,
   createJudgeOutageCard,
   createParkAnswers,
   leftWithBuilder,
+  raiseNoSignInOffer,
+  raisePictureSignInCard,
   withdrawStaleConversationCards,
 } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
@@ -1076,6 +1084,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let startPageSignOff: StartSignOff | null = null;
   // Starts the follow-ups Run these now made, once the services that start tasks exist.
   let startFollowUps = (): void => undefined;
+  // Starts the task Set Up Sign-In made, once the services that start tasks exist.
+  let startSignInSetup: (taskId: TaskId) => void = () => undefined;
 
   // A claim deadlock card's answer makes a task yield its claim, or cancels it as the Board does.
   const answerDeadlockCard = createClaimDeadlockAnswers({
@@ -1165,13 +1175,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     log: logger,
     onFlagAnswerInWrite: (ctx, item, answer) => {
       const retried = answerReporterCard(ctx, item, answer);
-      const after = applySkippedChoice(ctx, item, answer)
-        ? () => {
-            startFollowUps();
-          }
-        : chatWorkRef === null
-          ? undefined
-          : applyChatWorkAnswer(chatWorkRef, logger, ctx, item, answer);
+      let after: (() => void) | undefined;
+      if (applySkippedChoice(ctx, item, answer)) {
+        after = () => {
+          startFollowUps();
+        };
+      } else {
+        const setUp = applySignInSetupChoice(ctx, item, answer);
+        if (setUp !== null)
+          after = () => {
+            startSignInSetup(setUp);
+          };
+        else if (chatWorkRef !== null)
+          after = applyChatWorkAnswer(chatWorkRef, logger, ctx, item, answer);
+      }
       if (retried === null) return after;
       return () => {
         after?.();
@@ -2196,7 +2213,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     yourMcpServers: {},
     notes: [NO_SANDBOX_NOTE],
     tempDirs: [],
-    remove: () => undefined,
+    remove: () => Promise.resolve(),
   };
   const takeoverCodexHomes = codexHomes();
   let takeoverService: TakeoverService | null = null;
@@ -2716,6 +2733,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     usesDocker: (project) => commandCallsDocker(git, project, project.appStartCommand),
   });
   appStart = appStartNow;
+  // The card an earlier build raised for a failed picture sign-in has a fold key nothing closes now.
+  for (const old of listOpenByFoldKeyPrefix(state.db, 'pictures-sign-in:')) inbox.withdraw(old.id);
   pictures = startPictures({
     ensureApp: (projectId, signal) => appStartNow.ensureUp(projectId, signal),
     onNoAnswer: (projectId) => {
@@ -2725,13 +2744,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onAfterCapture: (taskId) => {
       picturePost?.announceTask(taskId);
     },
+    // A project's dev login that fails raises its one card, and one that signs in closes it.
+    onSignIn: (report) => {
+      if (report.problem === null) clearPictureSignInCard({ state, inbox }, report.projectId);
+      else raisePictureSignInCard({ state, inbox }, { ...report, problem: report.problem });
+    },
+    // A project left with an app address and no dev login is offered one.
+    onNoSignIn: (projectId) => {
+      raiseNoSignInOffer({ state, inbox }, projectId);
+    },
     // An on-demand picture (Design review, `check_design`) holds the preview up with no pass open.
     holdApp: (projectId, say) => previewNow.hold(projectId, say),
     // 10db's own dev UI draws nothing without the daemon, so its pictures read it as Open Page's tab does.
     devUi: opts.devUiOrigin ? { origin: opts.devUiOrigin, token: devUiToken(opts.dataDir) } : null,
     state,
     bus,
-    signInReporter: createSignInReporter({ state, inbox }),
+    signInReporter: createSignInReporter({ state }),
     camera: pictureCamera,
     daemonPort: listening.promise,
     prepareBrowser,
@@ -3266,6 +3294,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       startFollowUps();
   });
   startFollowUps();
+  startSignInSetup = (taskId) => {
+    try {
+      const task = getTask(db, taskId);
+      if (getProject(db, task.projectId).delivery === Delivery.PullRequest)
+        services.startBatch(task.projectId, { title: task.title, taskIds: [taskId] });
+      else services.startTask(taskId);
+    } catch (error) {
+      // The task stays on the board, where the builder can start it.
+      logger.warn(
+        { taskId, err: error instanceof Error ? error.message : String(error) },
+        'could not start the sign-in setup task',
+      );
+    }
+  };
   const build = opts.build ?? null;
   let selfUpdate: SelfUpdate | null = null;
   // What an update waits for, as counts. A queued ship, checkout return or cleanup is a delivery job
@@ -3551,6 +3593,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       dependencyChanges,
       shapeTools: shape.toolsFor,
       pictures: picturesNow,
+      signInSetup: {
+        check: (projectId, command) => pictures.checkDevLogin(projectId, command),
+        save: async (projectId, devLoginCommand) => {
+          await services.patchProject(projectId, { devLoginCommand });
+        },
+        cannot: (projectId, words) => {
+          cannotSignInCard({ state, inbox }, projectId, words);
+        },
+      },
       ...(laneBrowsers === null
         ? {}
         : { laneBrowser: { browsers: laneBrowsers, sessionOf: (id) => live.get(id)?.browser } }),

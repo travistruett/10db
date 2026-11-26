@@ -1,5 +1,6 @@
 import {
   PicturesStatusDto,
+  SignInCheckDto,
   TaskDesignCheckDto,
   TaskScreensDto,
   type DesignCheckId,
@@ -7,7 +8,7 @@ import {
   type TaskId,
   type TaskScreenId,
 } from '@10db/contracts';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { readJson } from './client';
 import { dataUrlOf } from './data-url';
 import { useDaemon } from './provider';
@@ -67,6 +68,27 @@ export function usePicturesStatus(projectId: ProjectId) {
       ),
     // The browser's download and a sign-in move on with no event of their own.
     refetchInterval: 5_000,
+  });
+}
+
+/**
+ * Check Sign-in: the daemon runs the project's dev login, signs its picture browser in and loads the
+ * first routed page. A failed sign-in is an answer (`state: 'failed'`), not an error.
+ */
+export function useCheckSignIn() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (projectId: ProjectId) =>
+      readJson(
+        await client.projects[':projectId'].pictures['sign-in-check'].$post({
+          param: { projectId },
+        }),
+        SignInCheckDto,
+      ),
+    onSettled: async (_check, _error, projectId) => {
+      await queryClient.invalidateQueries({ queryKey: ['pictures-status', projectId] });
+    },
   });
 }
 

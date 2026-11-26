@@ -18,6 +18,7 @@ for (const name of [
   'builder-mcp.mjs',
   'builder-mcp.mjs.map',
   'extract-worker.mjs',
+  'watchdog-worker.mjs',
   'line-worker.mjs',
   'vendor',
   'drizzle',
@@ -70,6 +71,13 @@ await build({
   banner: {},
   entryPoints: [resolve(root, 'src/conversation/extract-worker.ts')],
   outfile: resolve(outDir, 'extract-worker.mjs'),
+});
+// The thread that watches the daemon's main thread and kills a stalled process, loaded by the daemon
+// from beside itself.
+await build({
+  ...bundle,
+  entryPoints: [resolve(root, 'src/watchdog/worker.ts')],
+  outfile: resolve(outDir, 'watchdog-worker.mjs'),
 });
 // The watchpoint line patterns run in a worker thread under a deadline: a pattern can backtrack for as long as it likes.
 await build({

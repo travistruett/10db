@@ -181,10 +181,13 @@ export function claimSandboxTempRoot(
               : [];
           })
         : [];
+    // Both removals wait on the tree, which is why this runs at start, before the watchdog does.
     for (const entry of stale) {
       try {
+        // eslint-disable-next-line no-restricted-syntax -- at start, before the watchdog runs
         if (entry.kind === 'dir') removeLaneTempDir(entry.path, root);
         // No lane writes a setup dir, and removing it never follows the links it holds.
+        // eslint-disable-next-line no-restricted-syntax -- at start, before the watchdog runs
         else if (entry.kind === 'setup') rmSync(entry.path, { recursive: true, force: true });
         else rmSync(entry.path, { force: true });
         removed += 1;

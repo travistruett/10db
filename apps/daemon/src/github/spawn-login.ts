@@ -38,6 +38,7 @@ export function spawnGhLogin(tools: Pick<GhTools, 'git'>): GhLoginSpawn {
     const end = (code: number | null): void => {
       if (ended) return;
       ended = true;
+      // eslint-disable-next-line no-restricted-syntax -- an empty directory gh ran in and wrote nothing to
       rmSync(cwd, { recursive: true, force: true });
       for (const listener of exits) listener(code);
     };

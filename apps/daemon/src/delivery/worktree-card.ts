@@ -171,10 +171,9 @@ export function createWorktreeCardAnswers(
       }
       case 'stray':
         if (answer.choice !== WorktreeChoice.Delete) return;
-        removing(item.projectId, offer, offer.path, () => {
-          deleteStrayDirectory(ctx.worktreeRoot, offer.path);
-          return Promise.resolve();
-        });
+        removing(item.projectId, offer, offer.path, () =>
+          deleteStrayDirectory(ctx.worktreeRoot, offer.path),
+        );
         return;
       case 'merged-hand-made': {
         if (answer.choice !== WorktreeChoice.RemoveMerged) return;

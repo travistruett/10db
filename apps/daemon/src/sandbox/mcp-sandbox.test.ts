@@ -177,7 +177,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
       expect(launchOf(session, 'other').tmp).not.toBe(tmp);
       expect(tmp.startsWith(`${tmpRoot}/`)).toBe(true);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -204,7 +204,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
       for (const name of SRT_PROXY_NAMES) expect(names).not.toContain(name);
       expect(text).toContain(`export TMPDIR='${tmp}'`);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -238,7 +238,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
         ).toEqual([]);
       expect(settings).toMatchObject({ allowAppleEvents: false });
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -274,7 +274,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
           }),
         );
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     },
   );
@@ -311,7 +311,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
         network: { allowedDomains: [] },
       });
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -344,7 +344,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
           .sort(),
       );
     } finally {
-      session.dispose();
+      await session.dispose();
     }
     expect(readdirSync(tmpRoot)).toEqual([]);
     expect(readdirSync(filesRoot)).toEqual([]);
@@ -353,7 +353,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
   it('removes each server temp dir, settings file and env file on dispose', async () => {
     const session = await forSession();
     const { settingsFile, tmp, envFile, preload, refusalLog } = launchOf(session, 'docs');
-    session.dispose();
+    await session.dispose();
     for (const path of [settingsFile, tmp, envFile, preload, refusalLog])
       expect(existsSync(path)).toBe(false);
     expect(existsSync(session.tmpDir)).toBe(false);
@@ -393,7 +393,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
       { server: 'other', host: 'billing.us-east-1.api.aws' },
     ]);
     appendFileSync(docs.refusalLog, 'freetier.us-east-1.api.aws\n');
-    session.dispose();
+    await session.dispose();
     expect(warnings.at(-1)?.fields).toEqual({ server: 'docs', host: 'freetier.us-east-1.api.aws' });
     expect(clock.pendingTimers()).toBe(0);
   });
@@ -409,7 +409,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
       expect(statSync(refusalLog).mode & 0o777).toBe(0o600);
       expect(readFileSync(refusalLog, 'utf8')).toBe('');
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -429,7 +429,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
     try {
       expect(session.mcpServers).toEqual({});
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 });

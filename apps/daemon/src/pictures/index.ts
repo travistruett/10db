@@ -22,9 +22,11 @@ export {
 export { DeadlineError, withDeadline } from './deadline';
 export { launchChromium } from './playwright';
 export { createPlaywrightCamera } from './playwright-camera';
-export { taskInLocalCopy } from './copy-task';
+export { copyOfTask, taskInLocalCopy } from './copy-task';
 export { pageRouteLoads, takesPictures } from './picture-routes';
 export { startPruning } from './prune';
 export { keepScreen, pngSize, removeUnnamed, writePicture } from './picture-files';
 export { keptRoute, pageAreaRoutes } from './kept-route';
 export { checkShotsOf, missingLines } from './design-shots';
+export { realAccountProblem } from './fictional-account';
+export { maskedProse } from './sign-in-output';
