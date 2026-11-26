@@ -118,7 +118,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   });
   expect(created.ok()).toBe(true);
   const projectId = z.object({ id: z.string() }).parse(await created.json()).id;
-  // The builder watches the greeting folder in this project; the fake agent writes a file there.
+  // The builder watches the greeting folder in this project and asks to look at it; the fake agent writes a file there.
   const watched = await request.put(`${daemonUrl}/projects/${projectId}/watchpoints`, {
     headers: { Authorization: `Bearer ${E2E_TOKEN}` },
     data: [
@@ -128,7 +128,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
         why: 'What users read first.',
         globs: ['src/greeting/**'],
         guidance: 'Check the wording is friendly.',
-        loudness: 'show',
+        loudness: 'ask',
       },
     ],
   });
@@ -285,7 +285,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // check and the hunk, kept with the run.
   const forYou = taskDrawer.getByTestId('for-you');
   await expect(forYou.getByText('For You', { exact: true })).toBeVisible();
-  await forYou.getByRole('button', { name: /Greetings/ }).click();
+  // An ask watchpoint's fold starts open.
   await expect(forYou.getByText('Adds the greeting file the gate looks for.')).toBeVisible();
   await expect(forYou.getByText('✓ A plain text file, as the gate expects.')).toBeVisible();
   await expect(forYou.getByText('src/greeting/hello.txt')).toBeVisible();
@@ -409,6 +409,14 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // A passing gate raises no card: the only answer it could offer was one that closed it.
   await expect(page.getByText(`Review: ${TASK}`)).toHaveCount(0);
   await expect(page.getByText(QUESTION)).toHaveCount(0);
+  // The ask watchpoint left one Look card for the task, written as the run moved on. It shows the same hunk and
+  // notes as For You, and Looks right closes it.
+  const lookTitle = page.getByText(`Look at these changes: ${TASK}`);
+  await lookTitle.first().click();
+  await expect(page.getByText('Adds the greeting file the gate looks for.')).toBeVisible();
+  await expect(page.getByText('added line 1: hello')).toBeAttached();
+  await page.getByRole('button', { name: 'Looks right' }).click();
+  await expect(lookTitle).toHaveCount(0);
 
   // A locked card's reason is reachable from the keyboard, not only on hover.
   await open(page, 'Board');
