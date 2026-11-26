@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PROGRAM_KEY_MAX } from '@10db/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { keyPackageFile, programKey } from './program-key';
 
@@ -67,6 +68,17 @@ describe('programKey', () => {
     '',
   ])('gives no key to %j', (command) => {
     expect(keyOf(command)).toBeNull();
+  });
+
+  // Value: protects=a skip or judge-call row never carries a program key the precedent store refuses or trims;
+  // fails_when=programKey returns an over-long, control-character, $defaults or untrimmed key; why_new=escaped
+  // bug found reviewing the precedent store plan (the judge, a pure parser); no_claim=that the store accepts every
+  // key a caller passes by hand
+  it('gives no key the precedent store would refuse, and the trimmed form of one it would trim', () => {
+    expect(keyOf(`foo ${'x'.repeat(PROGRAM_KEY_MAX + 1)}`)).toBeNull();
+    expect(keyOf('foo "a\tb"')).toBeNull();
+    expect(keyOf("foo '$defaults'")).toBeNull();
+    expect(keyOf('foo "x "')).toBe('foo x');
   });
 
   it('gives no key to another tool, a stray field, or a call outside the checkout', () => {

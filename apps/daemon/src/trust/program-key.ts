@@ -225,7 +225,8 @@ function keyOf(
  * package runner's script, else the program and its first operand. It only picks which precedent the judge is
  * shown, never whether a call may run. Null where the call is not one program: a second command, a substitution,
  * a here-document, a redirect outside the checkout and the temp folder, a pipe into anything but the fast
- * path's reads, a tool that is not the shell, or a folder outside the checkout.
+ * path's reads, a tool that is not the shell, a folder outside the checkout, or a key the precedent store would
+ * refuse (`ProgramKey`). A key is returned as the store keeps it, trimmed, so a candidate matches its precedent.
  */
 export function programKey(
   toolName: string,
@@ -257,7 +258,8 @@ export function programKey(
   const [program, ...args] = words.words.slice(at);
   if (program === undefined || words.dynamic[at] === true) return null;
   const key = keyOf(program, args, words.dynamic.slice(at + 1), dir, checkout);
-  return key !== null && ProgramKey.safeParse(key).success ? key : null;
+  const parsed = key === null ? null : ProgramKey.safeParse(key);
+  return parsed?.success === true ? parsed.data : null;
 }
 
 /**

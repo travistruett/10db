@@ -46,7 +46,9 @@ MAKEFLAGS=…; make x`), and so could a substitution or a here-document on the c
   sharing `leading-command.ts` with `call-runs.ts`) names the kind of program a shell call runs: a make target with
   its folder, a repository script by path, a package runner's script, else the program and its first operand. It is
   null for a second command, a substitution, a here-document, a redirect outside the checkout or temp dir, a pipe
-  into anything but fast-path reads, a non-shell tool, or a folder outside the checkout; `keyPackageFile` is the
+  into anything but fast-path reads, a non-shell tool, a folder outside the checkout, or a key `ProgramKey` refuses
+  (over-long, a control character, `$defaults`), and it returns the key trimmed as the store keeps it, so a skip or
+  judge-call row never carries a key Approve and Run or Make Routine would throw on; `keyPackageFile` is the
   nearest `package.json` from cwd up to the checkout, for runner keys only. The key only picks which precedent is
   shown; nothing allows a call because it has one. `precedents.ts`: `precedentFor` takes the active row (in a copy
   the `copy` row first, and a `copy` row in any state stands for its key; outside a copy the `project` row only);
