@@ -45,6 +45,9 @@ function globHolds(glob: string, tracked: ReadonlySet<string>): boolean {
   return false;
 }
 
+/** A tracked path as a glob that matches only itself: git's glob pathspec reads `*`, `?`, `[` and `\\`. */
+const literalGlob = (path: string): string => path.replace(/[*?[\]\\]/gu, (c) => `\\${c}`);
+
 /** The most untracked names reported before the check stops. */
 const MAX_REPORTED = 20;
 
@@ -75,15 +78,26 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
   const cache = createEvalsCache();
   const found = (repoPath: string): Promise<FoundEvals | null> =>
     readEvals(deps.git, repoPath, deps.logger, cache);
-  // A definition's last commit is a fact of HEAD, so it is read once per commit and path list.
-  const committed = new Map<string, Promise<string | null>>();
+  // A definition's last commit is a fact of HEAD, so it is read once per commit and path list, and only the
+  // checkout's current HEAD is kept. A failed read is not kept, so the next open asks again.
+  const committed = new Map<
+    string,
+    { readonly commit: string; readonly at: Map<string, Promise<string | null>> }
+  >();
   const lastCommitted = (repoPath: string, commit: string, paths: readonly string[]) => {
-    const key = `${repoPath}\0${commit}\0${paths.join('\0')}`;
-    let at = committed.get(key);
-    if (at === undefined) {
-      at = deps.git.lastChangedAt(repoPath, paths).catch(() => null);
-      committed.set(key, at);
+    let atHead = committed.get(repoPath);
+    if (atHead?.commit !== commit) {
+      atHead = { commit, at: new Map() };
+      committed.set(repoPath, atHead);
     }
+    const key = paths.join('\0');
+    const kept = atHead.at.get(key);
+    if (kept !== undefined) return kept;
+    const at = deps.git.lastChangedAt(repoPath, paths.map(literalGlob)).catch(() => {
+      atHead.at.delete(key);
+      return null;
+    });
+    atHead.at.set(key, at);
     return at;
   };
   /** When each suite with a run and a named definition last had that definition committed. */

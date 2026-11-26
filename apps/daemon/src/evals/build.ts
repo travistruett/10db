@@ -47,14 +47,16 @@ const manifestSuite = (
   key: string,
 ): EvalManifestSuite | undefined => manifest?.manifest.suites.find((s) => s.key === key);
 
-/** The last runs as trend points: a run whose fingerprint differs from the run before it graded another eval. */
+/**
+ * The runs as trend points: a run whose fingerprint differs from the last earlier run that recorded one
+ * graded another eval. A run with none changes nothing, so it can't hide a change.
+ */
 function trendOf(runs: readonly ParsedRun[]): EvalTrendPointDto[] {
-  return runs.map((run, i) => {
-    const before = runs[i - 1]?.fingerprint ?? null;
-    return {
-      passed: run.passed,
-      evalChanged: before !== null && run.fingerprint !== null && before !== run.fingerprint,
-    };
+  let before: string | null = null;
+  return runs.map((run) => {
+    const evalChanged = before !== null && run.fingerprint !== null && before !== run.fingerprint;
+    if (run.fingerprint !== null) before = run.fingerprint;
+    return { passed: run.passed, evalChanged };
   });
 }
 

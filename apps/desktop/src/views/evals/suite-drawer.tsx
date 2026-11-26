@@ -89,13 +89,10 @@ function RunGates({ detail }: { readonly detail: EvalSuiteDetailDto }) {
 
 /** Whether a run (newest first) graded a different eval than the run before it. */
 function newEval(runs: EvalSuiteDetailDto['runs'], place: number): boolean {
-  const run = runs[place];
-  const before = runs[place + 1];
-  return (
-    run?.fingerprint != null &&
-    before?.fingerprint != null &&
-    run.fingerprint !== before.fingerprint
-  );
+  const mine = runs[place]?.fingerprint ?? null;
+  // The last earlier run that recorded a fingerprint, as the trend reads it.
+  const before = runs.slice(place + 1).find((r) => r.fingerprint !== null)?.fingerprint ?? null;
+  return mine !== null && before !== null && mine !== before;
 }
 
 function Runs({

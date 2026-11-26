@@ -49,7 +49,9 @@ export function Trend({ runs }: { readonly runs: readonly EvalTrendPointDto[] })
       wrap="nowrap"
       role="img"
       aria-label={`Last ${String(runs.length)} runs: ${String(failed)} failed${
-        changes > 0 ? `, the eval changed ${String(changes)} times` : ''
+        changes > 0
+          ? `, the eval changed ${changes === 1 ? 'once' : `${String(changes)} times`}`
+          : ''
       }`}
     >
       {runs.map((run, place) => (
