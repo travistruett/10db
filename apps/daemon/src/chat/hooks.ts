@@ -226,6 +226,11 @@ export interface ChatHooksDeps {
   /** Who holds Your folder: a chat's turn takes it, and writes only while it holds it. */
   readonly folderHold: FolderHold;
   /**
+   * The checkout's HEAD and working tree as one value (`checkoutState`): a command the builder allowed again
+   * outside the sandbox asks again once it moves.
+   */
+  readonly checkoutState: (checkout: string) => Promise<string>;
+  /**
    * The sessions whose next start tells them they moved to a branch before their last change. The move adds a
    * chat; the start takes it, so it is said once and a restart drops it.
    */
@@ -426,6 +431,12 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
   const pendingReleases = new Map<ChatId, { cancelled: boolean }>();
   // How each conversation's open session is closed, for a job that would not stop.
   const sessionClosers = new Map<ConversationId, () => Promise<void>>();
+  // How each chat's open session forgets the commands the builder allowed again outside the sandbox: when its
+  // turn ends, and when another chat's turn joins it in the checkout.
+  const outsideForget = new Map<
+    ChatId,
+    { readonly sessionId: SessionId; readonly forget: () => void }
+  >();
   const say = (conv: ConversationRow, lines: readonly string[]): void => {
     if (lines.length === 0) return;
     state.write((ctx) => {
@@ -475,6 +486,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         notices.set(chat.id, [readOnlyNotice(taken.blockers)]);
         return { writes: false };
       }
+      // What the chats already here allowed again outside the sandbox would now run on this chat's changes too.
+      for (const h of taken.sharedWith)
+        if (h.chatId !== null) outsideForget.get(h.chatId)?.forget();
       const others = taken.sharedWith.map((h) => holderWords(h));
       const joined = holderWords({
         kind: FolderHolderKind.ChatTurn,
@@ -617,14 +631,22 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       // A chat's sandbox lets one command ask to run outside it, each judged by the hook and then the builder:
       // Claude's flagged command, or Codex's sandbox escalation. Full access has no sandbox.
       const codexChat = launch.account.harness === Provider.Codex;
-      // How many calls that could change something this session has let through: a command the builder allowed
-      // to run again outside the sandbox lasts only until this moves, or a background task runs.
+      // How many calls that could change something this session has let through, moved too when its turn ends
+      // and when another chat joins the checkout: a command the builder allowed to run again outside the
+      // sandbox lasts only until this moves, or a background task runs.
       let changes = 0;
       // The call behind the latest count, if one was: a Codex escalation follows its own sandboxed attempt, which
       // the hook counted, so that one count is not held against the command it escalates.
       let lastChangeBy: string | null = null;
       let backgrounded = false;
       const asksOutside = full === null && !fullCodex;
+      if (asksOutside)
+        outsideForget.set(chat.id, {
+          sessionId: start.sessionId,
+          forget: () => {
+            changes += 1;
+          },
+        });
       const shapeId = planOfConversation(state.db, conv.id);
       const plan = deps.plan;
       // Every chat has its plan's folder, derived from the chat until a plan exists. Made before the sandbox,
@@ -658,7 +680,26 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                   lastChangeBy = null;
                 },
                 background: () => runningNow(),
-                remembers: () => !backgrounded,
+                // A checkout shared with something that can write it can change between two reads of it, unseen
+                // by this session. A chat waiting for the folder and a closed pass waiting for its merge write
+                // nothing while this turn holds it.
+                remembers: () =>
+                  !backgrounded &&
+                  !deps.folderHold
+                    .holders(conv.projectId, chat.id)
+                    .some(
+                      (h) =>
+                        h.kind !== FolderHolderKind.WaitingChat &&
+                        h.kind !== FolderHolderKind.PassClosed,
+                    ),
+                checkoutState: () =>
+                  deps.checkoutState(launch.cwd).catch((err: unknown) => {
+                    log.warn(
+                      { err, conversationId: conv.id },
+                      'the checkout could not be read for a remembered command',
+                    );
+                    return null;
+                  }),
               },
             }
           : {}),
@@ -746,6 +787,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           if (sessionJobs.get(conv.id) === endJobs) sessionJobs.delete(conv.id);
           if (sessionClosers.get(conv.id) === closer) sessionClosers.delete(conv.id);
           if (holdingSession.get(chat.id) === start.sessionId) holdingSession.delete(chat.id);
+          if (outsideForget.get(chat.id)?.sessionId === start.sessionId)
+            outsideForget.delete(chat.id);
           if (owedRules.get(conv.id)?.sessionId === start.sessionId) owedRules.delete(conv.id);
           if (reviewing.get(conv.id)?.sessionId === start.sessionId) reviewing.delete(conv.id);
           deps.live.end(conv.id, start.sessionId);
@@ -1138,6 +1181,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           if (!kept.some((r) => r.id === id)) open.live.delete(id);
       }
       const chat = chatOf(conv);
+      // The builder's yes to run a command again outside the sandbox lasts for the turn it was given in.
+      outsideForget.get(chat.id)?.forget();
       state.write((ctx) => {
         touchChat(ctx, chat.id, deps.now().toISOString());
       });

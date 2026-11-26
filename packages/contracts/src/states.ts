@@ -87,7 +87,7 @@ export const PermissionChoice = {
   AllowOnce: 'allow_once',
   AllowWorkstream: 'allow_workstream',
   AllowProject: 'allow_project',
-  /** On a chat's command-outside-the-sandbox card: this exact call again, in this chat's session only. */
+  /** On a chat's command-outside-the-sandbox card: this exact call again, in this turn only. */
   AllowChat: 'allow_chat',
   /** Only on a card for an approved project MCP server's tool: every tool the server listed, in this project. */
   AllowMcpServer: 'allow_mcp_server',

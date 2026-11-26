@@ -400,6 +400,7 @@ describe("a chat's command outside the sandbox", () => {
   let changes = 0;
   let background = false;
   let backgrounded = false;
+  let tree: string | null;
 
   function chatBroker(owner: ReturnType<typeof conversation>) {
     return createPermissionBroker(
@@ -425,6 +426,7 @@ describe("a chat's command outside the sandbox", () => {
             },
             background: () => background,
             remembers: () => !backgrounded,
+            checkoutState: () => Promise.resolve(tree),
           },
         },
       },
@@ -436,6 +438,35 @@ describe("a chat's command outside the sandbox", () => {
     changes = 0;
     background = false;
     backgrounded = false;
+    tree = 'a';
+  });
+
+  it('asks again within a turn once HEAD or the working tree moved since the yes', async () => {
+    const broker = chatBroker(conversation());
+    const first = broker(outside('pnpm test'));
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    expect(await first).toEqual({ behavior: 'allow' });
+    // Nothing moved since the yes: the same command runs unasked.
+    expect(await broker(outside('pnpm test'))).toEqual({ behavior: 'allow' });
+    expect(openCards()).toEqual([]);
+    // Another holder of the checkout changed a file, which moves no count of this session's.
+    tree = 'b';
+    const moved = broker(outside('pnpm test'));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    expect(await moved).toEqual({ behavior: 'allow' });
+    expect(await broker(outside('pnpm test'))).toEqual({ behavior: 'allow' });
+    // A checkout that can't be read is never taken as unchanged, and a yes given then is not remembered.
+    tree = null;
+    const unread = broker(outside('pnpm test'));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowChat });
+    expect(await unread).toEqual({ behavior: 'allow' });
+    void broker(outside('pnpm test')).catch(() => undefined);
+    await settle();
+    expect(onlyOpenCard().title).toBe('Run this outside the sandbox?');
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny });
+    await settle();
   });
 
   it('asks with three answers, remembers only the exact command for the session, and stores no rule', async () => {
