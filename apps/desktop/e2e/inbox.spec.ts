@@ -210,7 +210,8 @@ test('a card is answered from a phone paired with a code made in Devices', async
     // The dialog on the Mac says who paired, then closes.
     await expect(dialog).toBeHidden();
     await mobile.getByRole('link', { name: 'Open Inbox' }).click();
-    await mobile.getByText(title).first().click();
+    // The row in the list sheet, not the card's own title, which may already be drawn under the sheet.
+    await mobile.getByRole('listbox', { name: 'Inbox' }).getByText(title).click();
     await mobile.getByText('Yes', { exact: true }).first().click();
     await mobile.getByRole('button', { name: /^Send Answer/ }).click();
     await expect(mobile.getByText(title)).toHaveCount(0);
