@@ -83,6 +83,7 @@ import {
 import {
   approvedLines,
   buildTrustPolicy,
+  devStackElsewhere,
   sessionDevAccess,
   CROSSES_LIMIT_QUESTION,
   PRE_EXISTING_READ_MAX,
@@ -1716,6 +1717,12 @@ export function createRunner(opts: RunnerOptions): Runner {
         watchpoints,
         head,
         sources: [WATCHPOINT_HIT_SOURCES, [evalDefinitionSource(evalDefinitionSuites(row))]].flat(),
+        onLinesUnread: (keys) => {
+          opts.logger.warn(
+            { workstreamId: id, watchpoints: keys },
+            'the line patterns of these watchpoints did not finish; no line was cleared',
+          );
+        },
         read: (only, maxBytes) =>
           diffOfRanges(opts.git, checkout, ranges, maxBytes, only === null ? undefined : { only }),
       });
@@ -3299,6 +3306,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       claudeConnectors,
       devAccess,
       copyId: sessionCopyId,
+      builderFolder: project.repoPath,
     });
     // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
     // starts on 10db's rules.
@@ -3486,6 +3494,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       pictures:
         project.appUrl !== null && takesPictures(project, task, [], taskInLocalCopy(db, task.id)),
       browser: laneSession !== null && opts.endLaneBrowser !== undefined,
+      generators: devStackElsewhere({ checkout, builderFolder: project.repoPath, devAccess }),
       sandboxed: Boolean(opts.laneSandbox),
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
       judged,

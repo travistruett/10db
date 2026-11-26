@@ -15,6 +15,7 @@ import {
   type PermissionRuleDto,
   type ProjectDto,
 } from '@10db/contracts';
+import { OUTBOUND_PATTERNS, SECRET_PATTERN_NAMES } from '../stakeholders';
 import type { GateResult, GateRunner } from '../verify';
 import type { PageCamera } from './camera';
 import { browserDir, writeStorageState, type StorageState } from './storage-state';
@@ -78,9 +79,44 @@ export interface SignInDeps {
   readonly checkouts: () => readonly string[];
 }
 
+/** What a dev login that ran and failed leaves to show the builder; the output is scrubbed of tokens and addresses. */
+export interface SignInFailure {
+  readonly command: string;
+  /** Null when the command did not exit (a timeout, a stop, a refused Docker). */
+  readonly exitCode: number | null;
+  /** The last lines of the command's output that carry no address or secret; empty when it printed none. */
+  readonly tail: string;
+}
+
 export type SignInResult =
   | { readonly ok: true; readonly state: StorageState }
-  | { readonly ok: false; readonly problem: string };
+  | { readonly ok: false; readonly problem: string; readonly failure: SignInFailure | null };
+
+/** How many lines of the dev login's output a failure shows. */
+const TAIL_LINES = 8;
+const TAIL_LINE_CHARS = 200;
+
+/**
+ * The last lines of a dev login's output that are safe to show: a line that holds the app's address (the login
+ * prints its token there) or that matches a secret pattern is dropped, the rest are cut short.
+ */
+export function loginOutputTail(appUrl: AppUrl, output: string): string {
+  const origin = URL.parse(appUrl)?.origin ?? appUrl;
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(
+      (line) =>
+        line !== '' &&
+        !line.includes(origin) &&
+        !OUTBOUND_PATTERNS.some(
+          ({ name, pattern }) => SECRET_PATTERN_NAMES.includes(name) && pattern.test(line),
+        ),
+    )
+    .slice(-TAIL_LINES)
+    .map((line) => (line.length > TAIL_LINE_CHARS ? `${line.slice(0, TAIL_LINE_CHARS)}…` : line))
+    .join('\n');
+}
 
 const NEEDS_DOCKER = 'The dev login needs Docker: turn on Allow Docker in Settings › Sandbox';
 
@@ -104,9 +140,10 @@ export async function signIn(
   signal: AbortSignal,
 ): Promise<SignInResult> {
   const { appUrl, devLoginCommand } = project;
-  if (appUrl === null) return { ok: false, problem: 'The project has no app address' };
+  if (appUrl === null)
+    return { ok: false, problem: 'The project has no app address', failure: null };
   if (devLoginCommand === null)
-    return { ok: false, problem: 'The project has no dev login command' };
+    return { ok: false, problem: 'The project has no dev login command', failure: null };
   const dir = browserDir(deps.dataDir, project.id);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const logPath = join(dir, `login-${String(deps.now())}.log`);
@@ -128,14 +165,28 @@ export async function signIn(
       checkouts: deps.checkouts(),
       signal,
     });
+    const output = readFileSync(logPath, 'utf8');
     const problem = devLoginProblem(result);
-    if (problem !== null) return { ok: false, problem };
-    url = parseLoginUrl(appUrl, readFileSync(logPath, 'utf8'));
+    if (problem !== null)
+      return {
+        ok: false,
+        problem,
+        failure: {
+          command: devLoginCommand,
+          exitCode: result.timedOut || result.aborted ? null : result.exitCode,
+          tail: loginOutputTail(appUrl, output),
+        },
+      };
+    url = parseLoginUrl(appUrl, output);
   } finally {
     rmSync(logPath, { force: true });
   }
   if (url === null)
-    return { ok: false, problem: `The dev login command printed no address on ${appUrl}` };
+    return {
+      ok: false,
+      problem: `The dev login command printed no address on ${appUrl}`,
+      failure: { command: devLoginCommand, exitCode: 0, tail: '' },
+    };
   let state: StorageState;
   try {
     state = await deps.camera.signIn({ appUrl, url, signal });
@@ -144,6 +195,7 @@ export async function signIn(
     return {
       ok: false,
       problem: 'The browser could not sign in at the address the dev login printed',
+      failure: { command: devLoginCommand, exitCode: 0, tail: '' },
     };
   }
   writeStorageState(deps.dataDir, project.id, state);

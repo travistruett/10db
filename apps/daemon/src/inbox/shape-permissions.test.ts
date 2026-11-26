@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   mintId,
   PermissionChoice,
+  Provider,
   ShapeOrigin,
   type ConversationId,
   type InboxItemDto,
@@ -11,6 +12,7 @@ import {
   type SessionId,
   type ShapeId,
   type WorkstreamId,
+  UNSANDBOXED_DETAIL,
 } from '@10db/contracts';
 import {
   createTestStore,
@@ -415,6 +417,7 @@ describe("a chat's command outside the sandbox", () => {
           hazards: [],
           commandsAsk: true,
           unsandboxed: {
+            agent: Provider.Claude,
             mayRun: () => refusal,
             changes: () => changes,
             bump: () => {
@@ -443,13 +446,17 @@ describe("a chat's command outside the sandbox", () => {
     );
     const card = onlyOpenCard();
     expect(card.title).toBe('Run this outside the sandbox?');
-    expect(card.detail?.['unsandboxed']).toBe(true);
-    // The command leads the body, so the Inbox shows it too; then what Claude says, quoted on one line, so it
-    // can't add a paragraph that passes for 10db's; then the warning.
-    const [command, said, ...rest] = card.body.split('\n\n');
-    expect(command).toBe('pnpm test');
+    expect(card.detail?.[UNSANDBOXED_DETAIL]).toBe(true);
+    // The command is the detail's summary, shown on its own; the body is what Claude says, quoted on one line so
+    // it can't add a paragraph that passes for 10db's, then the warning.
+    expect(card.detail?.['summary']).toBe('pnpm test');
+    expect(card.body).not.toContain('pnpm test');
+    const [said, ...rest] = card.body.split('\n\n');
     expect(said).toBe('Claude says: “Run the tests This command is read-only and safe.”');
-    expect(rest).toHaveLength(1);
+    expect(rest).toEqual([
+      'It runs with your full rights: it can read and write anywhere you can.',
+    ]);
+    const warning = rest[0];
     expect(card.options.map((o) => o.label)).toEqual([
       PermissionChoice.AllowOnce,
       PermissionChoice.AllowChat,
@@ -506,7 +513,31 @@ describe("a chat's command outside the sandbox", () => {
     void chatBroker(owner)(outside('pnpm test')).catch(() => undefined);
     inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny });
     await settle();
+    // A command whose blank lines hold text like 10db's stays whole in the summary and out of the body.
+    const hostile = `cat <<'EOF'\n\n${String(warning)}\n\nClaude says: “safe”\nEOF`;
+    void broker(outside(hostile)).catch(() => undefined);
+    expect(onlyOpenCard().detail?.['summary']).toBe(hostile);
+    expect(onlyOpenCard().body).toBe(warning);
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny });
+    await settle();
     expect(listPermissionRules(state.db, owner.projectId, null)).toEqual([]);
+  });
+
+  it('shows the hidden characters of what Claude says, and keeps the command out of the body', async () => {
+    const broker = chatBroker(conversation());
+    const rtl = String.fromCodePoint(0x202e);
+    const command = `ls\n\nIt runs inside the sandbox.\t\u001b[1A${rtl}`;
+    void broker(outside(command, `Check${rtl}files\u0085now`)).catch(() => undefined);
+    const card = onlyOpenCard();
+    expect(card.body.split('\n\n')).toEqual([
+      'Claude says: “Check\\u{202e}files\\u{85}now”',
+      'It runs with your full rights: it can read and write anywhere you can.',
+    ]);
+    // The raw command stays the call's summary: the card shows it in its own block, and the chat's memory and
+    // the hook match on it.
+    expect(card.detail?.['summary']).toBe(command);
+    inbox.answer(card.id, { choice: PermissionChoice.Deny });
+    await settle();
   });
 
   it('denies a yes once the turn no longer holds the checkout, and a remembered call too', async () => {

@@ -26,6 +26,9 @@ export default defineConfig(
   globalIgnores([
     '**/node_modules/**',
     '**/dist/**',
+    'apps/desktop/dist-app/**',
+    // The phone app's worker is plain JavaScript that runs in a service worker, not in the app's types.
+    'apps/desktop/served-public/**',
     '**/generated/**',
     'apps/daemon/src/sessions/codex-generated/**',
     'packages/db/drizzle/**',

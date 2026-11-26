@@ -1,13 +1,18 @@
+import { createHash } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import {
   AccountKind,
   ConversationOwnerKind,
+  EventType,
   ExternalKind,
   LinearEventKind,
   LinearPostState,
   LinearVia,
   Provider,
+  ScreenKind,
   type LinearPostId,
   type ProjectDto,
   type TaskDto,
@@ -17,6 +22,8 @@ import {
   enqueueLinearPost,
   findOpenByFoldKey,
   insertTask,
+  insertTaskScreen,
+  insertWorkstream,
   listLinearPosts,
   seedProject,
   setAppSetting,
@@ -26,21 +33,32 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { createExploreEngine, type ExploreEngine } from '../conversation';
-import { createEventBus, createLiveFrames, createStateStore, type StateStore } from '../events';
+import {
+  createEventBus,
+  createLiveFrames,
+  createStateStore,
+  type EventBus,
+  type StateStore,
+} from '../events';
 import { createGit } from '../git';
-import { createInboxService } from '../inbox';
+import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
+import type { PicturesOutlook } from '../pictures';
 import { createMcpHandler, mintSessionToken } from '../mcp';
 import { FakeAdapter, type FakeScriptBook } from '../sessions';
 import {
   createLinearReporter,
   HOLD_RETRY_MS,
+  PICTURES_POLL_MS,
+  PICTURES_WAIT_MS,
   REPORTER_STARTER,
   type LinearReporter,
 } from './reporter';
 import { reporterConversations } from './reporter-conversation';
-import { linearReporterFoldKey } from './reporter-inbox';
+import { REPORT_DELAY_MS, subscribeLinearEvents } from './reporter-events';
+import { answerReporterCard, linearReporterFoldKey, ReporterChoice } from './reporter-inbox';
 import { reporterHooks } from './reporter-owner';
+import { LinearWriteError } from './reporter-writer';
 import { SNAPSHOT_FIRST_LINE, SNAPSHOT_STARTER } from './snapshot';
 
 // The reporter on the real pipeline: the store, the explore engine with the fake adapter, the daemon's own
@@ -67,30 +85,40 @@ let reporter: LinearReporter;
 let repo: { path: string; cleanup(): void };
 /** Makes the next launch throw, as an account with no model to run would. */
 let launchError: Error | null = null;
+/** The headers of the account's Linear entry: an Authorization one lets 10db write the comments itself. */
+let linearHeaders: Record<string, string> | null = null;
+/** The comments 10db wrote through its own writer, and the refusal its next write gets. */
+let written: { issueId: string; body: string }[] = [];
+let writeError: { message: string; refused: boolean; signedOut?: boolean } | null = null;
+/** The pictures 10db asked Linear to prepare, and the files it sent to the signed address. */
+let prepared: { filename: string; size: number }[] = [];
+let sent: { url: string; method: string | undefined }[] = [];
+/** What the pictures service says of the task's after picture; a test may change it as the capture goes on. */
+let outlook: () => PicturesOutlook = () => ({ kind: 'none' });
+let outlookCalls = 0;
+let bus: EventBus;
+/** The world's Inbox, wired as `daemon/start.ts` wires it: a Retry on the reporter's card wakes the reporter. */
+let inbox: InboxService;
 
-function recordingScript(postId: LinearPostId): FakeStep[] {
+const BODY = 'The run started on this task.';
+
+/** An upload address as Linear signs it. */
+const SIGNED_UPLOAD =
+  'https://storage.googleapis.com/linear-uploads-c4/a/b?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=linear-server%40linear-1.iam.gserviceaccount.com%2F20261125%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Signature=ab';
+
+/** Hands 10db the body, writes the comment 10db built, and names its id in the closing message. */
+function recordingScript(postId: LinearPostId, closing = `${postId}: comment-1`): FakeStep[] {
   return [
-    {
-      do: 'tool',
-      toolName: `${PREFIX}save_comment`,
-      input: { issueId: ISSUE, body: 'Run started.' },
-      result: JSON.stringify({ id: 'comment-1' }),
-    },
+    { do: 'mcp', tool: 'report_linear_post', args: { postId, body: BODY } },
     // The team key repeats across workspaces, so Linear's own id is the only one accepted.
     { do: 'tool', toolName: `${PREFIX}save_comment`, input: { issueId: 'AMP-1', body: 'x' } },
     {
-      do: 'mcp',
-      tool: 'report_linear_post',
-      args: {
-        postIds: [postId],
-        outcome: {
-          state: 'recorded',
-          commentIds: ['comment-1'],
-          statusSet: null,
-          attachmentUrl: null,
-        },
-      },
+      do: 'tool',
+      toolName: `${PREFIX}save_comment`,
+      input: { issueId: ISSUE, body: '$comment.body' },
+      result: JSON.stringify({ id: 'comment-1' }),
     },
+    { do: 'say', text: closing },
     { do: 'turn_complete' },
   ];
 }
@@ -119,7 +147,18 @@ function makeReporter(): LinearReporter {
           ],
         }),
     },
-    inbox: createInboxService({ state, onParkedAnswer: () => undefined }),
+    inbox,
+    picturesOutlook: () => {
+      outlookCalls += 1;
+      return outlook();
+    },
+    send: (url, init) => {
+      sent.push({
+        url: typeof url === 'string' ? url : url instanceof URL ? url.href : url.url,
+        method: init?.method,
+      });
+      return Promise.resolve(new Response(null, { status: 200 }));
+    },
   });
   engine.register(
     ConversationOwnerKind.Reporter,
@@ -144,6 +183,25 @@ function makeReporter(): LinearReporter {
             ],
           }),
       },
+      commentWriter: () => ({
+        preparePicture: ({ filename, size }) => {
+          prepared.push({ filename, size });
+          return Promise.resolve({
+            url: SIGNED_UPLOAD,
+            headers: { 'Content-Type': 'image/png' },
+            markdown: `![${filename}](https://uploads.linear.app/${filename})`,
+            assetUrl: `https://uploads.linear.app/${filename}`,
+          });
+        },
+        postComment: (comment) => {
+          written.push(comment);
+          return writeError === null
+            ? Promise.resolve('direct-1')
+            : Promise.reject(
+                new LinearWriteError(writeError.message, writeError.refused, writeError.signedOut),
+              );
+        },
+      }),
       launch: () => {
         if (launchError !== null) throw launchError;
         return {
@@ -166,7 +224,7 @@ function makeReporter(): LinearReporter {
           sandbox: null,
           yourMcpServers: {
             linear: {
-              connect: { type: 'http', url: 'https://mcp.linear.app/mcp', headers: null },
+              connect: { type: 'http', url: 'https://mcp.linear.app/mcp', headers: linearHeaders },
               claudeName: null,
               claudeOAuth: null,
               codex: {
@@ -188,11 +246,31 @@ function makeReporter(): LinearReporter {
 
 beforeEach(async () => {
   launchError = null;
-  ({ store, close: closeStore } = createTestStore());
-  repo = tempDir('reporter');
-  const bus = createEventBus();
-  state = createStateStore(store, bus);
+  linearHeaders = null;
+  written = [];
+  writeError = null;
+  prepared = [];
+  sent = [];
+  outlook = () => ({ kind: 'none' });
+  outlookCalls = 0;
   clock = new ManualClock();
+  // The store writes on the world's clock, as the daemon's does.
+  ({ store, close: closeStore } = createTestStore(() => clock.now()));
+  repo = tempDir('reporter');
+  bus = createEventBus();
+  state = createStateStore(store, bus);
+  inbox = createInboxService({
+    state,
+    onParkedAnswer: () => undefined,
+    onFlagAnswerInWrite: (ctx, item, answer) => {
+      const retried = answerReporterCard(ctx, item, answer);
+      return retried === null
+        ? undefined
+        : () => {
+            reporter.wake(retried);
+          };
+    },
+  });
   book = {};
   adapter = new FakeAdapter(book);
   project = seedProject(store, { name: 'alpha', repoPath: repo.path });
@@ -238,6 +316,7 @@ beforeEach(async () => {
       // Reads the reporter at call time: a test swaps it for a new one over the same store.
       reporter: {
         reportPost: (id, input) => reporter.reportPost(id, input),
+        pickStatus: (id, input) => reporter.pickStatus(id, input),
         uploadPicture: (id, input) => reporter.uploadPicture(id, input),
       },
     }),
@@ -258,16 +337,23 @@ afterEach(async () => {
   closeStore();
 });
 
-const oweOne = (dedupeKey = 'run_started:1:0'): LinearPostId => {
+const oweOne = (
+  dedupeKey = 'run_started:1:0',
+  event: LinearEventKind = LinearEventKind.RunStarted,
+  {
+    detail = {},
+    dueInMs = 30_000,
+  }: { detail?: Record<string, string | null>; dueInMs?: number } = {},
+): LinearPostId => {
   const row = store.write((ctx) =>
     enqueueLinearPost(ctx, {
       taskId: task.id,
       projectId: project.id,
-      event: LinearEventKind.RunStarted,
+      event,
       dedupeKey,
       attempt: 1,
-      detail: {},
-      dueAt: new Date(clock.now().getTime() + 30_000).toISOString(),
+      detail,
+      dueAt: new Date(clock.now().getTime() + dueInMs).toISOString(),
     }),
   ).value;
   if (row === null) throw new Error('the row was not made');
@@ -291,6 +377,49 @@ describe('the Linear reporter', () => {
     expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(1);
     // A reporter's run never holds an update drain.
     expect(engine.busy()).toEqual([]);
+  });
+
+  it('picks a run start status from the team by type and position, lets only that be set, and records it', async () => {
+    const id = oweOne();
+    const status = (name: string, type: string, position: number) => ({ name, type, position });
+    const statuses = [
+      status('Backlog', 'backlog', 1),
+      status('In Progress', 'started', 3),
+      status('In Review', 'started', 4),
+      status('Done', 'completed', 5),
+    ];
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'pick_linear_status',
+          args: { postId: id, current: statuses[0], statuses },
+        },
+        // The agent's own choice, not the pick: refused.
+        {
+          do: 'tool',
+          toolName: `${PREFIX}save_issue`,
+          input: { id: ISSUE, state: 'In Review' },
+        },
+        {
+          do: 'tool',
+          toolName: `${PREFIX}save_issue`,
+          input: { id: ISSUE, state: 'In Progress' },
+          result: '{}',
+        },
+        ...recordingScript(id),
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    // The row records the status the run set, whichever of its two writes came first.
+    expect(rows()[0]?.statusSet).toBe('In Progress');
+    expect(rows()[0]?.commentIds).toEqual(['comment-1']);
+    const results = adapter.observations.filter((o) => o.kind === 'mcp_result');
+    expect(results.map((o) => o.detail['isError'])).toEqual([false, false]);
+    expect(String(results[0]?.detail['text'])).toContain('In Progress');
+    // The status 10db did not pick, and the comment by the team key.
+    expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(2);
   });
 
   it('keeps a row whose session ended without recording pending, and runs it again at its backoff', async () => {
@@ -350,6 +479,60 @@ describe('the Linear reporter', () => {
     expect(card()).toBeUndefined();
   });
 
+  it('withholds an update with nothing to report without a session, a hold or a card', async () => {
+    oweOne('pr_opened:1', LinearEventKind.PrOpened, { detail: { prUrl: null } });
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Withheld);
+    expect(rows()[0]).toMatchObject({
+      withheldPattern: 'nothing to report',
+      tries: 0,
+      lastError: null,
+    });
+    expect(rows()[0]?.dismissedAt).not.toBeNull();
+    expect(adapter.shapeSessions).toHaveLength(0);
+    expect(
+      findOpenByFoldKey(store.db, project.id, linearReporterFoldKey(project.id)),
+    ).toBeUndefined();
+  });
+
+  it('spends a try on a run that made no Linear call after Linear answered in the conversation, and posts next time', async () => {
+    book[`Chat: ${SNAPSHOT_STARTER}`] = [
+      [
+        { do: 'tool', toolName: `${PREFIX}get_issue`, input: { id: ISSUE }, result: '{}' },
+        { do: 'say', text: `${SNAPSHOT_FIRST_LINE}\nAMP-1: Add search.` },
+        { do: 'turn_complete' },
+      ],
+    ];
+    await expect(reporter.snapshot(task.id)).resolves.toMatchObject({ kind: 'read' });
+    const id = oweOne();
+    // The posting turn right after the snapshot ends without a call, as the one on 2026-11-25 did.
+    book[KEY] = [[{ do: 'turn_complete' }], recordingScript(id)];
+    clock.advance(30_000);
+    await expect
+      .poll(
+        () => {
+          clock.advance(0);
+          return rows()[0]?.tries;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(1);
+    expect(rows()[0]?.state).toBe(LinearPostState.Pending);
+    expect(rows()[0]?.lastError).toContain('without calling Linear');
+    expect(rows()[0]?.lastError).not.toContain("isn't signed in");
+    // The account is not taken as signed out: the retry gets a session, and its write and report tools.
+    clock.advance(5 * 60_000);
+    await expect
+      .poll(
+        () => {
+          clock.advance(0);
+          return rows()[0]?.state;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(LinearPostState.Recorded);
+  });
+
   it('does not take the account as signed out when a run that made no Linear call left nothing to hold', async () => {
     const first = oweOne();
     // The run records its row without a call the guard counts as Linear's, so nothing is left to hold.
@@ -358,15 +541,7 @@ describe('the Linear reporter', () => {
         {
           do: 'mcp',
           tool: 'report_linear_post',
-          args: {
-            postIds: [first],
-            outcome: {
-              state: 'recorded',
-              commentIds: ['c-1'],
-              statusSet: null,
-              attachmentUrl: null,
-            },
-          },
+          args: { postId: first, nothingToReport: true },
         },
         { do: 'turn_complete' },
       ],
@@ -406,6 +581,361 @@ describe('the Linear reporter', () => {
     expect(rows()[0]?.tries).toBe(1);
   });
 
+  it('records a comment before Linear gets it, so a run that dies after the write never posts it twice', async () => {
+    const id = oweOne();
+    // The write goes out and the run ends without naming the comment's id.
+    book[KEY] = [recordingScript(id, 'Done.')];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    expect(rows()[0]?.commentIds).toEqual([]);
+    // Nothing is owed any more: a new daemon arms no run for it.
+    await reporter.stop();
+    reporter = makeReporter();
+    reporter.start();
+    clock.advance(60 * 60_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(1);
+  });
+
+  it('keeps the reason an agent gives for a failed write, and never writes that comment again', async () => {
+    const id = oweOne();
+    // The agent can't tell a refusal from a write Linear took but did not answer, so its word reopens nothing.
+    book[KEY] = [recordingScript(id, `${id}: failed: Issue not found`), recordingScript(id)];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.lastError, { timeout: 10_000 }).toBe('Issue not found');
+    expect(rows()[0]).toMatchObject({ state: LinearPostState.Recorded, tries: 0, commentIds: [] });
+    clock.advance(60 * 60_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(1);
+  });
+
+  it('withholds a body that carries a key, and refuses one that says nothing, with no write', async () => {
+    const id = oweOne();
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: id, body: 'placeholder' },
+        },
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: id, body: 'The key is sk-ant-abcdefghijklmnopqrstuvwx' },
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Withheld);
+    // 10db named the pattern itself, and the too-short body was refused with its reason.
+    expect(rows()[0]?.withheldPattern).toBe('anthropic_key');
+    const answers = adapter.observations.filter((o) => o.kind === 'mcp_result');
+    expect(answers[0]?.detail).toMatchObject({ isError: true });
+    expect(JSON.stringify(answers[0]?.detail)).toContain('write what the update says');
+    expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(0);
+  });
+
+  it('writes the comment itself when the account has a Linear sign-in 10db can use, and the agent writes nothing', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    const id = oweOne();
+    book[KEY] = [
+      [
+        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY } },
+        // The agent's own write is refused: 10db has made it.
+        {
+          do: 'tool',
+          toolName: `${PREFIX}save_comment`,
+          input: { issueId: ISSUE, body: BODY },
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    await expect.poll(() => rows()[0]?.commentIds, { timeout: 10_000 }).toEqual(['direct-1']);
+    expect(written).toHaveLength(1);
+    expect(written[0]?.issueId).toBe(ISSUE);
+    expect(written[0]?.body).toContain(BODY);
+    expect(written[0]?.body).toContain('10db · run_started · attempt 1');
+    expect(written[0]?.body).not.toContain(id);
+    expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(1);
+    expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(0);
+  });
+
+  /** A kept picture of the task's home page, its file written as the pictures service writes one. */
+  const keepPicture = (kind: ScreenKind, content: string): void => {
+    const storedPath = join(repo.path, `${kind}.png`);
+    writeFileSync(storedPath, content);
+    store.write((ctx) =>
+      insertTaskScreen(ctx, {
+        taskId: task.id,
+        turnId: null,
+        kind,
+        route: '/',
+        viewport: { width: 1440, height: 900 },
+        theme: 'default',
+        sha256: createHash('sha256').update(content).digest('hex'),
+        size: content.length,
+        width: 1440,
+        height: 900,
+        storedPath,
+        keptSha: null,
+      }),
+    );
+  };
+
+  /** Hands 10db a body for the one owed row and lets its own write finish. */
+  const endedComment = async (id: LinearPostId): Promise<string> => {
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: id, body: 'The run ended and its change landed.' },
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    return written[0]?.body ?? '';
+  };
+
+  it('puts a finished task’s before and after pictures in its ended comment, uploaded by 10db, and names no pull request', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    keepPicture(ScreenKind.Before, 'before-bytes');
+    keepPicture(ScreenKind.After, 'after-bytes');
+    const body = await endedComment(oweOne('ended:1:0', LinearEventKind.Ended));
+    expect(prepared.map((p) => p.filename)).toEqual(['1-home-before.png', '1-home-after.png']);
+    expect(prepared.map((p) => p.size)).toEqual(['before-bytes'.length, 'after-bytes'.length]);
+    expect(sent).toEqual([
+      { url: SIGNED_UPLOAD, method: 'PUT' },
+      { url: SIGNED_UPLOAD, method: 'PUT' },
+    ]);
+    expect(body).toContain('![1-home-before.png](https://uploads.linear.app/1-home-before.png)');
+    expect(body).toContain('![1-home-after.png](https://uploads.linear.app/1-home-after.png)');
+    expect(body).not.toMatch(/pull request/i);
+    expect(rows()[0]?.attachmentUrl).toBe('https://uploads.linear.app/1-home-before.png');
+  });
+
+  it('says once, with the reason, that a finished task has no pictures, and never names a pull request', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    outlook = () => ({ kind: 'skipped', reason: 'The dev login command failed (exit 1)' });
+    const body = await endedComment(oweOne('ended:1:0', LinearEventKind.Ended));
+    expect(body).toContain(
+      'No before and after pictures were taken. The dev login command failed (exit 1).',
+    );
+    expect(body.match(/dev login command failed/g)).toHaveLength(1);
+    expect(body).not.toMatch(/pull request/i);
+    expect(prepared).toEqual([]);
+  });
+
+  it('waits for a capture still running when the update comes due, and the comment carries the picture it kept', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    // The capture ends after the row first came due: its answer is "wait" once, and its after is kept as it ends.
+    outlook = () => {
+      if (outlookCalls > 1) return { kind: 'none' };
+      keepPicture(ScreenKind.After, 'after-bytes');
+      return { kind: 'wait' };
+    };
+    const id = oweOne('ended:1:0', LinearEventKind.Ended);
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: id, body: 'The run ended and its change landed.' },
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => outlookCalls, { timeout: 10_000 }).toBeGreaterThan(0);
+    // Nothing was written, and no try was spent.
+    expect(written).toEqual([]);
+    expect(rows()[0]).toMatchObject({ state: LinearPostState.Pending, tries: 0 });
+    clock.advance(PICTURES_POLL_MS);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    expect(written[0]?.body).toContain('![1-home-after.png]');
+    expect(written[0]?.body).not.toContain('still being taken');
+  });
+
+  it('stops waiting for the pictures after a bound and says they were still being taken', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    outlook = () => ({ kind: 'wait' });
+    const id = oweOne('ended:1:0', LinearEventKind.Ended);
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: id, body: 'The run ended and its change landed.' },
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => outlookCalls, { timeout: 10_000 }).toBeGreaterThan(0);
+    clock.advance(PICTURES_WAIT_MS);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    expect(written[0]?.body).toContain('still being taken');
+  });
+
+  it('owes an update again when its own write is refused, and does not hold it for a sign-in', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    writeError = { message: 'Issue not found', refused: true };
+    const id = oweOne();
+    book[KEY] = [
+      [
+        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY } },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.tries, { timeout: 10_000 }).toBe(1);
+    expect(rows()[0]).toMatchObject({
+      state: LinearPostState.Pending,
+      lastError: 'Issue not found',
+    });
+  });
+
+  it.each([
+    ['10db’s own write is turned away for its sign-in', 'direct'],
+    ['the agent says Linear answered that it is not signed in', 'agent'],
+  ] as const)('holds an update without spending a try when %s', async (_name, how) => {
+    const id = oweOne();
+    if (how === 'direct') {
+      linearHeaders = { Authorization: 'Bearer lin_api_x' };
+      writeError = { message: 'HTTP 401', refused: true, signedOut: true };
+      book[KEY] = [
+        [
+          { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY } },
+          { do: 'turn_complete' },
+        ],
+      ];
+    } else {
+      book[KEY] = [
+        [
+          // The call reaches Linear, which answers that the session must sign in.
+          { do: 'tool', toolName: `${PREFIX}get_issue`, input: { id: ISSUE }, result: '{}' },
+          { do: 'say', text: 'Linear asked me to sign in.\n\nLinear: not signed in' },
+          { do: 'turn_complete' },
+        ],
+      ];
+    }
+    clock.advance(30_000);
+    await expect
+      .poll(() => rows()[0]?.lastError ?? null, { timeout: 10_000 })
+      .toContain("isn't signed in to Linear");
+    expect(rows()[0]).toMatchObject({ state: LinearPostState.Pending, tries: 0 });
+  });
+
+  it('retries a failed update from the card, and keeps a run’s verdict owed until it is dismissed', async () => {
+    const started = oweOne();
+    const verdict = oweOne('verdict:1:0', LinearEventKind.Verdict);
+    const row = (id: LinearPostId) => rows().find((r) => r.id === id);
+    // Every run fails to start; each settle backs both rows off, and an hour covers every backoff before the cap.
+    launchError = new Error('no model to run');
+    await expect
+      .poll(
+        () => {
+          clock.advance(60 * 60_000);
+          return row(started)?.state;
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(LinearPostState.Failed);
+    expect(row(verdict)).toMatchObject({ state: LinearPostState.Pending, tries: 5 });
+    const card = () => findOpenByFoldKey(store.db, project.id, linearReporterFoldKey(project.id));
+    const answer = (choice: ReporterChoice): void => {
+      const open = card();
+      if (open === undefined) throw new Error('the card is not open');
+      inbox.answer(open.id, { choice });
+    };
+    expect(card()?.options.map((o) => o.label)).toEqual([
+      ReporterChoice.Retry,
+      ReporterChoice.Dismiss,
+    ]);
+    // Retry: the failed row is owed again with no try spent, and both rows are due now.
+    launchError = null;
+    book[KEY] = [recordingScript(started)];
+    answer(ReporterChoice.Retry);
+    const now = clock.now().toISOString();
+    expect(row(started)).toMatchObject({ state: LinearPostState.Pending, tries: 0, dueAt: now });
+    expect(row(verdict)?.dueAt).toBe(now);
+    await expect
+      .poll(
+        () => {
+          clock.advance(0);
+          return row(started)?.state;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(LinearPostState.Recorded);
+    // The run wrote no verdict: it fails again and is still owed.
+    await expect.poll(() => row(verdict)?.tries, { timeout: 10_000 }).toBe(6);
+    expect(row(verdict)?.state).toBe(LinearPostState.Pending);
+    // Dismiss is the only end of a run's last update short of posting it.
+    await expect.poll(() => card()?.id, { timeout: 10_000 }).toBeDefined();
+    answer(ReporterChoice.Dismiss);
+    expect(row(verdict)?.state).toBe(LinearPostState.Failed);
+    expect(row(verdict)?.dismissedAt).not.toBeNull();
+  });
+
+  it('gives a new update the report delay even when an older row of the task is on a long backoff', () => {
+    // AMP-134 got four comments in one second, 47 minutes late: new rows waited behind an older one's backoff.
+    oweOne('run_started:old:0', LinearEventKind.RunStarted, { dueInMs: 2 * 60 * 60_000 });
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
+    const unsubscribe = subscribeLinearEvents(bus, {
+      state,
+      clock,
+      reporter: {
+        poke: (id) => {
+          reporter.poke(id);
+        },
+        wake: (id) => {
+          reporter.wake(id);
+        },
+      },
+      log: silentLogger,
+    });
+    bus.publish([
+      {
+        seq: 1,
+        type: EventType.WorkstreamChanged,
+        entityType: 'workstream',
+        entityId: ws.id,
+        data: { from: 'QUEUED', to: 'STARTING', reason: null },
+        at: clock.now().toISOString(),
+      },
+    ]);
+    unsubscribe();
+    const made = rows().find((r) => r.detail['workstreamId'] === ws.id);
+    expect(made?.dueAt).toBe(new Date(clock.now().getTime() + REPORT_DELAY_MS).toISOString());
+  });
+
+  it('never writes a comment again when Linear may have taken it but did not answer', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    writeError = { message: 'Request timed out', refused: false };
+    const id = oweOne();
+    book[KEY] = [
+      [
+        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY } },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.lastError, { timeout: 10_000 }).toContain('timed out');
+    expect(rows()[0]).toMatchObject({ state: LinearPostState.Recorded, tries: 0, commentIds: [] });
+    clock.advance(60 * 60_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(written).toHaveLength(1);
+    expect(rows()[0]?.state).toBe(LinearPostState.Recorded);
+  });
+
   it('reads the linked issue for a lane without writing, and says why when it cannot', async () => {
     book[`Chat: ${SNAPSHOT_STARTER}`] = [
       [
@@ -434,5 +964,41 @@ describe('the Linear reporter', () => {
       kind: 'missing',
       reason: 'the session answered with nothing',
     });
+  });
+
+  it('records every update a run owes, however many come due together, from a script that names none', async () => {
+    // A task's run raises a row per event; a script that wrote for a fixed count left the rest owed.
+    book[KEY] = [
+      [
+        {
+          do: 'each_owed',
+          steps: [
+            { do: 'mcp', tool: 'report_linear_post', args: { postId: '$post', body: BODY } },
+            {
+              do: 'tool',
+              // Whichever Linear server the account's agent has: the brief names its tools by full name.
+              toolName: '$linear:save_comment',
+              input: { issueId: ISSUE, body: '$comment.body' },
+              result: JSON.stringify({ id: 'comment-1' }),
+            },
+            { do: 'say', text: '$post: comment-1' },
+          ],
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    const kinds = [
+      LinearEventKind.RunStarted,
+      LinearEventKind.Waiting,
+      LinearEventKind.Verdict,
+      LinearEventKind.Verdict,
+      LinearEventKind.Ended,
+    ];
+    kinds.forEach((kind, i) => oweOne(`${kind}:1:${String(i)}`, kind));
+    clock.advance(30_000);
+    await expect
+      .poll(() => rows().map((r) => r.state), { timeout: 10_000 })
+      .toEqual(kinds.map(() => LinearPostState.Recorded));
+    expect(rows().map((r) => r.commentIds)).toEqual(kinds.map(() => ['comment-1']));
   });
 });

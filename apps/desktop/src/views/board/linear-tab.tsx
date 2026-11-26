@@ -11,6 +11,7 @@ const EVENT_LABELS: Readonly<Record<LinearEventKind, string>> = {
   [LinearEventKind.Ended]: 'Run Ended',
   [LinearEventKind.PrOpened]: 'Pull Request Opened',
   [LinearEventKind.PrMerged]: 'Pull Request Merged',
+  [LinearEventKind.Landed]: 'Landed',
 };
 
 const STATE_LABELS: Readonly<Record<LinearPostState, string>> = {

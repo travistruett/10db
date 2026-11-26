@@ -3,6 +3,10 @@
 mod app_page;
 mod connection;
 mod dictation;
+mod pick_rules;
+mod preview;
+mod sign_in_state;
+mod snapshot;
 mod supervisor;
 mod tray;
 mod web_link;
@@ -80,7 +84,15 @@ pub fn run() {
             update_tray,
             open_app_page,
             dictation::start_dictation,
-            web_link::open_web_link
+            web_link::open_web_link,
+            preview::open_preview,
+            preview::drop_preview_picks,
+            preview::flash_preview_pick,
+            preview::preview_target,
+            preview::add_pick,
+            preview::remove_pick,
+            preview::show_composer,
+            preview::preview_dictation
         ])
         .setup(|app| {
             let items = tray::build(app.handle())?;
@@ -90,13 +102,21 @@ pub fn run() {
             } else {
                 Some(Supervisor::start(
                     app.path().resource_dir()?,
-                    connection::data_dir().join("logs"),
+                    connection::data_dir(),
                 ))
             };
             app.manage(Sidecar(supervisor));
+            app.manage(preview::Previews::default());
             Ok(())
         })
         .on_window_event(|window, event| {
+            if preview::is_preview(window.label()) {
+                // A preview closes for real; its picks already in a draft stay there.
+                if let WindowEvent::Destroyed = event {
+                    preview::forget(&window.state::<preview::Previews>(), window.label());
+                }
+                return;
+            }
             // Closing the window keeps work running (spec §3); Quit is in the menu bar.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();

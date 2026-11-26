@@ -28,6 +28,9 @@ import type {
   ClaimKind,
   DecisionId,
   DeviceId,
+  EvalLiveRunId,
+  EvalLiveRunState,
+  EvalSuiteKey,
   DevicePlatform,
   PushSubscriptionId,
   DesignCheckId,
@@ -322,6 +325,8 @@ export const projects = sqliteTable('projects', {
   devLoginCommand: text('dev_login_command'),
   /** Serves the app at its address while a pass is open; null when the builder runs it. */
   previewCommand: text('preview_command'),
+  /** Brings the dev stack up when a picture or the dev login finds the app address down; null when the builder keeps it up. */
+  appStartCommand: text('app_start_command'),
   /** The viewports and themes a page's pictures are taken in. */
   screens: text('screens', { mode: 'json' })
     .$type<ScreensMatrix>()
@@ -1577,6 +1582,8 @@ export const judgeCalls = sqliteTable(
     >(),
     outcome: text('outcome').$type<JudgeOutcome>().notNull(),
     latencyMs: integer('latency_ms'),
+    /** How many tries the call took; an unattended call that timed out once is tried again. */
+    attempts: integer('attempts').notNull().default(1),
     costUsd: real('cost_usd'),
     workstreamId: text('workstream_id').$type<WorkstreamId>(),
     taskId: text('task_id').$type<TaskId>(),
@@ -2857,3 +2864,40 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * A live run of an eval suite the builder started from 10db: what ran as the confirm window showed it, how it
+ * ended and the output's last lines. The stop command is kept so a run a crash left can still be stopped.
+ */
+export const evalLiveRuns = sqliteTable(
+  'eval_live_runs',
+  {
+    id: text('id').$type<EvalLiveRunId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    suiteKey: text('suite_key').$type<EvalSuiteKey>().notNull(),
+    command: text('command').notNull(),
+    stopCommand: text('stop_command'),
+    previewHash: text('preview_hash').notNull(),
+    docker: integer('docker', { mode: 'boolean' }).notNull(),
+    hostsJson: text('hosts_json').notNull(),
+    envFilesJson: text('env_files_json').notNull(),
+    state: text('state').$type<EvalLiveRunState>().notNull(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    exitCode: integer('exit_code'),
+    tail: text('tail').notNull().default(''),
+    costShownUsd: real('cost_shown_usd'),
+    stopRan: integer('stop_ran', { mode: 'boolean' }).notNull().default(false),
+    logPath: text('log_path').notNull(),
+  },
+  (t) => [
+    index('eval_live_runs_project_idx').on(t.projectId, t.suiteKey, t.startedAt),
+    check(
+      'eval_live_runs_state',
+      sql`${t.state} IN ('running', 'passed', 'failed', 'stopped', 'timed_out', 'interrupted')`,
+    ),
+  ],
+);

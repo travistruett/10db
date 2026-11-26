@@ -95,6 +95,7 @@ function setup(
         state: h.ctx.state,
         inbox: h.ctx.inbox,
         logger: silentLogger,
+        skipped: () => null,
         ...opts.slack,
       })
     : null;

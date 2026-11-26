@@ -10,12 +10,13 @@
         "test/fake-srt.ts",
         "src/builder-mcp.ts",
         "src/conversation/extract-worker.ts",
-        "src/watchdog/worker.ts"
+        "src/watchdog/worker.ts",
+        "src/watchpoints/line-worker.ts"
       ],
       "ignoreDependencies": ["@anthropic-ai/sandbox-runtime"]
     },
     "apps/desktop": {
-      "entry": ["scripts/*.ts", "e2e/*.spec.ts"]
+      "entry": ["scripts/*.ts", "e2e/*.spec.ts", "e2e/fake-tailscale.mjs", "served-public/sw.js"]
     },
     "packages/agent-skill": {
       "entry": ["src/main.ts"]

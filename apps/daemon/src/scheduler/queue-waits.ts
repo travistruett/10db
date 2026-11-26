@@ -125,14 +125,23 @@ export const queueWait = {
     endless: false,
     on: null,
   }),
-  /** The run's batch is not open with its copy made: still being cut, or over for good. */
-  copy: (batch: BatchDto | null): FoundWait => {
+  /**
+   * The run's batch is not open with its copy made: still being cut, or over for good. `ahead` names
+   * the copy in progress when the batch's copy waits its turn, which no cut has begun for.
+   */
+  copy: (batch: BatchDto | null, ahead?: { readonly title: string } | null): FoundWait => {
     const ended = batch !== null && ENDED_BATCH.has(batch.state);
+    const turn =
+      ahead === undefined
+        ? null
+        : ahead === null
+          ? 'for its turn to be cut as the next copy'
+          : `for the copy in progress (${ahead.title}) to ship or be abandoned, then its turn as the next copy`;
     return {
       kind: QueueWaitKind.Copy,
       line: ended
         ? `on a batch that is ${batch.state.toLowerCase()} and will not open again`
-        : 'for its batch to open',
+        : (turn ?? 'for its batch to open'),
       endless: ended,
       on: null,
     };

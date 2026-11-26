@@ -3,6 +3,24 @@ import { NOISY_MIN_RAISED, NOISY_SHARE } from './inbox-card-types';
 import { AreaName, DEFAULT_HAZARDS, DEPS_HAZARD, PathPattern } from './entities';
 import { WatchpointLoudness } from './watchpoint-hit';
 
+/** A regex over a changed line, matched case-insensitively; it must compile. */
+export const WatchpointLinePattern = z
+  .string()
+  .min(1)
+  .max(200)
+  .refine(
+    (source) => {
+      try {
+        new RegExp(source, 'i');
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'is not a valid pattern' },
+  );
+export type WatchpointLinePattern = z.infer<typeof WatchpointLinePattern>;
+
 /**
  * A kind of change the builder wants to judge themselves: the files it covers, why it matters and what to check.
  * `key` is unique within a list; a project's watchpoint with a key from the builder's list overrides that one.
@@ -12,6 +30,8 @@ export const Watchpoint = z.object({
   label: z.string().min(1).max(80),
   why: z.string().max(400),
   globs: z.array(PathPattern).min(1).max(64),
+  /** With patterns, a file the globs cover counts only when one of its added or removed lines matches. */
+  lines: z.array(WatchpointLinePattern).max(16).default([]),
   guidance: z.string().max(2000),
   loudness: z.enum(WatchpointLoudness),
   /** The library key it came from, so a starter's later revision knows which watchpoints to touch. */
@@ -119,6 +139,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     label: 'Migrations',
     why: "A revert can't undo a migration that ran.",
     globs: hazardGlobs('migrations'),
+    lines: [],
     guidance:
       'Check that the migration can run on existing data, that it is safe to apply while the old code still runs, and that nothing depends on a rollback.',
     loudness: WatchpointLoudness.Ask,
@@ -129,6 +150,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     label: 'Contracts and API',
     why: 'Other code and other people depend on these shapes, and a break reaches them late.',
     globs: ['**/contracts/**', '**/*.proto', '**/openapi*.{yaml,json}', '**/schema.graphql'],
+    lines: [],
     guidance:
       'Check that every change is additive, that nothing is removed or narrowed, and that callers are updated.',
     loudness: WatchpointLoudness.Ask,
@@ -139,6 +161,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     label: 'Prompts',
     why: 'A prompt change shifts behavior in ways tests rarely catch.',
     globs: ['**/prompts/**', '**/*prompt*.*'],
+    lines: [],
     guidance:
       'Check the new wording against what it should make the model do, and look for instructions that now conflict.',
     loudness: WatchpointLoudness.Show,
@@ -149,6 +172,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     label: 'Evals',
     why: 'A lowered bar or a changed golden hides a regression.',
     globs: ['**/evals/**', '**/*.eval.*'],
+    lines: [],
     guidance: 'Check that no bar was lowered and no golden changed without a reason.',
     loudness: WatchpointLoudness.Show,
     starter: 'evals',
@@ -158,6 +182,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     label: 'Agent instructions',
     why: 'These files steer every later session.',
     globs: ['**/AGENTS.md', '**/CLAUDE.md', '.claude/**', '.codex/**'],
+    lines: [],
     guidance:
       'Check that the rule is true, that it belongs there, and that it does not widen what agents may do.',
     loudness: WatchpointLoudness.Show,
@@ -168,12 +193,59 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     label: 'Dependencies',
     why: 'A new dependency is code nobody here reviewed.',
     globs: hazardGlobs(DEPS_HAZARD),
+    lines: [],
     guidance:
       'Check that each new or changed dependency is needed, pinned, and from a source you trust.',
     loudness: WatchpointLoudness.Show,
     starter: 'dependencies',
   },
+  {
+    key: 'indexes',
+    label: 'Indexes',
+    why: 'An index on a big table can lock it or rebuild it while the app runs.',
+    globs: hazardGlobs('migrations'),
+    lines: [
+      '\\bcreate\\s+(unique\\s+)?index\\b',
+      '\\bdrop\\s+index\\b',
+      '\\b(unique)?index\\s*\\(',
+    ],
+    guidance:
+      'Check whether the index locks or rebuilds a big table, and that it can be built while the old code still runs.',
+    loudness: WatchpointLoudness.Show,
+    starter: 'indexes',
+  },
+  {
+    key: 'model-choice',
+    label: 'Model choice',
+    why: 'A model id decides what a feature costs and which accounts it works on.',
+    globs: ['**'],
+    lines: [
+      '\\bclaude-[a-z0-9][\\w.-]*',
+      '\\banthropic\\.claude',
+      '\\bgpt-\\d[\\w.-]*',
+      '\\bo[134]-(mini|pro)\\b',
+      '\\bgemini-\\d[\\w.-]*',
+      'typesafe/jev',
+    ],
+    guidance:
+      'Check that the model is the one intended, that it works on every provider the feature supports, and what it costs.',
+    loudness: WatchpointLoudness.Show,
+    starter: 'model-choice',
+  },
 ];
+
+/** The starters a new install begins with; the rest wait in the library, in Add Watchpoint's menu. */
+const INITIAL_KEYS: readonly string[] = [
+  'migrations',
+  'contracts',
+  'prompts',
+  'evals',
+  'agent-instructions',
+  'dependencies',
+];
+export const INITIAL_WATCHPOINTS: readonly Watchpoint[] = STARTER_WATCHPOINTS.filter((w) =>
+  INITIAL_KEYS.includes(w.key),
+);
 
 /**
  * The starters' revision now. A list saved before revisions existed counts as revision 1; every save stamps the
@@ -203,6 +275,7 @@ export const STARTER_WATCHPOINT_REVISIONS: readonly {
         '**/db/migrate/**',
         '**/prisma/migrations/**',
       ],
+      lines: [],
       guidance:
         'Check that the migration can run on existing data, that it is safe to apply while the old code still runs, and that nothing depends on a rollback.',
       loudness: WatchpointLoudness.Show,
@@ -216,6 +289,7 @@ export const STARTER_WATCHPOINT_REVISIONS: readonly {
       label: 'Contracts and API',
       why: 'Other code and other people depend on these shapes, and a break reaches them late.',
       globs: ['**/contracts/**', '**/*.proto', '**/openapi*.{yaml,json}', '**/schema.graphql'],
+      lines: [],
       guidance:
         'Check that every change is additive, that nothing is removed or narrowed, and that callers are updated.',
       loudness: WatchpointLoudness.Show,
@@ -232,7 +306,9 @@ const sameWatchpoint = (a: Watchpoint, b: Watchpoint): boolean =>
   a.loudness === b.loudness &&
   a.starter === b.starter &&
   a.globs.length === b.globs.length &&
-  a.globs.every((g, i) => g === b.globs[i]);
+  a.globs.every((g, i) => g === b.globs[i]) &&
+  a.lines.length === b.lines.length &&
+  a.lines.every((l, i) => l === b.lines[i]);
 
 /**
  * The stored list with each unedited copy of a starter moved to the starter's current loudness, for the revisions

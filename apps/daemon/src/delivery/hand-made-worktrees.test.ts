@@ -116,6 +116,31 @@ describe('the hand-made worktree folder', () => {
     expect(getInboxItem(h.state.db, card.id)).toMatchObject({ state: 'RESOLVED' });
   });
 
+  it('keeps one card for the checkout, lists what has merged now, and withdraws it when none are left', async () => {
+    const one = handMade('one', PrState.Merged);
+    const two = handMade('two', PrState.Merged);
+    await offerHandMadeFolders(h.ctx, signal);
+    const card = cardTitled('2 worktrees in');
+    expect(card.title).toBe(`2 worktrees in ${folder} have merged`);
+
+    rmSync(one.path, { recursive: true, force: true });
+    h.git$('worktree', 'prune');
+    const three = handMade('three', PrState.Merged);
+    await offerHandMadeFolders(h.ctx, signal);
+    const [only, ...others] = h.cards().filter((c) => c.title.endsWith(' merged'));
+    expect(others).toEqual([]);
+    expect(only).toMatchObject({ id: card.id, title: `2 worktrees in ${folder} have merged` });
+    expect(only?.body).toContain(two.path);
+    expect(only?.body).toContain(three.path);
+    expect(only?.body).not.toContain(one.path);
+
+    writeFileSync(join(two.path, 'wip.txt'), 'x');
+    writeFileSync(join(three.path, 'wip.txt'), 'x');
+    await offerHandMadeFolders(h.ctx, signal);
+    expect(offers()).toEqual([]);
+    expect(getInboxItem(h.state.db, card.id)).toMatchObject({ state: 'CANCELLED' });
+  });
+
   const stays: readonly { name: string; hold: (path: string) => void }[] = [
     {
       name: 'it has an uncommitted change',

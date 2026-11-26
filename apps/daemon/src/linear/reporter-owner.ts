@@ -23,7 +23,12 @@ import type { LaneSandboxSpec } from '../sandbox';
 import type { YourSessionServer } from '../sessions';
 import { buildTrustPolicy, sessionDevAccess } from '../trust';
 import { readReporterFacts, reporterBrief } from './reporter-brief';
-import { linearToolPrefixes } from './reporter-guard';
+import { linearToolPrefixes, runToolNames } from './reporter-guard';
+import {
+  authorizedLinearServer,
+  createLinearCommentWriter,
+  type LinearCommentWriter,
+} from './reporter-writer';
 import { snapshotBrief } from './snapshot';
 import type { LinearReporter, LinearReporterRuns } from './reporter';
 
@@ -34,14 +39,16 @@ import type { LinearReporter, LinearReporterRuns } from './reporter';
 /** The share of the context window past which a session would continue fresh; a run never gets near it. */
 const FRESH_AT_CONTEXT_PCT = 70;
 
-const REPORTER_TOOLS: readonly string[] = Object.values(ReporterToolName).map(
-  (name) => `mcp__10db__${name}`,
-);
+/** The reporter's tools of 10db's: one hands over words and 10db does the rest, the other picks the status. */
+const REPORTER_TOOLS: readonly string[] = [
+  `mcp__10db__${ReporterToolName.ReportLinearPost}`,
+  `mcp__10db__${ReporterToolName.PickLinearStatus}`,
+];
 
 const SYSTEM_PROMPT = [
   "You are 10db's Linear reporter. You keep one Linear issue up to date from the facts you are given.",
-  "You have Linear's tools and two of 10db's: report_linear_post, and upload_linear_picture for the pictures your brief lists. Nothing else works.",
-  'Write only to the linked issue, named by its Linear id. When you have finished an update, record it with report_linear_post.',
+  "You have Linear's read tools and two of 10db's: report_linear_post and pick_linear_status. Nothing else works.",
+  "You write the words of each comment and nothing more: hand its body to report_linear_post. 10db writes the comment to Linear. When 10db's answer gives you save_comment arguments, call Linear's save_comment with exactly those. 10db picks the status: set only the one pick_linear_status answers.",
   'When your first message asks you to read the issue instead, you only read, and your reply is the answer.',
 ].join('\n');
 
@@ -74,6 +81,11 @@ export interface ReporterHooksDeps {
   readonly mcp: { readonly url: string };
   readonly runs: LinearReporterRuns & Pick<LinearReporter, 'verdict'>;
   readonly signIns: { list(): Promise<LinearSignInsDto> };
+  /** How 10db writes a comment through a Linear server it can sign in to; the production way when absent. */
+  readonly commentWriter?: (server: {
+    readonly url: string;
+    readonly headers: Readonly<Record<string, string>>;
+  }) => LinearCommentWriter;
   /** The project account's Efficient-tier launch. */
   launch(projectId: ProjectId): ReporterLaunch;
   prepare(input: {
@@ -128,6 +140,11 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
           entries: Object.keys(prepared.yourMcpServers),
           harness,
         }),
+        // 10db writes the comments itself when one of the account's Linear entries carries a sign-in it can use.
+        writer: ((): LinearCommentWriter | null => {
+          const server = authorizedLinearServer(prepared.yourMcpServers);
+          return server === null ? null : (deps.commentWriter ?? createLinearCommentWriter)(server);
+        })(),
       });
       const policy = buildTrustPolicy({
         surface: TrustSurface.Chat,
@@ -149,8 +166,10 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
         run.readOnly
           ? snapshotBrief(run.link)
           : reporterBrief(
-              readReporterFacts(state.db, TaskId.parse(conv.ownerId), posts, run.pictures),
+              readReporterFacts(state.db, TaskId.parse(conv.ownerId), posts, run.direct),
             ),
+        // A session may list its MCP tools deferred, behind a search: naming them in full lets it find them.
+        `Your tools, by full name: ${runToolNames(run).join(', ')}. If one isn't in your list, search for it by that name first (ToolSearch, tool_search).`,
         start.first.text,
       ].join('\n\n');
       return {

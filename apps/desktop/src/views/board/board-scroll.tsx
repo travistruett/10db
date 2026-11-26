@@ -1,6 +1,9 @@
 import { Box, Group, ScrollArea } from '@mantine/core';
 import type { ReactNode } from 'react';
 
+/** The columns never shrink below this, however many alerts sit above them. */
+export const COLUMNS_MIN_HEIGHT = 320;
+
 const SCROLLBAR = 12;
 /** Room between the columns and the scrollbar under them. */
 const GAP = 12;

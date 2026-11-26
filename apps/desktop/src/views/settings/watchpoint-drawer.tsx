@@ -1,89 +1,80 @@
 import {
   Watchpoint,
+  WatchpointLinePattern,
   WatchpointLoudness,
-  type EffectiveWatchpoint,
   type Watchpoint as WatchpointValue,
 } from '@10db/contracts';
-import {
-  Alert,
-  Button,
-  Input,
-  SegmentedControl,
-  Stack,
-  Switch,
-  Textarea,
-  TextInput,
-} from '@mantine/core';
+import { Alert, Button, Group, Input, Stack, Text, Textarea, TextInput } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { LoudnessControl } from './watchpoint-loudness';
 import { lines } from './list-drafts';
 import { PathMeanings } from './table-cells';
-import {
-  keyFor,
-  plain,
-  saved,
-  turnedOff,
-  WatchpointHome,
-  type WatchpointLists,
-} from './watchpoint-lists';
+import { keyFor } from './watchpoint-lists';
 
 interface Draft {
   readonly label: string;
   readonly why: string;
   readonly paths: string;
+  readonly lines: string;
   readonly guidance: string;
   readonly loudness: WatchpointLoudness;
-  readonly home: WatchpointHome;
-  readonly off: boolean;
 }
 
 const EMPTY: Draft = {
   label: '',
   why: '',
   paths: '',
+  lines: '',
   guidance: '',
   loudness: WatchpointLoudness.Show,
-  home: WatchpointHome.Everywhere,
-  off: false,
 };
 
-function draftOf(row: EffectiveWatchpoint): Draft {
+function draftOf(watchpoint: WatchpointValue): Draft {
   return {
-    label: row.label,
-    why: row.why,
-    paths: row.globs.join('\n'),
-    guidance: row.guidance,
-    loudness: row.loudness,
-    home: row.from === 'you' ? WatchpointHome.Everywhere : WatchpointHome.Project,
-    off: false,
+    label: watchpoint.label,
+    why: watchpoint.why,
+    paths: watchpoint.globs.join('\n'),
+    lines: watchpoint.lines.join('\n'),
+    guidance: watchpoint.guidance,
+    loudness: watchpoint.loudness,
   };
 }
 
 /**
- * A watchpoint to change, or a new one when `row` is null. Save sends the lists that changed: the builder's
- * and this project's own, which "Applies to" moves a watchpoint between.
+ * A watchpoint to change, or a new one when `watchpoint` is null. Save hands the page the watchpoint, which the
+ * page writes to its own list; an unchanged one saves nothing.
  */
 export function WatchpointDrawer({
-  row,
-  lists,
+  watchpoint,
+  takenKeys,
   saving,
   problem,
+  note,
+  onUseDefault,
   onSave,
   onClose,
   onDirty,
 }: {
-  readonly row: EffectiveWatchpoint | null;
-  readonly lists: WatchpointLists;
+  readonly watchpoint: WatchpointValue | null;
+  /** Every key in use, which a new watchpoint's key keeps apart from. */
+  readonly takenKeys: ReadonlySet<string>;
   readonly saving: boolean;
   readonly problem: string | null;
-  readonly onSave: (next: WatchpointLists) => void;
+  /** Said above the fields: where a save lands, when that is not where the watchpoint came from. */
+  readonly note?: string;
+  /** Drops the project's copy, so the watchpoint follows All Projects again; given only for a copy. */
+  readonly onUseDefault?: () => void;
+  readonly onSave: (next: WatchpointValue) => void;
   readonly onClose: () => void;
   readonly onDirty: (dirty: boolean) => void;
 }) {
-  const [draft, setDraft] = useState<Draft>(() => (row === null ? EMPTY : draftOf(row)));
+  const [draft, setDraft] = useState<Draft>(() =>
+    watchpoint === null ? EMPTY : draftOf(watchpoint),
+  );
   const [invalid, setInvalid] = useState<string | null>(null);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(row === null ? EMPTY : draftOf(row));
+  const dirty =
+    JSON.stringify(draft) !== JSON.stringify(watchpoint === null ? EMPTY : draftOf(watchpoint));
   useEffect(() => {
     onDirty(dirty);
   }, [dirty, onDirty]);
@@ -97,33 +88,41 @@ export function WatchpointDrawer({
     setInvalid(null);
     setDraft((d) => ({ ...d, ...next }));
   };
+  const badPattern = lines(draft.lines).find((p) => !WatchpointLinePattern.safeParse(p).success);
   const submit = () => {
-    const taken = new Set([...lists.yours.map((w) => w.key), ...lists.entries.map((e) => e.key)]);
+    if (watchpoint !== null && !dirty) {
+      onClose();
+      return;
+    }
     const parsed = Watchpoint.safeParse({
-      key: row?.key ?? keyFor(draft.label, taken),
+      key: watchpoint?.key ?? keyFor(draft.label, takenKeys),
       label: draft.label.trim(),
       why: draft.why.trim(),
       globs: lines(draft.paths),
+      lines: lines(draft.lines),
       guidance: draft.guidance.trim(),
       loudness: draft.loudness,
-      starter: row === null ? null : plain(row).starter,
+      starter: watchpoint?.starter ?? null,
     });
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
-      setInvalid(`${String(issue?.path[0] ?? 'Watchpoint')}: ${issue?.message ?? 'is not valid'}`);
+      const field = String(issue?.path[0] ?? 'Watchpoint');
+      // A pattern that doesn't compile names the line, so the builder can find it.
+      const at = field === 'lines' && typeof issue?.path[1] === 'number' ? issue.path[1] : null;
+      const pattern = at === null ? '' : ` "${lines(draft.lines)[at] ?? ''}"`;
+      setInvalid(
+        `${field === 'lines' ? 'Lines' : field}${pattern}: ${issue?.message ?? 'is not valid'}`,
+      );
       return;
     }
-    const next: WatchpointValue = parsed.data;
-    const base = saved(lists, next, draft.home);
-    // Only a switch turned on writes an `off` entry; saved() already dropped the project's entry at Everywhere.
-    onSave(row?.from === 'you' && draft.off ? turnedOff(base, next.key, true) : base);
+    onSave(parsed.data);
   };
   return (
     <SurfaceDrawer
       opened
       onClose={onClose}
-      label={row === null ? 'New Watchpoint' : `Watchpoint ${row.label}`}
-      title={row === null ? 'New Watchpoint' : row.label}
+      label={watchpoint === null ? 'New Watchpoint' : `Watchpoint ${watchpoint.label}`}
+      title={watchpoint === null ? 'New Watchpoint' : watchpoint.label}
       closeOnClickOutside
       footer={
         <>
@@ -131,12 +130,30 @@ export function WatchpointDrawer({
             Cancel
           </Button>
           <Button loading={saving} onClick={submit}>
-            Save Watchpoint
+            {watchpoint === null ? 'Add Watchpoint' : 'Save Watchpoint'}
           </Button>
         </>
       }
     >
       <Stack gap="lg">
+        {note === undefined ? null : (
+          <Group justify="space-between" wrap="nowrap" gap="sm">
+            <Text size="sm" c="dimmed">
+              {note}
+            </Text>
+            {onUseDefault === undefined ? null : (
+              <Button
+                variant="default"
+                size="compact-sm"
+                loading={saving}
+                style={{ flexShrink: 0 }}
+                onClick={onUseDefault}
+              >
+                Use Default
+              </Button>
+            )}
+          </Group>
+        )}
         <TextInput
           label="Name"
           aria-label="Watchpoint name"
@@ -148,7 +165,7 @@ export function WatchpointDrawer({
           }}
         />
         <Textarea
-          label="Why it matters"
+          label="Why It Matters"
           aria-label="Why the watchpoint matters"
           autosize
           minRows={2}
@@ -159,7 +176,7 @@ export function WatchpointDrawer({
         />
         <Stack gap={6}>
           <Textarea
-            label="Matches these paths"
+            label="Matches These Paths"
             aria-label="Watchpoint paths"
             placeholder={'**/migrations/**\n.claude/**'}
             description="One pattern per line. A task whose changes touch one of these is shown to you."
@@ -174,7 +191,21 @@ export function WatchpointDrawer({
           <PathMeanings paths={lines(draft.paths)} />
         </Stack>
         <Textarea
-          label="What to check"
+          label="Lines"
+          aria-label="Watchpoint line patterns"
+          placeholder="One pattern per line"
+          description="Optional. Only files whose added or removed lines match one of these count. Case-insensitive."
+          autosize
+          minRows={2}
+          styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)' } }}
+          value={draft.lines}
+          error={badPattern === undefined ? undefined : `"${badPattern}" is not a valid pattern`}
+          onChange={(e) => {
+            change({ lines: e.currentTarget.value });
+          }}
+        />
+        <Textarea
+          label="What to Check"
           aria-label="What to check"
           description="The agent reads it before it builds, and the reviewer checks the change against it."
           autosize
@@ -185,56 +216,19 @@ export function WatchpointDrawer({
           }}
         />
         <Input.Wrapper
-          label="Loudness"
-          description="Show puts it in the task's For You and the pull request. Ask and Hold come later."
+          label="When It Matches"
+          description="Show puts it in the task's For You and the pull request. Ask also leaves one Inbox card per task."
         >
           <LoudnessControl
             mt={6}
             size="sm"
-            ariaLabel="Watchpoint loudness"
+            ariaLabel="When the watchpoint matches"
             value={draft.loudness}
             onChange={(loudness) => {
               change({ loudness });
             }}
           />
         </Input.Wrapper>
-        <Input.Wrapper
-          label="Applies to"
-          description={
-            draft.home === WatchpointHome.Everywhere
-              ? 'Every project you have.'
-              : 'This project only. A watchpoint of yours with the same name is replaced here.'
-          }
-        >
-          <SegmentedControl
-            mt={6}
-            size="sm"
-            aria-label="Watchpoint applies to"
-            data={[
-              { value: WatchpointHome.Everywhere, label: 'Every project' },
-              { value: WatchpointHome.Project, label: 'This project only' },
-            ]}
-            value={draft.home}
-            onChange={(value) => {
-              change({
-                home:
-                  value === WatchpointHome.Project
-                    ? WatchpointHome.Project
-                    : WatchpointHome.Everywhere,
-              });
-            }}
-          />
-        </Input.Wrapper>
-        {row?.from === 'you' ? (
-          <Switch
-            label="Off in this project"
-            description="It stays on in every other project."
-            checked={draft.off}
-            onChange={(e) => {
-              change({ off: e.currentTarget.checked });
-            }}
-          />
-        ) : null}
         {invalid ? (
           <Alert color="red" title="Check the watchpoint">
             {invalid}

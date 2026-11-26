@@ -35,6 +35,7 @@ export {
   CompletionError,
   ConversationUnreadError,
   McpSignInError,
+  NO_DEFAULT_ACCOUNT,
   SessionEndReason,
 } from './types';
 export type {

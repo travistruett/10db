@@ -2,8 +2,8 @@ import { z } from 'zod';
 import {
   ProjectWatchpoints,
   revisedWatchpoints,
+  INITIAL_WATCHPOINTS,
   STARTER_REVISION,
-  STARTER_WATCHPOINTS,
   YourWatchpoints,
   type Watchpoint,
   type ProjectWatchpointEntry,
@@ -19,12 +19,12 @@ const YOUR_REVISION_KEY = 'watchpoints.you.revision';
 const projectKey = (projectId: ProjectId): string => `watchpoints.${projectId}`;
 
 /**
- * The builder's watchpoints: the starters until the list is first saved. A setting that doesn't parse reads as
+ * The builder's watchpoints: the initial starters until the list is first saved. A setting that doesn't parse reads as
  * none: it is a boundary, and a bad value must never stop a run.
  */
 export function readYourWatchpoints(db: DbReader): Watchpoint[] {
   const stored = getAppSetting(db, YOUR_WATCHPOINTS_KEY);
-  if (stored === undefined) return [...STARTER_WATCHPOINTS];
+  if (stored === undefined) return [...INITIAL_WATCHPOINTS];
   const parsed = YourWatchpoints.safeParse(stored);
   if (!parsed.success) return [];
   const savedAt = z.number().int().safeParse(getAppSetting(db, YOUR_REVISION_KEY));

@@ -28,9 +28,9 @@ export function watchpointBuildBrief(watchpoints: readonly Watchpoint[]): string
     'The builder keeps a watchpoint on these kinds of change. They read the changes themselves, so make each one easy to judge:',
     ...watchpoints.map(
       (f) =>
-        `- ${f.label}: ${f.globs.join(', ')}. Why it matters: ${f.why || '(none given)'} What they will check: ${f.guidance || '(none given)'}`,
+        `- ${f.label}: ${f.globs.join(', ')}${f.lines.length > 0 ? `; changed lines matching: ${f.lines.join(', ')}` : ''}. Why it matters: ${f.why || '(none given)'} What they will check: ${f.guidance || '(none given)'}`,
     ),
-    "If you change a file a watchpoint covers, give your reason in that commit's watchpointNotes: one { path, note } per file, at most 400 characters each.",
+    "If you change a file a watchpoint covers, give your reason in that commit's watchpointNotes: one { path, note } per file, at most 400 characters each. For a watchpoint that names changed lines, only files where a matching line changed need a reason.",
   ].join('\n');
 }
 

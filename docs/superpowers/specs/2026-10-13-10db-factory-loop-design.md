@@ -275,12 +275,13 @@ QUEUED ⇄ HELD (a queued run that has not run, set aside by the builder; built)
 ### 5.3 Handoff
 
 1. After each turn, the daemon reads context usage from the SDK.
-2. At **40%** (configurable; about 400k tokens on a 1M window), the daemon tells the agent to finish its current logical step, then call
+2. At **30%** (configurable; about 300k tokens on a 1M window;
+   `decisions/2026-11-25-lanes-hand-off-at-300k-and-stop-at-400k.md`), the daemon tells the agent to finish its current logical step, then call
    `write_handoff`.
 3. 10db validates the handoff against its schema and adds git-derived facts itself.
 4. The session ends. A fresh session starts under the same workstream, seeded with the task, acceptance
    criteria, the context pack (§9), the handoff and the claims.
-5. At **50%** without a handoff, the agent gets a firmer nudge. At the actual limit, Claude's compaction is
+5. At **40%** (about 400k tokens) without a handoff, the agent gets a firmer nudge. At the actual limit, Claude's compaction is
    allowed, logged as a deviation, and the context pack is re-injected afterwards.
 
 Handoff contents:
@@ -666,8 +667,9 @@ Open questions:
   - External and gbrain notes move to `docs/architecture/research/` during M0.
   - The legacy harness audit and the knowledge-repo study describe private repos and stay outside this public repository.
 - **Assumptions:** these are starting heuristics, all configurable and tuned with observed data:
-  - the 40% and 50% thresholds (of a 1M window: the builder finds a fresh session at about 400–500k tokens
-    keeps quality higher than running toward the limit);
+  - the 30% and 40% thresholds (of a 1M window: quality degrades gradually as context grows, so a lane hands off
+    at about 300k tokens and is told firmly at about 400k, the builder's hard point;
+    `decisions/2026-11-25-lanes-hand-off-at-300k-and-stop-at-400k.md`);
   - the 10-minute wait;
   - a default per-provider concurrency cap of 4 (Max 20x);
   - a default of 3 recovery attempts.

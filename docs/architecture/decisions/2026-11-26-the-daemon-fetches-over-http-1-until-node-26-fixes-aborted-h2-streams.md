@@ -46,19 +46,19 @@ tools); Claude, Codex, `gh` and remote MCP run in child processes and are untouc
 
 ## Why
 
-On 2026-11-26 the installed daemon failed twice on the same path, on Node 26.13.0 with its built-in undici
-8.12.2.
+On 2026-11-26 the installed daemon failed four times on the same path, on Node 26.13.0 with its built-in
+undici 8.12.2.
 
-- **A wedge.** A judge call to OpenRouter was aborted at its 4 s deadline while its body was still queued on a
-  warm HTTP/2 session. undici closes the stream then destroys it, Node sends no `RST_STREAM`, and nghttp2
-  loops on empty DATA frames without returning to the event loop (nodejs/node#67363). The daemon stopped for
-  more than eight minutes, grew to 139 GB of footprint, and nothing noticed.
-- **A crash.** The same abort leaves a stream that a late answer wraps in a new stream with no `error`
+- **Wedges (twice).** A judge call to OpenRouter was aborted at its 4 s deadline while its body was still
+  queued on a warm HTTP/2 session. undici closes the stream then destroys it, Node sends no `RST_STREAM`, and
+  nghttp2 loops on empty DATA frames without returning to the event loop (nodejs/node#67363). The daemon
+  stopped answering for 20 minutes each time and nothing noticed.
+- **Crashes (twice).** The same abort leaves a stream that a late answer wraps in a new stream with no `error`
   listener (nodejs/undici#6143). When undici's idle timer destroys the socket, that stream throws
   `InformationalError: socket idle timeout` (`UND_ERR_INFO`) uncaught, and the daemon exited.
 
-Both reproduce against a local HTTP/2 server, and an `allowH2: false` dispatcher prevents both: the server
-then sees only `http/1.1`, so no HTTP/2 session exists to wedge or to time out.
+Both reproduce against a local HTTP/2 server on the shipped runtime, and an `allowH2: false` dispatcher
+prevents both: the server then sees only `http/1.1`, so no HTTP/2 session exists to wedge or to time out.
 
 Turned down:
 

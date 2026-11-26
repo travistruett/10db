@@ -1,7 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { E2E_DATA, E2E_DIR, E2E_REPO } from './paths';
+import { DESKTOP_DIR, E2E_DATA, E2E_DIR, E2E_REPO } from './paths';
+
+// The phone app the share listener serves (`/app/`), which the phone flow in inbox.spec.ts opens.
+execFileSync('pnpm', ['--filter', '@10db/desktop', 'build:app'], {
+  cwd: DESKTOP_DIR,
+  stdio: 'inherit',
+});
 
 rmSync(E2E_DIR, { recursive: true, force: true });
 mkdirSync(join(E2E_REPO, 'src', 'greeting'), { recursive: true });

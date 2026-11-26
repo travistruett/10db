@@ -9,6 +9,10 @@ import { expectAccessible } from './expect-accessible';
 
 const Runs = z.array(z.object({ id: z.string(), taskTitle: z.string() }));
 const Changes = z.object({ commits: z.array(z.string()) });
+const YourWatchpoints = z.array(z.looseObject({ key: z.string(), loudness: z.string() }));
+const ProjectEntries = z.object({
+  entries: z.array(z.looseObject({ key: z.string(), off: z.literal(true).optional() })),
+});
 const Batches = z.array(
   z.object({
     id: z.string(),
@@ -101,6 +105,9 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   page,
   request,
 }) => {
+  // The whole journey, from a task through review, the Inbox and both watchpoint scopes to a reload, runs
+  // past the default two minutes on CI's WebKit.
+  test.setTimeout(240_000);
   // The window opens on the first run while there is no project (first-run.spec.ts covers it), so
   // the project on the disposable repo is created through the API before the page loads.
   const created = await request.post(`${daemonUrl}/projects`, {
@@ -201,19 +208,29 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const card = ready.getByRole('button', { name: TASK, exact: true });
   await card.focus();
   await expect(card).toBeFocused();
-  // Each key waits for the drag to take the last one: an arrow before the pick-up lands is lost.
+  // The pick-up is handled on the card itself, not by the sensor's timed listener, so it is sent once.
   await page.keyboard.press('Space');
   await expect(ready.getByRole('listitem').nth(1)).toHaveCSS('opacity', '0.3');
   // The drop targets are measured after the pick-up renders; the card is announced over itself once
-  // they are. An arrow before that finds no target to move to and is lost.
+  // they are.
   await expect(
     page.getByRole('status').filter({ hasText: `${TASK} is over ${TASK}.` }),
   ).toHaveCount(1);
-  await page.keyboard.press('ArrowUp');
-  await expect(
-    page.getByRole('status').filter({ hasText: `${TASK} is over ${OTHER}.` }),
-  ).toHaveCount(1);
-  await page.keyboard.press('Space');
+  // dnd-kit's sensor listens for the move and drop keys only from a timer the pick-up starts, so a key
+  // sent before the timer fires is lost. Each such key is sent again until its effect shows.
+  await expect(async () => {
+    await page.keyboard.press('ArrowUp');
+    await expect(
+      page.getByRole('status').filter({ hasText: `${TASK} is over ${OTHER}.` }),
+    ).toHaveCount(1, { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  // A drop shows as the card turning solid. Space on a card that has dropped would pick it up again, so
+  // the drop is sent again only while the card is still faded.
+  const inFlight = ready.getByRole('listitem', { name: TASK, exact: true });
+  await expect(async () => {
+    await page.keyboard.press('Space');
+    await expect(inFlight).toHaveCSS('opacity', '1', { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
   await expect(ready.getByRole('listitem').nth(0)).toHaveAccessibleName(TASK);
   await page.reload();
   await expect(
@@ -229,8 +246,12 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // The card in flight is faded in its list; it is solid again once dropped.
   const slot = page.getByRole('list', { name: 'Ready tasks' }).getByRole('listitem').first();
   await expect(slot).toHaveCSS('opacity', '0.3');
-  await page.keyboard.press('Enter');
-  await expect(slot).toHaveCSS('opacity', '1');
+  // Enter opens the card only when no drag is under way, so an Enter sent again while the card is still
+  // faded ends the drag and leaves its details closed.
+  await expect(async () => {
+    await page.keyboard.press('Enter');
+    await expect(slot).toHaveCSS('opacity', '1', { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
   await expect(page.getByRole('dialog', { name: 'Task' })).toBeHidden();
 
   // Park the other task from its menu and plan it again; parking survives a reload.
@@ -274,19 +295,18 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(
     page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),
   ).toBeVisible();
-  // The header counts the week's acceptance work: the finished task raised no card. The e2e daemon runs
-  // with the judge off, so nothing is checking and the line says why.
-  await expect(page.getByRole('button', { name: 'Completed 1' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Sent back 0' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Sent to you 0' })).toBeVisible();
-  await expect(
-    page.getByText("Acceptance isn't checking: no account can answer decisions"),
-  ).toBeVisible();
-  // The number opens Factory's Acceptance panel, which lists the task behind it.
-  await page.getByRole('button', { name: 'Completed 1' }).click();
+  // The Board carries no acceptance counts; Factory's Metrics holds them. The finished task raised no
+  // card, and the e2e daemon runs with the judge off, so nothing is checking and the panel says why.
+  await expect(page.getByText(/last 7 days/)).toHaveCount(0);
+  await open(page, 'Factory');
+  await page.getByRole('radiogroup', { name: 'Factory view' }).getByText('Metrics').click();
   await expect(
     page.getByRole('table', { name: 'Completed runs' }).getByRole('button', { name: TASK }),
   ).toBeVisible();
+  await expect(
+    page.getByText("Acceptance isn't checking: no account can answer decisions"),
+  ).toBeVisible();
+  await page.getByRole('radiogroup', { name: 'Factory view' }).getByText('Live').click();
   // Factory shows each project as a row with its bar, whose verdict is the row's name; the finished task is
   // under the project's merged today, and with no goals anywhere the project holds no goal list.
   await open(page, 'Factory');
@@ -359,7 +379,64 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // A switch with no visible label has its track over the input: click the label that holds both, as a person does.
   await reportSwitch.locator('xpath=..').click();
   await expect(reportSwitch).not.toBeChecked();
-  await open(page, 'Board');
+
+  // Settings › Watchpoints: All Projects holds your list; a project page follows it, sets one here or turns it off
+  // here, and never writes your list.
+  const watchAuth = { Authorization: `Bearer ${E2E_TOKEN}` };
+  const readYours = async () =>
+    YourWatchpoints.parse(
+      await (
+        await request.get(`${daemonUrl}/settings/watchpoints`, {
+          headers: watchAuth,
+          maxRetries: 2,
+        })
+      ).json(),
+    );
+  const readHere = async () =>
+    ProjectEntries.parse(
+      await (
+        await request.get(`${daemonUrl}/projects/${projectId}/watchpoints`, {
+          headers: watchAuth,
+          maxRetries: 2,
+        })
+      ).json(),
+    ).entries;
+  const yoursBefore = await readYours();
+  await page.goto('/settings/all-watchpoints');
+  await page
+    .getByRole('radiogroup', { name: 'When Prompts matches' })
+    .getByText('Ask', { exact: true })
+    .click();
+  await expect
+    .poll(async () => (await readYours()).find((w) => w.key === 'prompts')?.loudness)
+    .toBe('ask');
+  await chooseScope(page, 'This Project');
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Watchpoints', exact: true })
+    .click();
+  const promptsHere = page.getByRole('radiogroup', { name: 'When Prompts matches' });
+  // Default names what All Projects has now.
+  await expect(promptsHere.getByText('Default · Ask', { exact: true })).toBeVisible();
+  await expectAccessible(page, 'project watchpoints, dark');
+  await promptsHere.getByText('Off', { exact: true }).click();
+  await expect
+    .poll(async () => (await readHere()).find((e) => e.key === 'prompts'))
+    .toEqual({ key: 'prompts', off: true });
+  await promptsHere.getByText('Default · Ask', { exact: true }).click();
+  await expect.poll(async () => (await readHere()).some((e) => e.key === 'prompts')).toBe(false);
+  // The project page changed only the project's entries: your list is as All Projects left it.
+  expect((await readYours()).find((w) => w.key === 'prompts')?.loudness).toBe('ask');
+  expect((await readHere()).map((e) => e.key)).toEqual(['greetings', 'evals']);
+  // Later specs run under your list, so it goes back to how it was.
+  const restored = await request.put(`${daemonUrl}/settings/watchpoints`, {
+    headers: watchAuth,
+    data: yoursBefore,
+  });
+  expect(restored.ok()).toBe(true);
+  // The project's settings list Board Columns, which the rail's Board link would also match.
+  await page.goto('/board');
+  await expectView(page, 'Board');
   // The Board's card for the finished task carries the same marker.
   await expect(
     page.getByTestId('task-card').filter({ hasText: TASK }).getByTestId('eval-marker'),
@@ -393,11 +470,15 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
 
   // The MCP commit really landed: the finished run's changes hold the one commit it made.
   const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
-  const runs = await request.get(`${daemonUrl}/workstreams?active=false`, { headers: auth });
+  const runs = await request.get(`${daemonUrl}/workstreams?active=false`, {
+    headers: auth,
+    maxRetries: 2,
+  });
   const run = Runs.parse(await runs.json()).find((w) => w.taskTitle === TASK);
   expect(run).toBeDefined();
   const changes = await request.get(`${daemonUrl}/workstreams/${run?.id ?? ''}/changes`, {
     headers: auth,
+    maxRetries: 2,
   });
   expect(changes.ok()).toBe(true);
   expect(Changes.parse(await changes.json()).commits).toHaveLength(1);
@@ -451,17 +532,30 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(page.getByText(`Review: ${TASK}`)).toHaveCount(0);
   await expect(page.getByText(QUESTION)).toHaveCount(0);
   // The ask watchpoint left one Look card for the task, written as the run moved on. It shows the same hunk and
-  // notes as For You, and Looks right closes it.
+  // notes as For You, and Looks Right closes it.
   const lookTitle = page.getByText(`Look at these changes: ${TASK}`);
   await lookTitle.first().click();
-  // The detail pane beside the list is the Look card itself: its folds, a way back to the task and a note box.
-  await expect(page.getByRole('button', { name: 'Open the task' })).toBeVisible();
-  await page.getByRole('button', { name: 'Send back with a note' }).click();
-  await expect(page.getByRole('textbox', { name: 'What Needs to Change' })).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  // View Task, in the card's bar, opens the task's drawer over the Inbox; Back closes it and the card is still there.
+  await page.getByRole('button', { name: 'View Task', exact: true }).click();
+  await expect(taskDrawer).toBeVisible();
+  await expect(page).toHaveURL(/\/inbox\?.*task=/);
+  await expectView(page, 'Inbox');
+  await page.goBack();
+  await expect(taskDrawer).toBeHidden();
+  // Send Back turns the bar into a composer: its note is focused and required, and Esc cancels it.
+  await page.getByRole('button', { name: 'Send Back', exact: true }).click();
+  const whatToChange = page.getByRole('textbox', { name: 'What Needs to Change' });
+  await expect(whatToChange).toBeFocused();
+  const sendItBack = page.getByRole('button', { name: 'Send It Back' });
+  await expect(sendItBack).toBeDisabled();
+  await whatToChange.fill('Say where the greeting is read.');
+  await expect(sendItBack).toBeEnabled();
+  await whatToChange.press('Escape');
+  await expect(whatToChange).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Send Back', exact: true })).toBeFocused();
   await expect(page.getByText('Adds the greeting file the gate looks for.')).toBeVisible();
   await expect(page.getByText('added line 1: hello')).toBeAttached();
-  await page.getByRole('button', { name: 'Looks right' }).click();
+  await page.getByRole('button', { name: 'Looks Right', exact: true }).click();
   await expect(lookTitle).toHaveCount(0);
 
   // A locked card's reason is reachable from the keyboard, not only on hover.
@@ -519,6 +613,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const copyBatch = async () => {
     const response = await request.get(`${daemonUrl}/projects/${projectId}/batches`, {
       headers: authHeader,
+      maxRetries: 2,
     });
     return Batches.parse(await response.json()).find((b) => b.title.includes(COPY_TASK));
   };

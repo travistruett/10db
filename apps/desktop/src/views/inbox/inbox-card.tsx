@@ -6,37 +6,26 @@ import {
   AccountProblem,
   InboxKind,
   isParkChoice,
+  UNSANDBOXED_DETAIL,
   type DecisionRecording,
   type InboxItemDto,
 } from '@10db/contracts';
-import {
-  Alert,
-  Anchor,
-  Badge,
-  Button,
-  Code,
-  Group,
-  Kbd,
-  Radio,
-  Spoiler,
-  Stack,
-  Text,
-  Textarea,
-} from '@mantine/core';
+import { Anchor, Badge, Code, Group, Kbd, Radio, Spoiler, Stack, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
-import type { KeyboardEvent, ReactNode, RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { z } from 'zod';
 import { CodeSpans } from '../../shell/code-spans';
 import { ExternalLink } from '../board/pull-request-link';
-import { BatchCardActions } from './batch-card-actions';
+import { StepLogLink, useBatchActions } from './batch-card-actions';
 import { CardOpensLink, cardOpens } from './card-opens-link';
+import { CommandBlock } from './command-block';
 import { AcceptanceCard } from './acceptance-card';
 import { WatchpointCard } from './watchpoint-card';
 import { CheckCard } from './check-card';
 import { PlanCard } from './plan-card';
 import { ReviewRejection, reviewRejection } from '../review/review-rejection';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
-import { CardActions } from './card-actions';
+import { CardActions, KeyHint } from './card-actions';
 import { CardHeader } from './card-header';
 import { CardSurface } from './card-surface';
 import classes from './inbox-card.module.css';
@@ -49,6 +38,7 @@ import { SettingsSectionKey } from '../settings/sections';
 import { usePeople } from '../../daemon/people';
 import { useProjectIntegrations } from '../../daemon/sign-in-queries';
 import { OpenTaskLink } from '../sessions/open-task-link';
+import { useTaskSession } from '../../daemon/task-session-queries';
 import {
   OpenSessionLink,
   SessionBadge,
@@ -56,6 +46,7 @@ import {
   useTaskOfCard,
 } from './session-card-link';
 import { SlackPreview } from './slack-preview';
+import { useViewTaskButton } from './view-task';
 import {
   AskSomeoneFooter,
   ComposedMessage,
@@ -102,6 +93,25 @@ export interface InboxCardProps {
 
 /** Card text is untrusted (agent and tool output): it is only ever rendered as text. */
 export function CardBody({ item }: { readonly item: InboxItemDto }) {
+  // A chat's command outside the sandbox is its summary, in a block of its own above what Claude says and
+  // 10db's warning, so no line of the command reads as either.
+  const command = item.detail?.['summary'];
+  if (
+    item.kind === InboxKind.Permission &&
+    item.detail?.[UNSANDBOXED_DETAIL] === true &&
+    typeof command === 'string'
+  ) {
+    return (
+      <Stack gap="xs">
+        <CommandBlock command={command} />
+        {item.body === '' ? null : (
+          <Text size="sm" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+            {item.body}
+          </Text>
+        )}
+      </Stack>
+    );
+  }
   if (item.body === '') return null;
   if (item.kind === InboxKind.Permission) {
     return (
@@ -183,6 +193,10 @@ export function InboxCard({
   const principle = usePrincipleOf(item, selected);
   const session = useSessionOfCard(item);
   const taskOfCard = useTaskOfCard(item);
+  // OpenTaskLink draws nothing for a task no chat made; asked here too, so the bar knows it has nothing there.
+  const fromChat = useTaskSession(taskOfCard).data?.fromChat ?? null;
+  const viewTask = useViewTaskButton(item, !framed);
+  const batch = useBatchActions(item, onDismiss);
   const kind = review ? 'MCP server' : KIND_LABELS[item.kind];
   const header = (extra: ReactNode = null) => (
     <CardHeader
@@ -266,12 +280,6 @@ export function InboxCard({
     );
   }
 
-  const sendFromNote = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      onSubmit();
-    }
-  };
   const hasOptions = item.options.length > 0;
   const link = cardLink(item);
   const opens = cardOpens(item);
@@ -294,10 +302,6 @@ export function InboxCard({
             {session === null ? null : <SessionBadge chat={session} />}
           </>,
         )}
-        {session === null ? null : <OpenSessionLink chat={session} />}
-        {taskOfCard === null ? null : (
-          <OpenTaskLink taskId={taskOfCard} projectId={item.projectId} />
-        )}
         {review ? (
           <McpApprovalDetails review={review} body={item.body} />
         ) : (
@@ -305,7 +309,6 @@ export function InboxCard({
         )}
         {context}
         {rejection ? <ReviewRejection review={rejection} /> : null}
-        {link === null ? null : <ExternalLink url={link} label="Open on GitHub" />}
         {needsAccountModels(item) ? (
           // The account's drawer has no route of its own, so this opens the section that lists its accounts.
           <Anchor
@@ -350,7 +353,7 @@ export function InboxCard({
             }}
           />
         ) : null}
-        <BatchCardActions item={item} onDone={onDismiss} />
+        <StepLogLink item={item} />
         {hasOptions ? (
           <Radio.Group value={choice} onChange={onChoose} aria-label="Answer">
             <Stack gap="xs">
@@ -383,54 +386,46 @@ export function InboxCard({
           </Radio.Group>
         ) : null}
         {recordable ? <RecordDecision item={item} value={recording} onChange={onRecord} /> : null}
-        {error ? (
-          <Alert color="red" variant="light">
-            {error}
-          </Alert>
-        ) : null}
       </Stack>
       <CardActions
         framed={framed}
+        start={[
+          viewTask,
+          session === null ? null : <OpenSessionLink chat={session} />,
+          taskOfCard === null || fromChat === null ? null : (
+            <OpenTaskLink taskId={taskOfCard} projectId={item.projectId} asButton />
+          ),
+          link === null ? null : <ExternalLink url={link} label="Open on GitHub" asButton />,
+        ]}
+        error={error ?? batch.error}
+        noteRef={noteRef}
         note={
-          hasOptions ? (
-            // The note rides in the bar beside Send Answer, so it is in reach however long the card is.
-            <Textarea
-              ref={noteRef}
-              aria-label="Note"
-              placeholder="Add a note (optional)"
-              autosize
-              minRows={1}
-              maxRows={4}
-              value={note}
-              onChange={(e) => {
-                onNote(e.currentTarget.value);
-              }}
-              onFocus={onNoteFocus}
-              onKeyDown={sendFromNote}
-            />
+          hasOptions
+            ? {
+                value: note,
+                onChange: onNote,
+                onFocus: onNoteFocus,
+                onSubmit,
+              }
+            : null
+        }
+        extra={
+          (mode === StakeholderMode.Unrouted || mode === StakeholderMode.Pending) && hasOptions ? (
+            <AskSomeoneFooter item={item} people={people} />
           ) : null
         }
-      >
-        {(mode === StakeholderMode.Unrouted || mode === StakeholderMode.Pending) && hasOptions ? (
-          <AskSomeoneFooter item={item} people={people} />
-        ) : null}
-        {hasOptions || !closesItself ? (
-          <Button
-            size="sm"
-            loading={pending}
-            onClick={onSubmit}
-            rightSection={
-              shortcuts ? (
-                <Kbd size="xs" aria-hidden>
-                  ↵
-                </Kbd>
-              ) : null
-            }
-          >
-            {hasOptions ? 'Send Answer' : count > 1 ? 'Dismiss All' : 'Dismiss'}
-          </Button>
-        ) : null}
-      </CardActions>
+        secondary={batch.buttons}
+        primary={
+          hasOptions || !closesItself
+            ? {
+                label: hasOptions ? 'Send Answer' : count > 1 ? 'Dismiss All' : 'Dismiss',
+                loading: pending,
+                onClick: onSubmit,
+                ...(shortcuts ? { hint: KeyHint.Enter } : {}),
+              }
+            : null
+        }
+      />
     </CardSurface>
   );
 }

@@ -233,9 +233,13 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   with an orange warning icon for a warning, opening in a drawer with no answer and no Dismiss.
 - **Inbox content:** the selected card opens with its title (16 / 600) on a line of its own and one dim meta line
   under it: the kind's icon and name, the project, how many identical cards and how long ago (`card-header.tsx`).
-  Its text keeps the Reading width (see Content width). An answered card's buttons (a flag's, a question's, a permission's) are a bar held at the foot
-  of the content, a hairline above (`card-actions.tsx`), so Dismiss and Send Answer stay in one place however long
-  the card is; check, plan, drafted-question, 10db and pass cards keep their own buttons in their flow. A field's label
+  Its text keeps the Reading width (see Content width). Every card the builder answers ends in one bar held at the
+  foot of the content, a hairline above (`card-actions.tsx`), so its answers stay in one place however long the card
+  is: on the left the ways out as default buttons (View Task, which opens the task's drawer over the Inbox, Open
+  Session, Open on GitHub, Full Diff), on the right the answers with one filled primary, and the answer's error on a
+  line over them. Send Back turns the bar into a composer: a required note grows up out of the bar, focused, with
+  Cancel and Send It Back ⌘↵, and Esc cancels. 10db's own cards and a pass's pages keep their buttons in their
+  flow. A field's label
   never says "(optional)": the placeholder says Optional.
 - **Page header:** a page has one header, the frame's title row (`TitleRow`,
   `apps/desktop/src/shell/title-row.tsx`), at the top of the content column on the content's own tone: the title
@@ -278,7 +282,10 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   of waiting, quiet placeholder rows in the shape of what is coming take the content's place
   (`PageLoading`, `apps/desktop/src/shell/page-loading.tsx`: a list, cards or transcript lines), always static,
   with no shimmer, and no wider than 720 px. A page never shows a lone spinner as its whole content; a spinner
-  stays inside a button or a row.
+  stays inside a button or a row. A page that is not rows draws its own shape after the same delay
+  (`useLoadingDelayElapsed`): the Board draws its row of column outlines (`BoardSkeleton`,
+  `apps/desktop/src/views/board/board-skeleton.tsx`) at the loaded columns' widths, narrow rails and open columns
+  with a few card placeholders, from the saved collapsed state, so the page keeps its shape when the data arrives.
 - **Picking several from a list that is bounded** (a project's pages, which the builder reads whole) is tickable
   rows, each a checkbox named by the item, with its detail on the same line and why it can't be picked under it
   (`views/workbench/page-list.tsx`).

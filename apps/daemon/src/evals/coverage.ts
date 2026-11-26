@@ -95,6 +95,16 @@ export function coverageOf(input: {
 
 /** The most files one line names. */
 const LINE_FILES = 3;
+const PATH_SHOWN = 200;
+
+/**
+ * A changed path as the card shows it: a lane names its files, so a control or format character (a newline or line
+ * separator that would start a line of its own beside the live command, a bidi override) or a backtick is shown as `?`, and the path sits in a code span.
+ */
+const shownPath = (path: string): string =>
+  `\`${Array.from(path.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}`]/gu, '?'))
+    .slice(0, PATH_SHOWN)
+    .join('')}\``;
 
 /**
  * One line per touched suite for the run's Inbox card: the changed code, that the suite hasn't run on it, what it
@@ -103,7 +113,7 @@ const LINE_FILES = 3;
 export function coverageLines(detail: EvalCoverageDetail): string[] {
   const named = new Map(detail.suites.map((s) => [s.key, s]));
   return (detail.matched ?? []).map((m) => {
-    const files = m.paths.slice(0, LINE_FILES).join(', ');
+    const files = m.paths.slice(0, LINE_FILES).map(shownPath).join(', ');
     const more =
       m.paths.length > LINE_FILES ? ` and ${String(m.paths.length - LINE_FILES)} more` : '';
     const suite = named.get(m.key);

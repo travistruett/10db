@@ -30,8 +30,7 @@ them against what you said matters, and nothing else.
 - *Noise.* A broad glob fires on every task, and you stop reading. Settings shows each watchpoint's hits over the last
   30 days. An ask watchpoint you wave through goes yellow: at least 5 cards, at least 80% "Looks right" with no note,
   the measure 10db already uses.
-- *Misses.* A model id in ordinary code matches no glob. Line patterns and a judge question cover that (S3). Until
-  then, the gap shows in Settings: the Model choice starter isn't offered yet.
+- *Misses.* A model id in ordinary code matches no glob. Line patterns (the Model choice starter) and a judge question cover that.
 - *A wrong reason.* The agent's note is its own account of what it did. The reviewer's check is the independent
   read, and the hunks sit right under both.
 - *An agent weakens a watchpoint.* It can't: agents propose, you accept.
@@ -62,7 +61,8 @@ you as screenshots of the running app.
 | ----- | ---- | ---- |
 | S1 | Feature | Watchpoints with globs, `why` and `guidance`; the glob starters; Settings › Watchpoints; matching after the gate; hits kept as evidence; `watchpointNotes` from the build and review steps; the reviewer's Watchpoint section; For You; the PR body's For you section. Loudness **show** only (Ask is disabled with "next"). |
 | S2 | Feature | **Ask**: the one-per-task Look card, Looks right and Send back. An ask hit forces a review on a Light task. A show hit posts an Activity notice. Per-watchpoint hit counts and the noisy flag. |
-| S3 | Feature | `match.lines` (regexes over changed lines), and the Indexes and Model choice starters. `match.question`, a new `JudgeDecision` that is off and replayed in Shadow first; the Design principles and Auth starters. |
+| S3a | Feature | `match.lines` (regexes over changed lines), and the Indexes and Model choice starters. Built. |
+| S3b | Feature | `match.question`, a new `JudgeDecision` that is off and replayed in Shadow first; the Design principles and Auth starters. |
 | S4 | Feature | Assessing the starters against the repo, with evidence and a covered-file count, as hazards are. Agent proposals for watchpoint edits. Knowledge links (principle topics join the guidance) and "Looks right" saving a decision. |
 | S5 | Core | **Hold**: auto-merge off for a held run, Merge on the card, a goal's shared PR, recovery. Built only on your go. |
 
@@ -80,8 +80,8 @@ run back), and watchpoints on the Critical plan-approval card.
 | `globs` | ✓ | `PathPattern[]`, matched the way areas are (`areaMatches`, so dot-paths match). |
 | `guidance` | ✓ | What you want checked. It goes into the build brief and the review brief. |
 | `loudness` | ✓ | `WatchpointLoudness = { Show, Ask, Hold } as const`. S1 accepts only `show` from the UI. The type has all three, so stored settings never need migrating. |
-| `lines` | S3 | Optional regexes over the added and removed lines of matching files. |
-| `question` | S3 | Optional. A yes/no the judge asks of hunks the rules didn't settle. |
+| `lines` | S3a | Optional regexes over the added and removed lines of matching files. |
+| `question` | S3b | Optional. A yes/no the judge asks of hunks the rules didn't settle. |
 | `knowledge` | S4 | Optional principle topic keys. Their current text joins `guidance`. |
 | `starter` | ✓ | The library key it came from, if any. It tells a starter's later revision which watchpoints to touch. |
 
@@ -107,10 +107,10 @@ arrives as a proposal, never by silently editing your list.
 | Evals | `**/evals/**`, `**/*.eval.*` | show | S1 |
 | Agent instructions | `**/AGENTS.md`, `**/CLAUDE.md`, `.claude/**`, `.codex/**` | show | S1 |
 | Dependencies | the stock deps hazard's globs | show | S1 |
-| Indexes | migration globs, plus index DDL lines | show | S3 |
-| Model choice | model-id lines in any file | show | S3 |
-| Design principles | UI globs, plus a question linked to the `ui` principles | show | S3 |
-| Auth and permissions | a question | show | S3 |
+| Indexes | migration globs, plus index DDL lines | show | S3a |
+| Model choice | model-id lines in any file | show | S3a |
+| Design principles | UI globs, plus a question linked to the `ui` principles | show | S3b |
+| Auth and permissions | a question | show | S3b |
 
 On a new install, your list starts as the S1 starters. "Add from library" in Settings offers any starter not in the
 list. S2 turns Migrations and Contracts to ask, but only on watchpoints still at the starter's settings; one you've
@@ -217,13 +217,19 @@ field on every provider.
 
 ## Surfaces
 
-**Settings › Watchpoints** (mock-ups 1 and 1b). A project section under Planning, after Areas and Hazards.
-- One table, in two groups: "Yours, in every project" and "This project".
-- Each row has a segmented loudness control. Hold is greyed out until S5, and Ask until S2.
-- The row's drawer edits the name, why, globs (with a matching-file count read from the checkout), guidance,
-  loudness, and **Applies to**: every project or this one.
-- An override carries a cyan tag, and "Use yours" drops it.
-- The last-30-days column arrives in S2.
+**Settings › Watchpoints** follows Trust's two scopes: All Projects owns the list, and a project follows it.
+- **All Projects › Watchpoints** (under Agents, after Trust) edits your list (`/settings/watchpoints`): Watchpoint,
+  Matches, When It Matches (Show or Ask) and Edit and Remove. Add Watchpoint's menu adds a library starter.
+- **This Project › Watchpoints** (under Planning, after Areas and Hazards) is one table: yours first, as the project
+  has them, then the project's own, marked This Project. Its scope line links to All Projects › Watchpoints.
+  - Yours have When It Matches **Default · <yours>** / Show / Ask / Off: Default drops the project's entry, Show or
+    Ask writes a copy at that loudness, Off writes `{ key, off: true }`. A copy shows a dimmed "set here".
+  - Editing one of yours saves a copy for this project only; the drawer says so, and offers Use Default on a copy.
+  - The project's own have Show or Ask, and only they can be removed here. A project page never writes your list.
+  - The paths sit under the name, so the table fits the 1200 px window; Last 30 Days is the project's counts.
+- Hold is not offered in either control until S5; the type keeps it.
+- The drawer edits Name, Why It Matters, Matches These Paths, Lines, What to Check and When It Matches. The
+  matching-file count read from the checkout is not built: no route counts a glob's files yet.
 
 **For You** (mock-up 2). It is the first section of the drawer's Overview when the newest watchpoint row has hits, and
 it is absent otherwise. It mirrors `TaskSkips`: it fetches `/workstreams/:id/watchpoint-hits` itself and returns null
@@ -300,4 +306,4 @@ Its own index and cards come after S4, with plan review.
   fake agent writes, then assert For You shows it, with the hunk and the agent's note.
 - **No PR-body test is added.** A case in `pr-text.test.ts` gains a watchpoint input, which extends a test rather
   than adding one.
-- S2 extends `inbox.spec.ts` with the Look card. S3's line patterns join the rule-table test.
+- S2 extends `inbox.spec.ts` with the Look card. S3a's line patterns join the rule-table test.

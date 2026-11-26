@@ -5,7 +5,7 @@ import {
   type TaskId,
   type WorkstreamDto,
 } from '@10db/contracts';
-import { listActiveProjects, listBatches, listWorkstreams } from '@10db/db';
+import { listActiveProjects, listBatches, listWorkstreams, queuedCopyBatchIds } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
 import { cardsResolvedByEvent, flagCard, resolveStaleCards, type InboxService } from '../inbox';
@@ -41,15 +41,21 @@ export function createStallSweep(deps: {
   readonly state: StateStore;
   readonly inbox: Pick<InboxService, 'resolve'>;
   readonly waits: Pick<QueueWaits, 'get'>;
+  /** Whether 10db's admission holds new work now: the load guard, low disk or an update's drain. */
+  readonly held: () => boolean;
   readonly clock: Clock;
   readonly logger: Logger;
 }): StallSweep {
   let timer: Timer | null = null;
   let started = false;
+  // Silence before this was the daemon being down or a run waiting on 10db's own admission. The sweep
+  // made at the daemon's start is the earliest the daemon can have been running.
+  let countFrom = deps.clock.now();
 
   function sweep(): void {
     const db = deps.state.db;
     const now = deps.clock.now();
+    if (deps.held()) countFrom = now;
     const live = new Set(listActiveProjects(db).map((p) => p.id));
     const inLive = (w: { readonly projectId: ProjectId }): boolean => live.has(w.projectId);
     // A queued run no tick has looked at since the start has no wait yet: its card, and its batch's,
@@ -68,10 +74,13 @@ export function createStallSweep(deps: {
     const active = listWorkstreams(db, {
       states: [WorkstreamState.Starting, WorkstreamState.Running, WorkstreamState.Verifying],
     }).filter(inLive);
+    // A copy waiting for its turn is not being cut, however long it waits.
+    const waiting = new Set(queuedCopyBatchIds(db));
     const batches = listBatches(db, {
       states: [BatchState.Open, BatchState.Shipping, BatchState.Cutting],
     })
       .filter(inLive)
+      .filter((batch) => !waiting.has(batch.id))
       .map((batch) => ({
         batch,
         members: latestPerTask(listWorkstreams(db, { batchId: batch.id })),
@@ -88,6 +97,7 @@ export function createStallSweep(deps: {
       queued,
       active,
       batches,
+      countFrom,
       carried: new Map([...open].map(([key, card]) => [key, card.since])),
     });
     const changed = stalls.filter((s) => open.get(s.key)?.fingerprint !== s.fingerprint);

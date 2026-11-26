@@ -4,7 +4,7 @@ Shares this Mac's daemon on the builder's tailnet through `tailscale serve`.
 
 - `tailscale-cli.ts` is the only module that runs the Tailscale CLI. `findTailscaleCli` reads no environment;
   `TENDB_TAILSCALE=off` is parsed in `daemonOptionsFromEnv` (`tailscaleOff`) and `start.ts` then passes
-  `cli: () => null`, so the e2e daemon sees no Tailscale on a Mac that has one. `createTailscaleRun` uses
+  `cli: () => null`, so the e2e daemon sees no Tailscale on a Mac that has one. `TENDB_TAILSCALE_CLI=<absolute path>` (`tailscaleCli`) names the CLI to run instead of the search (`start.ts` composes `tailscaleOff`, then `tailscaleCli`, then `findTailscaleCli`). `createTailscaleRun` uses
   `execFile` with no shell, a 10 s default timeout, 1 MiB of output and an environment of `PATH` and `HOME` only; it
   never rejects. Lanes can't run the CLI, so nothing here is tested against a real one: the zod schema reads only
   the fields 10db needs, and an unreadable answer throws `TailscaleUnreadableError`, naming the field, never a value.
@@ -20,17 +20,30 @@ Shares this Mac's daemon on the builder's tailnet through `tailscale serve`.
   `http://127.0.0.1:<port>`, a `TCP[port]` entry that is exactly `{ "HTTPS": true }` and no Funnel on the name.
   `loopbackMappingOn` is the same check without a name, used only to remove 10db's mapping while the name is
   unreadable. `shareRefusal(port, mainPort)` takes the main listener's port because it is only known at run time.
+- `sharing-status.ts` (`computeSharingStatus`) is pure: the Remote Access checklist and state from the service's
+  readings. `sharing-settings.ts` owns the `sharing.*` `app_settings` keys, `serve-control.ts` reads and changes
+  `tailscale serve` and caches the last status, and `sharing-service-api.ts` holds the `SharingService` interface and
+  `SharingRefusedError`.
 - `sharing-service.ts` runs `set`, `requestCertificate`, `start`, `stop`, the refresh a stale `status()` starts and the
   60 s monitor on one queue. Stop and shutdown unserve first, then close the share sockets, then the listener, and
   remove only a mapping that is 10db's. A start with a Funnel, TCP or foreign mapping on the port never listens
   (`blocked`); a start that fails for Tailscale or certificate reasons (`retry`) is tried again by the monitor, a held
   port is not, and the monitor only removes 10db's mapping while the listener is down. `set` refuses with
   `SharingRefusedError`, whose message is shown to the builder (task 10 maps it to 409).
+- While sharing is on, the 60 s monitor publishes `sharing.changed` whenever the status it reads changes (its state
+  or its steps), so a tick that finds the CLI gone publishes even when the state label stays `paused`. The rail
+  refetches only on that event, or on Remote Access's 10 s poll, which fills the same query; a removed CLI clears
+  the rail's line within a minute.
+- A daemon that is not sharing (no listener, not enabled) neither unserves its port on Stop or shutdown nor records an owed
+  unserve: the port's mapping may be another daemon's (`notSharing` in `sharing-service.ts`). An unserve an earlier Stop
+  owed is still retried by the monitor and at start.
 - `share-listener.ts` is the second `serve()` on `127.0.0.1:<port>` with its own `WebSocketServer({ noServer: true })`
   and the same app. Its fetch wrapper (and the main listener's in `start.ts`) marks the **env object in place**
   (`Object.assign(env, { listener })`): `@hono/node-server` reads back a symbol the upgrade helper writes on that very
   object, so a spread copy silently breaks every WebSocket upgrade. `EADDRINUSE` answers `{ ok: false, holder }`,
-  `holder` from `lsofHolderOf` (`"<command> (pid <n>)"`). `start.ts` calls `sharing.start()` unawaited after recovery
+  `holder` from `lsofHolderOf` in `lsof-holder.ts` (`"<command> (pid <n>)"`). That reader checks lsof's `-Fpc`
+  record with zod; malformed output, a failed run or a timeout throws `LsofUnreadableError`, whose message names
+  the failing fields, never their values. `start.ts` logs it and passes `null` ("another process"). `start.ts` calls `sharing.start()` unawaited after recovery
   and `sharing.stop()` first in shutdown.
 
 ## Serve facts

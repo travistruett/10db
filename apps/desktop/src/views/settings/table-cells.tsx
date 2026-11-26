@@ -2,6 +2,7 @@ import {
   ActionIcon,
   Alert,
   Badge,
+  Box,
   Button,
   Code,
   Group,
@@ -38,15 +39,21 @@ export function Pill({
   );
 }
 
-/** Patterns a table row shows before the rest fold into "+N more". */
+/** Patterns a table row shows before the rest fold into "+N more", unless the row asks for fewer. */
 const SHOWN_PATHS = 3;
 
 /**
- * A row's patterns in brief: the first three in monospace, then "+N more", which lists them all on hover. The
+ * A row's patterns in brief: the first `shown` (three) in monospace, then "+N more", which lists them all on hover. The
  * row's drawer holds the full, editable list. Hovering a pattern says what it means.
  */
-export function PathSummary({ paths }: { readonly paths: readonly string[] }) {
-  const shown = paths.slice(0, SHOWN_PATHS);
+export function PathSummary({
+  paths,
+  shown: limit = SHOWN_PATHS,
+}: {
+  readonly paths: readonly string[];
+  readonly shown?: number;
+}) {
+  const shown = paths.slice(0, limit);
   const rest = paths.length - shown.length;
   return (
     <Group gap={6} wrap="wrap">
@@ -56,7 +63,8 @@ export function PathSummary({ paths }: { readonly paths: readonly string[] }) {
         </Tooltip>
       ))}
       {rest > 0 ? (
-        <HoverCard position="bottom-start" withinPortal>
+        // No popup roles: a paragraph can't carry them, and the list is a hover aid the drawer repeats in full.
+        <HoverCard position="bottom-start" withinPortal withRoles={false}>
           <HoverCard.Target>
             <Text size="xs" c="dimmed" style={{ cursor: 'default' }}>
               +{rest} more
@@ -94,7 +102,10 @@ export function PathMeanings({ paths }: { readonly paths: readonly string[] }) {
   );
 }
 
-/** Edit and Remove for one row; neither press reaches the row's own click. */
+/**
+ * Edit and Remove for one row; neither press reaches the row's own click. A row with no `onRemove` keeps Remove's
+ * place empty, so every row's Edit lines up.
+ */
 export function RowActions({
   noun,
   name,
@@ -105,7 +116,7 @@ export function RowActions({
   readonly noun: 'area' | 'hazard' | 'watchpoint';
   readonly name: string;
   readonly onEdit: () => void;
-  readonly onRemove: () => void;
+  readonly onRemove?: () => void;
   /** Why Remove is off, when it is. */
   readonly removeBlocked?: string;
 }) {
@@ -124,23 +135,28 @@ export function RowActions({
           <IconPencil size={16} aria-hidden />
         </ActionIcon>
       </Tooltip>
-      <Tooltip label={removeBlocked ?? `Remove ${noun}`}>
-        {/* A disabled button gets no pointer events, so the tooltip hangs on its wrapper. */}
-        <span>
-          <ActionIcon
-            variant="subtle"
-            color="gray"
-            aria-label={`Remove ${noun} ${name}`}
-            disabled={removeBlocked !== undefined}
-            onClick={(e) => {
-              e.stopPropagation();
-              onRemove();
-            }}
-          >
-            <IconTrash size={16} aria-hidden />
-          </ActionIcon>
-        </span>
-      </Tooltip>
+      {onRemove === undefined ? (
+        // As wide as the ActionIcon it stands in for (size md, 28 px).
+        <Box w={28} style={{ flexShrink: 0 }} aria-hidden />
+      ) : (
+        <Tooltip label={removeBlocked ?? `Remove ${noun}`}>
+          {/* A disabled button gets no pointer events, so the tooltip hangs on its wrapper. */}
+          <span>
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              aria-label={`Remove ${noun} ${name}`}
+              disabled={removeBlocked !== undefined}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove();
+              }}
+            >
+              <IconTrash size={16} aria-hidden />
+            </ActionIcon>
+          </span>
+        </Tooltip>
+      )}
     </Group>
   );
 }
