@@ -8,6 +8,7 @@ import type {
   ShapeId,
   TaskId,
 } from '@10db/contracts';
+import { sameToken } from '../same-token';
 
 // Shape spec §5.5. The daemon cannot draw a screen: only the app's window can. The broker is the
 // rendezvous. A session's `see_screen` call becomes a request; the window asks for work by long-
@@ -170,7 +171,7 @@ export function createScreenBroker(options: ScreenBrokerOptions = {}): ScreenBro
     },
 
     tokenValid(token) {
-      return [...open.values()].some((o) => o.request.token === token);
+      return [...open.values()].some((o) => sameToken(token, o.request.token));
     },
   };
 }

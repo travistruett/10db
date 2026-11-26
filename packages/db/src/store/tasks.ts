@@ -51,7 +51,7 @@ import { and, asc, desc, eq, inArray, isNull, max, ne, or } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn, listBoardColumns } from './board-columns';
 import { checkTaskKinds, listKinds } from './kinds';
-import { isLocalCopy } from './local-copies';
+import { isLocalCopy, queuedCopyBatchIds } from './local-copies';
 import { getProposal } from './knowledge';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -623,6 +623,33 @@ export function insertAcceptanceFollowUp(
 }
 
 /**
+ * Files what the builder sent back from a Look card: a task in the project's Ready column touching the source's
+ * areas, with the builder's note and the watchpoints the card named. The source run is untouched.
+ */
+export function insertWatchpointFollowUp(
+  ctx: WriteContext,
+  sourceId: TaskId,
+  input: { readonly watchpoints: readonly string[]; readonly note: string },
+): TaskDto {
+  const source = getTask(ctx.tx, sourceId);
+  const project = getProject(ctx.tx, source.projectId);
+  const what = input.watchpoints.length > 0 ? input.watchpoints.join(', ') : 'the watched changes';
+  const title = `Revisit ${what} in ${source.title}`;
+  return writeTask(ctx, source.projectId, {
+    landing: taskLandingFor(project),
+    workspaceMode: placementFor(project, undefined),
+    reason: null,
+    title: Title.parse(title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title),
+    description: `${input.note}\n\nSent back from the Look card for ${what} on the task "${source.title}" (${source.id}).`,
+    acceptanceCriteria: [`The note is answered: ${input.note}`],
+    areas: source.areas,
+    dependsOn: [],
+    proposalId: null,
+    boardColumnId: null,
+  });
+}
+
+/**
  * Adds the findings of a later rejection at the retry limit to the follow-up task an earlier one filed, while
  * that task is still open and unstarted; once it has started, was removed or is gone, the findings stay on
  * the step and nothing is written. A task shipped at its limit never files a second follow-up for the one
@@ -727,7 +754,8 @@ export function setTaskStatus(ctx: WriteContext, id: TaskId, status: TaskStatus)
 /**
  * Whether every dependency is done: finished, or an open task whose failed run shipped anyway and
  * whose pull request has merged. A finished task whose work is in a separate copy that has not landed
- * is not done: its dependents wait for the landing.
+ * is not done, unless the dependent's own latest run is in that same copy: the dependency's work is
+ * already on its branch and the copy lands them together.
  */
 export function dependenciesDone(db: DbReader, taskId: TaskId): boolean {
   return dependencyWaits(db, taskId).length === 0;
@@ -755,10 +783,19 @@ export function dependencyWaits(db: DbReader, taskId: TaskId): DependencyWait[] 
     .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.dependsOnId))
     .where(eq(schema.taskDeps.taskId, taskId))
     .all();
+  if (deps.length === 0) return [];
+  const ownBatchId =
+    db
+      .select({ batchId: schema.workstreams.batchId })
+      .from(schema.workstreams)
+      .where(eq(schema.workstreams.taskId, taskId))
+      .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+      .limit(1)
+      .get()?.batchId ?? null;
   return deps.flatMap(({ id, status, title }): DependencyWait[] => {
     const base = { taskId: id, title, landing: false, landingBatchId: null, failedRunId: null };
     if (status === TaskStatus.Done) {
-      const landing = landingBatch(db, id);
+      const landing = landingBatch(db, id, ownBatchId);
       return landing === null
         ? []
         : [{ ...base, landing: true, landingBatchId: landing, ended: null }];
@@ -773,8 +810,16 @@ export function dependencyWaits(db: DbReader, taskId: TaskId): DependencyWait[] 
   });
 }
 
-/** The batch of the task's latest run when it is a separate copy that has not shipped, else null. */
-function landingBatch(db: DbReader, taskId: TaskId): BatchId | null {
+/**
+ * The batch of the task's latest run when it is a separate copy that has not shipped, else null. A copy
+ * that is the dependent's own (`dependentBatchId`) is no landing to wait for: the dependency's work is
+ * already on its branch and the copy lands them together.
+ */
+function landingBatch(
+  db: DbReader,
+  taskId: TaskId,
+  dependentBatchId: BatchId | null,
+): BatchId | null {
   const latest = db
     .select({ batchId: schema.workstreams.batchId, batchState: schema.batches.state })
     .from(schema.workstreams)
@@ -784,6 +829,7 @@ function landingBatch(db: DbReader, taskId: TaskId): BatchId | null {
     .limit(1)
     .get();
   return latest?.batchId != null &&
+    latest.batchId !== dependentBatchId &&
     latest.batchState !== BatchState.Shipped &&
     isLocalCopy(db, latest.batchId)
     ? latest.batchId
@@ -1094,9 +1140,10 @@ function removeUnstarted(
       run ? { id: run.id, live: !isTerminal(run.state) } : null,
     );
   // A pull-request start inserts its workstreams only once its batch is cut; removing a task in that
-  // window would abort the cut.
+  // window would abort the cut. A copy waiting for its turn has begun no cut.
+  const queued = new Set(queuedCopyBatchIds(ctx.tx));
   const cutting = ctx.tx
-    .select({ title: schema.batches.title })
+    .select({ id: schema.batches.id, title: schema.batches.title })
     .from(schema.batches)
     .where(
       and(
@@ -1104,7 +1151,8 @@ function removeUnstarted(
         eq(schema.batches.state, BatchState.Cutting),
       ),
     )
-    .get();
+    .all()
+    .find((batch) => !queued.has(batch.id));
   if (cutting)
     throw new ConflictError(
       `Batch "${cutting.title}" is being cut; remove ${task.title} once it has started`,

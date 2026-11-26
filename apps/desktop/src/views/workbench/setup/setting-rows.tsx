@@ -9,6 +9,7 @@ import type { SettingDraft } from './setting-drafts';
 const LABELS: Record<SettingField, string> = {
   [SettingField.AppUrl]: 'App Address',
   [SettingField.DevLoginCommand]: 'Sign-in for pictures',
+  [SettingField.AppStartCommand]: 'App Start Command',
   [SettingField.ChangedCheckCommand]: 'Check After Each Turn',
   [SettingField.SandboxDocker]: 'Allow Docker',
 };

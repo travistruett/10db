@@ -1,20 +1,15 @@
-import { PermissionChoice, type InboxItemDto, type InboxOption } from '@10db/contracts';
 import {
-  Box,
-  Button,
-  Divider,
-  Group,
-  Kbd,
-  Paper,
-  Stack,
-  Text,
-  TextInput,
-  Tooltip,
-} from '@mantine/core';
+  commandParagraph,
+  PermissionChoice,
+  type InboxItemDto,
+  type InboxOption,
+} from '@10db/contracts';
+import { Button, Divider, Group, Kbd, Paper, Stack, Text, TextInput, Tooltip } from '@mantine/core';
 import { IconShieldHalf } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { DaemonRequestError } from '../daemon/client';
 import { useAnswerInbox } from '../daemon/queries';
+import { CommandBlock } from '../views/inbox/command-block';
 import { optionLabel } from '../views/inbox/permission-labels';
 import { WAITING_CARD_ATTRIBUTE } from './escape';
 
@@ -31,6 +26,20 @@ function buttonLabel(item: InboxItemDto, option: InboxOption): string {
 function detailText(item: InboxItemDto, key: string): string | null {
   const value = item.detail?.[key];
   return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/**
+ * The body less what repeats the call shown in its own block: a body that is only the call, a raw call
+ * leading the body, and the labelled `Command:` paragraph ending it. Each is cut whole, never split into
+ * paragraphs, so no piece of a call with blank lines reappears beside 10db's words.
+ */
+function bodyWithoutCall(body: string, call: string | null): string {
+  if (call === null) return body;
+  if (body === call) return '';
+  const lead = `${call}\n\n`;
+  const after = body.startsWith(lead) ? body.slice(lead.length) : body;
+  const labelled = `\n\n${commandParagraph(call)}`;
+  return after.endsWith(labelled) ? after.slice(0, -labelled.length) : after;
 }
 
 export function AskCard({
@@ -86,11 +95,8 @@ export function AskCard({
   };
   if (answer.isSuccess) return null;
   const call = detailText(item, 'summary');
-  // The command is in the block above; the body's own paragraph that repeats it is left out.
-  const rest = item.body
-    .split('\n\n')
-    .filter((paragraph) => paragraph !== call)
-    .join('\n\n');
+  // The command is in its own block, with its hidden characters shown; the body's own copy of it is left out.
+  const rest = bodyWithoutCall(item.body, call);
   return (
     <Paper
       {...{ [WAITING_CARD_ATTRIBUTE]: true }}
@@ -119,25 +125,7 @@ export function AskCard({
             </Text>
           ) : null}
         </Group>
-        {call === null ? null : (
-          <Box
-            component="pre"
-            m={0}
-            p="xs"
-            fz="xs"
-            style={{
-              fontFamily: 'var(--mantine-font-family-monospace)',
-              background: 'var(--mantine-color-body)',
-              borderRadius: 'var(--mantine-radius-sm)',
-              whiteSpace: 'pre-wrap',
-              overflowWrap: 'anywhere',
-              maxHeight: 160,
-              overflowY: 'auto',
-            }}
-          >
-            {call}
-          </Box>
-        )}
+        {call === null ? null : <CommandBlock command={call} />}
         {rest === '' ? null : (
           <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-line' }}>
             {rest}

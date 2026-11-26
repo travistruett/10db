@@ -11,6 +11,7 @@ export {
 export { isEqualOrUnder, protectedReads } from './protected-reads';
 export { realOrSelf } from './real-or-self';
 export { toolchainAccess } from './toolchain-reads';
+export { dockerAccess } from './docker-access';
 export { packageCacheEnv } from './package-cache';
 export { createLaneEnvFile, removeLaneEnvFile } from './env-file';
 export {

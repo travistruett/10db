@@ -11,6 +11,8 @@ export interface SessionClosing {
   /** The number of sessions open, which bounds where a reopened one can go. */
   readonly chatCount: number;
   readonly onSelect: (row: PanelRow) => void;
+  /** The row left and no other is left to select: the screen opens a fresh tab in its place. */
+  readonly onNoneLeft: (gone: PanelRow) => void;
   /** A reopened session is the one to show. */
   readonly onOpenChat: (chatId: ChatId, projectId: ProjectId) => void;
   readonly removeFresh: (id: string) => void;
@@ -25,6 +27,7 @@ export function useSessionClosing({
   selected,
   chatCount,
   onSelect,
+  onNoneLeft,
   onOpenChat,
   removeFresh,
 }: SessionClosing) {
@@ -38,12 +41,13 @@ export function useSessionClosing({
     readonly preview: ArchivePreviewDto;
   } | null>(null);
 
-  /** Focus moves to the row below, or the one above when the closed row was last. */
+  /** Focus moves to the row below, or above when the closed row was last; with no row left, `onNoneLeft`. */
   const moveFrom = (row: PanelRow): void => {
     if (row.key !== selected?.key) return;
     const index = rows.findIndex((r) => r.key === row.key);
     const next = rows[index + 1] ?? rows[index - 1];
-    if (next !== undefined) onSelect(next);
+    if (next === undefined) onNoneLeft(row);
+    else onSelect(next);
   };
 
   const remember = (row: PanelRow & { readonly kind: 'chat' }, archived: boolean): void => {

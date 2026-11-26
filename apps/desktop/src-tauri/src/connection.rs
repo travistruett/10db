@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// The file in the data directory where the daemon announces its pid and port.
+const RUNTIME_INFO_FILE: &str = "daemon.json";
+
 /// What the UI needs to reach the running daemon.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,7 +72,7 @@ pub fn data_dir() -> PathBuf {
 /// `NotRunning` when `daemon.json` is absent, `Unreadable` when a file can't be read, and
 /// `Invalid` when `daemon.json` doesn't parse or the token is empty.
 pub fn read_connection(dir: &Path) -> Result<DaemonConnection, ConnectionError> {
-    let info_text = match fs::read_to_string(dir.join("daemon.json")) {
+    let info_text = match fs::read_to_string(dir.join(RUNTIME_INFO_FILE)) {
         Ok(text) => text,
         Err(error) if error.kind() == ErrorKind::NotFound => {
             return Err(ConnectionError::NotRunning);
@@ -90,6 +93,16 @@ pub fn read_connection(dir: &Path) -> Result<DaemonConnection, ConnectionError> 
         protocol_version: info.protocol_version,
         pid: info.pid,
     })
+}
+
+/// The pid and port in `dir`'s `daemon.json`, or `None` when the file is absent or doesn't parse.
+/// The daemon writes the file once its server listens and removes it on a clean shutdown, so a
+/// crash leaves it behind.
+#[must_use]
+pub fn read_runtime_info(dir: &Path) -> Option<(u32, u16)> {
+    let text = fs::read_to_string(dir.join(RUNTIME_INFO_FILE)).ok()?;
+    let info: RuntimeInfo = serde_json::from_str(&text).ok()?;
+    Some((info.pid, info.port))
 }
 
 #[cfg(test)]

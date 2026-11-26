@@ -1,7 +1,14 @@
 import { posix } from 'node:path';
 import type { ProjectDto } from '@10db/contracts';
 import type { Git } from '../git';
-import { parseRules, within, withoutComments, type MakeRule, type ReadRepoFile } from '../trust';
+import {
+  parseRules,
+  within,
+  withoutComments,
+  withoutDirectives,
+  type MakeRule,
+  type ReadRepoFile,
+} from '../trust';
 
 /** The most of a Makefile or script read from the base to see whether a gate calls docker. */
 export const MAX_DOCKER_SCAN_BYTES = 256 * 1024;
@@ -89,7 +96,8 @@ export async function callsDocker(command: string, read: ReadRepoFile): Promise<
     if (rules === null || seen.has(key)) return false;
     seen.add(key);
     for (const rule of rules.get(target) ?? []) {
-      if (await scanText(rule.recipe, dir, depth)) return true;
+      // A directive line is make's test, not a command: `ifeq ($(RUNNER),docker)` runs nothing.
+      if (await scanText(withoutDirectives(rule.recipe), dir, depth)) return true;
       for (const needed of rule.prerequisites)
         if (await scanTarget(dir, needed, depth + 1)) return true;
     }
@@ -127,7 +135,20 @@ export async function gateCallsDocker(
   git: Git,
   project: Pick<ProjectDto, 'repoPath' | 'baseBranch' | 'gateCommand'>,
 ): Promise<boolean> {
-  if (project.gateCommand === null) return false;
+  return commandCallsDocker(git, project, project.gateCommand);
+}
+
+/**
+ * Whether one of the project's own commands (its gate, its app's start command) is seen to call
+ * Docker in `origin/<base>`, read as `gateCallsDocker` reads a gate. False for no command and when
+ * git can't say.
+ */
+export async function commandCallsDocker(
+  git: Git,
+  project: Pick<ProjectDto, 'repoPath' | 'baseBranch'>,
+  command: string | null,
+): Promise<boolean> {
+  if (command === null) return false;
   const commit = await originBaseCommit(git, project.repoPath, project.baseBranch);
   const read: ReadRepoFile = async (path) => {
     // With no remote-tracking commit no file is read: only the command's own text counts.
@@ -140,7 +161,7 @@ export async function gateCallsDocker(
     }
   };
   try {
-    return await callsDocker(project.gateCommand, read);
+    return await callsDocker(command, read);
   } catch {
     return false;
   }

@@ -202,10 +202,13 @@ The builder never edits hazards by hand; you assess and fix them.
 
 ## Assess a project's evals
 
-10db reads a project's eval files at HEAD and its eval results in the checkout, and shows them; it defines no eval format, runs no eval and calls no
-model for this. Result files and eval files are found by name. What no file name says (which code a suite covers,
-its bar and commands, the LLM work with no eval) is yours to record, as a manifest beside the project's settings,
-never a file in the repo.
+10db reads a project's eval files at HEAD and its eval results in the checkout, and shows them; it defines no eval format and runs no eval.
+Result files and eval files are found by name. What no file name says (which code a suite covers, its bar and
+commands, the LLM work with no eval) is recorded as a manifest beside the project's settings, never a file in the
+repo. 10db assesses on its own, with one model read of the eval files and the code that calls a model, when a
+project is added, when a commit changes an eval file and when the builder presses Assess now; this section is the
+deeper pass from your own session, which explores the repository and can find what that read misses. Your manifest
+replaces the one 10db recorded, and 10db's own scheduled assessment never replaces yours.
 
 1. **Read what 10db found:** `evals <projectId>`. It lists the suites, their latest result, the eval files no suite
    links and the gaps (unknown until you record a manifest).
@@ -217,13 +220,45 @@ never a file in the repo.
    - The code each suite covers, as globs that match tracked files.
    - The LLM work with no eval, where the model call is (`path` or `path:line`), and the repo's own words for why
      it has none.
-3. **Never run a live eval.** Designing an eval doesn't grant paid calls. Read results; run nothing.
+   - How the repo marks one unit of LLM work: a decorator or base class of its task registry (`@register_task`),
+     a workflow spec, or failing those an SDK call. That becomes a call pattern, which 10db `git grep`s at every
+     HEAD, so a new task with no eval shows the commit it lands, with no new assessment.
+3. **Never run a live eval.** Designing an eval doesn't grant paid calls. Read results; run nothing. The builder
+   runs a suite's live arm with Run in 10db, only for a suite whose manifest entry has `live` (step 4).
 4. **Write the manifest JSON** in the scratchpad: `{ "suites": [{ key, label?, bar?, definitionPaths, coveredPaths,
-freeCommand?, liveCommand? }], "gaps": [{ label, where, why }] }`. A suite `key` is a result file's task (as
-   `evals <projectId>` shows it) or a new key for a suite with no results yet.
+freeCommand?, liveCommand?, live? }], "gaps": [{ label, where, why }], "callPatterns": [{ label, regex, globs }] }`. A
+   suite `key` is a result file's task (as `evals <projectId>` shows it) or a new key for a suite with no results
+   yet. A `regex` is what `git grep -E` reads (POSIX extended: `[0-9]`, `[[:space:]]`, no `\d`, `\b` or `(?:`);
+   `globs` are git pathspec globs, one per extension (`**/*.py`; no `{a,b}`). At most 20 patterns. With none,
+   10db searches for the model SDKs' own calls, which in most repos are plumbing, not units of work.
+
+   **`live`** (only with a `liveCommand`) is what the live arm needs from 10db's sandbox, so Run can offer it:
+   `{ docker?, hosts?, envFiles?, loopback?, stopCommand?, timeoutMinutes? }` (default 60, at most 240).
+   - `docker: true` when the command reaches containers (`docker compose exec …`). Its `envFiles` are the files
+     compose reads under 10db's sandbox (`TENDB_SANDBOX=1`): the `env_file:` entries of its compose files and the
+     project's `.env`, each a `.env*` path inside the checkout that exists as a regular file. Name only what
+     compose needs there: ampsio's Makefile switches to `.env.example` under the sandbox, so it names none;
+     orgtools names `.env`, `orgtools/backend/.env.dev` and `orgtools/frontend/.env`. A Docker suite opens no
+     `hosts`: the containers keep their own network and their own keys. 10db passes the command no key.
+   - `stopCommand` ends the work inside the container (ampsio: a `docker compose exec -T backend python -c …`
+     that signals the `manage.py run_eval` process), because stopping 10db's side leaves it running.
+   - `hosts` (domains, `*.example.com` at most; never a bare `*.com`) only for a suite that is not Docker and
+     calls a provider from the Mac. `loopback: true` only for a command that calls a local server.
+   - When unsure, leave `live` out: a suite without it has no Run.
+
 5. **Apply** with `evals <projectId> <file>`. It refuses, and keeps nothing, when a `definitionPaths` entry is not a
    tracked file or a `coveredPaths` glob matches no tracked file; fix those and rerun until it refuses nothing.
-6. **Report** the suites linked, the gaps and the evidence for each, in a few lines.
+6. **Check each call pattern's count** in the output against the registry's own count (the tasks it registers).
+   Far more means the pattern is too broad and fills No Eval with noise; tighten it and apply again. A gap the
+   pattern finds outside every `coveredPaths` is listed as `found`, so name it under `gaps` only to add the
+   repo's words for why.
+7. **Report** the suites linked, the gaps, each call pattern with its count, and the evidence for each, in a few
+   lines.
+
+The builder files a task that drafts an eval with New Eval on the Evals page (header, a No Eval row, or a goal's
+proposed eval). Its brief carries the rationale (Decision, Evidence, Oracle, Coverage and bar, Models, Execution):
+draft the cases, graders and free companion arm by the project's own eval skill, open a pull request, and never run
+the live command or any paid model call.
 
 ## Errors
 

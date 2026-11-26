@@ -93,6 +93,7 @@ import {
   TakeOutRequest,
   PassPullRequestRequest,
 } from './pass-close';
+import { EvalDefinitionChangedData } from './eval-definition-change';
 import { AgentSkillInfo, AgentSkillInput, AgentSkillStatus } from './agent-skill';
 import {
   PassClosedData,
@@ -206,7 +207,10 @@ import { HumanTouchDayDto, HumanTouchDto } from './human-touch';
 import { CardTypeDto, CardTypesDto, CardTypeWindowDto } from './inbox-card-types';
 import { RigorFiguresDto, RigorFiguresRowDto } from './rigor-figures';
 import { HandoffInput } from './handoff';
-import { HealthResponse } from './health';
+import { HealthPublicResponse, HealthResponse } from './health';
+import { DeviceDto, PairingCodeDto, PairRequest, PairResponse } from './devices';
+import { PutSharingBody, SharingStatusDto } from './sharing';
+import { EventTicketDto } from './stream-ticket';
 import {
   DecisionDto,
   DecisionInput,
@@ -311,6 +315,15 @@ import {
   SystemCheckDto,
 } from './system';
 import { AgentCapabilitiesDto } from './agent-capabilities';
+import { WatchpointHitsDto } from './watchpoint-hit';
+import { EvalMarkersDto, TaskEvalCoverageDto } from './eval-coverage';
+import {
+  EvalLiveRunChangedData,
+  EvalLivePreviewDto,
+  EvalLiveRunDto,
+  RunEvalLiveBody,
+} from './evals';
+import { ProjectWatchpoints, ProjectWatchpointsDto, YourWatchpoints } from './watchpoints';
 import {
   InstalledPluginDto,
   ProjectTrustDto,
@@ -365,6 +378,14 @@ const laneBrowserSchemas: Record<string, z.ZodType> = {
 /** Every schema visible outside the daemon, keyed by the file stem of its generated JSON Schema. */
 export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'health-response': HealthResponse,
+  'health-public-response': HealthPublicResponse,
+  'device-dto': DeviceDto,
+  'pairing-code-dto': PairingCodeDto,
+  'pair-request': PairRequest,
+  'pair-response': PairResponse,
+  'sharing-status-dto': SharingStatusDto,
+  'put-sharing-body': PutSharingBody,
+  'event-ticket-dto': EventTicketDto,
   'agent-capabilities-dto': AgentCapabilitiesDto,
   'agent-command-dto': AgentCommandDto,
   'chat-create-input': ChatCreateInput,
@@ -423,6 +444,15 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'inbox-card-context-dto': InboxCardContextDto,
   'inbox-item-dto': InboxItemDto,
   'system-check-dto': SystemCheckDto,
+  'watchpoint-hits-dto': WatchpointHitsDto,
+  'eval-markers-dto': EvalMarkersDto,
+  'eval-live-preview-dto': EvalLivePreviewDto,
+  'eval-live-run-dto': EvalLiveRunDto,
+  'run-eval-live-body': RunEvalLiveBody,
+  'task-eval-coverage-dto': TaskEvalCoverageDto,
+  'project-watchpoints-dto': ProjectWatchpointsDto,
+  'your-watchpoints': YourWatchpoints,
+  'project-watchpoints': ProjectWatchpoints,
   'keep-awake-status': KeepAwakeStatus,
   'events-head': EventsHead,
   'keep-awake-input': KeepAwakeInput,
@@ -660,6 +690,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-page-signed-off-data': PassPageSignedOffData,
   'pass-closed-data': PassClosedData,
   'pass-settled-data': PassSettledData,
+  'eval-definition-changed-data': EvalDefinitionChangedData,
+  'eval-live-run-changed-data': EvalLiveRunChangedData,
   'pass-preview-broken-data': PassPreviewBrokenData,
   'pass-preview-mended-data': PassPreviewMendedData,
   ...mcpSchemas,

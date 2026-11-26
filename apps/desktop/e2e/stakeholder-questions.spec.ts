@@ -16,7 +16,7 @@ const Projects = z.array(z.object({ id: z.string(), name: z.string() }));
 /** The `e2e` project with the greeting area, made by an earlier spec or here: the question belongs to it. */
 async function projectId(request: APIRequestContext): Promise<string> {
   const listed = Projects.parse(
-    await (await request.get(`${daemonUrl}/projects`, { headers: auth })).json(),
+    await (await request.get(`${daemonUrl}/projects`, { headers: auth, maxRetries: 2 })).json(),
   );
   // Other specs in the same shard add projects of their own; this one seeds into the project with its area.
   const own = listed.find((p) => p.name === 'e2e');
@@ -110,6 +110,16 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(page).toHaveURL(/\/settings\/integrations/);
   await expect(page.getByText('Off: 10db was started with TENDB_SLACK=off')).toBeVisible();
   await expect(page.getByText('Off: 10db was started with TENDB_BENCHMARKS=off')).toBeVisible();
+  // Settings › Remote Access: this daemon runs the fake Tailscale CLI, so the page shows its checklist; Devices,
+  // with nothing paired, says so and offers pairing.
+  await page.goto('/settings/remote-access');
+  await expect(page.getByText('Share on your tailnet')).toBeVisible();
+  await page.goto('/settings/devices');
+  await expect(page.getByText('No devices paired')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: /Pair a Device|Finish Remote Access first/ }),
+  ).toBeVisible();
+  await page.goto('/settings/integrations');
   // Both workspaces are listed under the Off line, read-only: no menu on a row, no Add Workspace.
   const slackCard = page.getByRole('group', { name: 'Slack', exact: true });
   await expect(slackCard.getByText('Acme', { exact: true })).toBeVisible();
@@ -117,7 +127,7 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(slackCard.getByRole('button', { name: /options/ })).toHaveCount(0);
   await expect(slackCard.getByRole('button', { name: 'Add Workspace' })).toHaveCount(0);
   // The project's Slack reads Off; choosing Acme is kept across a reload.
-  const projectSlack = slackCard.getByRole('combobox', { name: 'Slack for e2e' });
+  const projectSlack = slackCard.getByRole('combobox', { name: 'Slack for e2e', exact: true });
   await expect(projectSlack).toHaveValue('Off');
   await projectSlack.click();
   await page.getByRole('option', { name: 'Acme' }).click();
@@ -126,6 +136,7 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(
     page.getByRole('group', { name: 'Slack', exact: true }).getByRole('combobox', {
       name: 'Slack for e2e',
+      exact: true,
     }),
   ).toHaveValue('Acme');
   // The project stays on Acme: the question below is routed with it bound.
@@ -250,7 +261,11 @@ test('a question Mark asked back reaches the Inbox, and the Board says the task 
   // The run is a seeded one with no session behind it; cancel it so later specs see no stray lane.
   const runs = z
     .array(z.object({ id: z.string(), taskTitle: z.string() }))
-    .parse(await (await request.get(`${daemonUrl}/workstreams`, { headers: auth })).json());
+    .parse(
+      await (
+        await request.get(`${daemonUrl}/workstreams`, { headers: auth, maxRetries: 2 })
+      ).json(),
+    );
   const run = runs.find((w) => w.taskTitle === WAITING_TASK);
   expect(run).toBeDefined();
   const cancelled = await request.post(`${daemonUrl}/workstreams/${run?.id ?? ''}/cancel`, {

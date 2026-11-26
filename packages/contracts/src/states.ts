@@ -32,6 +32,8 @@ export const InboxKind = {
   PlaybookMoveReport: 'playbook_move_report',
   /** A criterion the acceptance check could not settle, on a run that shipped; the builder accepts it or sends it back. */
   Acceptance: 'acceptance',
+  /** A change that hit a watchpoint set to ask, on a run that moved on; the builder looks and accepts it or sends it back. */
+  Watchpoint: 'watchpoint',
 } as const;
 export type InboxKind = ValueOf<typeof InboxKind>;
 
@@ -260,6 +262,10 @@ export const EvidenceKind = {
   Browser: 'browser',
   /** The acceptance check's reading of each criterion of a finished run. */
   Acceptance: 'acceptance',
+  /** The watchpoints a finished run's change hit, kept with their hunks. */
+  Watchpoint: 'watchpoint',
+  /** The suites of the project's evals a finished run's change touched, matched against the manifest as the run began. */
+  EvalCoverage: 'eval_coverage',
 } as const;
 export type EvidenceKind = ValueOf<typeof EvidenceKind>;
 

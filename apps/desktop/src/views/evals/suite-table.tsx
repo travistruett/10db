@@ -19,7 +19,7 @@ const COLUMNS: DataTableColumn<EvalSuiteDto>[] = [
             {suite.label}
           </Text>
           {under === null ? null : (
-            <Text size="xs" c="dimmed" lineClamp={1} title={under}>
+            <Text size="xs" c="dimmed" lineClamp={2} title={under}>
               {under}
             </Text>
           )}
@@ -79,11 +79,18 @@ const COLUMNS: DataTableColumn<EvalSuiteDto>[] = [
     accessor: 'at',
     title: 'Last Run',
     textAlign: 'right',
-    width: 104,
+    width: 120,
     render: (suite) => (
-      <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
-        {suite.latest === null ? '—' : dayText(suite.latest.at)}
-      </Text>
+      <Stack gap={2} align="flex-end">
+        <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+          {suite.latest === null ? '—' : dayText(suite.latest.at)}
+        </Text>
+        {suite.definitionChangedAt === null ? null : (
+          <Text size="xs" c="dimmed" ta="right">
+            {`eval changed ${dayText(suite.definitionChangedAt)}`}
+          </Text>
+        )}
+      </Stack>
     ),
   },
 ];

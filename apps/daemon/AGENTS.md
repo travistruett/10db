@@ -31,6 +31,8 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   `daemonOptionsFromEnv`; every decision then keeps today's rule), and keeps the OpenRouter sync (`benchmarks/openrouter-sync.ts`) from running. Only the installed app's daemon asks models;
   the e2e web server, the live acceptance daemon and `scripts/dev.sh` set it, and
   `tests/repo/src/benchmarks-off.test.ts` checks they do. A new launcher of a throwaway daemon sets it too.
+- Every outbound `fetch` is `outboundFetch` (`src/outbound/`, HTTP/1.1 only; ESLint refuses the global `fetch`
+  elsewhere in `src`). Its `AGENTS.md` has the rest.
 - `TENDB_SLACK=off` keeps a daemon from reading the Slack bot tokens (Keychain service `10db`, one
   account per workspace, `slack-bot:<teamId>`, `slackBotAccount`) and from calling Slack (`slackOnFromEnv`; `DaemonOptions.slack` is off unless
   given, so an in-process harness never reaches Slack). Only the installed app's daemon messages people; the e2e
@@ -63,7 +65,16 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   stopped; `.dev/data` for `pnpm dev`) seeds three demo projects with goals and tasks in every Factory state
   (`scripts/seed-factory-demo.ts`). Their account is paused with no end, so nothing runs; startup recovery
   re-queues the runs seeded as running.
-- Listen on `127.0.0.1` only.
+- Listen on `127.0.0.1` only. The share listener is a second `127.0.0.1` port behind `tailscale serve`, tailnet only;
+  `api/auth-matrix.ts` says which credential each route takes on each listener
+  (`decisions/2026-11-25-a-shared-mac-answers-on-its-tailnet-address.md`).
+- A bearer secret is never compared with `===`: the UI, dev-UI and render tokens go through `same-token/`
+  (SHA-256 digests and `timingSafeEqual`), and device tokens through `devices/tokens.ts`.
+- `api/app-static.ts` serves the phone's app (`apps/desktop/dist-app/`, built by `pnpm --filter @10db/desktop
+build:app`) for `GET /app/*` on the share listener: a file the build made, else `app.html` for an address with no
+  extension, with the CSP (no inline script, `connect-src` the request's own Host over `wss`). The bundle carries it
+  as `app/` beside `daemon.mjs` (`scripts/build.ts`); a run from source reads the desktop's `dist-app/`
+  (`resolveServedAppDir`). With no build the route answers 404.
 - Browser origins: only the Tauri webview's are built in. `TENDB_DEV_UI_ORIGIN` opts one loopback http origin in
   (`decisions/2026-10-29-dev-ui-over-the-factory.md`); a launcher of a daemon a browser UI talks to sets it.
 - `pnpm --filter @10db/daemon build [outDir]` bundles everything into `dist/daemon.mjs`, bundles srt's
@@ -86,7 +97,7 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
 `src/<module>/` directories are flat; each exports its public surface from `index.ts`, and other
 modules import only that (ESLint enforces it). Dependencies point one way:
 
-`clock`, `log`, `events`, `agent-skill`, `judge`, `slack`, `guard`, `permissions`, `trust`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge`, `sizing`, `test-value` → `plan-record` → `sessions`, `inbox`, `briefing`, `team` → `session-setup` →
+`clock`, `log`, `events`, `agent-skill`, `judge`, `slack`, `guard`, `permissions`, `trust`, `sandbox`, `git`, `watchpoints`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge`, `sizing`, `test-value` → `plan-record` → `sessions`, `inbox`, `briefing`, `team` → `session-setup` →
 `delivery`, `stakeholders`, `accounts` → `conversation` → `pass` → `pictures` → `mcp` → `screens` → `thread`, `shape` → `chat` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks`, `self-update` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.
@@ -138,6 +149,7 @@ write a module's notes there, not here. This file keeps what crosses modules.
 - `team/`: the team configuration and each task's step plan (`src/team/AGENTS.md`)
 - `trust/`: each session's trust policy, and 10db's judge: the fast path, `crosses_limit` and the grants (`src/trust/AGENTS.md`)
 - `verify/`: the gate runner and machine-wide gate slots (`src/verify/AGENTS.md`)
+- `watchpoints/`: matches a run's change against the builder's watchpoints, and the notes and briefs about them (`src/watchpoints/AGENTS.md`)
 - `watcher/`: flags writes to sensitive paths and strays outside claims (`src/watcher/AGENTS.md`)
 
 ### Across modules

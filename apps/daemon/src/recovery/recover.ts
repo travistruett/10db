@@ -8,6 +8,7 @@ import {
   type NextAction,
   type WorkstreamId,
 } from '@10db/contracts';
+import { coverageLinesOf } from '../evals';
 import {
   clearLease,
   endSession,
@@ -163,6 +164,7 @@ export async function recoverOnStartup(opts: {
             projectId: project.id,
             taskTitle: getTask(ctx.tx, row.taskId).title,
             ...(facts ?? unreadCheckFacts(row)),
+            evalLines: coverageLinesOf(ctx.tx, ws.id),
           });
         patchWorkstream(ctx, ws.id, null, {
           nextAction: { kind: 'builder_review', inboxId: kept.id },
@@ -196,10 +198,14 @@ export async function recoverOnStartup(opts: {
       report.parked.push(ws.id);
       continue;
     }
-    // A check, plan or acceptance card is not an agent's question: it is answered by its own handler.
+    // A check, plan, acceptance or Look card is not an agent's question: it is answered by its own handler.
     const open = waiting
       ? openItemsForWorkstream(db, ws.id).find(
-          (i) => i.kind !== 'check' && i.kind !== 'plan' && i.kind !== 'acceptance',
+          (i) =>
+            i.kind !== 'check' &&
+            i.kind !== 'plan' &&
+            i.kind !== 'acceptance' &&
+            i.kind !== 'watchpoint',
         )
       : undefined;
     if (open) {

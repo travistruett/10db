@@ -69,6 +69,9 @@ export const DEV_UI_READS: readonly string[] = [
   // The header's status line: what pauses work, with process names and no command lines. Memory only.
   '/status',
   '/settings/keep-awake',
+  '/settings/watchpoints',
+  '/projects/:projectId/watchpoints',
+  '/projects/:projectId/watchpoints/stats',
   '/settings/agent-skill',
   '/agent-skill',
   '/settings/lane-permissions',
@@ -100,6 +103,12 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/system': 'A system check runs commands on the machine.',
   '/github': 'A GitHub status check runs gh on the machine.',
   '/workstreams/:id/changes': "A lane's changes are read by running git in its copy.",
+  '/projects/:projectId/eval-markers':
+    "A task's suites are read from result files in the checkout, which a lane's pass may be writing.",
+  '/tasks/:taskId/eval-coverage':
+    "A task's suites are read from result files in the checkout, which a lane's pass may be writing.",
+  '/workstreams/:id/watchpoint-hits':
+    "A run's hunks and the agent's notes are text the lane wrote, which the preview's agent-editable code must not read.",
   '/workstreams/:id/skips':
     "What a lane skipped holds the commands it tried, which the preview's agent-editable code must not read.",
   '/goals/:goalId/pass-pages': "A goal's pass pages are read from its tasks' commits with git.",
@@ -122,6 +131,11 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/trust':
     "Trust's preview runs git in every checkout and lists the builder's home.",
   '/health': 'Open to every caller; it needs no token.',
+  '/sharing': "Sharing's status names the tailnet name and the host's login, kept to the 10db app.",
+  '/devices': 'The paired devices are kept to the 10db app.',
+  '/push/key': "The host's push key is for a paired phone's subscribe, not for a screen.",
+  '/app': "The phone app's page is served to the share listener's devices, not to a screen.",
+  '/app/*': "The phone app's files are served to the share listener's devices, not to a screen.",
   '/chats': "A chat is the builder's own words to an agent, kept to the 10db app.",
   '/chats/recent': "A chat is the builder's own words to an agent, kept to the 10db app.",
   '/chats/search': "A chat is the builder's own words to an agent, kept to the 10db app.",
@@ -142,7 +156,11 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
 const PARAM = '[A-Za-z0-9_-]+';
 const allowed = DEV_UI_READS.map((route) => new RegExp(`^${route.replace(/:[A-Za-z]+/g, PARAM)}$`));
 
-/** Whether the dev UI's token may make this request: a GET of a route named as a read, nothing else. */
+/**
+ * Whether the dev UI's token may make this request: a GET of a route named as a read, and the one POST
+ * that asks for a stream ticket. A ticket only opens the stream this token already reads.
+ */
 export function devUiMayRead(method: string, path: string): boolean {
+  if (method === 'POST' && path === '/events/ticket') return true;
   return method === 'GET' && allowed.some((pattern) => pattern.test(path));
 }

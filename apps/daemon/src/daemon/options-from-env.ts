@@ -1,4 +1,5 @@
 import type { DaemonEnv } from '../env';
+import { outboundFetch } from '../outbound';
 import { slackApiAt } from '../slack';
 import type { DaemonOptions } from './start';
 
@@ -16,6 +17,8 @@ export type EnvDaemonOptions = Pick<
   | 'benchmarksOff'
   | 'openRouterSync'
   | 'slack'
+  | 'tailscaleOff'
+  | 'tailscaleCli'
   | 'disk'
   | 'catalogueSync'
   | 'pictures'
@@ -60,9 +63,11 @@ export function daemonOptionsFromEnv(env: DaemonEnv): EnvDaemonOptions {
     ...(env.TENDB_BENCHMARKS === 'off' ? { benchmarksOff: true } : {}),
     openRouterSync: env.TENDB_JUDGE !== 'off' && env.TENDB_BENCHMARKS !== 'off',
     slack: slackOnFromEnv(env),
+    ...(env.TENDB_TAILSCALE === 'off' ? { tailscaleOff: true } : {}),
+    ...(env.TENDB_TAILSCALE_CLI === undefined ? {} : { tailscaleCli: env.TENDB_TAILSCALE_CLI }),
     ...(env.TENDB_SLACK_API === undefined
       ? {}
-      : { fetch: slackApiAt(env.TENDB_SLACK_API, globalThis.fetch) }),
+      : { fetch: slackApiAt(env.TENDB_SLACK_API, outboundFetch) }),
     ...(env.TENDB_DISK === 'off' ? {} : { disk: {} }),
     catalogueSync: env.TENDB_CATALOGUE !== 'off',
     pictures: { kind: 'pinned' },

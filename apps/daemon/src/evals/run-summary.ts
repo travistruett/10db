@@ -1,4 +1,4 @@
-import type { EvalModelResultDto } from '@10db/contracts';
+import type { EvalModelResultDto, EvalRunSummaryDto } from '@10db/contracts';
 
 /** What one trial of one case showed: how a flaky case is found. */
 export interface CaseTrials {
@@ -18,6 +18,16 @@ export interface ParsedRun {
   /** Empty for a format that records no cases. */
   readonly cases: readonly CaseTrials[];
 }
+
+/** What a run list shows of a run; the one place its summary is made. */
+export const runSummary = (run: ParsedRun): EvalRunSummaryDto => ({
+  path: run.path,
+  at: run.at,
+  passed: run.passed,
+  costUsd: runCost(run.models),
+  models: run.models.map((m) => m.model),
+  fingerprint: run.fingerprint,
+});
 
 /** A run's whole cost: the models' sum, null when any model's is unknown or there is none. */
 export function runCost(models: readonly EvalModelResultDto[]): number | null {

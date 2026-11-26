@@ -86,6 +86,12 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     takeoverOf: none,
     takeoverPreview: none,
     systemCheck: none,
+    yourWatchpoints: () => [],
+    setYourWatchpoints: none,
+    projectWatchpoints: () => ({ effective: [], entries: [] }),
+    setProjectWatchpoints: none,
+    watchpointHits: none,
+    watchpointStats: () => [],
     keepAwake: () => ({ mode: 'while_running', active: false }),
     setKeepAwake: none,
     agentSkill: none,
@@ -129,8 +135,17 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     removeNetworkHost: none,
     scanNetworkHosts: none,
     evals: none,
+    assessEvals: none,
+    evalModels: none,
+    evalMarkers: none,
+    taskEvalCoverage: none,
     evalSuite: none,
     recordEvalManifest: none,
+    evalLivePreview: none,
+    startEvalLive: none,
+    stopEvalLive: none,
+    evalLiveRuns: none,
+    newEvalTask: none,
     getHazardAssessment: none,
     lookAgainAtHazards: none,
     undoHazardAddition: none,
@@ -309,3 +324,19 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     ...overrides,
   };
 }
+
+/** The API's sharing deps for a test that never shares: no port, no lists, no devices, no tickets. */
+export const noSharing = {
+  listenPort: () => null,
+  share: { allowlists: () => null, hostLogin: () => null },
+  devices: { authenticate: () => null, isActive: () => false },
+  tickets: {
+    spend: () => null,
+    issue: () => ({ ticket: 'stub', expiresAt: '2026-01-01T00:00:30.000Z' }),
+  },
+  sockets: {
+    add: () => () => undefined,
+    closeDevice: () => undefined,
+    closeListener: () => undefined,
+  },
+};

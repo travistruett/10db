@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { buildAgentSkill } from '@10db/agent-skill';
@@ -18,10 +18,12 @@ for (const name of [
   'builder-mcp.mjs',
   'builder-mcp.mjs.map',
   'extract-worker.mjs',
+  'line-worker.mjs',
   'vendor',
   'drizzle',
   'harness',
   'agent-skill',
+  'app',
   'better_sqlite3.node',
   'build-info.json',
   'release',
@@ -69,6 +71,13 @@ await build({
   entryPoints: [resolve(root, 'src/conversation/extract-worker.ts')],
   outfile: resolve(outDir, 'extract-worker.mjs'),
 });
+// The watchpoint line patterns run in a worker thread under a deadline: a pattern can backtrack for as long as it likes.
+await build({
+  ...bundle,
+  banner: {},
+  entryPoints: [resolve(root, 'src/watchpoints/line-worker.ts')],
+  outfile: resolve(outDir, 'line-worker.mjs'),
+});
 // srt's command line, which runs every gate under the sandbox: the app carries its own copy.
 await build({
   ...bundle,
@@ -98,6 +107,12 @@ const snapshot = z
 if (snapshot !== undefined) cpSync(snapshot, resolve(outDir, 'catalogue-snapshot.json'));
 cpSync(DB_MIGRATIONS_DIR, resolve(outDir, 'drizzle'), { recursive: true });
 cpSync(HARNESS_PLUGIN_DIR, resolve(outDir, 'harness'), { recursive: true });
+// The served app the share listener serves at /app/ (apps/desktop, `vite build --mode app`). A build without it
+// serves none: the daemon answers 404 there.
+const servedApp = resolve(root, '../desktop/dist-app');
+if (existsSync(resolve(servedApp, 'app.html'))) {
+  cpSync(servedApp, resolve(outDir, 'app'), { recursive: true });
+}
 // The 10db-task skill the app installs for the builder's agents, with the version it is judged by.
 await buildAgentSkill(resolve(outDir, 'agent-skill', '10db-task'));
 // The scripts the app installs a newer build with (src/self-update), laid out as in the repository

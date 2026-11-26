@@ -365,6 +365,14 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "decision": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "oracle": {
+                    "type": "string",
+                    "minLength": 1
+                  },
                   "baseline": {
                     "default": [],
                     "type": "array",

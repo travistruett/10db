@@ -28,7 +28,15 @@ function queuedRun(wait: Partial<QueueWait> & { kind: QueueWait['kind'] }, batch
 }
 
 function input(over: Partial<StallInput>): StallInput {
-  return { now: NOW, queued: [], active: [], batches: [], carried: new Map(), ...over };
+  return {
+    now: NOW,
+    queued: [],
+    active: [],
+    batches: [],
+    carried: new Map(),
+    countFrom: new Date(0),
+    ...over,
+  };
 }
 
 describe('findStalls', () => {
@@ -83,6 +91,25 @@ describe('findStalls', () => {
     });
     expect(findStalls(input({ active: [run(19)] }))).toHaveLength(0);
     expect(findStalls(input({ active: [run(21)] }))).toHaveLength(1);
+  });
+
+  it('counts an active run silence from the daemon start or the last admission hold, whichever is later', () => {
+    const run = {
+      id: mintId('Workstream'),
+      projectId,
+      taskTitle: 'Build it',
+      state: WorkstreamState.Starting,
+      lastActivityAt: ago(90),
+      updatedAt: ago(90),
+    };
+    // Held until 5 minutes ago: not stuck, however long the run was quiet before.
+    expect(findStalls(input({ active: [run], countFrom: new Date(ago(5)) }))).toHaveLength(0);
+    // Still quiet 25 minutes after the hold: stuck, and it says since the hold ended.
+    const [stall] = findStalls(input({ active: [run], countFrom: new Date(ago(25)) }));
+    expect(stall?.since).toBe(ago(25));
+    // A run that moved after the restart keeps its own, later time.
+    const moved = { ...run, lastActivityAt: ago(10) };
+    expect(findStalls(input({ active: [moved], countFrom: new Date(ago(60)) }))).toHaveLength(0);
   });
 
   it('folds an open batch whose only unfinished member can never start into one batch stall', () => {

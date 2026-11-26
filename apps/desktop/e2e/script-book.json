@@ -33,12 +33,26 @@
         }
       },
       {
+        "do": "tool",
+        "toolName": "Write",
+        "input": {
+          "file_path": "evals/gate.py",
+          "content": "GATE = dict(minimum_rate=0.5)\n"
+        }
+      },
+      {
         "do": "mcp",
         "tool": "commit",
         "args": {
           "opId": "op-e2e-commit1",
-          "paths": ["src/greeting/hello.txt"],
-          "message": "Add the greeting"
+          "paths": ["src/greeting/hello.txt", "evals/gate.py"],
+          "message": "Add the greeting",
+          "watchpointNotes": [
+            {
+              "path": "src/greeting/hello.txt",
+              "note": "Adds the greeting file the gate looks for."
+            }
+          ]
         }
       },
       {
@@ -53,7 +67,13 @@
         "args": {
           "opId": "op-e2e-review1",
           "summary": "The greeting is written and committed.",
-          "verdict": "approve"
+          "verdict": "approve",
+          "watchpointNotes": [
+            {
+              "path": "src/greeting/hello.txt",
+              "note": "✓ A plain text file, as the gate expects."
+            }
+          ]
         }
       },
       {
@@ -704,26 +724,30 @@
   "Chat: Report the pending Linear updates.": [
     [
       {
-        "do": "tool",
-        "toolName": "mcp__linear__save_comment",
-        "input": {
-          "issueId": "e2e-linear-issue-1",
-          "body": "Update from 10db."
-        },
-        "result": "{\"id\":\"e2e-comment-1\"}"
-      },
-      {
-        "do": "mcp",
-        "tool": "report_linear_post",
-        "args": {
-          "postIds": ["$owed"],
-          "outcome": {
-            "state": "recorded",
-            "commentIds": ["e2e-comment-1"],
-            "statusSet": null,
-            "attachmentUrl": null
+        "do": "each_owed",
+        "steps": [
+          {
+            "do": "mcp",
+            "tool": "report_linear_post",
+            "args": {
+              "postId": "$post",
+              "body": "Update from 10db: the task moved forward."
+            }
+          },
+          {
+            "do": "tool",
+            "toolName": "$linear:save_comment",
+            "input": {
+              "issueId": "$comment.issueId",
+              "body": "$comment.body"
+            },
+            "result": "{\"id\":\"e2e-comment-1\"}"
+          },
+          {
+            "do": "say",
+            "text": "$post: e2e-comment-1"
           }
-        }
+        ]
       },
       {
         "do": "turn_complete"
@@ -731,26 +755,30 @@
     ],
     [
       {
-        "do": "tool",
-        "toolName": "mcp__linear__save_comment",
-        "input": {
-          "issueId": "e2e-linear-issue-1",
-          "body": "Update from 10db."
-        },
-        "result": "{\"id\":\"e2e-comment-1\"}"
-      },
-      {
-        "do": "mcp",
-        "tool": "report_linear_post",
-        "args": {
-          "postIds": ["$owed"],
-          "outcome": {
-            "state": "recorded",
-            "commentIds": ["e2e-comment-1"],
-            "statusSet": null,
-            "attachmentUrl": null
+        "do": "each_owed",
+        "steps": [
+          {
+            "do": "mcp",
+            "tool": "report_linear_post",
+            "args": {
+              "postId": "$post",
+              "body": "Update from 10db: the task moved forward."
+            }
+          },
+          {
+            "do": "tool",
+            "toolName": "$linear:save_comment",
+            "input": {
+              "issueId": "$comment.issueId",
+              "body": "$comment.body"
+            },
+            "result": "{\"id\":\"e2e-comment-1\"}"
+          },
+          {
+            "do": "say",
+            "text": "$post: e2e-comment-1"
           }
-        }
+        ]
       },
       {
         "do": "turn_complete"
@@ -758,26 +786,30 @@
     ],
     [
       {
-        "do": "tool",
-        "toolName": "mcp__linear__save_comment",
-        "input": {
-          "issueId": "e2e-linear-issue-1",
-          "body": "Update from 10db."
-        },
-        "result": "{\"id\":\"e2e-comment-1\"}"
-      },
-      {
-        "do": "mcp",
-        "tool": "report_linear_post",
-        "args": {
-          "postIds": ["$owed"],
-          "outcome": {
-            "state": "recorded",
-            "commentIds": ["e2e-comment-1"],
-            "statusSet": null,
-            "attachmentUrl": null
+        "do": "each_owed",
+        "steps": [
+          {
+            "do": "mcp",
+            "tool": "report_linear_post",
+            "args": {
+              "postId": "$post",
+              "body": "Update from 10db: the task moved forward."
+            }
+          },
+          {
+            "do": "tool",
+            "toolName": "$linear:save_comment",
+            "input": {
+              "issueId": "$comment.issueId",
+              "body": "$comment.body"
+            },
+            "result": "{\"id\":\"e2e-comment-1\"}"
+          },
+          {
+            "do": "say",
+            "text": "$post: e2e-comment-1"
           }
-        }
+        ]
       },
       {
         "do": "turn_complete"

@@ -1,7 +1,8 @@
 # apps/desktop
 
 The 10db window: React 19 + Mantine 9 UI built by Vite, inside a Tauri 2 shell (`src-tauri/`).
-The UI never touches the database; it talks to the daemon over loopback HTTP and WebSocket.
+The UI never touches the database; it talks to the daemon over loopback HTTP and WebSocket. The daemon's share listener, behind `tailscale serve`, is for other devices'
+tokens; the app still uses the main listener.
 
 - Daemon calls go through `src/daemon/client.ts` (Hono typed client over `AppType`). Never
   hand-write a fetch to the daemon. Parse every response with its `@10db/contracts` schema via `readJson`.
@@ -55,6 +56,15 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
   title row's 44 px height (`trafficLightPosition`), and elements marked
   `data-tauri-drag-region` move the window. The native window's theme follows the app's color scheme
   (`setWindowTheme`), not the system's.
+- The supervisor (`src-tauri/src/supervisor.rs`, `decisions/2026-11-25-a-silent-daemon-is-killed-and-replaced.md`)
+  stops only on a clean exit, a schema mismatch (3) or a refused setting (4). On exit 2 it watches the daemon that
+  holds `daemon.lock` and starts its own once that one is gone or silent on `/health` for 30 s; it never signals
+  the holder, the new daemon's instance lock does. Its own daemon is asked for `/health` every 5 s once
+  `daemon.json` names it, and one silent for 30 s is killed and replaced. `ps` that can't run counts as "not gone".
+  The loops have no scripted coverage. The check by hand (`kill -9`, then `kill -STOP`, the daemon of the built or
+  installed app, which runs its own sidecar) is the builder's or the coordinator's to run: an agent signals only a
+  daemon it started itself. The dev window can't show the loops: it sets `TENDB_EXTERNAL_DAEMON=1`, so it starts
+  no supervisor and never restarts a daemon.
 - `pnpm dev:window` (`scripts/dev-window.sh`, the `10db-dev-window` skill) does all of the below in one command on a
   worktree's own data, with a demo project, and stops it all when the window closes.
 - `pnpm --filter @10db/desktop dev:shell` runs the Tauri shell against the daemon and Vite server that
@@ -74,6 +84,7 @@ Read the ones for what you touch, and write a view's notes there, not here. This
 
 - `conversation/`: the conversation kit: markdown, the windowed list, tool call cards (`src/conversation/AGENTS.md`)
 - `screens/`: screens for Plan's `see_screen` (`src/screens/AGENTS.md`)
+- `served/`: the phone's app, a second build of this UI the daemon serves on the share listener (`src/served/AGENTS.md`)
 - `shell/`: the frame: rail, panel, title row, content surface, drawers (`src/shell/AGENTS.md`)
 - `views/board/`: the Board: columns, cards, task state, holds and batches (`src/views/board/AGENTS.md`)
 - `views/factory/`: Factory: a project's goals (`src/views/factory/AGENTS.md`)

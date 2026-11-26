@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readdirSync,
   realpathSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -13,8 +14,8 @@ import { prepareCommandEnv, withCopyId } from './command-env';
 import { dockerAccess, dockerEnvNames } from './docker-access';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
-import { pathsEqual } from './protected-reads';
-import { buildLaneProfile } from './profile';
+import { isEqualOrUnder, pathsEqual } from './protected-reads';
+import { buildLaneProfile, SandboxProfileError } from './profile';
 import {
   laneRootsOf,
   projectAccess,
@@ -74,6 +75,11 @@ export interface GateRunInput {
    * install scripts, no pnpmfile) should ask: nothing else in the sandbox may write there.
    */
   readonly packageInstall?: boolean;
+  /**
+   * Checkout-relative env files open for reading, never writing (a Docker live eval run only, whose
+   * compose reads them). Every other `.env*` stays closed.
+   */
+  readonly dotEnvReadable?: readonly string[];
   /** The copy the gate's batch runs in (`copyIdForBatch`); absent or null for any other gate. */
   readonly copyId?: CopyId | null;
   /**
@@ -160,6 +166,31 @@ function realOr(path: string): string {
   } catch {
     return path;
   }
+}
+
+/**
+ * The real path of a checkout-relative env file a run may read: it must exist, stay inside the
+ * checkout once links are followed, and be a regular file. Anything else is refused, so a link
+ * out of the checkout never opens what it leads to.
+ */
+function openableDotEnv(checkout: string, file: string): string {
+  const refuse = (problem: string): never => {
+    throw new SandboxProfileError('dotEnvReadable', `${file}: ${problem}`);
+  };
+  let real: string;
+  try {
+    real = realpathSync.native(join(checkout, file));
+  } catch {
+    return refuse('is not a file in the checkout');
+  }
+  if (!isEqualOrUnder(real, checkout)) return refuse('leads outside the checkout');
+  try {
+    if (!statSync(real).isFile()) return refuse('is not a regular file');
+  } catch (error) {
+    if (error instanceof SandboxProfileError) throw error;
+    return refuse('is not a file in the checkout');
+  }
+  return real;
 }
 
 /** One gate run under the sandbox: the process to spawn, and its own temp dir. */
@@ -295,9 +326,22 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           },
           input.copyId ?? null,
         );
+        const opened = (input.dotEnvReadable ?? []).map((file) => openableDotEnv(checkout, file));
+        if (opened.length > 0 && docker === null)
+          throw new SandboxProfileError(
+            'dotEnvReadable',
+            'env files open for reading only in a run with Docker on',
+          );
+        for (const [i, file] of opened.entries()) {
+          if (!access.checkoutSecrets.some((secret) => pathsEqual(realOr(secret), file)))
+            throw new SandboxProfileError(
+              'dotEnvReadable',
+              `${input.dotEnvReadable?.[i] ?? file}: is not a secret env file of the checkout`,
+            );
+        }
         const secrets = splitSecrets(
           checkout,
-          access.checkoutSecrets,
+          access.checkoutSecrets.filter((file) => !opened.some((o) => pathsEqual(realOr(file), o))),
           dataDenyEnforced(deps.runtime),
         );
         const profile = buildLaneProfile({
@@ -339,6 +383,8 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
             ...access.pinnedTools,
             // An existing .env is untracked and can't be recovered, so it is never appended or truncated.
             ...secrets.statVisible,
+            ...opened,
+            ...access.checkoutSecrets,
           ],
           // srt reads the settings file before the sandbox starts; the command reads no file here.
           sandboxRoots: access.sandboxRoots,

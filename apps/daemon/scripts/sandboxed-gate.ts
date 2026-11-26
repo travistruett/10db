@@ -5,7 +5,8 @@
  *   pnpm --filter @10db/daemon exec tsx scripts/sandboxed-gate.ts <checkout> [options] [-- <command>]
  *
  * Options: `--loopback` (the project's "Let lane commands use localhost"), `--host <name>` (an
- * allowed host, repeatable), `--read <path>` (a path on the project's read list, repeatable), `--log <path>` (default: in the temp dir). The command defaults to `make gate`. The env is this
+ * allowed host, repeatable), `--read <path>` (a path on the project's read list, repeatable), `--docker` (the project's
+ * Docker switch), `--dot-env <file>` (a checkout-relative env file readable, repeatable), `--log <path>` (default: in the temp dir). The command defaults to `make gate`. The env is this
  * process's own; the sandbox keeps only its allowlisted names, as it does with the login env.
  */
 import { join, resolve } from 'node:path';
@@ -24,13 +25,22 @@ const command = split === -1 ? 'make gate' : args.slice(split + 1).join(' ');
 const [target] = options;
 if (target === undefined || target.startsWith('--')) {
   process.stderr.write(
-    'usage: sandboxed-gate.ts <checkout> [--loopback] [--host <name>]... [--read <path>]... [-- <command>]\n',
+    'usage: sandboxed-gate.ts <checkout> [--loopback] [--host <name>]... [--docker] [--dot-env <file>]... [--read <path>]... [-- <command>]\n',
   );
   process.exit(2);
 }
 const checkout = resolve(target);
 const valuesOf = (flag: string): string[] =>
   options.flatMap((option, i) => (option === flag ? [options[i + 1] ?? ''] : []));
+const dotEnv = valuesOf('--dot-env');
+if (dotEnv.some((file) => file === '' || file.startsWith('--'))) {
+  process.stderr.write('--dot-env needs a checkout-relative file name\n');
+  process.exit(2);
+}
+if (dotEnv.length > 0 && !options.includes('--docker')) {
+  process.stderr.write('--dot-env needs --docker\n');
+  process.exit(2);
+}
 const hosts = valuesOf('--host');
 const reads = valuesOf('--read').map((path) => resolve(path));
 const logAt = options.indexOf('--log');
@@ -68,7 +78,12 @@ const gate = createGateRunner({
 });
 const result = await gate
   .run({
-    project: { repoPath: checkout, sandboxLoopback: options.includes('--loopback') },
+    project: {
+      repoPath: checkout,
+      sandboxLoopback: options.includes('--loopback'),
+      sandboxDocker: options.includes('--docker'),
+    },
+    dotEnvReadable: dotEnv,
     command,
     logPath,
     timeoutMs: 3_600_000,

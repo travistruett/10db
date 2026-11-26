@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { AcceptanceDetail } from './acceptance';
+import { StoredWatchpointDetail } from './watchpoint-hit';
+import { StoredEvalCoverageDetail } from './eval-coverage';
 import { USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN } from './accounts';
 import { AllowedCommands } from './allowed-commands';
 import { ModelSetting } from './catalogue';
@@ -547,10 +549,12 @@ export const ProjectInput = z
     areas: z.array(AreaDef).min(1),
     hazards: z.array(HazardDef).default(() => [...DEFAULT_HAZARDS]),
     maxLanes: z.int().min(1).max(16).default(2),
-    // Defaults hand off at about 400k tokens on a 1M window (spikes summary). Low minimums let acceptance runs
-    // force a handoff on a large context window.
-    handoffPct: z.int().min(5).max(95).default(40),
-    nudgePct: z.int().min(6).max(98).default(50),
+    // Defaults hand off at about 300k tokens on a 1M window, at the next step boundary, and tell the agent firmly
+    // to hand off at about 400k: accuracy and recall degrade gradually as context grows, with no safe threshold,
+    // and 400k is the builder's hard point (decisions/2026-11-25-lanes-hand-off-at-300k-and-stop-at-400k.md).
+    // Low minimums let acceptance runs force a handoff on a large context window.
+    handoffPct: z.int().min(5).max(95).default(30),
+    nudgePct: z.int().min(6).max(98).default(40),
     humanWaitMinutes: z.int().min(1).max(240).default(10),
     /** The rigor a task gets when nothing else sets one. */
     defaultRigor: z.enum(Rigor).default(Rigor.Standard),
@@ -761,6 +765,13 @@ export const ProjectDto = z.object({
    * sandbox in the project's folder; null when the builder runs the dev server.
    */
   previewCommand: z.string().nullable(),
+  /**
+   * Brings the project's dev stack up (Ampsio's `make up`): run once by 10db, in the project's folder
+   * under the gate's sandbox with Docker allowed, when a picture or the dev login finds nothing
+   * answering at the app address. It is expected to return once the stack is started; null when the
+   * builder keeps the stack up.
+   */
+  appStartCommand: z.string().nullable(),
   /** The viewports and themes each page's pictures are taken in. */
   screens: ScreensMatrix,
   /** Page names the builder left out of a Workbench rebuild: the setup never counts them as new. */
@@ -824,6 +835,8 @@ export const ProjectPatch = z
     devLoginCommand: ProjectCommand.nullable(),
     /** Run under the gate's sandbox while a pass is open; blank or null forgets it. */
     previewCommand: ProjectCommand.nullable(),
+    /** Run once, under the gate's sandbox with Docker allowed, when the app address is down; blank or null forgets it. */
+    appStartCommand: ProjectCommand.nullable(),
     screens: ScreensMatrix,
     /** Replaces the page names left out of a rebuild. */
     leftOutPages: z.array(AreaName).max(200),
@@ -1419,8 +1432,6 @@ export const NetworkHostInput = z.object({ host: z.string() });
 export type NetworkHostInput = z.infer<typeof NetworkHostInput>;
 
 const EvidenceBase = {
-  /** The acceptance check's reading; null on every other kind. */
-  detail: AcceptanceDetail.nullable(),
   id: EvidenceId,
   workstreamId: WorkstreamId,
   summary: z.string(),
@@ -1437,30 +1448,35 @@ export const EvidenceDto = z.discriminatedUnion('kind', [
   z.object({
     ...EvidenceBase,
     kind: z.literal(EvidenceKind.Gate),
+    detail: z.null(),
     command: z.string(),
     exitCode: z.int(),
   }),
   z.object({
     ...EvidenceBase,
     kind: z.literal(EvidenceKind.Agent),
+    detail: z.null(),
     command: z.string(),
     exitCode: z.int(),
   }),
   z.object({
     ...EvidenceBase,
     kind: z.literal(EvidenceKind.Builder),
+    detail: z.null(),
     command: z.null(),
     exitCode: z.null(),
   }),
   z.object({
     ...EvidenceBase,
     kind: z.literal(EvidenceKind.NoRevert),
+    detail: z.null(),
     command: z.null(),
     exitCode: z.null(),
   }),
   z.object({
     ...EvidenceBase,
     kind: z.literal(EvidenceKind.Browser),
+    detail: z.null(),
     command: z.null(),
     exitCode: z.null(),
     screenId: TaskScreenId,
@@ -1468,6 +1484,24 @@ export const EvidenceDto = z.discriminatedUnion('kind', [
   z.object({
     ...EvidenceBase,
     kind: z.literal(EvidenceKind.Acceptance),
+    /** The acceptance check's reading of each criterion. */
+    detail: AcceptanceDetail.nullable(),
+    command: z.null(),
+    exitCode: z.null(),
+  }),
+  z.object({
+    ...EvidenceBase,
+    kind: z.literal(EvidenceKind.Watchpoint),
+    /** The watchpoints the run's change hit, with their hunks. A detail that does not parse reads as unreadable. */
+    detail: StoredWatchpointDetail,
+    command: z.null(),
+    exitCode: z.null(),
+  }),
+  z.object({
+    ...EvidenceBase,
+    kind: z.literal(EvidenceKind.EvalCoverage),
+    /** The suites the run's change touched. A detail that does not parse reads as unreadable. */
+    detail: StoredEvalCoverageDetail,
     command: z.null(),
     exitCode: z.null(),
   }),

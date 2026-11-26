@@ -1,5 +1,6 @@
 import {
   AcceptanceVerdict,
+  COPY_ID_VARIABLE,
   EvidenceKind,
   findingNotes,
   JudgeKind,
@@ -93,6 +94,13 @@ export interface PromptInput {
    * what the change does that the task didn't ask for. Input to the reviewer, not a finding.
    */
   readonly acceptance?: string | null;
+  /**
+   * The watchpoints that overlap the task's areas, for a build step: what the builder reads themselves, and the
+   * instruction to give a reason per covered file in the commit's `watchpointNotes`.
+   */
+  readonly watchpoints?: string | null;
+  /** What a Review or QA step is told, every round, of the watchpoint files the change touched. */
+  readonly watchpointReview?: string | null;
   readonly revisedBy: {
     readonly role: StepRole;
     readonly personaName: string;
@@ -124,6 +132,11 @@ export interface PromptInput {
    * task in Your folder naming a routed page, on a project with an app address.
    */
   readonly pictures?: boolean;
+  /**
+   * The session's checkout is not the folder the project's dev stack runs from, and Docker and the project's
+   * compose services are open to it (`devStackElsewhere`): it is told where to run the project's generators.
+   */
+  readonly generators?: boolean;
   /** The session has 10db's lane browser (every lane step, read-only ones included). */
   readonly browser?: boolean;
   /**
@@ -521,6 +534,12 @@ const browserRule = (provider: Provider | undefined): string =>
 const PICTURES_RULE =
   "10db takes pictures of your task's pages for the builder, by their routes. When a page you changed has no route of its own here (a route with a parameter, or a change only in shared code), name it with report_pages: a page area's route with its parameter filled in, such as /people/42 for /people/[id]. Any other path is refused; at most four routes a turn.";
 
+/**
+ * Told to a session in its own checkout whose project's dev stack runs from the builder's folder: the judge
+ * reads a generator run in those containers as writing outside the checkout, and a throwaway one as routine.
+ */
+const GENERATORS_RULE = `The project's shared dev containers hold the builder's files, not your checkout's, so a generator (migrations, an API client) run in them misses your changes and writes the builder's folder. A project target that runs in your own copy's stack (the one named by ${COPY_ID_VARIABLE}) is fine to use. Otherwise generate in a throwaway container from the project's image: docker run --rm --network none, your checkout's folders mounted where compose mounts them, dependency volumes mounted read-only (:ro), no .env and no --env-file, and --skip-checks where the tool would reach a database. Commit what it writes; never hand-edit generated files. Before generating a migration, take the project's migrations hazard with request_claim if it has one.`;
+
 function readOnlyRules(role: StepRole): string[] {
   return [
     'This step is read-only: 10db refuses file edits, commits and any shell command that writes. Report what should change; the implement step changes it.',
@@ -817,7 +836,10 @@ function failedStepsSection(output: string): string {
 }
 
 /** What the acceptance check sends a run back with: each criterion it read as not met, and why. */
-function acceptanceSendBack(evidence: EvidenceDto, tools: ToolAccess): string {
+function acceptanceSendBack(
+  evidence: Extract<EvidenceDto, { kind: typeof EvidenceKind.Acceptance }>,
+  tools: ToolAccess,
+): string {
   const notMet = (evidence.detail?.criteria ?? [])
     .filter((c) => c.verdict === AcceptanceVerdict.NotMet)
     .map((c) => `${c.criterion} (${c.note})`);
@@ -1084,6 +1106,9 @@ function stepSection(input: PromptInput): string[] {
     lines.push('', input.testValue);
   if (step.role === StepRole.Review && firstRound && input.acceptance)
     lines.push('', input.acceptance);
+  if (step.role === StepRole.Implement && input.watchpoints) lines.push('', input.watchpoints);
+  if ((step.role === StepRole.Review || step.role === StepRole.Qa) && input.watchpointReview)
+    lines.push('', input.watchpointReview);
   return lines;
 }
 
@@ -1097,6 +1122,7 @@ export function buildSessionPrompt(input: PromptInput): string {
         : [
             ...(input.inPass === true ? PASS_RULES : briefRules(RULES, brief, input.provider)),
             ...(input.pictures === true ? [PICTURES_RULE] : []),
+            ...(input.generators === true ? [GENERATORS_RULE] : []),
           ]),
       ...(input.browser === true ? [browserRule(input.provider)] : []),
     ],

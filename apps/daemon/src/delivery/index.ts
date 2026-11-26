@@ -24,6 +24,7 @@ export { reserveGitNaming } from './folder-wait';
 export { DEFAULT_DELIVERY_LIMITS, type DeliveryContext, type DeliveryLimits } from './context';
 export { createDeliveryJobs, jobKey, JobQueue, type DeliveryJobs } from './jobs';
 export { createBatchStarter, type BatchStarter } from './start';
+export { subscribeCopyQueue } from './copy-queue';
 export {
   newPageTasks,
   openPass,
@@ -49,6 +50,7 @@ export {
   type PassPullRequests,
 } from './pass-pr';
 export { createSlackPicturePost, type SlackPicturePost } from './slack-picture-post';
+export { picturePlan } from './pr-pictures';
 export { createKeptWorkGate, subscribeKeptWorkLanding } from './kept-work-start';
 export { answerPassMoveCard, resumePassSettles, subscribePassSettles } from './pass-settle';
 export { createFailedRestarts } from './restart';
@@ -56,6 +58,7 @@ export { CopyJournalMissingError, copyIdForBatch } from './copy-id';
 export { finalCheck, stepCheck } from './local-check';
 export { fileFlakyTests, flakeNote, rerunFlaky, type FlakyTest } from './flaky-tests';
 export { prBody } from './pr-text';
+export { watchpointHitsOf } from './watchpoint-hits';
 export { createShipper, type Shipper } from './ship';
 export { subscribeShipTrigger } from './trigger';
 export { createPrWatch, subscribePrWatch, type PrWatch } from './pr-watch';
@@ -102,4 +105,3 @@ export {
   sweepUnlistedRuns,
 } from './skipped-card';
 export { skipFollowUpStarter } from './skip-follow-up';
-export { picturePlan } from './pr-pictures';

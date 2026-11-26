@@ -19,6 +19,11 @@ export TENDB_BENCHMARKS="${TENDB_BENCHMARKS:-off}"
 export TENDB_JUDGE="${TENDB_JUDGE:-off}"
 # Nor does it message the builder's stakeholders on the Slack bot token.
 export TENDB_SLACK="${TENDB_SLACK:-off}"
+# With the default off, this run never touches the installed app's Tailscale serve mapping. `TENDB_TAILSCALE=on`
+# lets it run the Tailscale CLI on this Mac, which can then change the serve mapping the installed app uses.
+# `TENDB_TAILSCALE_CLI=<absolute path>` runs another CLI instead, such as the e2e's fake; with the default off it
+# does nothing, so set both. The README's Develop section has the commands.
+export TENDB_TAILSCALE="${TENDB_TAILSCALE:-off}"
 # `TENDB_FAKE_SLACK=on` turns Slack on against a fake one (scripts/fake-slack.mjs) with made-up workspaces:
 # connect with the token xoxb-fake-acme or xoxb-fake-globex. Nothing reaches the real Slack.
 if [ "${TENDB_FAKE_SLACK:-off}" = on ]; then

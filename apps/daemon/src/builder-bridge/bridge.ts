@@ -10,6 +10,7 @@ import {
   type CallToolResult,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { outboundFetch } from '../outbound';
 import { runningDaemon } from '../runtime-files';
 
 const NOT_RUNNING = '10db is not running: open the 10db app and try again';
@@ -63,7 +64,7 @@ export function createBuilderBridge(options: BuilderBridgeOptions): McpServer {
     if (daemon === null) throw failure(NOT_RUNNING);
     let response: Response;
     try {
-      response = await fetch(`http://127.0.0.1:${String(daemon.info.port)}/builder/mcp`, {
+      response = await outboundFetch(`http://127.0.0.1:${String(daemon.info.port)}/builder/mcp`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${daemon.token}`,

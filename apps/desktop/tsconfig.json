@@ -11,6 +11,7 @@
     "src",
     "vite.config.ts",
     "picker-source.ts",
+    "vite.app.config.ts",
     "vitest.config.ts",
     "window-csp.ts",
     "window-csp.test.ts"

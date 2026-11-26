@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "head": {
+      "type": "string"
+    },
+    "skipped": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "watchpoint": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              },
+              "guidance": {
+                "type": "string"
+              },
+              "loudness": {
+                "type": "string",
+                "enum": [
+                  "show",
+                  "ask",
+                  "hold"
+                ]
+              }
+            },
+            "required": [
+              "key",
+              "label",
+              "why",
+              "guidance",
+              "loudness"
+            ]
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "M",
+                    "A",
+                    "D",
+                    "R"
+                  ]
+                },
+                "added": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "removed": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "patch": {
+                  "type": "string"
+                },
+                "clipped": {
+                  "type": "boolean"
+                },
+                "evalDefinition": {
+                  "type": "object",
+                  "properties": {
+                    "suiteKey": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "changes": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "bar_lowered",
+                              "cases_removed",
+                              "golden_changed",
+                              "grader_changed",
+                              "model_judge_added",
+                              "unclassified"
+                            ]
+                          },
+                          "line": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "line"
+                        ]
+                      }
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "suiteKey",
+                    "changes",
+                    "reason"
+                  ]
+                },
+                "agentNote": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reviewerNote": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "path",
+                "status",
+                "added",
+                "removed",
+                "patch",
+                "clipped",
+                "agentNote",
+                "reviewerNote"
+              ]
+            }
+          }
+        },
+        "required": [
+          "watchpoint",
+          "files"
+        ]
+      }
+    },
+    "canOpenDiff": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "at",
+    "head",
+    "skipped",
+    "hits",
+    "canOpenDiff"
+  ]
+}

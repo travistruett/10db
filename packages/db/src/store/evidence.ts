@@ -1,5 +1,7 @@
 import {
   type AcceptanceDetail,
+  type WatchpointDetail,
+  type EvalCoverageDetail,
   EventType,
   EvidenceKind,
   mintId,
@@ -9,7 +11,7 @@ import {
   type TaskScreenId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
@@ -31,6 +33,18 @@ export type NewEvidence =
       readonly kind: typeof EvidenceKind.Builder | typeof EvidenceKind.NoRevert;
       readonly command: null;
       readonly exitCode: null;
+    })
+  | (NewEvidenceBase & {
+      readonly kind: typeof EvidenceKind.Watchpoint;
+      readonly command: null;
+      readonly exitCode: null;
+      readonly detail: WatchpointDetail;
+    })
+  | (NewEvidenceBase & {
+      readonly kind: typeof EvidenceKind.EvalCoverage;
+      readonly command: null;
+      readonly exitCode: null;
+      readonly detail: EvalCoverageDetail;
     })
   | (NewEvidenceBase & {
       readonly kind: typeof EvidenceKind.Acceptance;
@@ -63,13 +77,14 @@ function parseRow(row: { readonly id: string }): EvidenceDto {
 }
 
 export function insertEvidence(ctx: WriteContext, input: NewEvidence): EvidenceDto {
-  const row: EvidenceDto = {
-    id: mintId('Evidence'),
-    ...input,
-    commitShas: [...input.commitShas],
-    detail: input.kind === EvidenceKind.Acceptance ? input.detail : null,
-    createdAt: ctx.now,
-  };
+  const stamp = { id: mintId('Evidence'), commitShas: [...input.commitShas], createdAt: ctx.now };
+  // Acceptance, Watchpoint and EvalCoverage rows keep the reading they carry; every other kind has none.
+  const row: EvidenceDto =
+    input.kind === EvidenceKind.Acceptance ||
+    input.kind === EvidenceKind.Watchpoint ||
+    input.kind === EvidenceKind.EvalCoverage
+      ? { ...input, ...stamp }
+      : { ...input, ...stamp, detail: null };
   ctx.tx
     .insert(schema.evidence)
     .values({ ...row, screenId: input.kind === EvidenceKind.Browser ? input.screenId : null })
@@ -97,4 +112,43 @@ export function listEvidence(db: DbReader, workstreamId: WorkstreamId): Evidence
     .orderBy(asc(schema.evidence.id))
     .all()
     .map(parseRow);
+}
+
+/** A workstream's newest evidence row of one kind, read without parsing its other rows; null when it has none. */
+export function newestEvidenceOfKind(
+  db: DbReader,
+  workstreamId: WorkstreamId,
+  kind: EvidenceKind,
+): EvidenceDto | null {
+  const row = db
+    .select()
+    .from(schema.evidence)
+    .where(and(eq(schema.evidence.workstreamId, workstreamId), eq(schema.evidence.kind, kind)))
+    .orderBy(desc(schema.evidence.id))
+    .get();
+  return row === undefined ? null : parseRow(row);
+}
+
+/** The newest evidence row of one kind for each of the workstreams, in one read; a workstream with none is absent. */
+export function newestEvidenceOfKindIn(
+  db: DbReader,
+  workstreamIds: readonly WorkstreamId[],
+  kind: EvidenceKind,
+): Map<WorkstreamId, EvidenceDto> {
+  const out = new Map<WorkstreamId, EvidenceDto>();
+  if (workstreamIds.length === 0) return out;
+  const rows = db
+    .select()
+    .from(schema.evidence)
+    .where(
+      and(
+        inArray(schema.evidence.workstreamId, [...workstreamIds]),
+        eq(schema.evidence.kind, kind),
+      ),
+    )
+    .orderBy(asc(schema.evidence.id))
+    .all();
+  // Oldest first, so the last of each workstream wins.
+  for (const row of rows) out.set(row.workstreamId, parseRow(row));
+  return out;
 }

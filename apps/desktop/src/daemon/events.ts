@@ -3,6 +3,7 @@ import {
   ConversationDeltaFrame,
   DaemonEvent,
   EventsHead,
+  EventTicketDto,
   EventType,
   TaskId,
   GithubLoginEndedData,
@@ -30,6 +31,8 @@ import { HAZARD_ASSESSMENT_KEY } from './hazard-queries';
 import { KINDS_KEY } from './kind-queries';
 import { modelKeys } from './model-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
+import { deviceKeys } from './device-queries';
+import { sharingKeys } from './sharing-queries';
 import { PERSONAS_KEY } from './persona-queries';
 import { playbookKeys } from './playbook-queries';
 import {
@@ -46,6 +49,8 @@ import { shapeKeys } from './shape-queries';
 import { linearPostKeys } from './linear-queries';
 import { designCheckKeys, screenKeys } from './screen-queries';
 import { skipKeys } from './skip-queries';
+import { evalMarkerKeys } from './evals-queries';
+import { watchpointKeys } from './watchpoint-queries';
 import { statusKeys } from './status-queries';
 import {
   FIGMA_SIGN_INS_KEY,
@@ -120,6 +125,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   pass: [passKeys.all, folderKeys.all, taskSessionKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
+  // Sharing this Mac changed state; a device paired, was used or was revoked.
+  sharing: [sharingKeys.all],
+  device: [deviceKeys.all],
   // One account's sign-in to one of the builder's MCP servers started, ended or was cancelled; an ended
   // Connect Linear also turns the project's Linear on.
   mcp_sign_in: [
@@ -134,8 +142,10 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES, rigorFiguresKeys.all],
   // Lanes changing can switch keep-awake on or off. A pass page's state is its run's, paused or resumed
   // by a usage limit with no pass event.
+  // A review step's result carries its watchpoint notes, so the open For You follows the run too.
   workstream: [
     ...WORK,
+    watchpointKeys.hits,
     queryKeys.keepAwake,
     CANDIDATES,
     humanTouchKeys.all,
@@ -149,7 +159,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   session: [...WORK, humanTouchKeys.all],
   claim: [...WORK, CANDIDATES],
   handoff: WORK,
-  evidence: WORK,
+  // A run's watchpoint reading is an evidence row, so its For You section follows it.
+  // A covered suite's marker is one too.
+  evidence: [...WORK, watchpointKeys.hits, watchpointKeys.allStats, evalMarkerKeys.all],
   // An account pause moves workstreams, which send their own events.
   account: [accountKeys.all, modelKeys.all],
   inbox: [
@@ -159,8 +171,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
     humanTouchKeys.all,
     cardTypesKeys.all,
     acceptanceFiguresKeys.all,
+    watchpointKeys.allStats,
   ],
-  app_setting: [queryKeys.keepAwake, queryKeys.agentSkill],
+  app_setting: [queryKeys.keepAwake, queryKeys.agentSkill, watchpointKeys.all],
   // Settings › People lists people and the routes each answers; Question Routing and a task's question routes
   // name them. Step plans, which only the batch sheet shows, are not read from people; they follow personas,
   // and so do the Models page's picks.
@@ -197,6 +210,8 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'task.screen_added': [screenKeys.all],
   // The reporter's update on a task's Linear issue was owed, recorded, withheld or failed.
   'linear_post.changed': [linearPostKeys.all],
+  // A live eval run started or ended: its suite's runs, and a covered task's "not run", read again.
+  'eval.live_run_changed': [evalsKeys.all, evalMarkerKeys.all],
   // A notice that asks nothing joined Activity, and its task's drawer lists it.
   'notice.posted': [activityKeys.all],
   // A turn began or ended: what streams is read again, so an item that finished leaves it, and what the turn
@@ -204,12 +219,23 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'conversation.state': [liveKeys.all, chatWorkKeys.all],
 };
 
-export function eventStreamUrl(conn: DaemonConnection, after: number): string {
+/** The stream's address: the cursor and a one-use ticket, never the token. */
+export function eventStreamUrl(conn: DaemonConnection, after: number, ticket: string): string {
   const url = new URL('/events/stream', conn.url);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('after', String(after));
-  url.searchParams.set('token', conn.token);
+  url.searchParams.set('ticket', ticket);
   return url.toString();
+}
+
+const eventListeners = new Set<(event: DaemonEvent) => void>();
+
+/** Hears every event the window's one stream receives (a dialog waiting on one thing), without a stream of its own. */
+export function subscribeToEvents(listener: (event: DaemonEvent) => void): () => void {
+  eventListeners.add(listener);
+  return () => {
+    eventListeners.delete(listener);
+  };
 }
 
 /**
@@ -277,6 +303,7 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       // One arrives per tool call: a pass lane's is written into its page, never refetched.
       if (event.type === EventType.SessionActivity) writePassActivity(queryClient, event);
       listener.current?.(event);
+      for (const heard of eventListeners) heard(event);
     }
 
     function retry(): void {
@@ -306,8 +333,19 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
           return;
         }
       }
+      let ticket: string;
+      try {
+        // A ticket opens one socket and lapses in seconds; a failed request is a failed connect.
+        const issued = await client.events.ticket.$post(undefined, {
+          init: { signal: AbortSignal.timeout(HEAD_TIMEOUT_MS) },
+        });
+        ticket = (await readJson(issued, EventTicketDto)).ticket;
+      } catch {
+        retry();
+        return;
+      }
       if (stopped) return;
-      const ws = new WebSocket(eventStreamUrl(connection, after));
+      const ws = new WebSocket(eventStreamUrl(connection, after, ticket));
       socket = ws;
       ws.addEventListener('open', () => {
         attempt = 0;

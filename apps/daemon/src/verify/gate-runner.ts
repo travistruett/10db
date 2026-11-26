@@ -64,6 +64,8 @@ export interface GateRequest {
    * directory for it, and its output calls it the install, not the gate, when a host was blocked.
    */
   readonly packageInstall?: boolean;
+  /** Checkout-relative env files open for reading, never writing: a Docker live eval run only. */
+  readonly dotEnvReadable?: readonly string[];
   /** The copy the gate's batch runs in (`copyIdForBatch`); absent or null for any other gate. */
   readonly copyId?: CopyId | null;
   /**
@@ -282,6 +284,9 @@ export function createGateRunner(options: GateRunnerOptions): GateRunner {
           checkouts: request.checkouts,
           command: request.command,
           ...(request.packageInstall === true ? { packageInstall: true } : {}),
+          ...(request.dotEnvReadable === undefined
+            ? {}
+            : { dotEnvReadable: request.dotEnvReadable }),
           copyId: request.copyId ?? null,
         });
       } catch (error) {

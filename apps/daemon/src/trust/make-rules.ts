@@ -19,6 +19,22 @@ export function withoutComments(text: string): string {
     .join('\n');
 }
 
+/** A conditional directive line (`ifdef`, `ifndef`, `ifeq`, `ifneq`, `else`, `endif`), indented by anything but a tab. */
+const DIRECTIVE = /^ *(?:ifdef|ifndef|ifeq|ifneq|else|endif)(?=[\s(]|$)/;
+
+/** Whether a line is a conditional directive: make reads it, and no shell does. */
+export function isDirectiveLine(line: string): boolean {
+  return DIRECTIVE.test(line);
+}
+
+/** The text without its conditional directive lines, for a reader that looks only at what a shell runs. */
+export function withoutDirectives(text: string): string {
+  return text
+    .split('\n')
+    .filter((line) => !isDirectiveLine(line))
+    .join('\n');
+}
+
 /** `rel` under `dir`, or null when it leaves the repository or is absolute; the root itself is `''`. */
 export function within(dir: string, rel: string): string | null {
   if (rel.startsWith('/')) return null;
@@ -28,7 +44,11 @@ export function within(dir: string, rel: string): string | null {
   return joined === '.' ? '' : joined;
 }
 
-/** The rules of one Makefile by target name; a target named twice keeps both recipes. */
+/**
+ * The rules of one Makefile by target name; a target named twice keeps both recipes. A conditional directive
+ * line inside a rule stays in its recipe as written, so a reader sees both branches and the test between them;
+ * outside a rule it is skipped.
+ */
 export function parseRules(text: string): Map<string, MakeRule[]> {
   const rules = new Map<string, MakeRule[]>();
   let current: { names: string[]; prerequisites: string[]; recipe: string[] } | null = null;
@@ -44,6 +64,10 @@ export function parseRules(text: string): Map<string, MakeRule[]> {
       continue;
     }
     if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+    if (isDirectiveLine(line)) {
+      current?.recipe.push(line);
+      continue;
+    }
     close();
     const head = /^([^\s:=#][^:=#]*):(?!=)([^=]*)$/.exec(line.replace(/#.*$/, ''));
     if (head === null) continue;

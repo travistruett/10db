@@ -27,6 +27,9 @@ if (process.version !== `v${pinned}`) {
 const triple = /^host: (\S+)$/m.exec(execFileSync('rustc', ['-vV'], { encoding: 'utf8' }))?.[1];
 if (!triple) throw new Error('rustc -vV did not report a host triple');
 
+// The phone's served app (dist-app/) goes into the daemon bundle, so it is built first.
+execFileSync('pnpm', ['--filter', '@10db/desktop', 'build:app'], { cwd: repo, stdio: 'inherit' });
+
 const resources = resolve(tauri, 'resources', 'daemon');
 execFileSync('pnpm', ['--filter', '@10db/daemon', 'exec', 'tsx', 'scripts/build.ts', resources], {
   cwd: repo,

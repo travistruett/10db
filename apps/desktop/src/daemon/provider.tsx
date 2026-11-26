@@ -9,18 +9,56 @@ import type { ConnectionResolver, DaemonConnection } from './connection';
 export const HEALTH_INTERVAL_MS = 5_000;
 /** How often a disconnected UI asks where the daemon is and tries again. */
 export const RECONNECT_INTERVAL_MS = 1_000;
-/** How long a health check may take before the daemon counts as down; below the poll interval. */
+/** How long a health check of a connected daemon may take before it counts as down; below the poll interval. */
 export const HEALTH_TIMEOUT_MS = 2_000;
+/**
+ * How long a health check may take while looking for a daemon again. A daemon that has just started, or a Mac
+ * under load, answers slowly, and a timeout that gives up on it keeps the window out for as long as it stays slow.
+ */
+export const RECONNECT_HEALTH_TIMEOUT_MS = 5_000;
+/**
+ * The longest one whole attempt (asking where the daemon is, then its health) may take. It bounds the attempt
+ * itself rather than one request in it, so a lookup that never returns can't stop the next try from being made.
+ */
+export const ATTEMPT_DEADLINE_MS = RECONNECT_HEALTH_TIMEOUT_MS + 3_000;
 
 export interface DaemonIntervals {
   readonly healthy: number;
   readonly disconnected: number;
+  /** Overrides `ATTEMPT_DEADLINE_MS`. */
+  readonly attemptDeadline?: number;
 }
 
 const DEFAULT_INTERVALS: DaemonIntervals = {
   healthy: HEALTH_INTERVAL_MS,
   disconnected: RECONNECT_INTERVAL_MS,
 };
+
+class AttemptTimeoutError extends Error {
+  override readonly name = 'AttemptTimeoutError';
+  constructor() {
+    super('The daemon did not answer in time');
+  }
+}
+
+/** `work`'s result, or an `AttemptTimeoutError` once `ms` pass; the work is left to finish unheard. */
+function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new AttemptTimeoutError());
+    }, ms);
+    work.then(
+      (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
 
 export type DaemonStatus =
   | { readonly kind: 'connecting'; readonly lastError: string | null }
@@ -86,6 +124,7 @@ export function DaemonProvider({
   const [value, setValue] = useState<DaemonValue | null>(null);
   const [status, setStatus] = useState<DaemonStatus>({ kind: 'connecting', lastError: null });
   const { healthy: healthyMs, disconnected: disconnectedMs } = intervals;
+  const deadlineMs = intervals.attemptDeadline ?? ATTEMPT_DEADLINE_MS;
 
   useEffect(() => {
     let stopped = false;
@@ -94,23 +133,42 @@ export function DaemonProvider({
     let healthy = false;
     let everConnected = false;
     let downSince: number | null = null;
+    let attempts = 0;
+
+    /** Asks where the daemon is (when not connected) and for its health. */
+    async function attempt(): Promise<HealthResponse & { readonly active: DaemonValue }> {
+      const mine = ++attempts;
+      const known = current;
+      // Not connected: the address and token are read again, because a restarted daemon has new ones.
+      const searching = !healthy || known === null;
+      let active: DaemonValue;
+      if (known === null || searching) {
+        const connection = await resolve();
+        active =
+          known !== null && sameConnection(known.connection, connection)
+            ? known
+            : { connection, client: createDaemonClient(connection) };
+        // An attempt that outlived its deadline must not put an older address over a newer one.
+        if (mine === attempts) current = active;
+      } else {
+        active = known;
+      }
+      const health = await readJson(
+        await active.client.health.$get(undefined, {
+          init: {
+            signal: AbortSignal.timeout(
+              searching ? RECONNECT_HEALTH_TIMEOUT_MS : HEALTH_TIMEOUT_MS,
+            ),
+          },
+        }),
+        HealthResponse,
+      );
+      return { ...health, active };
+    }
 
     async function tick(): Promise<void> {
       try {
-        let active = current;
-        if (!healthy || active === null) {
-          const connection = await resolve();
-          if (active === null || !sameConnection(active.connection, connection)) {
-            active = { connection, client: createDaemonClient(connection) };
-          }
-          current = active;
-        }
-        const health = await readJson(
-          await active.client.health.$get(undefined, {
-            init: { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) },
-          }),
-          HealthResponse,
-        );
+        const { active, ...health } = await withDeadline(attempt(), deadlineMs);
         if (stopped) return;
         healthy = true;
         everConnected = true;
@@ -153,7 +211,7 @@ export function DaemonProvider({
       stopped = true;
       clearTimeout(timer);
     };
-  }, [resolve, healthyMs, disconnectedMs]);
+  }, [resolve, healthyMs, disconnectedMs, deadlineMs]);
 
   if (status.kind === 'mismatch') {
     return (

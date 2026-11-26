@@ -165,7 +165,7 @@ export interface McpDeps {
   /** The tools of a chat's session; absent, such a session is refused. */
   readonly chatTools?: ChatToolsFor;
   /** The Linear reporter's tool, offered only to a session of its own. */
-  readonly reporter?: Pick<LinearReporter, 'reportPost' | 'uploadPicture'>;
+  readonly reporter?: Pick<LinearReporter, 'reportPost' | 'pickStatus' | 'uploadPicture'>;
   /** Draws a mock-up and shoots the app for `check_design`; absent, a lane is not offered it. */
   readonly pictures?: Pick<Pictures, 'shootNow' | 'drawMockup' | 'bytesOf'>;
   /** The data directory, where the lane browser keeps its screenshots; absent, no browser tools are offered. */
@@ -913,7 +913,14 @@ export function createToolHandlers(
             return verdict.decision === 'deny' ? verdict.reason : null;
           },
         });
-        return deps.state.write((ctx) => record('commit', input.opId, { ...kept }, ctx));
+        return deps.state.write((ctx) =>
+          record(
+            'commit',
+            input.opId,
+            { ...kept, watchpointNotes: input.watchpointNotes ?? [] },
+            ctx,
+          ),
+        );
       }
       // A batch names its branch; other work commits on the branch pinned at its first session.
       const row = getWorkstreamRow(db, workstreamId);
@@ -960,6 +967,8 @@ export function createToolHandlers(
           evidence,
         ),
       });
+      // The notes are kept with the commit's result, where the watchpoint reading and the brief find them.
+      const watchpointNotes = input.watchpointNotes ?? [];
       return deps.state.write((ctx) => {
         ctx.emit({
           type: EventType.CommitRecorded,
@@ -976,9 +985,9 @@ export function createToolHandlers(
           sessionId,
           opId: input.opId,
           tool: McpToolName.Commit,
-          result: stored,
+          result: { ...stored, watchpointNotes },
         });
-        return result;
+        return { ...result, watchpointNotes };
       });
     },
 
@@ -1181,7 +1190,20 @@ export function createToolHandlers(
             throw new InvalidError(
               `Your notes and the list of follow-up tasks this step has filed, which 10db adds to them, are over ${String(MAX_STEP_SUMMARY)} characters; send shorter notes.`,
             );
-          const result = { summary, verdict, sessionId, at: ctx.now };
+          // Only a Review or QA step reads a diff, so only theirs checks watchpoint files; a plan review's are dropped.
+          const watchpointNotes =
+            (step.role === StepRole.Review || step.role === StepRole.Qa) &&
+            input.watchpointNotes !== undefined &&
+            input.watchpointNotes.length > 0
+              ? input.watchpointNotes
+              : null;
+          const result = {
+            summary,
+            verdict,
+            sessionId,
+            at: ctx.now,
+            ...(watchpointNotes === null ? {} : { watchpointNotes }),
+          };
           patchWorkstream(ctx, workstreamId, null, {
             steps: row.steps.map((s, i) => (i === row.stepIndex ? { ...s, result } : s)),
           });

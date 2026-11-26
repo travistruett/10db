@@ -1,0 +1,93 @@
+import type { MiddlewareHandler } from 'hono';
+import { RouteClass, routeClassOf } from './auth-matrix';
+import { Listener, listenerOf, type ListenerAllowlists } from '../listeners';
+import type { ApiEnv } from './request-context';
+
+export interface RequestGuardDeps {
+  /** Read per request: the share listener's lists change when sharing turns on, off or the name changes. */
+  readonly allowlists: (listener: Listener) => ListenerAllowlists | null; // null: the share listener has no lists yet → 503 but /health
+  readonly hostLogin: () => string | null;
+}
+
+const listsByRequest = new WeakMap<Request, ListenerAllowlists | null>();
+
+/**
+ * The listener's lists for one request. The CORS check and both guards ask, and the share listener's lists are
+ * worked out from sharing state, so the first answer is kept for the request and the next request asks again.
+ */
+export function requestAllowlists(
+  deps: RequestGuardDeps,
+  request: Request,
+  listener: Listener,
+): ListenerAllowlists | null {
+  if (listsByRequest.has(request)) return listsByRequest.get(request) ?? null;
+  const lists = deps.allowlists(listener);
+  listsByRequest.set(request, lists);
+  return lists;
+}
+
+const isHealth = (method: string, path: string): boolean =>
+  routeClassOf(method, path) === RouteClass.Health;
+
+/**
+ * Refuses a Host the listener doesn't serve (421), which blocks DNS rebinding. A request with no Host passes on
+ * the main listener: no browser omits it, and an in-process `app.request` does. The share listener has no lists
+ * until sharing has a name, and then answers 503 to everything but `/health`.
+ */
+export function hostGuard(deps: RequestGuardDeps): MiddlewareHandler<ApiEnv> {
+  return async (c, next) => {
+    const listener = listenerOf(c.env);
+    const lists = requestAllowlists(deps, c.req.raw, listener);
+    if (lists === null) {
+      if (isHealth(c.req.method, c.req.path)) return next();
+      return c.json({ error: 'not_shared' }, 503);
+    }
+    const host = c.req.header('host');
+    if (host === undefined && listener === Listener.Main) return next();
+    if (!lists.hosts.some((h) => h.toLowerCase() === host?.toLowerCase()))
+      return c.json({ error: 'misdirected' }, 421);
+    return next();
+  };
+}
+
+/** Refuses a request carrying an `Origin` the listener doesn't list; one with none is a non-browser client. */
+export function originGuard(deps: RequestGuardDeps): MiddlewareHandler<ApiEnv> {
+  return async (c, next) => {
+    const origin = c.req.header('origin');
+    if (origin === undefined || isHealth(c.req.method, c.req.path)) return next();
+    const lists = requestAllowlists(deps, c.req.raw, listenerOf(c.env));
+    if (!lists?.origins.includes(origin)) return c.json({ error: 'forbidden origin' }, 403);
+    return next();
+  };
+}
+
+/** The Host's name without its port: `[::1]:4317` is `[::1]`. */
+function hostName(host: string): string {
+  const end = host.startsWith('[') ? host.indexOf(']') + 1 : host.indexOf(':');
+  return (end > 0 ? host.slice(0, end) : host).toLowerCase();
+}
+
+/**
+ * Sets `c.var.remote`: the share listener's requests, and a main-listener request carrying `Tailscale-Headers-Info`,
+ * `X-Forwarded-For` or a `*.ts.net` Host. A remote request whose `Tailscale-User-Login` isn't the host's own gets 403;
+ * with no such header (a tagged peer) the device token alone decides.
+ */
+export function remoteMark(deps: RequestGuardDeps): MiddlewareHandler<ApiEnv> {
+  return async (c, next) => {
+    const host = c.req.header('host');
+    const remote =
+      listenerOf(c.env) === Listener.Share ||
+      c.req.header('tailscale-headers-info') !== undefined ||
+      c.req.header('x-forwarded-for') !== undefined ||
+      hostName(host ?? '')
+        .replace(/\.$/, '')
+        .endsWith('.ts.net');
+    c.set('remote', remote);
+    const login = c.req.header('tailscale-user-login');
+    if (remote && login !== undefined) {
+      const own = deps.hostLogin();
+      if (login.toLowerCase() !== own?.toLowerCase()) return c.json({ error: 'forbidden' }, 403);
+    }
+    return next();
+  };
+}

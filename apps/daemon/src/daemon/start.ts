@@ -1,6 +1,7 @@
 import { applyAcceptanceAnswer } from '../acceptance';
+import { applyWatchpointAnswer } from '../watchpoints';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -92,7 +93,9 @@ import {
   createUsageReports,
   type AccountLimits,
 } from '../accounts';
+import { createPushService, createVapidKeyStore, startPushSender } from '../push';
 import { createApp, type SelfUpdateServices } from '../api';
+import { Listener } from '../listeners';
 import {
   createBenchmarkSync,
   createOpenRouterSync,
@@ -121,8 +124,8 @@ import { settleSecondOpinionModel } from './decision-offer';
 import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
 import {
   createLinearImport,
+  answerReporterCard,
   createLinearReporter,
-  dismissReporterPosts,
   reporterConversations,
   reporterHooks,
   reporterSettings,
@@ -159,6 +162,19 @@ import {
   scheduleNightlyBackup,
 } from '../backups';
 import { systemClock, type Clock } from '../clock';
+import {
+  createDeviceService,
+  createPairingCodes,
+  createSocketRegistry,
+  createTickets,
+} from '../devices';
+import {
+  createSharingService,
+  createTailscaleRun,
+  findTailscaleCli,
+  lsofHolderOf,
+  startShareListener,
+} from '../sharing';
 import {
   allCheckouts,
   createBaseUpdates,
@@ -201,6 +217,7 @@ import {
   resolvePnpm,
   resumePassSettles,
   copyIdForBatch,
+  subscribeCopyQueue,
   subscribeKeptWorkLanding,
   subscribePassSettles,
   subscribePrWatch,
@@ -237,6 +254,7 @@ import {
   type ResolvedTools,
   accountAgentOf,
 } from '../environment';
+import { outboundFetch } from '../outbound';
 import {
   createEventBus,
   createLiveFrames,
@@ -341,6 +359,7 @@ import {
   createBrowserHost,
   createBrowserLaunches,
   createPlaywrightCamera,
+  createSignInReporter,
   launchChromium,
   refusedCamera,
   MISSED_AFTER_MS,
@@ -405,6 +424,7 @@ import {
   createLedgerSweep,
   reapLaneProcessLedgers,
   secretFilesIn,
+  dockerAccess,
   sweepSystemTempDirs,
   sweepSystemTempFiles,
   type SweepReport,
@@ -461,7 +481,8 @@ import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { autoDocker } from './auto-docker';
 import { GATE_HOLD_RETRY_MS, holdStaleGates } from './gate-hold';
-import { MAX_DOCKER_SCAN_BYTES, originBaseCommit } from './docker-need';
+import { commandCallsDocker, MAX_DOCKER_SCAN_BYTES, originBaseCommit } from './docker-need';
+import { createAppStart, type AppStart } from '../app-start';
 import { createProjectPinStore } from './checkout-pins';
 import { resolveNoticeCards } from './notice-sweep';
 import {
@@ -476,7 +497,12 @@ import { createAnswerWriter } from './answer-writer-launch';
 import { createAreaNamer } from './area-namer';
 import { systemListeners, type ListenerReader } from './listening-ports';
 import { loopbackProbe, type AddressProbe } from './loopback-probe';
-import { createEvalsService } from '../evals';
+import {
+  createEvalLiveRuns,
+  createEvalsAssessor,
+  createEvalsService,
+  subscribeEvalAssessment,
+} from '../evals';
 import { createServices } from './services';
 import {
   allSandboxRootsOf,
@@ -594,6 +620,12 @@ export interface DaemonOptions {
   readonly aaKey?: () => string | null;
   /** `TENDB_BENCHMARKS=off`: the key is neither read nor written, and the status says off. */
   readonly benchmarksOff?: boolean;
+  /** Sharing finds and runs no Tailscale CLI (`TENDB_TAILSCALE=off`). */
+  readonly tailscaleOff?: boolean;
+  /** The Tailscale CLI to run (`TENDB_TAILSCALE_CLI`), in place of the search for the installed one. */
+  readonly tailscaleCli?: string;
+  /** The built served app the share listener serves at `/app/`; absent when this build carries none. */
+  readonly appDir?: string | null;
   readonly fetch?: typeof fetch;
   /** The `fetch` a Plan session's Figma tools post a mock-up with and read assets with; the real one by default. */
   readonly figmaFetch?: typeof fetch;
@@ -718,6 +750,8 @@ function noSystemCheck(): Promise<SystemCheckDto> {
 }
 
 export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
+  // Every outbound call the daemon makes goes through this one fetch.
+  const outbound = opts.fetch ?? outboundFetch;
   // Before anything runs git: the one git every daemon git call runs, from a fixed install prefix,
   // never a PATH, and only one that can be told to read no attributes.
   const gitBin = await resolveGit();
@@ -733,7 +767,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
   mkdirSync(join(opts.dataDir, 'logs'), { recursive: true });
-  const lock = acquireInstanceLock(opts.dataDir);
+  // On the system clock, not the injected one: the waits here are for another process.
+  const lock = await acquireInstanceLock(opts.dataDir);
   const logPath = join(opts.dataDir, 'logs', 'daemon.log');
   rotateLogFile(logPath);
   const logFile = fileDestination(logPath);
@@ -862,7 +897,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const benchmarks = createBenchmarkSync({
     state,
     clock,
-    fetch: opts.fetch ?? fetch,
+    fetch: outbound,
     readKey: opts.aaKey ?? (() => null),
     logger: logger.child({ component: 'benchmarks' }),
   });
@@ -873,7 +908,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const catalogue = createCatalogueSync({
     state,
     clock,
-    fetch: opts.fetch ?? fetch,
+    fetch: outbound,
     logger: logger.child({ component: 'catalogue' }),
     snapshot: () => {
       // The file is part of the install and does not change while the process runs.
@@ -894,7 +929,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'catalogue' }),
   });
   const judgeKeychain = opts.keychain ?? unavailableKeychain;
-  const decisionModels = createDecisionModelList({ fetch: opts.fetch ?? fetch, clock });
+  const decisionModels = createDecisionModelList({ fetch: outbound, clock });
   const readJudgeCredential = createJudgeCredentialReader({
     state,
     keychain: judgeKeychain,
@@ -906,7 +941,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     clock,
     onCallHealth: (health) => watchJudgeOutage?.(health),
-    fetch: opts.fetch ?? fetch,
+    fetch: outbound,
     decisionModelIds: () => decisionModels.ids(),
     readCredential: readJudgeCredential,
     off: opts.judgeOff === true,
@@ -926,7 +961,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ? createOpenRouterSync({
           state,
           clock,
-          fetch: opts.fetch ?? fetch,
+          fetch: outbound,
           readKey: async () => {
             // The Decisions account's key when it is an OpenRouter account, else any live OpenRouter account's; an
             // Anthropic key or a Bedrock token must never go to openrouter.ai.
@@ -1026,6 +1061,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     bytesOf: (sha256) => pictures?.bytesOf(sha256) ?? 0,
   };
   let preview: Preview | null = null;
+  let appStart: AppStart | null = null;
   // The API's port, once it listens: an app address may not name it, and no picture is taken before.
   let listenPort: number | null = null;
   const listening = Promise.withResolvers<number>();
@@ -1065,7 +1101,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ? createSlackClients({
           state,
           keychain: judgeKeychain,
-          fetch: opts.fetch ?? fetch,
+          fetch: outbound,
           clock,
           timeoutMs: SLACK_TIMEOUT_MS,
         })
@@ -1127,14 +1163,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onParkAnswer: parkAnswers,
     log: logger,
     onFlagAnswerInWrite: (ctx, item, answer) => {
-      dismissReporterPosts(ctx, item);
-      return applySkippedChoice(ctx, item, answer)
+      const retried = answerReporterCard(ctx, item, answer);
+      const after = applySkippedChoice(ctx, item, answer)
         ? () => {
             startFollowUps();
           }
         : chatWorkRef === null
           ? undefined
           : applyChatWorkAnswer(chatWorkRef, logger, ctx, item, answer);
+      if (retried === null) return after;
+      return () => {
+        after?.();
+        lateLinearReporter?.wake(retried);
+      };
     },
     onCheckAnswer: (ctx, item, answer) => {
       const signOffPage = startPageSignOff;
@@ -1143,6 +1184,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     onAcceptanceAnswer: (ctx, item, answer) => {
       applyAcceptanceAnswer(ctx, item, answer);
+    },
+    onWatchpointAnswer: (ctx, item, answer) => {
+      applyWatchpointAnswer(ctx, item, answer);
     },
     onPlanAnswer: (ctx, item, answer) => {
       if (!runner) throw new RunnerNotStartedError('plan');
@@ -1458,6 +1502,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // all, so the machine never runs more than `limits.gateSlots` at once.
   // Every project's gate gets its Docker switch as it stands, and 10db turns it on when the gate
   // needs Docker (`auto-docker.ts`); an install or a generator names no project and is left alone.
+  const evalsService = createEvalsService({
+    state,
+    git,
+    logger: logger.child({ module: 'evals' }),
+  });
   const gateRunner = autoDocker(
     createGateRunner({
       sandbox: sandboxes?.gate ?? null,
@@ -1475,6 +1524,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   );
   const gateSlots = createGateSlots(limits.gateSlots);
+  // A suite's live arm, run only when the builder presses Run: the unslotted runner (a paid eval never
+  // holds or waits for a gate slot), its processes in a ledger. What a crash left is stopped here, after
+  // the ledger reap above and before any route serves.
+  const evalLiveRuns = createEvalLiveRuns({
+    gates: gateRunner,
+    ledgers:
+      ledgerSweep && sandboxRoots
+        ? { sweep: ledgerSweep, root: sandboxRoots.files, processes: laneProcesses }
+        : null,
+    sandboxed: sandboxes?.gate != null,
+    dataDir: opts.dataDir,
+    state,
+    evals: evalsService,
+    checkouts: () => allCheckouts(state.db),
+    env: () => launcher.projectEnv(),
+    logger: logger.child({ component: 'eval-live' }),
+  });
+  await evalLiveRuns.recoverAtStart();
   // A final gate that fails because the project's dev stack isn't up to date waits, with one card,
   // instead of failing the task. It wraps the limiter, so a waiting gate holds no slot.
   const gateHoldDeps = {
@@ -1622,6 +1689,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           state,
           inbox,
           logger: logger.child({ component: 'slack-pictures' }),
+          skipped: (taskId) => {
+            const outlook = pictures?.outlook(taskId);
+            return outlook?.kind === 'skipped' ? outlook.reason : null;
+          },
           channelOf: (projectId) => {
             const sharing = readSlackSharing(state.db, projectId);
             // The channel belongs to the workspace it was picked in; another binding now leaves it unused.
@@ -1729,8 +1800,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // Built after the moves, which tell it when a project moved.
   let accountLimits: AccountLimits | null = null;
-  // Built later; a move wakes it, so the project's updates held for a Linear sign-in go out on the new account.
-  let movedLinearReporter: Pick<LinearReporter, 'wake'> | null = null;
+  // Built later. A move wakes it, so the project's updates held for a Linear sign-in go out on the new account,
+  // and so does a Retry on its Inbox card, so the failed updates go out now.
+  let lateLinearReporter: Pick<LinearReporter, 'wake'> | null = null;
   const moveBack = createMoveBack({
     state,
     clock,
@@ -1753,7 +1825,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onMoved: (projectId) => {
       accountLimits?.forget(projectId);
       scheduler?.requestTick();
-      movedLinearReporter?.wake(projectId);
+      lateLinearReporter?.wake(projectId);
     },
   });
   accountLimits = createAccountLimits({
@@ -1813,7 +1885,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     startGate,
     lists: accountLists,
     dataDir: opts.dataDir,
-    fetch: opts.fetch ?? fetch,
+    fetch: outbound,
     logger: logger.child({ component: 'catalogue' }),
   });
   // What runs after every fetch of the catalogue: each account's list is read again through the identity probe, then
@@ -2018,7 +2090,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     joiningProblem: (taskId) => starter.joiningProblem(taskId),
     screens,
     pictures: picturesNow,
-    ...(opts.figmaFetch === undefined ? {} : { figmaFetch: opts.figmaFetch }),
+    figmaFetch: opts.figmaFetch ?? outbound,
     jev: createShapeJev({
       state,
       judge,
@@ -2248,6 +2320,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // What each task conversation's session streams now; the runner owns those sessions.
   const laneLive = createLiveRegistry();
   const createdRunner = createRunner({
+    evals: evalsService,
     judge,
     gitTools: { git: gitBin, gh: ghBin },
     awaitBeforePicture: (task, signal) => pictures?.awaitBefore(task, signal) ?? Promise.resolve(),
@@ -2358,6 +2431,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     inbox,
     waits: queueWaits,
+    held: () => admission.held(),
     clock,
     logger: logger.child({ component: 'stalls' }),
   });
@@ -2623,7 +2697,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         : null,
   });
   const previewNow = preview;
+  // The project's own start command brings its dev stack up when a picture or the dev login finds the
+  // app address down, run under the gate's sandbox with Docker allowed.
+  const appStartNow = createAppStart({
+    state,
+    inbox,
+    gate: gateRunner,
+    dataDir: opts.dataDir,
+    clock,
+    logger: logger.child({ component: 'app-start' }),
+    sessionEnv: () => launcher.projectEnv(),
+    rules: (project) => listPermissionRules(state.db, project.id, null),
+    checkouts: () => allCheckouts(state.db),
+    dockerSockets: () => dockerAccess(homedir(), launcher.projectEnv()).sockets,
+    usesDocker: (project) => commandCallsDocker(git, project, project.appStartCommand),
+  });
+  appStart = appStartNow;
   pictures = startPictures({
+    ensureApp: (projectId, signal) => appStartNow.ensureUp(projectId, signal),
     onNoAnswer: (projectId) => {
       void previewNow.lost(projectId);
     },
@@ -2637,6 +2728,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     devUi: opts.devUiOrigin ? { origin: opts.devUiOrigin, token: devUiToken(opts.dataDir) } : null,
     state,
     bus,
+    signInReporter: createSignInReporter({ state, inbox }),
     camera: pictureCamera,
     daemonPort: listening.promise,
     prepareBrowser,
@@ -2698,6 +2790,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     if (!pageLabelsAbort.signal.aborted) logger.warn({ err: error }, 'page labels not guessed');
   });
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
+  // A copy waiting for its turn is cut when the copy in progress ends, and once now: recovery left
+  // a waiting copy as it was, so one whose predecessor ended while the daemon was down goes on.
+  const unsubscribeCopyQueue = subscribeCopyQueue(bus, starter);
+  starter.advanceCopyQueue();
   // A pass that closes unsettled gets its Move card, and each closed pass is looked at again; a
   // started task's saved work goes once its work lands.
   const unsubscribePassSettles = subscribePassSettles(bus, delivery);
@@ -2773,6 +2869,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     hazardAssessor,
   );
+  // Assesses each project's evals the same way: when it is added, when a commit changes an eval file, and
+  // when the Evals page asks.
+  const evalsAssessor = createEvalsAssessor({
+    state,
+    git,
+    evals: evalsService,
+    asker: areaNamer,
+    logger: logger.child({ module: 'evals' }),
+  });
+  const unsubscribeEvalAssessment = subscribeEvalAssessment(
+    bus,
+    {
+      projectOfWorkstream: (id) => {
+        try {
+          return getWorkstreamRow(state.db, id).projectId;
+        } catch {
+          return null;
+        }
+      },
+    },
+    evalsAssessor,
+  );
   const github = createGithubServices({
     clock,
     spawn: opts.githubLoginSpawn ?? spawnGhLogin({ git: gitBin }),
@@ -2841,6 +2959,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // The Linear reporter: one short session of its own per task with updates owed, on the explore engine.
   const linearReporter = createLinearReporter({
+    send: outbound,
     state,
     clock,
     log: logger.child({ component: 'linear-reporter' }),
@@ -2848,8 +2967,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     conversations: reporterConversations(state),
     signIns: linearSignIns,
     inbox,
+    picturesOutlook: (taskId) => pictures.outlook(taskId),
   });
-  movedLinearReporter = linearReporter;
+  lateLinearReporter = linearReporter;
   /** Each service's own next step once it works for a project. Linear: the project reports to it. */
   const whenConnectedWorks: Record<ConnectableService, (projectId: ProjectId) => void> = {
     linear: (projectId) => {
@@ -3000,7 +3120,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       sends,
       connections: slackConnections,
       clock,
-      fetch: opts.fetch ?? fetch,
+      fetch: outbound,
       watches: replyWatches,
       draftOpts,
       githubLogin: () => Promise.resolve(github.cachedLogin()),
@@ -3111,7 +3231,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     listeners: opts.listeners ?? systemListeners,
     probe: opts.probe ?? loopbackProbe(),
     hazards: hazardAssessor,
-    evals: createEvalsService({ state, git, logger: logger.child({ module: 'evals' }) }),
+    evals: evalsService,
+    evalsAssessor,
+    evalLive: evalLiveRuns,
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
       git.gitDirs(repoPath).catch(() => undefined);
@@ -3317,8 +3439,59 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       return selfUpdateServices.selfUpdateStatus();
     },
   };
+  const deviceSockets = createSocketRegistry();
+  const sharingLog = logger.child({ component: 'sharing' });
+  const sharing = createSharingService({
+    state,
+    clock,
+    log: sharingLog,
+    cli: opts.tailscaleOff ? () => null : () => opts.tailscaleCli ?? findTailscaleCli(existsSync),
+    run: createTailscaleRun,
+    listen: (sharePort) =>
+      startShareListener({
+        fetch: (req, env) => app.fetch(req, env),
+        port: sharePort,
+        sockets: deviceSockets,
+        // An unreadable holder is logged and shown as "another process": the port is still held, so the share
+        // stays blocked rather than turning into a retry or a non-refusal error.
+        holderOf: (port) =>
+          lsofHolderOf(port).catch((error: unknown) => {
+            sharingLog.warn(
+              { error: String(error) },
+              'sharing: could not read the port holder from lsof',
+            );
+            return null;
+          }),
+      }),
+    sockets: deviceSockets,
+    mainPort: () => listenPort ?? opts.port,
+  });
+  const devices = createDeviceService({
+    state,
+    clock,
+    codes: createPairingCodes({ clock }),
+    sockets: deviceSockets,
+    sharing: () => sharing.status(),
+  });
+  const streamTickets = createTickets({ clock });
+  const vapidKeys = createVapidKeyStore(opts.keychain ?? unavailableKeychain);
+  const pushService = createPushService({ state, keys: vapidKeys });
+  const stopPushSender = startPushSender({
+    bus,
+    state,
+    keys: vapidKeys,
+    log: logger.child({ component: 'push' }),
+  });
   const app = createApp({
     commit: build?.commit ?? null,
+    listenPort: () => listenPort,
+    share: { allowlists: () => sharing.allowlists(), hostLogin: () => sharing.hostLogin() },
+    remote: { sharing, devices },
+    appDir: opts.appDir ?? null,
+    push: pushService,
+    devices,
+    tickets: streamTickets,
+    sockets: deviceSockets,
     skillVersion: agentSkill.shippedVersion(),
     devUiOrigin: opts.devUiOrigin ?? null,
     // Only when a dev UI is opted in; it reads and nothing else, and outlives a restart.
@@ -3428,7 +3601,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const wss = new WebSocketServer({ noServer: true });
   const server = serve({
-    fetch: app.fetch,
+    // The env is marked in place: the server reads back what the upgrade helper writes on this very object.
+    fetch: (req, env) => app.fetch(req, Object.assign(env, { listener: Listener.Main })),
     hostname: '127.0.0.1',
     port: opts.port,
     // ws declares `options.noServer?: boolean`, which WebSocketServerLike rejects under
@@ -3501,10 +3675,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       logger.error({ err: error }, 'the first self-update check failed');
     });
   }
+  // After the main listener is up and recovery has run. It never throws, and a slow Tailscale CLI must not hold startup.
+  void sharing.start();
   logger.info({ port, dataDir: opts.dataDir }, 'daemon started');
 
   async function shutdown(): Promise<void> {
     try {
+      // First, so a shutdown killed part-way has already unshared.
+      await sharing.stop();
       // First: a check that is holding the scheduler back would otherwise start it again while the
       // rest of this shutdown runs. Its flags are set at the call; what it settles on is a stage
       // under way, killed with the gh it started, which is awaited beside the delivery jobs.
@@ -3524,6 +3702,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         logger.warn({ err: error }, 'could not stop the sign-in');
       });
       unsubscribeShip();
+      unsubscribeCopyQueue();
       unsubscribeLinearEvents();
       unsubscribePassSettles();
       sizing.stop();
@@ -3545,8 +3724,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       clearInterval(pictureRetries);
       copyRecheck.cancel();
       await pictures?.stop();
+      await appStart?.stop();
       // The dev server 10db started ends with it; a builder's own is never 10db's to stop.
       await preview?.stop();
+      // Each live eval run ends `interrupted` and its stop command runs, before the store closes.
+      await evalLiveRuns.stopAll();
       picturePruning.stop();
       await pictureCamera.close();
       await laneBrowsers?.close();
@@ -3578,6 +3760,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeYields();
       unsubscribeHazards();
       hazardAssessor.stop();
+      unsubscribeEvalAssessment();
+      evalsAssessor.stop();
       watcher?.stop();
       keepAwake.stop();
       // A probe in flight writes to the database; the runner can ask for another while it stops.
@@ -3601,6 +3785,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // but it reads and writes the database until it ends.
       await createdScheduler.idle();
       unsubscribeSettled();
+      stopPushSender();
       unsubscribeSkipped();
       await Promise.all(skippedRaises);
       state.write((ctx) => {

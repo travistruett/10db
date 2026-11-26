@@ -11,6 +11,8 @@ import { IntegrationsSection } from './integrations-section';
 import { AppearanceSection } from './appearance-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { LanePermissionsSection } from './lane-permissions-section';
+import { DevicesSection } from './devices-section';
+import { RemoteAccessSection } from './remote-access-section';
 import { PeopleSection } from './people/people-section';
 import { ProjectSharing } from './sharing-section';
 import { PlannedRemainder } from './planned-section';
@@ -27,6 +29,7 @@ import { ProjectLinear } from './project-linear';
 import { ProjectPagesForm } from './project-pages-form';
 import { SandboxSection } from './sandbox-section';
 import { ProjectTrustSection } from './project-trust-section';
+import { WatchpointsSection } from './watchpoints-section';
 import { sectionByKey, SettingsScope, SettingsSectionKey } from './sections';
 import { ProjectPlaybook } from './project-playbook';
 import { SessionsSection } from './sessions-section';
@@ -128,6 +131,13 @@ export function SectionBody({
           {project ? <ProjectAreas key={project.id} project={project} /> : <NoProject />}
         </>
       );
+    case SettingsSectionKey.Watchpoints:
+      return (
+        <>
+          {heading}
+          {project ? <WatchpointsSection key={project.id} project={project} /> : <NoProject />}
+        </>
+      );
     case SettingsSectionKey.NetworkHosts:
       return (
         <>
@@ -154,6 +164,21 @@ export function SectionBody({
         <>
           {heading}
           <PeopleSection />
+        </>
+      );
+    case SettingsSectionKey.RemoteAccess:
+      return (
+        <>
+          {heading}
+          <RemoteAccessSection />
+        </>
+      );
+    case SettingsSectionKey.Devices:
+      return (
+        <>
+          {heading}
+          <DevicesSection />
+          <PlannedRemainder section={section} />
         </>
       );
     case SettingsSectionKey.ProjectTrust:

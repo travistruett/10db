@@ -24,6 +24,8 @@ function isHandler(entry: unknown): entry is (params: unknown) => unknown {
 export interface FakeAppServer {
   readonly spawn: CodexSpawn;
   sent(): Rpc[];
+  /** Sends the client a request, as the server does for an approval, and resolves with the client's reply. */
+  request(method: string, params: unknown): Promise<Rpc>;
 }
 
 /**
@@ -42,6 +44,10 @@ export function fakeAppServer(script: Readonly<Record<string, unknown>>): FakeAp
     stdout.write(`${JSON.stringify(message)}\n`);
   };
 
+  /** The server's own requests awaiting the client's reply, by id. */
+  const replies = new Map<number | string, (reply: Rpc) => void>();
+  let nextRequest = 0;
+
   const requests = createInterface({ input: stdin });
   requests.on('error', () => undefined);
   /** Answers `id` with `answer`: its error when it is `{ error }`, else as the result. */
@@ -55,6 +61,12 @@ export function fakeAppServer(script: Readonly<Record<string, unknown>>): FakeAp
     if (!parsed.success) return;
     const message = parsed.data;
     sent.push(message);
+    if (message.id !== undefined && message.method === undefined) {
+      const waiter = replies.get(message.id);
+      replies.delete(message.id);
+      waiter?.(message);
+      return;
+    }
     if (message.id === undefined || message.method === undefined) return;
     const id = message.id;
     if (!Object.hasOwn(script, message.method)) {
@@ -91,5 +103,14 @@ export function fakeAppServer(script: Readonly<Record<string, unknown>>): FakeAp
     },
   };
 
-  return { spawn: () => child, sent: () => [...sent] };
+  return {
+    spawn: () => child,
+    sent: () => [...sent],
+    request: (method, params) => {
+      const id = `server-${String((nextRequest += 1))}`;
+      const reply = new Promise<Rpc>((resolve) => replies.set(id, resolve));
+      stdout.write(`${JSON.stringify({ id, method, params })}\n`);
+      return reply;
+    },
+  };
 }

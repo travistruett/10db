@@ -19,6 +19,7 @@ import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
+import { useEvalMarkers } from '../../daemon/evals-queries';
 import { useGoals } from '../../daemon/goal-queries';
 import {
   useAbandonBatch,
@@ -33,7 +34,6 @@ import {
 import { CreateButton } from '../../shell/create-button';
 import { PageIntro } from '../../shell/page-intro';
 import { TitleRow } from '../../shell/title-row';
-import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
 import { SplitButton } from '../../shell/split-button';
@@ -43,9 +43,9 @@ import { BatchSheet } from './batch/batch-sheet';
 import { closeNote } from './batch/close-note';
 import { batchTaskCount } from './batch/batch-task-count';
 import { TaskExternalLink } from './task-external-link';
-import { AcceptanceLine } from './acceptance-line';
 import { BoardColumn } from './board-column';
-import { BoardScroll } from './board-scroll';
+import { BoardScroll, COLUMNS_MIN_HEIGHT } from './board-scroll';
+import { BoardSkeleton } from './board-skeleton';
 import { columnHint } from './column-hints';
 import { isCollapsible, isRail, useCollapsedColumns } from './column-rail';
 import { GoalLine, readyCountOf } from './goal-line';
@@ -80,8 +80,6 @@ import { boardRun } from './pass-page';
 
 const NEW_TASK_FORM_ID = 'new-task-form';
 
-/** The columns never shrink below this, however many alerts sit above them. */
-const COLUMNS_MIN_HEIGHT = 320;
 /** The goal filter's option for no filter; a goal's ID never has this form. */
 const ALL_GOALS = 'all';
 /** Cards show no goal badge while the Goal filter selects a goal: every card would repeat it. */
@@ -181,6 +179,7 @@ function BoardColumns({
   goalTitles,
 }: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
+  const evalMarkers = useEvalMarkers(projectId);
   const retry = useRetryWorkstream();
   const abandon = useAbandonBatch();
   const closeTask = useCloseTask();
@@ -328,6 +327,7 @@ function BoardColumns({
                 place={ws ? places.get(ws.id) : undefined}
                 peers={peers}
                 goalTitle={task.goalId ? goalTitles.get(task.goalId) : undefined}
+                evalMarkers={evalMarkers.data?.tasks[task.id]}
               />
             );
           }}
@@ -613,7 +613,6 @@ export function BoardView() {
         }
       />
       <PageIntro
-        description={project ? <AcceptanceLine projectId={project.id} /> : undefined}
         toolbar={
           filterGoal ? (
             <GoalLine
@@ -670,10 +669,8 @@ export function BoardView() {
           {linked.error.message}
         </Alert>
       ) : null}
-      {projects.isPending ? (
-        <PageLoading shape={PageLoadingShape.Cards} label="Loading projects" />
-      ) : project && (tasks.isPending || columns.isPending) ? (
-        <PageLoading shape={PageLoadingShape.Cards} label="Loading the board" />
+      {projects.isPending || (project && (tasks.isPending || columns.isPending)) ? (
+        <BoardSkeleton projectId={project?.id ?? null} layout={layout} />
       ) : null}
       {project && tasks.isSuccess && (columns.data !== undefined || columns.isError) ? (
         <BoardColumns

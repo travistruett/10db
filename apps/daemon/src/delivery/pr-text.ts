@@ -1,4 +1,5 @@
-import { WorkstreamState, type BatchId } from '@10db/contracts';
+import { WorkstreamState, type BatchId, type WatchpointHitsDto } from '@10db/contracts';
+import { definitionReason } from '../evals';
 import { fillTemplate } from './pr-template';
 
 /** Conventional Commits' longest header, as this repo's commitlint and `config-conventional` set it. */
@@ -66,6 +67,11 @@ export function prSubject(
 /** A commit message line that explains a pull request's unit tests over CI's budget. */
 const TEST_BUDGET_LINE = /^Test-budget:[ \t]*\S/;
 
+/** The line CI's budget check looks for, saying `reason` on one line. */
+export function testBudgetLine(reason: string): string {
+  return `Test-budget: ${reason.replace(/\s+/g, ' ').trim()}`;
+}
+
 /**
  * The `Test-budget: <reason>` lines of a lane's commit messages, trimmed, each once and in order.
  * CI fails a pull request that adds more unit tests than its budget unless the body has one.
@@ -118,14 +124,74 @@ export function prBody(input: {
   readonly template: string | null;
   /** `testBudgetLines` of the batch's commits; each starts a line, which is what CI looks for. */
   readonly testBudget?: readonly string[];
+  /** The watchpoints the batch's tasks hit, with the notes written about their files; none leaves the section out. */
+  readonly watchpoints?: WatchpointHitsDto['hits'];
 }): string {
-  const body = fillTemplate(input.template, [
+  // The markers are always written, so a task that ships into this pull request later has a place to fill.
+  const filled = fillTemplate(input.template, [
     { heading: 'What and why', text: whatAndWhy(input.tasks) },
     { heading: 'How it was checked', text: howChecked(input.gate, input.ci, input.tasks) },
   ]);
+  const body = withForYou(filled, forYouSection(input.watchpoints ?? []));
   const budget = input.testBudget ?? [];
   const reasons = budget.length > 0 ? `\n\n${budget.join('\n')}` : '';
   return `${body}${reasons}\n\n---\n\nShipped by 10db, batch ${input.batch.id}\n`;
+}
+
+/** The pull request section for what the builder watches, and the markers a later task's ship replaces between. */
+const FOR_YOU_HEADING = '## For you';
+const AFTER_FOR_YOU = '\n\n## How it was checked';
+const FOR_YOU_START = '<!-- 10db:for-you -->';
+const FOR_YOU_END = '<!-- /10db:for-you -->';
+
+/** A path in code ticks, or JSON-quoted when it holds a control character that could break the line. */
+const pathText = (path: string): string =>
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u001f\u007f]/.test(path) ? JSON.stringify(plain(path)) : `\`${plain(path)}\``;
+
+/** A note's text with nothing that could close or open the markers' comments. */
+const plain = (text: string): string => text.replaceAll('<!--', '<!- -').replaceAll('-->', '- ->');
+
+/** The section placed before "How it was checked", or at the end when the body has no such section. */
+function withForYou(body: string, section: string): string {
+  const at = body.indexOf(AFTER_FOR_YOU);
+  return at < 0 ? `${body}\n\n${section}` : `${body.slice(0, at)}\n\n${section}${body.slice(at)}`;
+}
+
+/**
+ * The "For you" section's text: each watchpoint, its loudness, its files with the agent's reason, and the
+ * reviewer's check as a quote, between the markers. With no hit the markers hold nothing, which renders as blank.
+ */
+export function forYouSection(hits: WatchpointHitsDto['hits']): string {
+  if (hits.length === 0) return `${FOR_YOU_START}\n${FOR_YOU_END}`;
+  const blocks = hits.map((hit) =>
+    [
+      `**${plain(hit.watchpoint.label)}** (${hit.watchpoint.loudness})`,
+      ...hit.files.flatMap((file) => [
+        `- ${pathText(file.path)}${file.added === null ? '' : ` (+${String(file.added)} −${String(file.removed ?? 0)})`}`,
+        ...(file.evalDefinition === undefined
+          ? []
+          : [
+              `  - Eval: ${plain(definitionReason(file.evalDefinition.changes, true, file.clipped))}`,
+            ]),
+        ...(file.agentNote === null ? [] : [`  - Agent: ${plain(file.agentNote)}`]),
+        ...(file.reviewerNote === null ? [] : [`  > ${plain(file.reviewerNote)}`]),
+      ]),
+    ].join('\n'),
+  );
+  return [FOR_YOU_START, FOR_YOU_HEADING, ...blocks, FOR_YOU_END].join('\n\n');
+}
+
+/**
+ * The body of a pull request that already exists, with the text between its For you markers replaced by
+ * `section`; null when the body has no markers (someone removed them) or already says it.
+ */
+export function bodyWithForYou(body: string, section: string): string | null {
+  const start = body.indexOf(FOR_YOU_START);
+  const end = body.indexOf(FOR_YOU_END, start + FOR_YOU_START.length);
+  if (start < 0 || end < 0) return null;
+  const next = `${body.slice(0, start)}${section}${body.slice(end + FOR_YOU_END.length)}`;
+  return next === body ? null : next;
 }
 
 const word = (state: WorkstreamState): string => state.toLowerCase();

@@ -3,6 +3,7 @@ import { Code, Group, Loader, SegmentedControl, Stack, Table, Text, Title } from
 import { useState, type ReactNode } from 'react';
 import { useEvalSuite } from '../../daemon/evals-queries';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
+import { LiveRunControls } from './live-run-modal';
 import { costText, dayTimeText, gatesPassed, rateText } from './eval-figures';
 
 /** How many runs the drawer lists before "n older runs". */
@@ -21,6 +22,12 @@ function Section({ title, children }: { readonly title: string; readonly childre
 
 /** A model's binding in a run: two slots may name one model. */
 const bindingOf = (m: EvalModelResultDto): string => `${m.slot ?? ''}|${m.model}`;
+
+/** A model's name in the switch: the model, and its slot only when two bindings share the model. */
+function switchName(m: EvalModelResultDto, models: readonly EvalModelResultDto[]): string {
+  const shared = models.filter((other) => other.model === m.model).length > 1;
+  return shared && m.slot !== null ? `${m.model} (${m.slot})` : m.model;
+}
 
 /** One model's gates, failing first, each rate against its minimum. */
 function Gates({ model }: { readonly model: EvalModelResultDto }) {
@@ -72,13 +79,21 @@ function RunGates({ detail }: { readonly detail: EvalSuiteDetailDto }) {
           onChange={setChosen}
           data={models.map((m) => ({
             value: bindingOf(m),
-            label: `${m.slot ?? m.model} · ${gatesPassed(m)}`,
+            label: `${switchName(m, models)} · ${gatesPassed(m)}`,
           }))}
         />
       ) : null}
       <Gates model={shown} />
     </Section>
   );
+}
+
+/** Whether a run (newest first) graded a different eval than the run before it. */
+function newEval(runs: EvalSuiteDetailDto['runs'], place: number): boolean {
+  const mine = runs[place]?.fingerprint ?? null;
+  // The last earlier run that recorded a fingerprint, as the trend reads it.
+  const before = runs.slice(place + 1).find((r) => r.fingerprint !== null)?.fingerprint ?? null;
+  return mine !== null && before !== null && mine !== before;
 }
 
 function Runs({
@@ -94,7 +109,7 @@ function Runs({
     <Section title="Runs">
       <Table highlightOnHover verticalSpacing={6} fz="sm">
         <Table.Tbody>
-          {detail.runs.slice(0, RUNS_SHOWN).map((run) => (
+          {detail.runs.slice(0, RUNS_SHOWN).map((run, place) => (
             <Table.Tr
               key={run.path}
               onClick={() => {
@@ -113,6 +128,7 @@ function Runs({
               </Table.Td>
               <Table.Td c="dimmed">
                 {run.models.length === 1 ? run.models[0] : `${String(run.models.length)} models`}
+                {newEval(detail.runs, place) ? ' · new eval' : ''}
               </Table.Td>
               <Table.Td ta="right">{costText(run.costUsd)}</Table.Td>
             </Table.Tr>
@@ -128,24 +144,22 @@ function Runs({
   );
 }
 
-function Manifest({ detail }: { readonly detail: EvalSuiteDetailDto }) {
+function Manifest({
+  detail,
+  projectId,
+}: {
+  readonly detail: EvalSuiteDetailDto;
+  readonly projectId: ProjectId;
+}) {
   const rows: [string, ReactNode][] = [];
   if (detail.coveredPaths.length > 0)
     rows.push(['Covers', detail.coveredPaths.map((p) => <Code key={p}>{p}</Code>)]);
   if (detail.suite.definitionPaths.length > 0)
     rows.push(['Definition', detail.suite.definitionPaths.map((p) => <Code key={p}>{p}</Code>)]);
   if (detail.freeCommand !== null) rows.push(['Free Check', <Code>{detail.freeCommand}</Code>]);
+  if (detail.liveCommand !== null) rows.push(['Live Run', <Code>{detail.liveCommand}</Code>]);
   if (detail.liveCommand !== null)
-    rows.push([
-      'Live Run',
-      <>
-        <Code>{detail.liveCommand}</Code>
-        <Text span size="xs" c="dimmed">
-          {' '}
-          spends money; you run it
-        </Text>
-      </>,
-    ]);
+    rows.push(['', <LiveRunControls projectId={projectId} suiteKey={detail.suite.key} />]);
   if (rows.length === 0) return null;
   return (
     <Section title="What It Covers">
@@ -169,9 +183,11 @@ function Manifest({ detail }: { readonly detail: EvalSuiteDetailDto }) {
 
 function SuiteBody({
   detail,
+  projectId,
   onPick,
 }: {
   readonly detail: EvalSuiteDetailDto;
+  readonly projectId: ProjectId;
   readonly onPick: (path: string) => void;
 }) {
   const { suite, run } = detail;
@@ -180,6 +196,11 @@ function SuiteBody({
     run?.repeat ? `${String(run.repeat)} trials a case` : null,
     run ? `run ${dayTimeText(run.at)}` : 'no results found',
   ].filter((part): part is string => part !== null);
+  // The latest run no longer measures the eval as written once its definition was committed well after it.
+  const changedAfter =
+    suite.definitionChangedAt !== null && run !== null && run.path === suite.latest?.path
+      ? `The eval's definition was committed ${dayTimeText(suite.definitionChangedAt)}, after this run, so this result may not measure the eval as it is now.`
+      : null;
   return (
     <Stack gap="lg">
       <Stack gap={4}>
@@ -190,6 +211,11 @@ function SuiteBody({
           {meta.join(' · ')}
         </Text>
         {suite.bar === null ? null : <Text size="sm">{suite.bar}</Text>}
+        {changedAfter === null ? null : (
+          <Text size="xs" c="dimmed">
+            {changedAfter}
+          </Text>
+        )}
       </Stack>
       <RunGates key={run?.path ?? ''} detail={detail} />
       {detail.runs.length > 0 ? <Runs detail={detail} onPick={onPick} /> : null}
@@ -205,7 +231,7 @@ function SuiteBody({
           ))}
         </Section>
       ) : null}
-      <Manifest detail={detail} />
+      <Manifest detail={detail} projectId={projectId} />
     </Stack>
   );
 }
@@ -242,7 +268,7 @@ export function SuiteDrawer({
       {...(suiteKey === null ? {} : { showing: suiteKey })}
     >
       {detail.data ? (
-        <SuiteBody detail={detail.data} onPick={pick} />
+        <SuiteBody detail={detail.data} projectId={projectId} onPick={pick} />
       ) : detail.isError ? (
         <Text size="sm" c="red">
           {detail.error.message}

@@ -41,6 +41,19 @@ export function resolveAgentSkillDir(): string | null {
   return existsSync(join(bundled, 'VERSION')) ? bundled : null;
 }
 
+/**
+ * The built served app: the bundle carries it beside itself as `app/`; from source it is the desktop's
+ * `dist-app/` once `pnpm --filter @10db/desktop build:app` has run. Null when there is none.
+ */
+export function resolveServedAppDir(): string | null {
+  const bundled = join(import.meta.dirname, 'app');
+  // Only a run from source looks outside its own folder; the bundle never reads beside where it was put.
+  const dirs = import.meta.filename.endsWith('.ts')
+    ? [join(import.meta.dirname, '..', '..', 'desktop', 'dist-app')]
+    : [bundled];
+  return dirs.find((dir) => existsSync(join(dir, 'app.html'))) ?? null;
+}
+
 export class SandboxRuntimeError extends Error {
   override readonly name = 'SandboxRuntimeError';
 }

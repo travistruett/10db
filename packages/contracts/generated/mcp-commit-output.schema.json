@@ -8,6 +8,32 @@
     },
     "alreadyCommitted": {
       "type": "boolean"
+    },
+    "watchpointNotes": {
+      "default": [],
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "pattern": "^[^\\r\\n]+$"
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400,
+            "pattern": "^[^\\r\\n]+$"
+          }
+        },
+        "required": [
+          "path",
+          "note"
+        ]
+      }
     }
   },
   "required": [

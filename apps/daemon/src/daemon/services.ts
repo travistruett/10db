@@ -8,6 +8,7 @@ import {
   RigorSource,
   powersDecisions,
   type AcceptanceFigures,
+  type EvalsDto,
   TaskKindSource,
   type Rigor,
   type TaskDto,
@@ -51,6 +52,10 @@ import {
   type WorkstreamId,
   type FigmaSignInsDto,
   type LinearSignInsDto,
+  effectiveWatchpoints,
+  type ProjectWatchpointsDto,
+  type ProjectId,
+  type TaskInput,
 } from '@10db/contracts';
 import {
   closeTask,
@@ -76,6 +81,7 @@ import {
   listKinds,
   humanTouchDays,
   inboxCardTypes,
+  watchpointStats,
   rigorFigures,
   acceptanceFigures,
   findAccountRow,
@@ -134,6 +140,10 @@ import {
   offerAllowThis,
   offeredText,
   offerToAgent,
+  readProjectWatchpoints,
+  readYourWatchpoints,
+  writeProjectWatchpoints,
+  writeYourWatchpoints,
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService, type McpSignIns } from '../accounts';
 import type { Clock } from '../clock';
@@ -159,14 +169,16 @@ import {
   type PassOpenInput,
   type PassPullRequests,
   type Shipper,
+  watchpointHitsOf,
 } from '../delivery';
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
 import type { EventBus, LiveFrames, StateStore } from '../events';
 import { inspectFolder, proposeAreas, proposeSetupAreas, type AreaNamer } from '../folders';
 import { dropPendingPageLabels } from './page-label-guess';
 import { adoptGoal } from '../goals';
+import { classifyPath } from '../guard';
 import { taskSession } from '../chat';
-import type { EvalsService } from '../evals';
+import { suitesOfTasks, type EvalLiveRuns, type EvalsAssessor, type EvalsService } from '../evals';
 import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
@@ -401,6 +413,10 @@ export function createServices(deps: {
   readonly hazards: Pick<HazardAssessor, 'assess'>;
   /** Reads each project's committed eval results and keeps the manifest an agent recorded. */
   readonly evals: EvalsService;
+  /** Assesses each project's evals with a model, on add, on a commit to eval files, and on request. */
+  readonly evalsAssessor: Pick<EvalsAssessor, 'assess' | 'status'>;
+  /** Runs a suite's live arm when the builder presses Run. */
+  readonly evalLive: EvalLiveRuns;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
   /** Settings › Trust: the switches, the builder's plugins and each project's preview. */
@@ -412,6 +428,11 @@ export function createServices(deps: {
   readonly figmaSignIns: { list(): Promise<FigmaSignInsDto> };
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
+  const effectiveWatchpointsOf = (projectId: ProjectId): ProjectWatchpointsDto => {
+    getProject(db, projectId);
+    const entries = readProjectWatchpoints(db, projectId);
+    return { effective: effectiveWatchpoints(readYourWatchpoints(db), entries), entries };
+  };
   const restarts = createFailedRestarts(deps);
   const catalogueStatus = (): CatalogueStatusDto => ({
     ...deps.catalogue.status(),
@@ -446,6 +467,33 @@ export function createServices(deps: {
       );
   }
 
+  async function makeTask(
+    projectId: ProjectId,
+    input: TaskInput,
+    rigorSource?: RigorSource,
+  ): Promise<TaskDto> {
+    refuseArchived(db, projectId);
+    await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
+    const task = deps.state.write((ctx) => {
+      const known = listKinds(ctx.tx);
+      const kinds = input.kinds ?? [];
+      refuseRigorBelowKinds({ rigor: input.rigor ?? null, taskKinds: kinds, kinds: known });
+      return insertTask(
+        ctx,
+        projectId,
+        { ...input, kinds },
+        proposePlacement(getProject(ctx.tx, projectId), {
+          areas: input.areas,
+          kinds: kindsOfTask(kinds, known),
+          workspaceMode: input.workspaceMode,
+        }),
+        rigorSource,
+      );
+    });
+    deps.scheduler.requestTick();
+    return task;
+  }
+
   async function refuseMissingLandingBranch(
     project: ProjectDto,
     landing: TaskLanding | undefined,
@@ -473,6 +521,11 @@ export function createServices(deps: {
       'new tasks',
     );
   }
+  /** What was found of a project's evals, with where 10db's own assessment of them stands. */
+  async function readEvalsPage(projectId: ProjectId): Promise<EvalsDto> {
+    const read = await deps.evals.read(projectId, getProject(db, projectId).repoPath);
+    return { ...read, assessment: deps.evalsAssessor.status(projectId) };
+  }
   return {
     listProjects: () => listProjectViews(db),
     listArchivedProjects: () => listArchivedProjects(db),
@@ -484,6 +537,8 @@ export function createServices(deps: {
       deps.state.write((ctx) => {
         archiveProject(ctx, projectId);
       });
+      // A live eval is the builder's spend in this checkout: it ends with the project's work, its stop command run in the background.
+      void deps.evalLive.stopProject(projectId);
     },
     restoreProject(projectId) {
       deps.state.write((ctx) => {
@@ -511,27 +566,25 @@ export function createServices(deps: {
       return project;
     },
     listTasks: (projectId) => listTasks(db, projectId),
-    async createTask(projectId, input, rigorSource) {
-      refuseArchived(db, projectId);
-      await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
-      const task = deps.state.write((ctx) => {
-        const known = listKinds(ctx.tx);
-        const kinds = input.kinds ?? [];
-        refuseRigorBelowKinds({ rigor: input.rigor ?? null, taskKinds: kinds, kinds: known });
-        return insertTask(
-          ctx,
-          projectId,
-          { ...input, kinds },
-          proposePlacement(getProject(ctx.tx, projectId), {
-            areas: input.areas,
-            kinds: kindsOfTask(kinds, known),
-            workspaceMode: input.workspaceMode,
-          }),
-          rigorSource,
-        );
+    createTask: makeTask,
+    async newEvalTask(projectId, request) {
+      const project = getProject(db, projectId);
+      const draft = await deps.evals.draftTask(projectId, project.repoPath, request);
+      // The task works in the areas the behavior's files fall in; with none named, in the project's catch-all or first.
+      const named = new Set(
+        request.where.flatMap((path) => classifyPath(path, project.areas, []).areas),
+      );
+      const areas =
+        named.size > 0
+          ? [...named]
+          : [(project.areas.find((a) => a.catchAll === true) ?? project.areas[0])?.name ?? ''];
+      return makeTask(projectId, {
+        title: draft.title,
+        why: draft.why,
+        description: draft.description,
+        acceptanceCriteria: [...draft.acceptanceCriteria],
+        areas,
       });
-      deps.scheduler.requestTick();
-      return task;
     },
     holdTask: (taskId) => deps.state.write((ctx) => holdTask(ctx, taskId)),
     settleSizing: (taskIds) => deps.sizing.settled(taskIds, deps.sizingWaitMs),
@@ -884,6 +937,26 @@ export function createServices(deps: {
         benchmarkSync: syncWarning(deps.benchmarks.status()),
       };
     },
+    yourWatchpoints: () => readYourWatchpoints(db),
+    setYourWatchpoints(watchpoints) {
+      deps.state.write((ctx) => {
+        writeYourWatchpoints(ctx, watchpoints);
+      });
+      return readYourWatchpoints(db);
+    },
+    projectWatchpoints: (projectId) => effectiveWatchpointsOf(projectId),
+    setProjectWatchpoints(projectId, entries) {
+      getProject(db, projectId);
+      deps.state.write((ctx) => {
+        writeProjectWatchpoints(ctx, projectId, entries);
+      });
+      return effectiveWatchpointsOf(projectId);
+    },
+    watchpointHits: (id) => watchpointHitsOf(db, id),
+    watchpointStats: (projectId) => {
+      getProject(db, projectId);
+      return watchpointStats(db, projectId, deps.clock.now());
+    },
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
     agentSkill: () => deps.agentSkill.status(),
@@ -921,11 +994,53 @@ export function createServices(deps: {
       getProject(db, projectId);
       return hazardAssessmentDto(db, projectId);
     },
-    evals(projectId) {
-      return deps.evals.read(projectId, getProject(db, projectId).repoPath);
+    evals: (projectId) => readEvalsPage(projectId),
+    async assessEvals(projectId) {
+      getProject(db, projectId);
+      await deps.evalsAssessor.assess(projectId);
+      return readEvalsPage(projectId);
+    },
+    evalModels(projectId) {
+      return deps.evals.models(projectId, getProject(db, projectId).repoPath);
+    },
+    async evalMarkers(projectId) {
+      const found = await suitesOfTasks(
+        db,
+        deps.evals,
+        getProject(db, projectId).repoPath,
+        listTasks(db, projectId),
+      );
+      return {
+        tasks: Object.fromEntries(
+          [...found].map(([taskId, suites]) => [
+            taskId,
+            suites.map((s) => ({ suiteKey: s.suiteKey, label: s.label, state: s.state })),
+          ]),
+        ),
+      };
+    },
+    async taskEvalCoverage(taskId) {
+      const task = getTask(db, taskId);
+      const found = await suitesOfTasks(db, deps.evals, getProject(db, task.projectId).repoPath, [
+        task,
+      ]);
+      return { suites: found.get(taskId) ?? [] };
     },
     evalSuite(projectId, key, run) {
       return deps.evals.suite(projectId, getProject(db, projectId).repoPath, key, run);
+    },
+    evalLivePreview(projectId, suiteKey) {
+      return deps.evalLive.preview(projectId, suiteKey);
+    },
+    startEvalLive(projectId, suiteKey, previewHash) {
+      return deps.evalLive.start(projectId, suiteKey, previewHash);
+    },
+    stopEvalLive(projectId, runId) {
+      return deps.evalLive.stop(projectId, runId);
+    },
+    evalLiveRuns(projectId, suiteKey) {
+      getProject(db, projectId);
+      return deps.evalLive.list(projectId, suiteKey);
     },
     recordEvalManifest(projectId, manifest) {
       return deps.evals.record(projectId, getProject(db, projectId).repoPath, manifest);

@@ -58,6 +58,11 @@ export default defineConfig({
         TENDB_JUDGE: 'off',
         // No question may reach a real person from a throwaway daemon.
         TENDB_SLACK: 'off',
+        // No test may find, or change, the builder's own Tailscale from a throwaway daemon: it runs a fake one,
+        // which keeps its serve mapping in a file and shares nothing until a spec turns sharing on.
+        // Blank, so a caller's shell can't turn the fake off with `TENDB_TAILSCALE=off`.
+        TENDB_TAILSCALE: '',
+        TENDB_TAILSCALE_CLI: resolve(DESKTOP_DIR, 'e2e/fake-tailscale.mjs'),
         // The container has little free disk; the test daemon must not hold lanes for it.
         TENDB_DISK: 'off',
         TENDB_DATA_DIR: E2E_DATA,
