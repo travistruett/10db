@@ -12,6 +12,7 @@ import {
   useProjectWatchpoints,
   useSetProjectWatchpoints,
   useSetYourWatchpoints,
+  useWatchpointStats,
   useYourWatchpoints,
 } from '../../daemon/watchpoint-queries';
 import { ConfirmModal } from '../../shell/confirm-modal';
@@ -28,6 +29,8 @@ import {
 } from './watchpoint-lists';
 import { LoudnessControl } from './watchpoint-loudness';
 
+const count = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? '' : 's'}`;
+
 /** Paths a row lists before "+N more"; the drawer has the rest. */
 const SHOWN_GLOBS = 3;
 const YOURS = 'Yours, in every project';
@@ -37,6 +40,7 @@ const THIS_PROJECT = 'This project';
 export function WatchpointsSection({ project }: { readonly project: ProjectDto }) {
   const yours = useYourWatchpoints();
   const here = useProjectWatchpoints(project.id);
+  const stats = useWatchpointStats(project.id).data;
   const setYours = useSetYourWatchpoints();
   const setHere = useSetProjectWatchpoints(project.id);
   const [editing, setEditing] = useState<EffectiveWatchpoint | null>(null);
@@ -166,6 +170,23 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
           />
         </Box>
       ),
+    },
+    {
+      accessor: 'lastThirtyDays',
+      title: 'Last 30 days',
+      noWrap: true,
+      render: (row) => {
+        const found = stats?.find((s) => s.key === row.key);
+        const line = `${count(found?.tasks ?? 0, 'task')} · ${count(found?.cards ?? 0, 'card')}`;
+        return (
+          <Group gap={6} wrap="nowrap">
+            <Text size="sm" c={found?.noisy === true ? 'yellow' : 'dimmed'}>
+              {line}
+            </Text>
+            {found?.noisy === true ? <Pill color="yellow">noisy</Pill> : null}
+          </Group>
+        );
+      },
     },
     {
       accessor: 'actions',

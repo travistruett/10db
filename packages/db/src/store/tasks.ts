@@ -623,6 +623,33 @@ export function insertAcceptanceFollowUp(
 }
 
 /**
+ * Files what the builder sent back from a Look card: a task in the project's Ready column touching the source's
+ * areas, with the builder's note and the watchpoints the card named. The source run is untouched.
+ */
+export function insertWatchpointFollowUp(
+  ctx: WriteContext,
+  sourceId: TaskId,
+  input: { readonly watchpoints: readonly string[]; readonly note: string },
+): TaskDto {
+  const source = getTask(ctx.tx, sourceId);
+  const project = getProject(ctx.tx, source.projectId);
+  const what = input.watchpoints.length > 0 ? input.watchpoints.join(', ') : 'the watched changes';
+  const title = `Revisit ${what} in ${source.title}`;
+  return writeTask(ctx, source.projectId, {
+    landing: taskLandingFor(project),
+    workspaceMode: placementFor(project, undefined),
+    reason: null,
+    title: Title.parse(title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title),
+    description: `${input.note}\n\nSent back from the Look card for ${what} on the task "${source.title}" (${source.id}).`,
+    acceptanceCriteria: [`The note is answered: ${input.note}`],
+    areas: source.areas,
+    dependsOn: [],
+    proposalId: null,
+    boardColumnId: null,
+  });
+}
+
+/**
  * Adds the findings of a later rejection at the retry limit to the follow-up task an earlier one filed, while
  * that task is still open and unstarted; once it has started, was removed or is gone, the findings stay on
  * the step and nothing is written. A task shipped at its limit never files a second follow-up for the one

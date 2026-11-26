@@ -1,13 +1,12 @@
 import { WatchpointLoudness } from '@10db/contracts';
 import { SegmentedControl, Tooltip, type MantineSize, type MantineSpacing } from '@mantine/core';
 
-/** Which loudness the app can act on so far: Ask and Hold are shown but not offered. */
+/** Which loudness the app can act on so far: Hold is shown but not offered. */
 const WHY_OFF: Readonly<Partial<Record<WatchpointLoudness, string>>> = {
-  [WatchpointLoudness.Ask]: 'Next',
   [WatchpointLoudness.Hold]: 'Coming later',
 };
 
-/** Show, Ask and Hold as one control; only Show can be chosen yet, and the others say when they come. */
+/** Show, Ask and Hold as one control; Hold can't be chosen yet and says when it comes. */
 export function LoudnessControl({
   value,
   onChange,
@@ -48,7 +47,7 @@ export function LoudnessControl({
       ]}
       value={value}
       onChange={(next) => {
-        if (next === WatchpointLoudness.Show) onChange(WatchpointLoudness.Show);
+        if (next === WatchpointLoudness.Show || next === WatchpointLoudness.Ask) onChange(next);
       }}
     />
   );
