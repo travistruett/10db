@@ -3,6 +3,7 @@ import {
   effectiveWatchpoints,
   isNoisyWatchpoint,
   revisedWatchpoints,
+  STARTER_REVISION,
   STARTER_WATCHPOINTS,
   WatchpointFileStatus,
   WatchpointLoudness,
@@ -198,6 +199,11 @@ describe('revisedWatchpoints', () => {
     expect(unchanged?.loudness).toBe(WatchpointLoudness.Ask);
     expect(kept).toEqual(edited);
     expect(untouched).toEqual(other);
+  });
+
+  it('leaves a list saved at the current revision alone, so a starter set back to show stays show', () => {
+    const [kept] = revisedWatchpoints([s1Migrations()], STARTER_REVISION);
+    expect(kept?.loudness).toBe(WatchpointLoudness.Show);
   });
 });
 

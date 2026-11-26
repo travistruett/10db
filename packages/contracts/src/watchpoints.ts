@@ -176,13 +176,22 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
 ];
 
 /**
+ * The starters' revision now. A list saved before revisions existed counts as revision 1; every save stamps the
+ * current one, so a revision is applied to a list once and a builder's later choice is never undone by it.
+ */
+export const STARTER_REVISION = 2;
+
+/**
  * The S1 versions of the starters whose loudness later changed. A builder's copy that still equals the old version
  * field for field takes the starter's new loudness; an edited copy is left as the builder made it.
  */
-export const STARTER_WATCHPOINT_REVISIONS: readonly { readonly was: Watchpoint }[] =
-  STARTER_WATCHPOINTS.filter((w) => w.loudness === WatchpointLoudness.Ask).map((w) => ({
-    was: { ...w, globs: [...w.globs], loudness: WatchpointLoudness.Show },
-  }));
+export const STARTER_WATCHPOINT_REVISIONS: readonly {
+  readonly since: number;
+  readonly was: Watchpoint;
+}[] = STARTER_WATCHPOINTS.filter((w) => w.loudness === WatchpointLoudness.Ask).map((w) => ({
+  since: STARTER_REVISION,
+  was: { ...w, globs: [...w.globs], loudness: WatchpointLoudness.Show },
+}));
 
 const sameWatchpoint = (a: Watchpoint, b: Watchpoint): boolean =>
   a.key === b.key &&
@@ -194,10 +203,15 @@ const sameWatchpoint = (a: Watchpoint, b: Watchpoint): boolean =>
   a.globs.length === b.globs.length &&
   a.globs.every((g, i) => g === b.globs[i]);
 
-/** The stored list with each unedited copy of a revised starter moved to the starter's current loudness. */
-export function revisedWatchpoints(stored: readonly Watchpoint[]): Watchpoint[] {
+/**
+ * The stored list with each unedited copy of a starter moved to the starter's current loudness, for the revisions
+ * newer than the one the list was saved at (1 when it carries none).
+ */
+export function revisedWatchpoints(stored: readonly Watchpoint[], savedAt = 1): Watchpoint[] {
   return stored.map((entry) => {
-    const revision = STARTER_WATCHPOINT_REVISIONS.find((r) => sameWatchpoint(r.was, entry));
+    const revision = STARTER_WATCHPOINT_REVISIONS.find(
+      (r) => r.since > savedAt && sameWatchpoint(r.was, entry),
+    );
     if (revision === undefined) return entry;
     const now = STARTER_WATCHPOINTS.find((w) => w.key === entry.key);
     return now === undefined ? entry : { ...entry, loudness: now.loudness };

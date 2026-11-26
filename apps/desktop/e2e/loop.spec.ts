@@ -413,6 +413,11 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // notes as For You, and Looks right closes it.
   const lookTitle = page.getByText(`Look at these changes: ${TASK}`);
   await lookTitle.first().click();
+  // The detail pane beside the list is the Look card itself: its folds, a way back to the task and a note box.
+  await expect(page.getByRole('button', { name: 'Open the task' })).toBeVisible();
+  await page.getByRole('button', { name: 'Send back with a note' }).click();
+  await expect(page.getByRole('textbox', { name: 'What Needs to Change' })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByText('Adds the greeting file the gate looks for.')).toBeVisible();
   await expect(page.getByText('added line 1: hello')).toBeAttached();
   await page.getByRole('button', { name: 'Looks right' }).click();
