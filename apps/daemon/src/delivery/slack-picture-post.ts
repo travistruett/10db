@@ -9,6 +9,7 @@ import {
   type PassId,
   type ProjectDto,
   type ProjectId,
+  type TaskDto,
 } from '@10db/contracts';
 import {
   findOpenByFoldKey,
@@ -29,11 +30,14 @@ import { SlackError, SlackFailure, type SlackClient } from '../slack';
 import { raise, type DeliveryContext } from './context';
 import { signedOffTasks } from './pass-signed-off';
 import { picturePlan } from './pr-pictures';
+import { passPostText, taskPostText } from './slack-picture-text';
+import { noFacts, postLinkOf, taskPostFacts, type TaskPostFacts } from './slack-task-facts';
 
 // Decision 2026-11-23-a-projects-pictures-can-go-to-its-slack-channel: with the project's setting on,
 // a pass's pull request is announced once in its channel with the signed-off pages' before and after
 // pictures, and a finished task outside a pass is announced once per after picture with its own. A post
 // never delays or fails what it reports: it runs detached and, when it fails, leaves one Inbox item.
+// Its words are `slack-picture-text.ts`'s (decisions/2026-11-26-a-slack-pictures-post-links-its-issue-and-says-how-it-went.md).
 
 /** The most files one message carries; the rest are in the pull request. */
 const MAX_SLACK_PICTURES = 10;
@@ -76,10 +80,6 @@ const postedSetting = (projectId: ProjectId): string => `slack-pictures-posted.$
 const FOLD_PREFIX = 'pictures-to-slack:';
 const foldKeyOf = (id: PassId | TaskId): string => `${FOLD_PREFIX}${id}`;
 
-/** Slack reads these three characters as markup. */
-const escapeSlack = (text: string): string =>
-  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
 /** What was posted, by pass (its pull request's URL) or by task (its newest after picture's id): a repeat posts nothing. */
 function marksOf(
   db: SlackPicturePostDeps['state']['db'],
@@ -106,9 +106,6 @@ function reasonOf(error: unknown): string {
 
 /** What a task's mark holds once its skipped pictures were said; an after's id replaces it when one is posted. */
 const SKIPPED_MARK = 'skipped';
-
-const skippedMessage = (project: string, task: string, reason: string): string =>
-  `*${escapeSlack(project)}*: ${escapeSlack(task)} is done. No before and after pictures were taken. ${escapeSlack(reason)}.`;
 
 /** The message's cut: how many pictures did not fit in it. */
 const moreOf = (planned: number): number => planned - MAX_SLACK_PICTURES;
@@ -174,17 +171,13 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
     if (planned.length === 0) return;
     const files = await readFiles(planned);
     if (files.length === 0) return;
-    const more = moreOf(planned.length);
-    const comment = [
-      `*${escapeSlack(pass.name)}*: ${String(tasks.length)} ${tasks.length === 1 ? 'page' : 'pages'} signed off, as a pull request.`,
-      ...tasks.map((task) => `• ${escapeSlack(task.title)}`),
-      ...(more > 0
-        ? [
-            `${String(more)} more ${more === 1 ? 'picture is' : 'pictures are'} in the pull request.`,
-          ]
-        : []),
-      `<${url}|Open the pull request>`,
-    ].join('\n');
+    const comment = passPostText({
+      project: project.name,
+      pass: pass.name,
+      url,
+      pages: tasks.map((task) => ({ title: task.title, link: postLinkOf(task) })),
+      more: moreOf(planned.length),
+    });
 
     await uploadToChannel(client, target.channelId, comment, files);
 
@@ -214,6 +207,19 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
       foldKey: foldKeyOf(passId),
       refresh: true,
     });
+  }
+
+  /** What the post says of the task's run; a read that fails leaves the facts out rather than failing the post. */
+  function factsOf(project: ProjectDto, task: TaskDto): TaskPostFacts {
+    try {
+      return taskPostFacts(deps.state.db, project, task);
+    } catch (error) {
+      deps.logger.warn(
+        { taskId: task.id, error: error instanceof Error ? error.message : String(error) },
+        'task facts not read for Slack',
+      );
+      return noFacts(task);
+    }
   }
 
   /** The id of the task's newest after picture; null when it has none. */
@@ -265,19 +271,19 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
         marksOf(deps.state.db, project.id)[taskId] === SKIPPED_MARK
       )
         return settle(project);
+      const text = taskPostText(
+        {
+          project: project.name,
+          title: task.title,
+          why: task.why,
+          facts: factsOf(project, task),
+        },
+        { skipped: reason },
+      );
       await client.post({
         channel: target.channelId,
-        text: skippedMessage(project.name, task.title, reason),
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: skippedMessage(project.name, task.title, reason),
-              verbatim: true,
-            },
-          },
-        ],
+        text,
+        blocks: [{ type: 'section', text: { type: 'mrkdwn', text, verbatim: true } }],
       });
       deps.state.write((w) => {
         setAppSetting(w, postedSetting(project.id), {
@@ -304,13 +310,15 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
       .flatMap((picture) => (picture === null ? [] : [picture]));
     const files = await readFiles(planned);
     if (files.length === 0) return settle(project);
-    const more = moreOf(planned.length);
-    const comment = [
-      `*${escapeSlack(project.name)}*: ${escapeSlack(task.title)} is done.`,
-      ...(more > 0
-        ? [`${String(more)} more ${more === 1 ? 'picture is' : 'pictures are'} in 10db.`]
-        : []),
-    ].join('\n');
+    const comment = taskPostText(
+      {
+        project: project.name,
+        title: task.title,
+        why: task.why,
+        facts: factsOf(project, task),
+      },
+      { more: moreOf(planned.length) },
+    );
 
     await uploadToChannel(client, target.channelId, comment, files);
 

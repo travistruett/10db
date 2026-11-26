@@ -177,11 +177,17 @@ export function getWorkstream(db: DbReader, id: WorkstreamId): WorkstreamDto {
 
 export function listWorkstreams(
   db: DbReader,
-  filter: { states?: readonly WorkstreamState[]; projectId?: ProjectId; batchId?: BatchId } = {},
+  filter: {
+    states?: readonly WorkstreamState[];
+    projectId?: ProjectId;
+    batchId?: BatchId;
+    taskId?: TaskId;
+  } = {},
 ): WorkstreamDto[] {
   const where: SQL[] = [];
   if (filter.states) where.push(inArray(schema.workstreams.state, [...filter.states]));
   if (filter.projectId) where.push(eq(schema.workstreams.projectId, filter.projectId));
+  if (filter.taskId) where.push(eq(schema.workstreams.taskId, filter.taskId));
   if (filter.batchId) where.push(eq(schema.workstreams.batchId, filter.batchId));
   return db
     .select()
