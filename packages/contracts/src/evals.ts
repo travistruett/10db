@@ -353,3 +353,41 @@ export const EvalManifestResult = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(false), untracked: z.array(z.string()), message: z.string() }),
 ]);
 export type EvalManifestResult = z.infer<typeof EvalManifestResult>;
+
+/** Where a request for an eval came from, so the task says why it exists. */
+export const NewEvalOrigin = {
+  /** The Evals page's header button. */
+  Page: 'page',
+  /** A row of the No Eval tab. */
+  Gap: 'gap',
+  /** A goal's proposed eval in a Shape plan. */
+  PlanEval: 'plan_eval',
+} as const;
+export type NewEvalOrigin = (typeof NewEvalOrigin)[keyof typeof NewEvalOrigin];
+
+const RationaleText = z.string().trim().max(4000);
+
+/**
+ * What the New Eval form sends: the rationale an eval is written from, which becomes the brief of a task
+ * that drafts it. Only the behavior is required; each other section reads "not stated" when empty.
+ */
+export const NewEvalRequest = z.strictObject({
+  /** The behavior the eval pins, as the task's title names it. */
+  behavior: z
+    .string()
+    .trim()
+    .min(1)
+    .max(150)
+    .refine((b) => !/\p{Cc}/u.test(b), 'no control characters such as newlines or tabs'),
+  decision: RationaleText.default(''),
+  evidence: RationaleText.default(''),
+  oracle: RationaleText.default(''),
+  /** The cases to cover and the bar a model must reach. */
+  coverageAndBar: RationaleText.default(''),
+  models: RationaleText.default(''),
+  execution: RationaleText.default(''),
+  /** Tracked paths the behavior lives in; the lane reads them, and they pick the task's areas. */
+  where: z.array(RepoPath).max(20).default([]),
+  origin: z.enum([NewEvalOrigin.Page, NewEvalOrigin.Gap, NewEvalOrigin.PlanEval]).default('page'),
+});
+export type NewEvalBody = z.output<typeof NewEvalRequest>;

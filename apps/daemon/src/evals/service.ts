@@ -4,6 +4,7 @@ import {
   type EvalManifestResult,
   type EvalModelsDto,
   type EvalsDto,
+  type NewEvalBody,
   type EvalSuiteDetailDto,
   type HazardDef,
   type ProjectId,
@@ -22,6 +23,7 @@ import {
   type FoundCallSites,
 } from './call-sites';
 import { evalDrift } from './drift';
+import { evalTaskDraft, findEvalSkills, type EvalTaskDraft } from './new-eval-task';
 import { readEvalManifest, writeEvalManifest } from './manifest-store';
 import { buildModels } from './models';
 import { createEvalsCache, readEvals, type FoundEvals } from './read-results';
@@ -41,11 +43,16 @@ export interface EvalsService {
     repoPath: string,
     manifest: EvalManifest,
   ): Promise<EvalManifestResult>;
+  /** The task that drafts an eval for `request`: the project's eval skill and suites read at HEAD, never run. */
+  draftTask(projectId: ProjectId, repoPath: string, request: NewEvalBody): Promise<EvalTaskDraft>;
 }
 
 export interface EvalsDeps {
   readonly state: StateStore;
-  readonly git: Pick<Git, 'survey' | 'commitAt' | 'lastChangedAt' | 'grepAt' | 'filesAt'>;
+  readonly git: Pick<
+    Git,
+    'survey' | 'commitAt' | 'lastChangedAt' | 'grepAt' | 'filesAt' | 'surveyTexts'
+  >;
   readonly logger: Logger;
 }
 
@@ -231,6 +238,13 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
       if (result.kind === 'no_suite') throw new NotFoundError('Eval suite', key);
       if (result.kind === 'no_run') throw new NotFoundError('Eval run', run ?? '');
       return result.detail;
+    },
+    async draftTask(projectId, repoPath, request) {
+      const read = await found(repoPath);
+      const manifest = readEvalManifest(deps.state.db, projectId);
+      const suites = buildEvals(read, manifest).suites;
+      const skills = read === null ? [] : await findEvalSkills(deps.git, repoPath, read.tracked);
+      return evalTaskDraft(request, skills, suites);
     },
     async record(projectId, repoPath, manifest) {
       const read = await found(repoPath);

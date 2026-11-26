@@ -1,13 +1,14 @@
-import type {
-  EvalCallSiteCountDto,
-  EvalDriftDto,
-  EvalGapDto,
-  EvalsDto,
-  ProjectViewDto,
+import {
+  NewEvalOrigin,
+  type EvalCallSiteCountDto,
+  type EvalDriftDto,
+  type EvalGapDto,
+  type EvalsDto,
+  type ProjectViewDto,
 } from '@10db/contracts';
 import { Button, Code, Container, Group, Paper, Stack, Tabs, Text } from '@mantine/core';
 import { useClipboard } from '@mantine/hooks';
-import { IconCopy, IconFlask, IconListCheck } from '@tabler/icons-react';
+import { IconCopy, IconFlask, IconListCheck, IconPlus } from '@tabler/icons-react';
 import { DataTable } from 'mantine-datatable';
 import { useState, type ReactNode } from 'react';
 import { useEvals } from '../../daemon/evals-queries';
@@ -20,6 +21,7 @@ import { RaisedPanel } from '../../shell/raised-panel';
 import { TitleRow } from '../../shell/title-row';
 import { useSelectedProject } from '../../shell/selected-project';
 import { ByModel } from './by-model';
+import { NewEvalModal, type NewEvalPrefill } from './new-eval-modal';
 import { SuiteDrawer } from './suite-drawer';
 import { SuiteTable } from './suite-table';
 
@@ -209,10 +211,12 @@ function Gaps({
   gaps,
   callSites,
   project,
+  onNewEval,
 }: {
   readonly gaps: readonly EvalGapDto[] | null;
   readonly callSites: readonly EvalCallSiteCountDto[];
   readonly project: ProjectViewDto;
+  readonly onNewEval: (prefill: NewEvalPrefill) => void;
 }) {
   const copyAsk = useCopyAsk(project);
   if (gaps === null)
@@ -273,6 +277,28 @@ function Gaps({
                 </Text>
               ),
             },
+            {
+              accessor: 'newEval',
+              title: '',
+              textAlign: 'right',
+              render: (gap) => (
+                <Button
+                  size="compact-xs"
+                  variant="default"
+                  aria-label={`New Eval for ${gap.label}`}
+                  onClick={() => {
+                    onNewEval({
+                      behavior: gap.label,
+                      evidence: gap.why,
+                      where: [gap.where.replace(/:\d+$/u, '')],
+                      origin: NewEvalOrigin.Gap,
+                    });
+                  }}
+                >
+                  New Eval
+                </Button>
+              ),
+            },
           ]}
         />
       </RaisedPanel>
@@ -285,9 +311,24 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
   const [tab, setTab] = useState<EvalsTab>(EvalsTab.Suites);
   const [open, setOpen] = useState<string | null>(null);
   const copyAsk = useCopyAsk(project);
+  const [newEval, setNewEval] = useState<NewEvalPrefill | null>(null);
   const header = (description?: ReactNode) => (
     <>
-      <TitleRow title="Evals" meta={project.name} />
+      <TitleRow
+        title="Evals"
+        meta={project.name}
+        actions={
+          <Button
+            size="xs"
+            leftSection={<IconPlus size={14} stroke={1.5} />}
+            onClick={() => {
+              setNewEval({ origin: NewEvalOrigin.Page });
+            }}
+          >
+            New Eval
+          </Button>
+        }
+      />
       <PageIntro
         {...(description === undefined ? {} : { description })}
         toolbar={
@@ -356,8 +397,20 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
       ) : tab === EvalsTab.Models ? (
         <ByModel projectId={project.id} />
       ) : (
-        <Gaps gaps={data.gaps} callSites={data.callSites} project={project} />
+        <Gaps
+          gaps={data.gaps}
+          callSites={data.callSites}
+          project={project}
+          onNewEval={setNewEval}
+        />
       )}
+      <NewEvalModal
+        projectId={project.id}
+        prefill={newEval}
+        onClose={() => {
+          setNewEval(null);
+        }}
+      />
       <SuiteDrawer
         projectId={project.id}
         suiteKey={open}

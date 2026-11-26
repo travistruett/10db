@@ -1,5 +1,12 @@
-import { EvalModelsDto, EvalsDto, EvalSuiteDetailDto, type ProjectId } from '@10db/contracts';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import {
+  EvalModelsDto,
+  EvalsDto,
+  EvalSuiteDetailDto,
+  TaskDto,
+  type NewEvalBody,
+  type ProjectId,
+} from '@10db/contracts';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { readJson } from './client';
 import { useDaemon } from './provider';
 
@@ -53,5 +60,22 @@ export function useEvalModels(projectId: ProjectId, enabled: boolean) {
         await client.projects[':projectId']['eval-models'].$get({ param: { projectId } }),
         EvalModelsDto,
       ),
+  });
+}
+
+/** Files the task that drafts an eval; the lane that takes it writes the cases and never runs them. */
+export function useNewEvalTask(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: NewEvalBody) =>
+      readJson(
+        await client.projects[':projectId'].evals.tasks.$post({
+          param: { projectId },
+          json: input,
+        }),
+        TaskDto,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
   });
 }

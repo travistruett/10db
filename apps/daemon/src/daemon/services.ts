@@ -54,6 +54,7 @@ import {
   effectiveWatchpoints,
   type ProjectWatchpointsDto,
   type ProjectId,
+  type TaskInput,
 } from '@10db/contracts';
 import {
   closeTask,
@@ -173,6 +174,7 @@ import type { EventBus, LiveFrames, StateStore } from '../events';
 import { inspectFolder, proposeAreas, proposeSetupAreas, type AreaNamer } from '../folders';
 import { dropPendingPageLabels } from './page-label-guess';
 import { adoptGoal } from '../goals';
+import { classifyPath } from '../guard';
 import { taskSession } from '../chat';
 import type { EvalsService } from '../evals';
 import type { Git } from '../git';
@@ -459,6 +461,33 @@ export function createServices(deps: {
       );
   }
 
+  async function makeTask(
+    projectId: ProjectId,
+    input: TaskInput,
+    rigorSource?: RigorSource,
+  ): Promise<TaskDto> {
+    refuseArchived(db, projectId);
+    await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
+    const task = deps.state.write((ctx) => {
+      const known = listKinds(ctx.tx);
+      const kinds = input.kinds ?? [];
+      refuseRigorBelowKinds({ rigor: input.rigor ?? null, taskKinds: kinds, kinds: known });
+      return insertTask(
+        ctx,
+        projectId,
+        { ...input, kinds },
+        proposePlacement(getProject(ctx.tx, projectId), {
+          areas: input.areas,
+          kinds: kindsOfTask(kinds, known),
+          workspaceMode: input.workspaceMode,
+        }),
+        rigorSource,
+      );
+    });
+    deps.scheduler.requestTick();
+    return task;
+  }
+
   async function refuseMissingLandingBranch(
     project: ProjectDto,
     landing: TaskLanding | undefined,
@@ -524,27 +553,25 @@ export function createServices(deps: {
       return project;
     },
     listTasks: (projectId) => listTasks(db, projectId),
-    async createTask(projectId, input, rigorSource) {
-      refuseArchived(db, projectId);
-      await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
-      const task = deps.state.write((ctx) => {
-        const known = listKinds(ctx.tx);
-        const kinds = input.kinds ?? [];
-        refuseRigorBelowKinds({ rigor: input.rigor ?? null, taskKinds: kinds, kinds: known });
-        return insertTask(
-          ctx,
-          projectId,
-          { ...input, kinds },
-          proposePlacement(getProject(ctx.tx, projectId), {
-            areas: input.areas,
-            kinds: kindsOfTask(kinds, known),
-            workspaceMode: input.workspaceMode,
-          }),
-          rigorSource,
-        );
+    createTask: makeTask,
+    async newEvalTask(projectId, request) {
+      const project = getProject(db, projectId);
+      const draft = await deps.evals.draftTask(projectId, project.repoPath, request);
+      // The task works in the areas the behavior's files fall in; with none named, in the project's catch-all or first.
+      const named = new Set(
+        request.where.flatMap((path) => classifyPath(path, project.areas, []).areas),
+      );
+      const areas =
+        named.size > 0
+          ? [...named]
+          : [(project.areas.find((a) => a.catchAll === true) ?? project.areas[0])?.name ?? ''];
+      return makeTask(projectId, {
+        title: draft.title,
+        why: draft.why,
+        description: draft.description,
+        acceptanceCriteria: [...draft.acceptanceCriteria],
+        areas,
       });
-      deps.scheduler.requestTick();
-      return task;
     },
     holdTask: (taskId) => deps.state.write((ctx) => holdTask(ctx, taskId)),
     settleSizing: (taskIds) => deps.sizing.settled(taskIds, deps.sizingWaitMs),
