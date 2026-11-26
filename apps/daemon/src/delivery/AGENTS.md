@@ -21,8 +21,4 @@
 - A `Card` needs `tier`, `urgency` and `closesWhen` (`decisions/2026-11-17-every-card-has-a-tier.md`); a notice
   goes through `post` or `postIn`.
 - `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`), else `autoTestBudgetLine` (`test-budget-reason.ts`) writes one from value cards (`decisions/2026-11-25-a-pull-request-over-its-test-budget-says-why-from-its-value-cards.md`).
-- A Your-folder run of a Commit Directly project with a gate commits on its own lane branch, `10db/lane/<8 hex>`
-  (`lane-branch.ts` `laneBranchOf`, `Git.commitOnBranch`), never on the base; `runCommits` reads the lane, and
-  `lane-landing.ts` `landLaneWork` lands it as one commit once its last check passed. The stray-branch card skips
-  lane branches (`decisions/2026-11-26-a-commit-directly-lane-commits-on-its-own-branch-until-its-gate-passes.md`).
 - A check red on the base too waits, not fixes (`ci-failure-class.ts`, `decisions/2026-11-24-a-red-base-is-one-fix-not-a-fix-per-pull-request.md`); one the change failed reruns once first (`ci-rerun.ts`, `decisions/2026-11-25-a-failed-required-check-is-rerun-once-before-a-fix.md`).
