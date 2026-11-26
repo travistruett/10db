@@ -976,7 +976,8 @@ describe('the Linear reporter', () => {
             { do: 'mcp', tool: 'report_linear_post', args: { postId: '$post', body: BODY } },
             {
               do: 'tool',
-              toolName: `${PREFIX}save_comment`,
+              // Whichever Linear server the account's agent has: the brief names its tools by full name.
+              toolName: '$linear:save_comment',
               input: { issueId: ISSUE, body: '$comment.body' },
               result: JSON.stringify({ id: 'comment-1' }),
             },

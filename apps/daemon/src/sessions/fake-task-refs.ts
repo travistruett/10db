@@ -12,14 +12,21 @@ const COMMENT_REF = /^\$comment\.(\w+)$/;
 const POST = '$post';
 // A line of the brief's owed updates: `- <post id>: <event>, attempt <n>, {detail}`; a recorded one has `comments [` instead.
 const OWED_LINE = /^- (lnp_[0-9a-f-]{36}): [a-z_]+, attempt \d+, \{/gm;
+// A Linear tool a script names without its server: `$linear:save_comment`. The server is whichever one the brief's
+// tool list names first, since which servers an account's agent has depends on the machine (a builder's own Linear
+// server, or the claude.ai connector).
+const LINEAR_TOOL = /\$linear:(\w+)/g;
+const LINEAR_PREFIX = /(mcp__[\w-]+?__)save_comment/;
 
 export class FakeTaskRefs {
   private readonly ids = new Map<string, string>();
   private readonly owed: string[];
+  private readonly linearPrefix: string | undefined;
   private readonly comment: { issueId?: string; body?: string } = {};
 
   constructor(prompt = '') {
     this.owed = [...prompt.matchAll(OWED_LINE)].map((m) => m[1] ?? '');
+    this.linearPrefix = LINEAR_PREFIX.exec(prompt)?.[1];
   }
 
   /** Remembers each title and id pair in a tool result's JSON; a result that is not JSON teaches nothing. */
@@ -40,13 +47,24 @@ export class FakeTaskRefs {
     return out;
   }
 
-  /** The script's steps with each `each_owed` group written out once per owed update, `$post` replaced by its id. */
+  /**
+   * The script's steps with each `each_owed` group written out once per owed update, `$post` replaced by its id
+   * and `$linear:<tool>` by the full name of that tool on the brief's first Linear server.
+   */
   expand(steps: readonly FakeStep[]): FakeStep[] {
     return steps.flatMap((step) =>
       step.do === 'each_owed'
         ? this.owed.flatMap((id) =>
             step.steps.map((inner) =>
-              FakeStep.parse(JSON.parse(JSON.stringify(inner).replaceAll(POST, id))),
+              FakeStep.parse(
+                JSON.parse(
+                  JSON.stringify(inner)
+                    .replaceAll(POST, id)
+                    .replaceAll(LINEAR_TOOL, (named, tool: string) =>
+                      this.linearPrefix === undefined ? named : `${this.linearPrefix}${tool}`,
+                    ),
+                ),
+              ),
             ),
           )
         : [step],

@@ -736,7 +736,7 @@
           },
           {
             "do": "tool",
-            "toolName": "mcp__linear__save_comment",
+            "toolName": "$linear:save_comment",
             "input": {
               "issueId": "$comment.issueId",
               "body": "$comment.body"
@@ -767,7 +767,7 @@
           },
           {
             "do": "tool",
-            "toolName": "mcp__linear__save_comment",
+            "toolName": "$linear:save_comment",
             "input": {
               "issueId": "$comment.issueId",
               "body": "$comment.body"
@@ -798,7 +798,7 @@
           },
           {
             "do": "tool",
-            "toolName": "mcp__linear__save_comment",
+            "toolName": "$linear:save_comment",
             "input": {
               "issueId": "$comment.issueId",
               "body": "$comment.body"
