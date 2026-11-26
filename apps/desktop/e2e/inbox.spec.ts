@@ -1,11 +1,18 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { chromium, expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import {
+  chromium,
+  expect,
+  test,
+  type APIRequestContext,
+  type Browser,
+  type Page,
+} from '@playwright/test';
 import { z } from 'zod';
 import { daemonUrl } from './daemon-url';
 import { E2E_DATA } from './paths';
 import { auth, createProject } from './shape-project';
-import { freeLoopbackPort, startTlsStandIn } from './tls-standin';
+import { freeLoopbackPort, startTlsStandIn, type TlsStandIn } from './tls-standin';
 
 // Core flow 3: the builder answers Inbox cards from the keyboard. The questions are written into the
 // idle daemon's database, into a project of their own, and answered again when the spec ends so no
@@ -80,7 +87,11 @@ test.beforeAll(async ({ request }) => {
 });
 
 test.afterAll(async ({ request }) => {
-  await resolveOwnCards(request);
+  try {
+    await resolveOwnCards(request);
+  } finally {
+    await stopSharing(request);
+  }
 });
 
 test('answering a question with a digit and Enter selects the next row and lowers the badge', async ({
@@ -142,12 +153,8 @@ test('answering a question with a digit and Enter selects the next row and lower
 
 const Shared = z.looseObject({ state: z.string() });
 
-test('a card is answered from a phone paired with a code made in Devices', async ({
-  page,
-  request,
-}) => {
-  const fqdn = 'mac.e2e.ts.net';
-  const title = 'Ship the phone Inbox?';
+/** Writes one open question card into the project, as a lane's `ask_human` would. */
+function seedQuestion(title: string): void {
   execFileSync(
     'pnpm',
     [
@@ -167,26 +174,58 @@ test('a card is answered from a phone paired with a code made in Devices', async
     ],
     { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
   );
-  // Sharing on, as the Remote Access page does: the name's certificate asked for, then Share.
-  const sharePort = await freeLoopbackPort();
-  expect((await request.post(`${daemonUrl}/sharing/certificate`, { headers: auth })).ok()).toBe(
-    true,
-  );
-  const shared = await request.put(`${daemonUrl}/sharing`, {
-    headers: auth,
-    data: { enabled: true, port: sharePort },
-  });
-  expect(shared.ok()).toBe(true);
-  await expect
-    .poll(
-      async () =>
-        Shared.parse(await (await request.get(`${daemonUrl}/sharing`, { headers: auth })).json())
-          .state,
-    )
-    .toBe('ready');
-  const standIn = await startTlsStandIn({ fqdn, sharePort, login: 'e2e@example.com' });
-  const browser = await chromium.launch({ args: [`--host-resolver-rules=MAP ${fqdn} 127.0.0.1`] });
+}
+
+const DeviceIds = z.array(z.looseObject({ id: z.string() }));
+
+/**
+ * Turns sharing off and revokes every device. It runs in afterAll whatever the phone test did, so a failure
+ * halfway never leaves the share listener on for the specs after it; it tolerates a reply that isn't what it
+ * expects, so the cleanup never hides the failure that came first.
+ */
+async function stopSharing(request: APIRequestContext): Promise<void> {
+  const list = await request.get(`${daemonUrl}/devices`, { headers: auth });
+  const devices = DeviceIds.safeParse(list.ok() ? await list.json().catch(() => null) : null);
+  for (const device of devices.success ? devices.data : []) {
+    await request.delete(`${daemonUrl}/devices/${device.id}`, { headers: auth });
+  }
+  await request.put(`${daemonUrl}/sharing`, { headers: auth, data: { enabled: false } });
+}
+
+test('a card is answered from a phone paired with a code made in Devices', async ({
+  page,
+  request,
+}) => {
+  const fqdn = 'mac.e2e.ts.net';
+  const title = 'Ship the phone Inbox?';
+  // Left open: the Mac's page shows it once it has loaded, which is when "the answered card is gone" means something.
+  const stays = 'Hold the phone card for later?';
+  seedQuestion(title);
+  seedQuestion(stays);
+
+  let standIn: TlsStandIn | undefined;
+  let browser: Browser | undefined;
   try {
+    // Sharing on, as the Remote Access page does: the name's certificate asked for, then Share.
+    const sharePort = await freeLoopbackPort();
+    expect((await request.post(`${daemonUrl}/sharing/certificate`, { headers: auth })).ok()).toBe(
+      true,
+    );
+    const shared = await request.put(`${daemonUrl}/sharing`, {
+      headers: auth,
+      data: { enabled: true, port: sharePort },
+    });
+    expect(shared.ok()).toBe(true);
+    await expect
+      .poll(
+        async () =>
+          Shared.parse(await (await request.get(`${daemonUrl}/sharing`, { headers: auth })).json())
+            .state,
+      )
+      .toBe('ready');
+    standIn = await startTlsStandIn({ fqdn, sharePort, login: 'e2e@example.com' });
+    browser = await chromium.launch({ args: [`--host-resolver-rules=MAP ${fqdn} 127.0.0.1`] });
+
     await page.setViewportSize({ width: 1280, height: 900 });
     await toolsAreInstalled(page);
     await page.goto('/settings/devices');
@@ -203,7 +242,11 @@ test('a card is answered from a phone paired with a code made in Devices', async
       ignoreHTTPSErrors: true,
       colorScheme: 'dark',
       reducedMotion: 'reduce',
+      // The test says nothing about the worker, and one would cache the page between steps.
+      serviceWorkers: 'block',
     });
+    phone.setDefaultTimeout(20_000);
+    // The runner traces this context too (`trace: retain-on-failure`), so a failure keeps the phone's trace.
     const mobile = await phone.newPage();
     await mobile.goto(`https://${fqdn}:${String(standIn.port)}/app/pair#code=${code}`);
     await expect(mobile.getByRole('heading', { name: /^Paired with/ })).toBeVisible();
@@ -212,22 +255,16 @@ test('a card is answered from a phone paired with a code made in Devices', async
     await mobile.getByRole('link', { name: 'Open Inbox' }).click();
     // The row in the list sheet, not the card's own title, which may already be drawn under the sheet.
     await mobile.getByRole('listbox', { name: 'Inbox' }).getByText(title).click();
-    await mobile.getByText('Yes', { exact: true }).first().click();
+    await mobile.getByRole('radio', { name: /Yes/ }).click();
     await mobile.getByRole('button', { name: /^Send Answer/ }).click();
     await expect(mobile.getByText(title)).toHaveCount(0);
-    // The Mac sees the same: the card is gone from its Inbox.
+    // The Mac sees the same: once its list has loaded (the card left open is in it), the answered card is not.
     await page.goto(inboxUrl('&kind=question'));
+    await expect(page.getByText(stays).first()).toBeVisible();
     await expect(page.getByText(title)).toHaveCount(0);
   } finally {
-    await browser.close();
-    await standIn.close();
-    const devices = z
-      .array(z.looseObject({ id: z.string() }))
-      .parse(await (await request.get(`${daemonUrl}/devices`, { headers: auth })).json());
-    for (const device of devices) {
-      await request.delete(`${daemonUrl}/devices/${device.id}`, { headers: auth });
-    }
-    await request.put(`${daemonUrl}/sharing`, { headers: auth, data: { enabled: false } });
+    await browser?.close();
+    await standIn?.close();
     await page.unrouteAll({ behavior: 'ignoreErrors' });
   }
 });

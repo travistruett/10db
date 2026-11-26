@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { request as httpRequest } from 'node:http';
 import { createServer } from 'node:https';
 import { connect, createServer as createTcpServer } from 'node:net';
+import type { Duplex } from 'node:stream';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,25 +24,32 @@ export interface TlsStandIn {
 function selfSigned(dir: string): { key: Buffer; cert: Buffer } {
   const key = join(dir, 'key.pem');
   const cert = join(dir, 'cert.pem');
-  execFileSync(
-    'openssl',
-    [
-      'req',
-      '-x509',
-      '-newkey',
-      'rsa:2048',
-      '-nodes',
-      '-days',
-      '1',
-      '-subj',
-      '/CN=e2e',
-      '-keyout',
-      key,
-      '-out',
-      cert,
-    ],
-    { stdio: 'ignore' },
-  );
+  try {
+    execFileSync(
+      'openssl',
+      [
+        'req',
+        '-x509',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-days',
+        '1',
+        '-subj',
+        '/CN=e2e',
+        '-keyout',
+        key,
+        '-out',
+        cert,
+      ],
+      { stdio: ['ignore', 'ignore', 'pipe'] },
+    );
+  } catch (error) {
+    // openssl's own words, which say whether it is missing or refused an option.
+    rmSync(dir, { recursive: true, force: true });
+    const stderr = error instanceof Error && 'stderr' in error ? String(error.stderr) : '';
+    throw new StandInError(`openssl could not make the stand-in's certificate: ${stderr}`);
+  }
   return { key: readFileSync(key), cert: readFileSync(cert) };
 }
 
@@ -78,16 +86,22 @@ export async function startTlsStandIn(target: {
       },
       (answer) => {
         res.writeHead(answer.statusCode ?? 502, answer.headers);
+        answer.on('error', () => res.destroy());
         answer.pipe(res);
       },
     );
     upstream.on('error', () => {
-      res.writeHead(502).end();
+      if (res.headersSent) res.destroy();
+      else res.writeHead(502).end();
     });
     req.pipe(upstream);
   });
   // The event stream: forward the upgrade by hand with the same headers.
+  // The event streams it forwards: closing the proxy ends them too, which `closeAllConnections` does not.
+  const upgraded = new Set<Duplex>();
   server.on('upgrade', (req, socket, head) => {
+    upgraded.add(socket);
+    socket.on('close', () => upgraded.delete(socket));
     const upstream = connect(target.sharePort, '127.0.0.1', () => {
       const headers = forwarded(req.headers);
       const lines = Object.entries(headers).flatMap(([name, value]) =>
@@ -109,6 +123,7 @@ export async function startTlsStandIn(target: {
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections();
+        for (const socket of upgraded) socket.destroy();
         server.close(() => {
           rmSync(dir, { recursive: true, force: true });
           resolve();

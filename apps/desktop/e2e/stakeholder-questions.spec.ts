@@ -127,7 +127,7 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(slackCard.getByRole('button', { name: /options/ })).toHaveCount(0);
   await expect(slackCard.getByRole('button', { name: 'Add Workspace' })).toHaveCount(0);
   // The project's Slack reads Off; choosing Acme is kept across a reload.
-  const projectSlack = slackCard.getByRole('combobox', { name: 'Slack for e2e' });
+  const projectSlack = slackCard.getByRole('combobox', { name: 'Slack for e2e', exact: true });
   await expect(projectSlack).toHaveValue('Off');
   await projectSlack.click();
   await page.getByRole('option', { name: 'Acme' }).click();
@@ -136,6 +136,7 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(
     page.getByRole('group', { name: 'Slack', exact: true }).getByRole('combobox', {
       name: 'Slack for e2e',
+      exact: true,
     }),
   ).toHaveValue('Acme');
   // The project stays on Acme: the question below is routed with it bound.

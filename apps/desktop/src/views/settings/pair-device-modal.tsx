@@ -1,5 +1,5 @@
 import { Button, Group, Image, Loader, Modal, Stack, Text } from '@mantine/core';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { DeviceChange, DeviceChangedData, EventType } from '@10db/contracts';
 import { useDevices, usePairingCode } from '../../daemon/device-queries';
@@ -75,8 +75,11 @@ function PairBody({ onClose }: { readonly onClose: () => void }) {
       },
     });
   };
+  const started = useRef(false);
   useEffect(() => {
-    // Once, when the dialog opens.
+    // Once, when the dialog opens: a second pass (StrictMode) would make a code that cancels the first.
+    if (started.current) return;
+    started.current = true;
     make();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
