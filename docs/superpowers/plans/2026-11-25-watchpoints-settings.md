@@ -69,8 +69,8 @@ UI only. It is the same on every provider.
    - A project page never PUTs `/settings/watchpoints`. Remove `withLoudness`'s write to your list and the drawer's
      "Applies to" choice. Remove `watchpoint-lists.ts` helpers that become dead.
 4. **The drawer** (`watchpoint-drawer.tsx`), shared by both pages:
-   - Fields: Name, Why It Matters, Matches These Paths (with the checkout's matching count on the project page
-     only), Lines, What to Check, When It Matches.
+   - Fields: Name, Why It Matters, Matches These Paths ~~(with the checkout's matching count on the project page
+     only)~~, Lines, What to Check, When It Matches. Struck: no route counts a glob's files in the checkout.
    - On one of yours opened from a project page, it says "Changes apply to this project only" and shows **Use Default**
      when it is an override.
    - The Lines placeholder becomes "One pattern per line", not example regexes.
