@@ -107,6 +107,50 @@
                 "clipped": {
                   "type": "boolean"
                 },
+                "evalDefinition": {
+                  "type": "object",
+                  "properties": {
+                    "suiteKey": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "changes": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "bar_lowered",
+                              "cases_removed",
+                              "golden_changed",
+                              "grader_changed",
+                              "model_judge_added",
+                              "unclassified"
+                            ]
+                          },
+                          "line": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "line"
+                        ]
+                      }
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "suiteKey",
+                    "changes",
+                    "reason"
+                  ]
+                },
                 "agentNote": {
                   "type": [
                     "string",

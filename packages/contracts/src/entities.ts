@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AcceptanceDetail } from './acceptance';
 import { StoredWatchpointDetail } from './watchpoint-hit';
+import { StoredEvalCoverageDetail } from './eval-coverage';
 import { USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN } from './accounts';
 import { AllowedCommands } from './allowed-commands';
 import { ModelSetting } from './catalogue';
@@ -1482,6 +1483,14 @@ export const EvidenceDto = z.discriminatedUnion('kind', [
     kind: z.literal(EvidenceKind.Watchpoint),
     /** The watchpoints the run's change hit, with their hunks. A detail that does not parse reads as unreadable. */
     detail: StoredWatchpointDetail,
+    command: z.null(),
+    exitCode: z.null(),
+  }),
+  z.object({
+    ...EvidenceBase,
+    kind: z.literal(EvidenceKind.EvalCoverage),
+    /** The suites the run's change touched. A detail that does not parse reads as unreadable. */
+    detail: StoredEvalCoverageDetail,
     command: z.null(),
     exitCode: z.null(),
   }),

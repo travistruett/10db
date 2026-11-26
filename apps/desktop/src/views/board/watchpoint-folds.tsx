@@ -72,6 +72,9 @@ function FileHunks({ file }: { readonly file: WatchpointFileView }) {
               : `+${String(file.added)} −${String(file.removed ?? 0)}`}
         </Text>
       </Group>
+      {file.evalDefinition === undefined ? null : (
+        <Note who="Eval">{file.evalDefinition.reason}</Note>
+      )}
       {file.agentNote === null ? null : <Note who="Agent">{file.agentNote}</Note>}
       {file.reviewerNote === null ? null : (
         <Note who="Reviewer" tone={checkTone(file.reviewerNote)}>

@@ -731,6 +731,8 @@ export interface Git extends ChatGit {
    * pathspec), as an ISO time in UTC; null with no glob, no commit or none that touched one.
    */
   lastChangedAt(repo: string, globs: readonly string[]): Promise<string | null>;
+  /** When commit `rev` was committed, as an ISO time in UTC; null when `rev` names no commit. */
+  commitTimeOf(repo: string, rev: string): Promise<string | null>;
   /** The merge, cherry-pick, revert, rebase or `git am` waiting in the worktree, or null. */
   operationInProgress(repo: string): Promise<OperationInProgress | null>;
   /** Filters the tree at `rev`, or the checkout's own attributes, ask for; empty when none. */
@@ -4899,6 +4901,14 @@ export function createGit(opts: GitOptions = {}): Git {
         ...globs.map((g) => `:(glob)${g}`),
       ]);
       const at = out.trim();
+      return at === '' ? null : new Date(at).toISOString();
+    },
+    async commitTimeOf(repo, rev) {
+      if (rev.startsWith('-')) return null;
+      const c = await pinned(repo);
+      const sha = await revParse(c, `${rev}^{commit}`);
+      if (sha === null) return null;
+      const at = (await git(c, ['log', '-1', '--format=%cI', sha, '--'])).trim();
       return at === '' ? null : new Date(at).toISOString();
     },
     async diffSince(repo, base, head, maxBytes, paths) {
