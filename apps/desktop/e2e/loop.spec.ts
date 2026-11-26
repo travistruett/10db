@@ -101,6 +101,9 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   page,
   request,
 }) => {
+  // The whole journey, from a task through review, the Inbox and both watchpoint scopes to a reload, runs
+  // past the default two minutes on CI's WebKit.
+  test.setTimeout(240_000);
   // The window opens on the first run while there is no project (first-run.spec.ts covers it), so
   // the project on the disposable repo is created through the API before the page loads.
   const created = await request.post(`${daemonUrl}/projects`, {
