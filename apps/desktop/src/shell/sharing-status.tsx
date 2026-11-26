@@ -16,12 +16,13 @@ const STEP_NAME: Readonly<Record<SharingStep, string>> = {
 
 /**
  * What the rail's foot says while this Mac is shared: "Shared on your tailnet", or "Sharing paused: <step>"
- * when a step that passed fails. Nothing while sharing is off. It links to Remote Access.
+ * when a step that passed fails. Nothing while sharing is off, or while Tailscale is gone: with no steps to
+ * read, nothing is set up, as Remote Access reads it. It links to Remote Access.
  */
 export function SharingStatus() {
   const status = useSharing().data;
   const labels = useRailMode().labels;
-  if (status === undefined) return null;
+  if (status === undefined || status.steps.length === 0) return null;
   let line: string;
   if (status.state === SharingState.Ready) line = 'Shared on your tailnet';
   else if (status.state === SharingState.Paused) {

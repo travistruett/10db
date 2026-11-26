@@ -124,8 +124,8 @@ import { settleSecondOpinionModel } from './decision-offer';
 import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
 import {
   createLinearImport,
+  answerReporterCard,
   createLinearReporter,
-  dismissReporterPosts,
   reporterConversations,
   reporterHooks,
   reporterSettings,
@@ -359,6 +359,7 @@ import {
   createBrowserHost,
   createBrowserLaunches,
   createPlaywrightCamera,
+  createSignInReporter,
   launchChromium,
   refusedCamera,
   MISSED_AFTER_MS,
@@ -423,6 +424,7 @@ import {
   createLedgerSweep,
   reapLaneProcessLedgers,
   secretFilesIn,
+  dockerAccess,
   sweepSystemTempDirs,
   sweepSystemTempFiles,
   type SweepReport,
@@ -479,7 +481,8 @@ import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { autoDocker } from './auto-docker';
 import { GATE_HOLD_RETRY_MS, holdStaleGates } from './gate-hold';
-import { MAX_DOCKER_SCAN_BYTES, originBaseCommit } from './docker-need';
+import { commandCallsDocker, MAX_DOCKER_SCAN_BYTES, originBaseCommit } from './docker-need';
+import { createAppStart, type AppStart } from '../app-start';
 import { createProjectPinStore } from './checkout-pins';
 import { resolveNoticeCards } from './notice-sweep';
 import {
@@ -494,7 +497,12 @@ import { createAnswerWriter } from './answer-writer-launch';
 import { createAreaNamer } from './area-namer';
 import { systemListeners, type ListenerReader } from './listening-ports';
 import { loopbackProbe, type AddressProbe } from './loopback-probe';
-import { createEvalLiveRuns, createEvalsService } from '../evals';
+import {
+  createEvalLiveRuns,
+  createEvalsAssessor,
+  createEvalsService,
+  subscribeEvalAssessment,
+} from '../evals';
 import { createServices } from './services';
 import {
   allSandboxRootsOf,
@@ -759,7 +767,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
   mkdirSync(join(opts.dataDir, 'logs'), { recursive: true });
-  const lock = acquireInstanceLock(opts.dataDir);
+  // On the system clock, not the injected one: the waits here are for another process.
+  const lock = await acquireInstanceLock(opts.dataDir);
   const logPath = join(opts.dataDir, 'logs', 'daemon.log');
   rotateLogFile(logPath);
   const logFile = fileDestination(logPath);
@@ -1052,6 +1061,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     bytesOf: (sha256) => pictures?.bytesOf(sha256) ?? 0,
   };
   let preview: Preview | null = null;
+  let appStart: AppStart | null = null;
   // The API's port, once it listens: an app address may not name it, and no picture is taken before.
   let listenPort: number | null = null;
   const listening = Promise.withResolvers<number>();
@@ -1153,14 +1163,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onParkAnswer: parkAnswers,
     log: logger,
     onFlagAnswerInWrite: (ctx, item, answer) => {
-      dismissReporterPosts(ctx, item);
-      return applySkippedChoice(ctx, item, answer)
+      const retried = answerReporterCard(ctx, item, answer);
+      const after = applySkippedChoice(ctx, item, answer)
         ? () => {
             startFollowUps();
           }
         : chatWorkRef === null
           ? undefined
           : applyChatWorkAnswer(chatWorkRef, logger, ctx, item, answer);
+      if (retried === null) return after;
+      return () => {
+        after?.();
+        lateLinearReporter?.wake(retried);
+      };
     },
     onCheckAnswer: (ctx, item, answer) => {
       const signOffPage = startPageSignOff;
@@ -1674,6 +1689,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           state,
           inbox,
           logger: logger.child({ component: 'slack-pictures' }),
+          skipped: (taskId) => {
+            const outlook = pictures?.outlook(taskId);
+            return outlook?.kind === 'skipped' ? outlook.reason : null;
+          },
           channelOf: (projectId) => {
             const sharing = readSlackSharing(state.db, projectId);
             // The channel belongs to the workspace it was picked in; another binding now leaves it unused.
@@ -1781,8 +1800,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // Built after the moves, which tell it when a project moved.
   let accountLimits: AccountLimits | null = null;
-  // Built later; a move wakes it, so the project's updates held for a Linear sign-in go out on the new account.
-  let movedLinearReporter: Pick<LinearReporter, 'wake'> | null = null;
+  // Built later. A move wakes it, so the project's updates held for a Linear sign-in go out on the new account,
+  // and so does a Retry on its Inbox card, so the failed updates go out now.
+  let lateLinearReporter: Pick<LinearReporter, 'wake'> | null = null;
   const moveBack = createMoveBack({
     state,
     clock,
@@ -1805,7 +1825,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onMoved: (projectId) => {
       accountLimits?.forget(projectId);
       scheduler?.requestTick();
-      movedLinearReporter?.wake(projectId);
+      lateLinearReporter?.wake(projectId);
     },
   });
   accountLimits = createAccountLimits({
@@ -2677,7 +2697,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         : null,
   });
   const previewNow = preview;
+  // The project's own start command brings its dev stack up when a picture or the dev login finds the
+  // app address down, run under the gate's sandbox with Docker allowed.
+  const appStartNow = createAppStart({
+    state,
+    inbox,
+    gate: gateRunner,
+    dataDir: opts.dataDir,
+    clock,
+    logger: logger.child({ component: 'app-start' }),
+    sessionEnv: () => launcher.projectEnv(),
+    rules: (project) => listPermissionRules(state.db, project.id, null),
+    checkouts: () => allCheckouts(state.db),
+    dockerSockets: () => dockerAccess(homedir(), launcher.projectEnv()).sockets,
+    usesDocker: (project) => commandCallsDocker(git, project, project.appStartCommand),
+  });
+  appStart = appStartNow;
   pictures = startPictures({
+    ensureApp: (projectId, signal) => appStartNow.ensureUp(projectId, signal),
     onNoAnswer: (projectId) => {
       void previewNow.lost(projectId);
     },
@@ -2691,6 +2728,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     devUi: opts.devUiOrigin ? { origin: opts.devUiOrigin, token: devUiToken(opts.dataDir) } : null,
     state,
     bus,
+    signInReporter: createSignInReporter({ state, inbox }),
     camera: pictureCamera,
     daemonPort: listening.promise,
     prepareBrowser,
@@ -2831,6 +2869,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     hazardAssessor,
   );
+  // Assesses each project's evals the same way: when it is added, when a commit changes an eval file, and
+  // when the Evals page asks.
+  const evalsAssessor = createEvalsAssessor({
+    state,
+    git,
+    evals: evalsService,
+    asker: areaNamer,
+    logger: logger.child({ module: 'evals' }),
+  });
+  const unsubscribeEvalAssessment = subscribeEvalAssessment(
+    bus,
+    {
+      projectOfWorkstream: (id) => {
+        try {
+          return getWorkstreamRow(state.db, id).projectId;
+        } catch {
+          return null;
+        }
+      },
+    },
+    evalsAssessor,
+  );
   const github = createGithubServices({
     clock,
     spawn: opts.githubLoginSpawn ?? spawnGhLogin({ git: gitBin }),
@@ -2899,7 +2959,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // The Linear reporter: one short session of its own per task with updates owed, on the explore engine.
   const linearReporter = createLinearReporter({
-    fetch: outbound,
+    send: outbound,
     state,
     clock,
     log: logger.child({ component: 'linear-reporter' }),
@@ -2907,8 +2967,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     conversations: reporterConversations(state),
     signIns: linearSignIns,
     inbox,
+    picturesOutlook: (taskId) => pictures.outlook(taskId),
   });
-  movedLinearReporter = linearReporter;
+  lateLinearReporter = linearReporter;
   /** Each service's own next step once it works for a project. Linear: the project reports to it. */
   const whenConnectedWorks: Record<ConnectableService, (projectId: ProjectId) => void> = {
     linear: (projectId) => {
@@ -3171,6 +3232,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     probe: opts.probe ?? loopbackProbe(),
     hazards: hazardAssessor,
     evals: evalsService,
+    evalsAssessor,
     evalLive: evalLiveRuns,
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
@@ -3378,10 +3440,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   };
   const deviceSockets = createSocketRegistry();
+  const sharingLog = logger.child({ component: 'sharing' });
   const sharing = createSharingService({
     state,
     clock,
-    log: logger.child({ component: 'sharing' }),
+    log: sharingLog,
     cli: opts.tailscaleOff ? () => null : () => opts.tailscaleCli ?? findTailscaleCli(existsSync),
     run: createTailscaleRun,
     listen: (sharePort) =>
@@ -3389,7 +3452,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         fetch: (req, env) => app.fetch(req, env),
         port: sharePort,
         sockets: deviceSockets,
-        holderOf: lsofHolderOf,
+        // An unreadable holder is logged and shown as "another process": the port is still held, so the share
+        // stays blocked rather than turning into a retry or a non-refusal error.
+        holderOf: (port) =>
+          lsofHolderOf(port).catch((error: unknown) => {
+            sharingLog.warn(
+              { error: String(error) },
+              'sharing: could not read the port holder from lsof',
+            );
+            return null;
+          }),
       }),
     sockets: deviceSockets,
     mainPort: () => listenPort ?? opts.port,
@@ -3652,6 +3724,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       clearInterval(pictureRetries);
       copyRecheck.cancel();
       await pictures?.stop();
+      await appStart?.stop();
       // The dev server 10db started ends with it; a builder's own is never 10db's to stop.
       await preview?.stop();
       // Each live eval run ends `interrupted` and its stop command runs, before the store closes.
@@ -3687,6 +3760,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeYields();
       unsubscribeHazards();
       hazardAssessor.stop();
+      unsubscribeEvalAssessment();
+      evalsAssessor.stop();
       watcher?.stop();
       keepAwake.stop();
       // A probe in flight writes to the database; the runner can ask for another while it stops.

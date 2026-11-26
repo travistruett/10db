@@ -1,4 +1,5 @@
 import {
+  EvalAssessmentState,
   EvalLiveRefusal,
   EvalLiveRunState,
   type EvalLivePreviewDto,
@@ -6,25 +7,26 @@ import {
   type ProjectId,
 } from '@10db/contracts';
 import { Button, Code, Group, Loader, Modal, Stack, Text } from '@mantine/core';
-import { useClipboard } from '@mantine/hooks';
-import { IconCopy } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import { DaemonRequestError } from '../../daemon/client';
 import {
+  useEvals,
   useEvalLivePreview,
   useEvalLiveRuns,
   useStartEvalLive,
   useStopEvalLive,
 } from '../../daemon/evals-queries';
+import { useSelectedProject } from '../../shell/selected-project';
 import { SettingsSectionKey } from '../settings/sections';
+import { AssessAction, useEvalAssessment } from './assess-action';
 import { costText, dayTimeText } from './eval-figures';
 
 const RefusalBody = z.object({ refusal: z.string() });
 
 const REFUSAL_WORDS: Readonly<Record<EvalLiveRefusal, string>> = {
-  [EvalLiveRefusal.NoLive]: "The assessment hasn't said how this command runs.",
+  [EvalLiveRefusal.NoLive]: '10db does not know how this command runs yet. Assess Now to find out.',
   [EvalLiveRefusal.NoSandbox]: "This 10db runs no sandbox, so it can't run a live eval.",
   [EvalLiveRefusal.DockerOff]: "This runs in Docker and the project's Docker switch is off.",
   [EvalLiveRefusal.ManifestChanged]: 'What the suite runs changed since this window opened.',
@@ -396,25 +398,19 @@ export function LiveRunControls({
   const preview = useEvalLivePreview(projectId, suiteKey, true);
   const runs = useEvalLiveRuns(projectId, suiteKey);
   const [opened, setOpened] = useState(false);
-  const clipboard = useClipboard({ timeout: 1500 });
+  const { project } = useSelectedProject();
+  const evals = useEvals(projectId);
+  const assessment = useEvalAssessment(
+    evals.data?.assessment ?? { state: EvalAssessmentState.Idle, reason: null },
+    projectId,
+  );
   if (preview.data?.refusal === EvalLiveRefusal.NoLive) {
     return (
       <Stack gap={4} align="flex-start">
         <Text size="xs" c="dimmed">
           {REFUSAL_WORDS[EvalLiveRefusal.NoLive]}
         </Text>
-        <Button
-          size="compact-xs"
-          variant="default"
-          leftSection={<IconCopy size={14} stroke={1.5} />}
-          onClick={() => {
-            clipboard.copy(
-              `Use the 10db-task skill to assess the evals of the 10db project ${projectId}, and record how the live command of ${suiteKey} runs.`,
-            );
-          }}
-        >
-          {clipboard.copied ? 'Copied' : 'Copy the Ask'}
-        </Button>
+        {project === null ? null : <AssessAction assessment={assessment} project={project} />}
       </Stack>
     );
   }

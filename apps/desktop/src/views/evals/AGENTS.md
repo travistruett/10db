@@ -12,12 +12,17 @@
   changed, so a dot is read against runs of the same eval), the cost of a run per model, p50 latency and the
   run's date. A status is text, never a pill (DESIGN.md, Tables). A cost the report lacks reads "unknown",
   never $0 (`eval-figures.ts`). The table lists every suite: a project has tens, so it isn't paged.
-- Before an assessment (`assessedAt` null) a bordered line says the suites were found by file names and offers
-  Copy the Ask, the sentence to paste in any Claude Code or Codex session that runs the `10db-task` skill's
-  "Assess a project's evals" (it records the manifest through the CLI). Eval files found by name that no suite
-  links to list under the table, folded past six.
+- The byline under the title says what is found and when it was assessed ("Assessed 2 hours ago", the exact time and
+  commit in a tooltip; "Assessing…"; "Not assessed yet"). It never names a commit or says no model ran.
+- `assess-action.tsx` is the one **Assess Now** button (busy while an assessment runs, whoever started it). Where the
+  daemon says it has no model to ask (`unavailable`: a Codex-only builder with no other account), the same place
+  offers "Copy a Prompt for Your Own Session", the sentence to paste in a session that runs the `10db-task` skill's
+  "Assess a project's evals", and says why. `AssessmentNotice` heads Suites with the state: assessing, unavailable,
+  failed (the reason) or "Not assessed yet" with Assess Now. A project with no eval file and no result is the
+  `NoEvals` empty state: New Eval (primary) and Assess Now. Eval files found by name that no suite links to list
+  under the table, folded past six.
 - No Eval lists the manifest's gaps (LLM work with no eval, where, and why it counts); before an assessment it
-  is an `EmptyState` with Copy the Ask, since only an agent can know.
+  is an `EmptyState` with Assess Now.
 - A row opens `SuiteDrawer` (`suite-drawer.tsx`, `GET /projects/:id/evals/:suiteKey?run=`): the bar; the gates
   of one run, failing first, with a model switch when the run has several (the failing model first); every run
   (newest first, eight shown), where a click shows that run whole; flaky cases across the last runs; and what
@@ -29,8 +34,8 @@
   adds "eval changed <date>" and the drawer says that run may not measure the eval as it is now; the drawer's
   runs mark "new eval" where the fingerprint changed.
 - When HEAD has moved past the assessed commit and the manifest misses something (`drift`), Suites opens with a
-  bordered "Since the assessment at <commit>" line: new eval files no suite links, new LLM calls with no eval and
-  paths the manifest names that are gone, each listed, with Copy the Ask. It is information on the page only.
+  bordered "Changed since the last assessment" line: new eval files no suite links, new LLM calls with no eval and
+  paths the manifest names that are gone, each listed, with Assess Now. It is information on the page only.
 - No Eval says under each `where` whether the gap was `assessed` or `found at HEAD` by a call pattern, and above
   the table how many sites each pattern found, so a pattern that is too broad shows.
 - By Model (`by-model.tsx`, `GET /projects/:id/eval-models`, fetched when the tab opens): one row per model, its
@@ -53,6 +58,6 @@
   once and the run reads "Stopping" until its row settles. The end shows the state in words (text, never a pill),
   the exit code and the output's tail; an interrupted run whose stop command didn't run says the work in the
   containers may still be running. The window can close while a run goes: the drawer lists the last five runs, and
-  a running one keeps its Stop. A suite whose manifest entry has no `live` shows "The assessment hasn't said how
-  this command runs" and Copy the Ask, no Run. `eval.live_run_changed` refetches the evals queries and the covered
+  a running one keeps its Stop. A suite whose manifest entry has no `live` says 10db doesn't know how the
+  command runs yet and offers Assess Now (or the prompt to paste where 10db can't assess), no Run. `eval.live_run_changed` refetches the evals queries and the covered
   tasks' markers.

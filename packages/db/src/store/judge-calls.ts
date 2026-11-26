@@ -23,7 +23,10 @@ export interface JudgeCallInput {
   /** Each yes/no question's probability of yes; absent for a choice. */
   readonly probabilities?: Readonly<Record<string, number>> | null;
   readonly outcome: JudgeOutcome;
+  /** The whole wait, over every try. */
   readonly latencyMs: number | null;
+  /** How many tries the call took; one when absent. */
+  readonly attempts?: number;
   readonly costUsd: number | null;
   readonly workstreamId: WorkstreamId | null;
   readonly taskId: TaskId | null;
@@ -89,6 +92,7 @@ export function pageJudgeCalls(
       probabilities: schema.judgeCalls.probabilities,
       outcome: schema.judgeCalls.outcome,
       latencyMs: schema.judgeCalls.latencyMs,
+      attempts: schema.judgeCalls.attempts,
       costUsd: schema.judgeCalls.costUsd,
       workstreamId: schema.judgeCalls.workstreamId,
       taskId: schema.judgeCalls.taskId,

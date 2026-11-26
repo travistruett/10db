@@ -617,6 +617,9 @@ export class ConversationUnreadError extends Error {
   override readonly name = 'ConversationUnreadError';
 }
 
+/** What a one-shot question says when no account can be asked it. */
+export const NO_DEFAULT_ACCOUNT = 'There is no default account to ask.';
+
 /** The model gave no answer: it was refused, it failed, or it did not answer in time. */
 export class CompletionError extends Error {
   override readonly name = 'CompletionError';

@@ -1,5 +1,6 @@
 import {
   RIGOR_FIGURES_PERIODS,
+  type AcceptanceChecking,
   type AcceptanceRow,
   type ProjectId,
   type RigorFiguresPeriod,
@@ -8,8 +9,15 @@ import { Alert, Anchor, Loader, SegmentedControl, Stack, Table, Text, Title } fr
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useAcceptanceFigures } from '../../daemon/acceptance-queries';
-import { notCheckingLine } from '../board/acceptance-line';
 import { RaisedPanel } from '../../shell/raised-panel';
+
+/** Why acceptance isn't checking, shown under the counts. */
+function notCheckingLine(checking: AcceptanceChecking): string | null {
+  if (checking.on) return null;
+  return checking.reason === 'no_account'
+    ? "Acceptance isn't checking: no account can answer decisions"
+    : "Acceptance isn't checking: it's off in Settings";
+}
 
 function periodOf(value: string): RigorFiguresPeriod | null {
   return RIGOR_FIGURES_PERIODS.find((p) => String(p) === value) ?? null;
@@ -67,7 +75,7 @@ function RunList({
 
 /**
  * What acceptance did over a period: tasks that finished with nothing to ask, runs a check sent back
- * (acceptance, review or QA), and acceptance cards that came to the builder. The Board's counts link here.
+ * (acceptance, review or QA), and acceptance cards that came to the builder.
  */
 export function AcceptancePanel({ projectId }: { readonly projectId: ProjectId | null }) {
   const [days, setDays] = useState<RigorFiguresPeriod>(7);

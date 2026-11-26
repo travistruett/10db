@@ -1,8 +1,17 @@
 import { z } from 'zod';
 import { AccountId, JudgeCallId, TaskId, WorkstreamId } from './ids';
 
-/** How long a decision waits for a model before today's rule applies. */
+/** How long an attended decision waits for a model before today's rule applies: a person is waiting. */
 export const JUDGE_TIMEOUT_MS = 4_000;
+
+/** Who waits on a judge call: a person in the session, or nobody, as in a lane's run. */
+export const JudgeBudget = { Attended: 'attended', Unattended: 'unattended' } as const;
+export type JudgeBudget = (typeof JudgeBudget)[keyof typeof JudgeBudget];
+
+/** How long one try of an unattended call waits: long enough for a slow answer or a large prompt. */
+export const JUDGE_UNATTENDED_TIMEOUT_MS = 12_000;
+/** The tries an unattended call makes before today's rule applies; only a timeout is tried again. */
+export const JUDGE_UNATTENDED_ATTEMPTS = 2;
 
 /** A routine decision the daemon can ask a fast model to make. */
 export const JudgeDecision = {
@@ -242,7 +251,10 @@ export const JudgeCallDto = z.object({
   /** Each question's probability of yes, for a decision that asks several yes/no questions; null for a choice. */
   probabilities: z.record(z.string(), z.number()).nullable(),
   outcome: z.enum(JudgeOutcome),
+  /** The whole wait, over every try. */
   latencyMs: z.number().nullable(),
+  /** How many tries the call took: an unattended call that timed out once is tried again. */
+  attempts: z.int().min(1),
   costUsd: z.number().nullable(),
   workstreamId: WorkstreamId.nullable(),
   taskId: TaskId.nullable(),

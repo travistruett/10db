@@ -292,19 +292,18 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(
     page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),
   ).toBeVisible();
-  // The header counts the week's acceptance work: the finished task raised no card. The e2e daemon runs
-  // with the judge off, so nothing is checking and the line says why.
-  await expect(page.getByRole('button', { name: 'Completed 1' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Sent back 0' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Sent to you 0' })).toBeVisible();
-  await expect(
-    page.getByText("Acceptance isn't checking: no account can answer decisions"),
-  ).toBeVisible();
-  // The number opens Factory's Acceptance panel, which lists the task behind it.
-  await page.getByRole('button', { name: 'Completed 1' }).click();
+  // The Board carries no acceptance counts; Factory's Metrics holds them. The finished task raised no
+  // card, and the e2e daemon runs with the judge off, so nothing is checking and the panel says why.
+  await expect(page.getByText(/last 7 days/)).toHaveCount(0);
+  await open(page, 'Factory');
+  await page.getByRole('radiogroup', { name: 'Factory view' }).getByText('Metrics').click();
   await expect(
     page.getByRole('table', { name: 'Completed runs' }).getByRole('button', { name: TASK }),
   ).toBeVisible();
+  await expect(
+    page.getByText("Acceptance isn't checking: no account can answer decisions"),
+  ).toBeVisible();
+  await page.getByRole('radiogroup', { name: 'Factory view' }).getByText('Live').click();
   // Factory shows each project as a row with its bar, whose verdict is the row's name; the finished task is
   // under the project's merged today, and with no goals anywhere the project holds no goal list.
   await open(page, 'Factory');

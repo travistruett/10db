@@ -19,7 +19,7 @@ const COLUMNS: DataTableColumn<EvalSuiteDto>[] = [
             {suite.label}
           </Text>
           {under === null ? null : (
-            <Text size="xs" c="dimmed" lineClamp={1} title={under}>
+            <Text size="xs" c="dimmed" lineClamp={2} title={under}>
               {under}
             </Text>
           )}

@@ -1,6 +1,9 @@
 import {
   AccountKind,
   JUDGE_TIMEOUT_MS,
+  JUDGE_UNATTENDED_ATTEMPTS,
+  JUDGE_UNATTENDED_TIMEOUT_MS,
+  JudgeBudget,
   mintId,
   type AccountId,
   type AskedDecision,
@@ -19,7 +22,7 @@ import type { Logger } from '../log';
 import { askModel, askModelNouls, type ModelQuestion } from './ask';
 import type { NoulQuestion } from './noul-questions';
 import type { BedrockClientFactory } from './bedrock';
-import { ModelApi, modelApi, optionsText } from './openrouter';
+import { isTypeSafeModel, ModelApi, modelApi, optionsText } from './openrouter';
 import { NO_DECISION_CREDENTIAL, secretsOf, type JudgeCredential } from './credential';
 import type { JudgeCallHealth } from './outage';
 import { untilAborted } from './until-aborted';
@@ -37,6 +40,8 @@ export interface JudgeRequest {
   readonly options: readonly [string, ...string[]];
   /** What each option means, by option. The call's logged question carries them as text. */
   readonly criteria?: Readonly<Record<string, string>>;
+  /** Who waits on the call; attended when absent. */
+  readonly budget?: JudgeBudget;
   readonly workstreamId?: WorkstreamId;
   readonly taskId?: TaskId;
   readonly signal?: AbortSignal;
@@ -68,8 +73,10 @@ export interface AssessRequest {
   readonly questions: Readonly<Record<string, NoulQuestion>>;
   /** What the call's row records of the answers at the decision's floor; pure, so the caller can read them again. */
   readonly read: (probabilities: Readonly<Record<string, number>>, floor: number) => AssessReading;
-  /** How long this call may take; the judge's own timeout when absent. */
+  /** How long one try of this call may take; the budget's own timeout when absent. */
   readonly timeoutMs?: number;
+  /** Who waits on the call; attended when absent. */
+  readonly budget?: JudgeBudget;
   /**
    * A second opinion: its failures are its own, so they neither raise the judge's outage card nor show as the
    * account falling back to rules.
@@ -187,13 +194,22 @@ const FALLBACK_OUTCOME = {
   stopped: 'stopped',
 } as const satisfies Record<string, JudgeOutcome>;
 
+/** The kind of account a try ran on: the provider an outage card names. Null when no credential was read. */
+type TriedOn = JudgeCredential['kind'] | null;
+
 type Attempt<T> =
-  | { readonly kind: 'answered'; readonly answer: T; readonly latencyMs: number }
+  | {
+      readonly kind: 'answered';
+      readonly answer: T;
+      readonly latencyMs: number;
+      readonly accountKind: TriedOn;
+    }
   | {
       readonly kind: 'fallback';
       readonly reason: 'no_key' | 'timeout' | 'error' | 'stopped';
       readonly detail: string;
       readonly latencyMs: number | null;
+      readonly accountKind: TriedOn;
     };
 
 const TEST_STATE =
@@ -230,14 +246,13 @@ function choiceOf(
 }
 
 /**
- * The OpenRouter endpoint yes/no questions go to: a System One model's own, the decisions endpoint for a model its
- * list names, and chat for every other model. With the list unread a model is asked as a chat model, since only
- * System One is known to answer a `noul`.
+ * The OpenRouter endpoint yes/no questions go to: the decisions endpoint for a TypeSafe model or a model the list
+ * names, and chat for every other model. With the list unread any other model is asked as a chat model, since only
+ * TypeSafe's are known to answer a `noul` on the decisions endpoint.
  */
 function noulApi(model: string, decisionModels: () => ReadonlySet<string> | null): ModelApi {
-  const api = modelApi(model, decisionModels);
-  if (api !== ModelApi.Decisions) return api;
-  return decisionModels() === null ? ModelApi.Chat : ModelApi.Decisions;
+  if (modelApi(model, decisionModels) === ModelApi.Chat) return ModelApi.Chat;
+  return decisionModels() !== null || isTypeSafeModel(model) ? ModelApi.Decisions : ModelApi.Chat;
 }
 
 function messageOf(error: unknown): string {
@@ -301,6 +316,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
           reason: 'no_key',
           detail: NO_DECISION_CREDENTIAL,
           latencyMs: null,
+          accountKind: null,
         };
       const price =
         credential.kind === AccountKind.OpenRouter ? undefined : listedPrice(accountId, model);
@@ -320,14 +336,16 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         // A credential lookup the SDK makes before it reads the signal (an SSO profile) is bounded too.
         controller.signal,
       );
-      return { kind: 'answered', answer, latencyMs: elapsed() };
+      return { kind: 'answered', answer, latencyMs: elapsed(), accountKind: credential.kind };
     } catch (error) {
+      const accountKind = credential?.kind ?? null;
       if (timeout.fired)
         return {
           kind: 'fallback',
           reason: 'timeout',
           detail: `No answer within ${String(timeoutMs / 1000)} s`,
           latencyMs: elapsed(),
+          accountKind,
         };
       // The caller's signal is a cancel or a shutdown: the call did not fail, it was stopped.
       if (q.signal?.aborted)
@@ -336,12 +354,14 @@ export function createJudge(deps: JudgeDeps): JudgeService {
           reason: 'stopped',
           detail: 'Stopped by a cancel or a shutdown',
           latencyMs: elapsed(),
+          accountKind,
         };
       return {
         kind: 'fallback',
         reason: 'error',
         detail: scrub(messageOf(error), credential),
         latencyMs: elapsed(),
+        accountKind,
       };
     } finally {
       timer.cancel();
@@ -362,6 +382,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       readonly taskId?: TaskId | undefined;
       readonly signal?: AbortSignal | undefined;
       readonly timeoutMs?: number | undefined;
+      readonly budget?: JudgeBudget | undefined;
       readonly secondary?: boolean | undefined;
     },
     send: (transport: Transport) => Promise<T>,
@@ -376,6 +397,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       const config = getJudgeConfig(deps.state.db);
       const decision = config.decisions[req.decision];
       model = decision.model;
+      let attempts = 1;
       const log = (fields: LoggedAnswer & { readonly latencyMs: number | null }): JudgeCallId =>
         deps.state.write((ctx) =>
           insertJudgeCall(ctx, {
@@ -388,6 +410,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
             probabilities: fields.probabilities ?? null,
             outcome: fields.outcome,
             latencyMs: fields.latencyMs,
+            attempts,
             costUsd: fields.costUsd,
             workstreamId: req.workstreamId ?? null,
             taskId: req.taskId ?? null,
@@ -419,13 +442,35 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       if (!config.enabled || !decision.enabled)
         return fallback('off', 'Switched off in Settings', null);
 
-      const result = await attempt(
-        model,
-        config.accountId,
-        req,
-        req.timeoutMs ?? deps.timeoutMs ?? JUDGE_TIMEOUT_MS,
-        send,
-      );
+      const unattended = req.budget === JudgeBudget.Unattended;
+      const timeoutMs =
+        req.timeoutMs ??
+        (unattended ? JUDGE_UNATTENDED_TIMEOUT_MS : (deps.timeoutMs ?? JUDGE_TIMEOUT_MS));
+      const maxAttempts = unattended ? JUDGE_UNATTENDED_ATTEMPTS : 1;
+      let result = await attempt(model, config.accountId, req, timeoutMs, send);
+      let waitedMs = result.latencyMs ?? 0;
+      // Only a slow answer is tried again: an error or a missing key would fail the same way.
+      while (
+        result.kind === 'fallback' &&
+        result.reason === 'timeout' &&
+        attempts < maxAttempts &&
+        req.signal?.aborted !== true
+      ) {
+        attempts += 1;
+        result = await attempt(model, config.accountId, req, timeoutMs, send);
+        waitedMs += result.latencyMs ?? 0;
+      }
+      if (attempts > 1) {
+        if (result.kind === 'answered') result = { ...result, latencyMs: waitedMs };
+        else
+          result = {
+            ...result,
+            latencyMs: waitedMs,
+            ...(result.reason === 'timeout'
+              ? { detail: `${result.detail} in ${String(attempts)} tries` }
+              : {}),
+          };
+      }
       // A decision's own calls say whether the account is answering; a test of another model does not.
       if (
         req.secondary !== true &&
@@ -439,6 +484,8 @@ export function createJudge(deps: JudgeDeps): JudgeService {
             kind: 'failed',
             reason: result.reason,
             detail: result.detail,
+            model,
+            accountKind: result.accountKind,
             ...(req.taskId === undefined ? {} : { taskId: req.taskId }),
             ...(req.workstreamId === undefined ? {} : { workstreamId: req.workstreamId }),
           });

@@ -60,7 +60,14 @@ checklist is in [CONTRIBUTING.md](CONTRIBUTING.md#set-up).
 
 - `mise install && pnpm install`: install the pinned tools, the dependencies and the git hooks.
   This includes Rust (about 1 GB). `make setup` does the same and asks before installing Rust.
-- `pnpm dev`: run the daemon and the browser UI with a shared dev token, with state in `.dev/`.
+- `pnpm dev`: run the daemon and the browser UI with a shared dev token, with state in `.dev/`. Here `TENDB_TAILSCALE`
+  defaults to `off`, so Settings > Remote Access says "Remote Access needs Tailscale". To try sharing from it:
+  - `TENDB_TAILSCALE=on pnpm dev` uses the Tailscale CLI on this Mac, which must be installed and signed in.
+    Sharing from this daemon changes this Mac's Tailscale serve settings, which the installed 10db app uses too.
+  - `TENDB_TAILSCALE=on TENDB_TAILSCALE_CLI=$PWD/apps/desktop/e2e/fake-tailscale.mjs pnpm dev`, from the checkout
+    root, uses the e2e's fake CLI instead. It keeps the serve mapping in a file and names the Mac `mac.e2e.ts.net`, so
+    nothing is shared beyond this Mac. `TENDB_TAILSCALE=on` is needed with the path too: the default `off` makes the path do
+    nothing.
 - `pnpm --filter @10db/desktop dev:shell`: open the Tauri window ("10db Dev", its own app identifier, data in `.dev/data`) against that daemon. It runs beside the installed app. Run `pnpm --filter @10db/desktop sidecar` once first.
 - `pnpm dev:factory`: the UI with hot reload over your installed 10db; see [Hot-reload the UI over your real 10db](#hot-reload-the-ui-over-your-real-10db).
 - 10db's tools in Claude Code, Codex or another MCP client (list, create, edit and start tasks; read the

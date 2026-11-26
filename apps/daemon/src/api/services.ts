@@ -936,6 +936,8 @@ export interface ApiServices extends PlanRecordServices {
   scanNetworkHosts(projectId: ProjectId): Promise<FoundHostDto[]>;
   /** The project's eval files at HEAD and result files from its checkout, with the recorded manifest laid over them; nothing is run. */
   evals(projectId: ProjectId): Promise<EvalsDto>;
+  /** Assesses the project's evals with a model now, and answers the page as it stands after. */
+  assessEvals(projectId: ProjectId): Promise<EvalsDto>;
   /** Every model the project's results graded, with its newest result per suite; nothing is run. */
   evalModels(projectId: ProjectId): Promise<EvalModelsDto>;
   /** The suites each of the project's tasks touched, with their state against the checkout's results; nothing is run. */

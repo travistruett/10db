@@ -90,7 +90,7 @@ pub fn run() {
             } else {
                 Some(Supervisor::start(
                     app.path().resource_dir()?,
-                    connection::data_dir().join("logs"),
+                    connection::data_dir(),
                 ))
             };
             app.manage(Sidecar(supervisor));

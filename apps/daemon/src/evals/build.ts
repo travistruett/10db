@@ -1,4 +1,4 @@
-import { EvalGapSource, EvalSuiteKey } from '@10db/contracts';
+import { EvalAssessmentState, EvalGapSource, EvalSuiteKey } from '@10db/contracts';
 import type {
   EvalCallSiteCountDto,
   EvalDriftDto,
@@ -121,6 +121,7 @@ export function buildEvals(
   return {
     commit: found?.commit ?? null,
     assessedAt: manifest?.assessedAt ?? null,
+    assessment: { state: EvalAssessmentState.Idle, reason: null },
     suites,
     unlinked: (found?.markers.definitions ?? []).filter((p) => !linked.has(p)).sort(),
     gaps:

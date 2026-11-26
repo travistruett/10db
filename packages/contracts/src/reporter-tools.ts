@@ -34,7 +34,7 @@ export interface PickedLinearStatus {
 /** What the reporter's agent reads about each tool. */
 export const REPORTER_TOOL_DESCRIPTIONS: Readonly<Record<ReporterToolName, string>> = {
   [ReporterToolName.ReportLinearPost]:
-    'Record the updates you made on the issue, by their post ids: the comment ids you wrote, the status you set and any attachment. Or record them as withheld, naming the pattern a refused write matched. Call it once per update you finished.',
+    "Hand 10db the comment for one owed update: its post id and the comment's body, nothing else (no footer; 10db adds it). The result is the exact arguments to give Linear's save_comment, which you then call unchanged. Or give the post id with nothingToReport true when the update has nothing to say. Call it once per owed update.",
   [ReporterToolName.PickLinearStatus]:
     "Ask 10db which status to set on the issue for an owed update. Give the update's post id, the issue's current status and every status of its team, each with its name, type and position as Linear lists them. 10db answers the status name to set with Linear's save_issue state, or null to set none. Only the status it answers can be set.",
   [ReporterToolName.UploadLinearPicture]:
