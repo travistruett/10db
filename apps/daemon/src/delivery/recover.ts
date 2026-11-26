@@ -21,6 +21,7 @@ import {
   listOpenLocalCopies,
   listWorkstreams,
   patchBatch,
+  queuedCopyBatchIds,
   transitionBatch,
 } from '@10db/db';
 import type { StateStore } from '../events';
@@ -181,7 +182,10 @@ export async function recoverBatches(deps: {
   // A row the restart interrupted is then cut again, as it is, so its tasks keep their place in line.
   // One that can't be (something is left that only a person can settle, or an earlier daemon's row
   // with no workstreams) is deleted with a card saying its tasks did not start.
+  // A copy waiting for its turn has begun no cut and keeps its place; `advanceCopyQueue` cuts it.
+  const waiting = new Set(queuedCopyBatchIds(db));
   for (const batch of listBatches(db, { states: [BatchState.Cutting] })) {
+    if (waiting.has(batch.id)) continue;
     const left = deps.worktrees ? await removeCutWorktree(deps.worktrees.root, batch) : null;
     if (left === null && (await cuttableAgain(batch))) {
       deps.starter.recut(batch.id);

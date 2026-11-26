@@ -294,7 +294,10 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await expect(page.getByRole('checkbox', { name: 'Settings', exact: true })).toBeVisible();
   await scan(page, 480, 'dark', 'picker');
   // The one Apply split the server area and gave its open task every part, so it lost no file.
-  const tasks = await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth });
+  const tasks = await request.get(`${daemonUrl}/projects/${projectId}/tasks`, {
+    headers: auth,
+    maxRetries: 2,
+  });
   expect(
     TaskAreas.parse(await tasks.json()).find((task) => task.title === 'Server work')?.areas,
   ).toEqual(['server-shared', 'auth', 'orders', 'search']);
@@ -446,7 +449,10 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
 
   // Discard on People's row: its changes are deleted and it leaves the queue; the pass made its task,
   // so the task leaves the Board too.
-  const passes = await request.get(`${daemonUrl}/passes?live=true`, { headers: auth });
+  const passes = await request.get(`${daemonUrl}/passes?live=true`, {
+    headers: auth,
+    maxRetries: 2,
+  });
   const peopleTask = Live.parse(await passes.json())
     .find((view) => view.pass.projectId === projectId)
     ?.pages.find((p) => p.label === 'People');
@@ -457,7 +463,10 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await discardPage.getByRole('button', { name: 'Discard Page' }).click();
   await expect(discardPage).toHaveCount(0);
   await expect(row(page, 'People')).toHaveCount(0);
-  const board = await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth });
+  const board = await request.get(`${daemonUrl}/projects/${projectId}/tasks`, {
+    headers: auth,
+    maxRetries: 2,
+  });
   expect(TaskIds.parse(await board.json()).map((task) => task.id)).not.toContain(
     peopleTask?.taskId,
   );
@@ -475,7 +484,10 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await expect(page.getByRole('button', { name: 'Start Pass', exact: true })).toBeVisible();
   await expect
     .poll(async () => {
-      const live = await request.get(`${daemonUrl}/passes?live=true`, { headers: auth });
+      const live = await request.get(`${daemonUrl}/passes?live=true`, {
+        headers: auth,
+        maxRetries: 2,
+      });
       return Live.parse(await live.json()).filter((view) => view.pass.projectId === projectId);
     })
     .toEqual([]);

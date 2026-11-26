@@ -72,7 +72,13 @@ export function createLinearSignIns(deps: {
           return {
             ...base,
             via: LinearVia.Server,
-            signedIn: own.some((r) => r.state === McpSignInState.SignedIn),
+            // Only a read that says so is a yes or a no: a status that couldn't be read, or a sign-in under
+            // way or ended in error, leaves it unknown, and nothing is held for it.
+            signedIn: own.some((r) => r.state === McpSignInState.SignedIn)
+              ? true
+              : own.every((r) => r.state === McpSignInState.NotSignedIn)
+                ? false
+                : null,
             note: null,
             serverKey: own[0]?.key ?? null,
           };

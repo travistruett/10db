@@ -94,6 +94,7 @@ import {
   createUsageReports,
   type AccountLimits,
 } from '../accounts';
+import { createPushService, createVapidKeyStore, startPushSender } from '../push';
 import { createApp, type SelfUpdateServices } from '../api';
 import { Listener } from '../listeners';
 import {
@@ -217,6 +218,7 @@ import {
   resolvePnpm,
   resumePassSettles,
   copyIdForBatch,
+  subscribeCopyQueue,
   subscribeKeptWorkLanding,
   subscribePassSettles,
   subscribePrWatch,
@@ -495,7 +497,12 @@ import { createAnswerWriter } from './answer-writer-launch';
 import { createAreaNamer } from './area-namer';
 import { systemListeners, type ListenerReader } from './listening-ports';
 import { loopbackProbe, type AddressProbe } from './loopback-probe';
-import { createEvalsService } from '../evals';
+import {
+  createEvalLiveRuns,
+  createEvalsAssessor,
+  createEvalsService,
+  subscribeEvalAssessment,
+} from '../evals';
 import { createServices } from './services';
 import {
   allSandboxRootsOf,
@@ -615,6 +622,10 @@ export interface DaemonOptions {
   readonly benchmarksOff?: boolean;
   /** Sharing finds and runs no Tailscale CLI (`TENDB_TAILSCALE=off`). */
   readonly tailscaleOff?: boolean;
+  /** The Tailscale CLI to run (`TENDB_TAILSCALE_CLI`), in place of the search for the installed one. */
+  readonly tailscaleCli?: string;
+  /** The built served app the share listener serves at `/app/`; absent when this build carries none. */
+  readonly appDir?: string | null;
   readonly fetch?: typeof fetch;
   /** The `fetch` a Plan session's Figma tools post a mock-up with and read assets with; the real one by default. */
   readonly figmaFetch?: typeof fetch;
@@ -1497,6 +1508,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // all, so the machine never runs more than `limits.gateSlots` at once.
   // Every project's gate gets its Docker switch as it stands, and 10db turns it on when the gate
   // needs Docker (`auto-docker.ts`); an install or a generator names no project and is left alone.
+  const evalsService = createEvalsService({
+    state,
+    git,
+    logger: logger.child({ module: 'evals' }),
+  });
   const gateRunner = autoDocker(
     createGateRunner({
       sandbox: sandboxes?.gate ?? null,
@@ -1514,6 +1530,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   );
   const gateSlots = createGateSlots(limits.gateSlots);
+  // A suite's live arm, run only when the builder presses Run: the unslotted runner (a paid eval never
+  // holds or waits for a gate slot), its processes in a ledger. What a crash left is stopped here, after
+  // the ledger reap above and before any route serves.
+  const evalLiveRuns = createEvalLiveRuns({
+    gates: gateRunner,
+    ledgers:
+      ledgerSweep && sandboxRoots
+        ? { sweep: ledgerSweep, root: sandboxRoots.files, processes: laneProcesses }
+        : null,
+    sandboxed: sandboxes?.gate != null,
+    dataDir: opts.dataDir,
+    state,
+    evals: evalsService,
+    checkouts: () => allCheckouts(state.db),
+    env: () => launcher.projectEnv(),
+    logger: logger.child({ component: 'eval-live' }),
+  });
+  await evalLiveRuns.recoverAtStart();
   // A final gate that fails because the project's dev stack isn't up to date waits, with one card,
   // instead of failing the task. It wraps the limiter, so a waiting gate holds no slot.
   const gateHoldDeps = {
@@ -2287,11 +2321,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   resumeModelMarks({ state, clock });
   // What each task conversation's session streams now; the runner owns those sessions.
   const laneLive = createLiveRegistry();
-  const evalsService = createEvalsService({
-    state,
-    git,
-    logger: logger.child({ module: 'evals' }),
-  });
   const createdRunner = createRunner({
     evals: evalsService,
     judge,
@@ -2405,6 +2434,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     inbox,
     waits: queueWaits,
+    held: () => admission.held(),
     clock,
     logger: logger.child({ component: 'stalls' }),
   });
@@ -2747,6 +2777,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     if (!pageLabelsAbort.signal.aborted) logger.warn({ err: error }, 'page labels not guessed');
   });
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
+  // A copy waiting for its turn is cut when the copy in progress ends, and once now: recovery left
+  // a waiting copy as it was, so one whose predecessor ended while the daemon was down goes on.
+  const unsubscribeCopyQueue = subscribeCopyQueue(bus, starter);
+  starter.advanceCopyQueue();
   // A pass that closes unsettled gets its Move card, and each closed pass is looked at again; a
   // started task's saved work goes once its work lands.
   const unsubscribePassSettles = subscribePassSettles(bus, delivery);
@@ -2821,6 +2855,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       },
     },
     hazardAssessor,
+  );
+  // Assesses each project's evals the same way: when it is added, when a commit changes an eval file, and
+  // when the Evals page asks.
+  const evalsAssessor = createEvalsAssessor({
+    state,
+    git,
+    evals: evalsService,
+    asker: areaNamer,
+    logger: logger.child({ module: 'evals' }),
+  });
+  const unsubscribeEvalAssessment = subscribeEvalAssessment(
+    bus,
+    {
+      projectOfWorkstream: (id) => {
+        try {
+          return getWorkstreamRow(state.db, id).projectId;
+        } catch {
+          return null;
+        }
+      },
+    },
+    evalsAssessor,
   );
   const github = createGithubServices({
     clock,
@@ -3164,6 +3220,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     probe: opts.probe ?? loopbackProbe(),
     hazards: hazardAssessor,
     evals: evalsService,
+    evalsAssessor,
+    evalLive: evalLiveRuns,
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
       git.gitDirs(repoPath).catch(() => undefined);
@@ -3374,7 +3432,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     clock,
     log: logger.child({ component: 'sharing' }),
-    cli: opts.tailscaleOff ? () => null : () => findTailscaleCli(existsSync),
+    cli: opts.tailscaleOff ? () => null : () => opts.tailscaleCli ?? findTailscaleCli(existsSync),
     run: createTailscaleRun,
     listen: (sharePort) =>
       startShareListener({
@@ -3394,11 +3452,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     sharing: () => sharing.status(),
   });
   const streamTickets = createTickets({ clock });
+  const vapidKeys = createVapidKeyStore(opts.keychain ?? unavailableKeychain);
+  const pushService = createPushService({ state, keys: vapidKeys });
+  const stopPushSender = startPushSender({
+    bus,
+    state,
+    keys: vapidKeys,
+    log: logger.child({ component: 'push' }),
+  });
   const app = createApp({
     commit: build?.commit ?? null,
     listenPort: () => listenPort,
     share: { allowlists: () => sharing.allowlists(), hostLogin: () => sharing.hostLogin() },
     remote: { sharing, devices },
+    appDir: opts.appDir ?? null,
+    push: pushService,
     devices,
     tickets: streamTickets,
     sockets: deviceSockets,
@@ -3613,6 +3681,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         logger.warn({ err: error }, 'could not stop the sign-in');
       });
       unsubscribeShip();
+      unsubscribeCopyQueue();
       unsubscribeLinearEvents();
       unsubscribePassSettles();
       sizing.stop();
@@ -3636,6 +3705,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await pictures?.stop();
       // The dev server 10db started ends with it; a builder's own is never 10db's to stop.
       await preview?.stop();
+      // Each live eval run ends `interrupted` and its stop command runs, before the store closes.
+      await evalLiveRuns.stopAll();
       picturePruning.stop();
       await pictureCamera.close();
       await laneBrowsers?.close();
@@ -3667,6 +3738,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeYields();
       unsubscribeHazards();
       hazardAssessor.stop();
+      unsubscribeEvalAssessment();
+      evalsAssessor.stop();
       watcher?.stop();
       keepAwake.stop();
       // A probe in flight writes to the database; the runner can ask for another while it stops.
@@ -3690,6 +3763,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // but it reads and writes the database until it ends.
       await createdScheduler.idle();
       unsubscribeSettled();
+      stopPushSender();
       unsubscribeSkipped();
       await Promise.all(skippedRaises);
       state.write((ctx) => {

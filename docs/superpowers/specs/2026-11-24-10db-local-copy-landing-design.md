@@ -258,8 +258,10 @@ between those two moments is overwritten. This is the same as `git pull`, and no
 
 ## 7. Dependents
 
-A task in a copy can reach Done before its work lands. `dependenciesDone` (`store/tasks.ts:677`) counts a Done task
-whose latest batch is a local copy that hasn't shipped as not done. Its dependents wait for the landing.
+A task in a copy can reach Done before its work lands. `dependenciesDone` (`store/tasks.ts`) counts a Done task
+whose latest batch is a local copy that hasn't shipped as not done. Its dependents wait for the landing, except a
+dependent whose own latest run is in that same copy: the dependency's work is already on its branch, so it starts,
+and the copy lands both together. A pull-request batch has no such wait, so the case doesn't arise there.
 
 ## 8. Recovery
 

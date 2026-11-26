@@ -1,5 +1,6 @@
 import { posix } from 'node:path';
 import type { CommittedFile, CommittedReader } from '../folders';
+<<<<<<< 048b997f5b0f7b67a42ead0c0b26417af9c837ec
 import { redirectionSpan } from '../guard';
 import {
   ASSIGNMENT_WORD,
@@ -10,6 +11,20 @@ import {
   repoPath,
 } from './leading-command';
 import { MAKEFILE_NAMES, parseRules, within, withoutComments, type MakeRule } from './make-rules';
+||||||| 4edfb74ac
+import { leadingWords, parseShell, redirectionSpan } from '../guard';
+import { MAKEFILE_NAMES, parseRules, within, withoutComments, type MakeRule } from './make-rules';
+=======
+import { leadingWords, parseShell, redirectionSpan } from '../guard';
+import {
+  isDirectiveLine,
+  MAKEFILE_NAMES,
+  parseRules,
+  within,
+  withoutComments,
+  type MakeRule,
+} from './make-rules';
+>>>>>>> aa1ab30de979723e5c3138fb2000b2399b1b8c46
 
 /** What a call runs, as committed on the base: a make target's rule, or a repository script whole. */
 export type RunText =
@@ -92,6 +107,7 @@ function recipeCommands(recipe: string): string[] {
   return withoutComments(recipe)
     .replace(/\\\n/g, ' ')
     .split('\n')
+    .filter((line) => !isDirectiveLine(line))
     .map((line) => line.replace(/^\t/, '').replace(/^[\s@+-]+/, ''))
     .filter((line) => line !== '');
 }

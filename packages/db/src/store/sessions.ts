@@ -254,6 +254,21 @@ export function conversationCostUsd(db: DbReader, conversationId: ConversationId
   return row?.total ?? null;
 }
 
+/** The account and start of the conversation's newest `count` sessions, newest first. */
+export function lastConversationSessions(
+  db: DbReader,
+  conversationId: ConversationId,
+  count: number,
+): { accountId: AccountId; startedAt: string }[] {
+  return db
+    .select({ accountId: schema.sessions.accountId, startedAt: schema.sessions.startedAt })
+    .from(schema.sessions)
+    .where(eq(schema.sessions.conversationId, conversationId))
+    .orderBy(desc(schema.sessions.sequence))
+    .limit(count)
+    .all();
+}
+
 /** Ends every session of the conversation that has not ended, as a restart finds them; answers how many. */
 export function endConversationSessions(
   ctx: WriteContext,

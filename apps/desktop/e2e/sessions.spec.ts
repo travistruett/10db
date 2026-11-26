@@ -228,7 +228,12 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await expect(sessionsBadge(page)).not.toContainText('need');
   await expect(page.getByText('I left the other task alone.')).toBeVisible();
   const listed = Tasks.parse(
-    await (await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth })).json(),
+    await (
+      await request.get(`${daemonUrl}/projects/${projectId}/tasks`, {
+        headers: auth,
+        maxRetries: 2,
+      })
+    ).json(),
   );
   expect(listed.map((t) => t.title)).toContain('Hold the line');
 
@@ -313,7 +318,9 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
 
   // Later specs read Factory across projects: the task this chat started is stopped.
   const streams = Workstreams.parse(
-    await (await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })).json(),
+    await (
+      await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth, maxRetries: 2 })
+    ).json(),
   ).filter((w) => w.projectId === projectId);
   for (const stream of streams)
     await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });
@@ -341,7 +348,7 @@ const OpenChats = z.array(
 /** The worktree a session works in, read from the daemon's open chats; the only one the project has. */
 async function worktreeOf(request: APIRequestContext, project: string): Promise<string> {
   const chats = OpenChats.parse(
-    await (await request.get(`${daemonUrl}/chats?open=1`, { headers: auth })).json(),
+    await (await request.get(`${daemonUrl}/chats?open=1`, { headers: auth, maxRetries: 2 })).json(),
   );
   const found = chats.flatMap((chat) =>
     chat.work?.worktree?.includes(`/${project}-`) ? [chat.work.worktree] : [],
@@ -581,7 +588,10 @@ test('a chat goes to the builder’s terminal and back: the banner, a held messa
       .poll(async () =>
         WorkstreamNotices.parse(
           await (
-            await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })
+            await request.get(`${daemonUrl}/workstreams?active=true`, {
+              headers: auth,
+              maxRetries: 2,
+            })
           ).json(),
         )
           .filter((w) => w.projectId === projectId)
@@ -599,7 +609,9 @@ test('a chat goes to the builder’s terminal and back: the banner, a held messa
 
     // The task has the folder now; once it ends, the held message runs.
     const streams = Workstreams.parse(
-      await (await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })).json(),
+      await (
+        await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth, maxRetries: 2 })
+      ).json(),
     ).filter((w) => w.projectId === projectId);
     for (const stream of streams)
       await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });
@@ -620,7 +632,10 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   const titlesWithIds = async (): Promise<z.infer<typeof Tasks>> =>
     Tasks.parse(
       await (
-        await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth })
+        await request.get(`${daemonUrl}/projects/${projectId}/tasks`, {
+          headers: auth,
+          maxRetries: 2,
+        })
       ).json(),
     );
   const titles = async (): Promise<string[]> => (await titlesWithIds()).map((t) => t.title);
@@ -830,7 +845,10 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   const goalTitles = async (): Promise<string> =>
     JSON.stringify(
       await (
-        await request.get(`${daemonUrl}/projects/${projectId}/goals`, { headers: auth })
+        await request.get(`${daemonUrl}/projects/${projectId}/goals`, {
+          headers: auth,
+          maxRetries: 2,
+        })
       ).json(),
     );
   await panel.getByRole('button', { name: 'Accept', exact: true }).click();
@@ -898,7 +916,10 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
       .array(z.looseObject({ external: z.looseObject({ id: z.string() }).nullish() }))
       .parse(
         await (
-          await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth })
+          await request.get(`${daemonUrl}/projects/${projectId}/tasks`, {
+            headers: auth,
+            maxRetries: 2,
+          })
         ).json(),
       )
       .filter((t) => t.external?.id === 'AMP-1').length;
@@ -950,7 +971,11 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   const plan = async (): Promise<string | null | undefined> =>
     z
       .array(z.looseObject({ id: z.string(), planId: z.string().nullable() }))
-      .parse(await (await request.get(`${daemonUrl}/chats?open=1`, { headers: auth })).json())
+      .parse(
+        await (
+          await request.get(`${daemonUrl}/chats?open=1`, { headers: auth, maxRetries: 2 })
+        ).json(),
+      )
       .find((chat) => chat.id === chatId())?.planId;
   // The runs the start made are cancelled, so a later spec finds no running lane.
   const goalTasks = new Set(
@@ -960,7 +985,9 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   );
   const activeOfGoal = async (): Promise<z.infer<typeof Workstreams>> =>
     Workstreams.parse(
-      await (await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })).json(),
+      await (
+        await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth, maxRetries: 2 })
+      ).json(),
     ).filter((w) => w.projectId === projectId && goalTasks.has(String(w['taskId'])));
   for (const stream of await activeOfGoal())
     await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });

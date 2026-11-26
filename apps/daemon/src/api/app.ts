@@ -28,6 +28,8 @@ import {
   ProposalVerdictAccept,
   ProposalVerdictReject,
   EventsHead,
+  PushSubscriptionInput,
+  type PushKeyDto,
   FolderInspectInput,
   GoalAdoptInput,
   PlanExportInput,
@@ -90,6 +92,9 @@ import {
   type NewEvalBody,
   NewEvalRequest,
   EvalSuiteKey,
+  EvalLiveRunId,
+  EvalLiveRefused,
+  RunEvalLiveBody,
   EvalSuiteQuery,
   PersonInput,
   PickSize,
@@ -178,6 +183,7 @@ import {
   type SharingStatusDto,
   DeviceId,
 } from '@10db/contracts';
+import { serveApp } from './app-static';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
@@ -269,6 +275,10 @@ export interface ApiDeps {
     readonly token: string;
     mayRead(method: string, path: string): boolean;
   } | null;
+  /** Push for paired devices; its routes answer 501 without it. */
+  readonly push?: PushRoutes;
+  /** The built served app (`dist-app/`) that `/app/` serves on the share listener; null or absent when there is none. */
+  readonly appDir?: string | null;
   /** The self-update setting; its routes answer 501 without it. */
   readonly selfUpdate?: SelfUpdateServices;
   readonly upgradeWebSocket: UpgradeWebSocket;
@@ -283,6 +293,11 @@ export interface ApiDeps {
 }
 
 const STATUS = { not_found: 404, conflict: 409, invalid: 400, upstream: 502 } as const;
+/** What a route made for the calling device says to a client that is not one (the window's own token). */
+const deviceOnly = {
+  error: 'conflict',
+  message: 'This is for a paired device: the 10db window has none',
+} as const;
 const OPEN_PATHS = new Set(['/health', '/mcp']);
 /** A page of a conversation's items starts after this `seq`. */
 const ConversationItemsQuery = z.object({
@@ -406,6 +421,13 @@ const RecentChatsQuery = z.strictObject({
 /** The conversation a `/conversations/:id…` path names, when it does. */
 const CONVERSATION_PATH = /^\/conversations\/([^/]+)/;
 
+/** What a paired device does about push; `push/` implements it (this file is typechecked by the desktop). */
+export interface PushRoutes {
+  key(): Promise<PushKeyDto>;
+  subscribe(deviceId: DeviceId, input: PushSubscriptionInput): Promise<void>;
+  unsubscribe(deviceId: DeviceId): void;
+}
+
 export function createApp(deps: ApiDeps) {
   /**
    * A token held by code an agent may edit (a screen's, the dev UI's) reads a conversation only where it
@@ -518,6 +540,10 @@ export function createApp(deps: ApiDeps) {
   // After the token check, before any route reads the body. A declared length over the limit is
   // refused unread; a body with none is read only up to the limit.
   base.use('*', limitBody);
+  // The served app's files: only the share listener reaches them, the matrix answers 404 on the main one.
+  const served = serveApp(deps.appDir ?? null);
+  base.get('/app', served);
+  base.get('/app/*', served);
   const app = base
     .all('/mcp', (c) => deps.mcp(c.req.raw))
     // Behind the UI-token middleware above: a managed session's token fails it.
@@ -1297,6 +1323,35 @@ export function createApp(deps: ApiDeps) {
           ? c.json(deps.remote.devices.pair(c.req.valid('json')))
           : c.json({ error: 'not_implemented' }, 501),
     )
+    // The calling device's own routes come before `/devices/:deviceId`, which would read `me` as an id.
+    .delete('/devices/me', (c) => {
+      const principal = c.var.principal;
+      if (!deps.remote || principal.kind !== 'device') return c.json(deviceOnly, 409);
+      return deps.remote.devices.revoke(principal.deviceId)
+        ? c.body(null, 204)
+        : c.json({ error: 'not_found', message: 'No such device' }, 404);
+    })
+    .get('/push/key', async (c) =>
+      deps.push ? c.json(await deps.push.key()) : c.json({ error: 'not_implemented' }, 501),
+    )
+    .put(
+      '/devices/me/push',
+      validator('json', (value) => PushSubscriptionInput.parse(value)),
+      async (c) => {
+        const principal = c.var.principal;
+        if (!deps.push) return c.json({ error: 'not_implemented' }, 501);
+        if (principal.kind !== 'device') return c.json(deviceOnly, 409);
+        await deps.push.subscribe(principal.deviceId, c.req.valid('json'));
+        return c.body(null, 204);
+      },
+    )
+    .delete('/devices/me/push', (c) => {
+      const principal = c.var.principal;
+      if (!deps.push) return c.json({ error: 'not_implemented' }, 501);
+      if (principal.kind !== 'device') return c.json(deviceOnly, 409);
+      deps.push.unsubscribe(principal.deviceId);
+      return c.body(null, 204);
+    })
     .delete('/devices/:deviceId', (c) => {
       if (!deps.remote) return c.json({ error: 'not_implemented' }, 501);
       return deps.remote.devices.revoke(DeviceId.parse(c.req.param('deviceId')))
@@ -1618,6 +1673,12 @@ export function createApp(deps: ApiDeps) {
     .get('/projects/:projectId/evals', async (c) =>
       c.json(await deps.services.evals(ProjectId.parse(c.req.param('projectId')))),
     )
+    .post('/projects/:projectId/evals/assess', async (c) =>
+      c.json(
+        // Not tied to the request: a dropped connection must not end a run another page is waiting on.
+        await deps.services.assessEvals(ProjectId.parse(c.req.param('projectId'))),
+      ),
+    )
     .get('/projects/:projectId/eval-models', async (c) =>
       c.json(await deps.services.evalModels(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -1649,6 +1710,52 @@ export function createApp(deps: ApiDeps) {
           ),
           201,
         ),
+    )
+    .get(
+      '/projects/:projectId/evals/live/runs',
+      validator('query', (value) =>
+        z.strictObject({ suite: EvalSuiteKey.optional() }).parse(value),
+      ),
+      (c) =>
+        c.json(
+          deps.services.evalLiveRuns(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('query').suite ?? null,
+          ),
+        ),
+    )
+    .post('/projects/:projectId/evals/live/runs/:runId/stop', async (c) => {
+      await deps.services.stopEvalLive(
+        ProjectId.parse(c.req.param('projectId')),
+        EvalLiveRunId.parse(c.req.param('runId')),
+      );
+      return c.body(null, 204);
+    })
+    .get('/projects/:projectId/evals/:suiteKey/live', async (c) =>
+      c.json(
+        await deps.services.evalLivePreview(
+          ProjectId.parse(c.req.param('projectId')),
+          EvalSuiteKey.parse(c.req.param('suiteKey')),
+        ),
+      ),
+    )
+    .post(
+      '/projects/:projectId/evals/:suiteKey/live/runs',
+      validator('json', (value): RunEvalLiveBody => RunEvalLiveBody.parse(value)),
+      async (c) => {
+        try {
+          const run = await deps.services.startEvalLive(
+            ProjectId.parse(c.req.param('projectId')),
+            EvalSuiteKey.parse(c.req.param('suiteKey')),
+            c.req.valid('json').previewHash,
+          );
+          return c.json(run, 201);
+        } catch (error) {
+          if (error instanceof EvalLiveRefused)
+            return c.json({ refusal: error.refusal, message: error.message }, 409);
+          throw error;
+        }
+      },
     )
     .get(
       '/projects/:projectId/evals/:suiteKey',

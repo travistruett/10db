@@ -68,6 +68,9 @@ const DaemonEnv = z.object({
   // `off` keeps the daemon from finding or running the Tailscale CLI, so a throwaway daemon on a Mac that has
   // Tailscale never shares or reads it. Set for every daemon that is not the installed app, as TENDB_SLACK is.
   TENDB_TAILSCALE: z.enum(['on', 'off']).optional(),
+  // The Tailscale CLI to run, in place of the search for the installed app's and Homebrew's. For a CLI in an
+  // unusual place, and for the e2e's fake one. `TENDB_TAILSCALE=off` still wins.
+  TENDB_TAILSCALE_CLI: z.string().startsWith('/').optional(),
   // Dev only: the Slack Web API's address, in place of https://slack.com/api, for the fake Slack that
   // `TENDB_FAKE_SLACK=on pnpm dev:window` starts (scripts/fake-slack.mjs).
   TENDB_SLACK_API: z.url().optional(),
