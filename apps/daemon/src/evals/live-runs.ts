@@ -25,7 +25,6 @@ import {
   runningEvalLiveRun,
   type EvalLiveRunRow,
 } from '@10db/db';
-import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
 import { openPreviewLedger, type PreviewLedger, type PreviewLedgers } from '../preview';
@@ -33,7 +32,9 @@ import type { GateRequest, GateResult, GateRunner } from '../verify';
 import { readEvalManifest } from './manifest-store';
 import type { EvalsService } from './service';
 
-const REFUSAL_TEXT: Readonly<Record<EvalLiveRefusal, string>> = {
+const REFUSAL_TEXT: Readonly<Record<EvalLiveRefusal | 'shuttingDown' | 'archived', string>> = {
+  shuttingDown: '10db is stopping, so it starts no live eval.',
+  archived: 'This project is archived.',
   [EvalLiveRefusal.NoLive]: 'This suite records no live run settings, so 10db has no Run for it.',
   [EvalLiveRefusal.NoSandbox]: 'This 10db runs no sandbox, so it will not run a live eval.',
   [EvalLiveRefusal.DockerOff]:
@@ -78,7 +79,6 @@ export interface EvalLiveRunsDeps {
   /** False in a daemon with fake sessions. */
   readonly sandboxed: boolean;
   readonly dataDir: string;
-  readonly clock: Clock;
   readonly state: StateStore;
   /** Reads the newest result's cost, for the confirm window. */
   readonly evals: Pick<EvalsService, 'suite'>;
@@ -93,10 +93,10 @@ export interface EvalLiveRuns {
   preview(projectId: ProjectId, suiteKey: EvalSuiteKey): Promise<EvalLivePreviewDto>;
   /** Starts the run the window showed; throws `EvalLiveRefused` and writes no row when it may not. */
   start(projectId: ProjectId, suiteKey: EvalSuiteKey, previewHash: string): Promise<EvalLiveRunDto>;
-  /** Stops a running run and settles it; throws NotFoundError for one that is not running. */
+  /** Sends the abort and answers; the run settles, and its stop command runs, in the background. Throws NotFoundError for one that is not running. */
   stop(projectId: ProjectId, runId: EvalLiveRunId): Promise<void>;
   list(projectId: ProjectId, suiteKey: EvalSuiteKey | null): EvalLiveRunDto[];
-  /** Marks the runs a crash left `interrupted` at once and runs their stop commands in the background (a Run waits for them); never starts a run. */
+  /** Marks the runs a crash left `interrupted` at once and runs their stop commands in the background (a Run is refused busy until they settle); never starts a run. */
   recoverAtStart(): Promise<void>;
   /** Ends every run as the daemon stops: `interrupted`. */
   stopAll(): Promise<void>;
@@ -111,6 +111,10 @@ interface ActiveRun {
   readonly projectId: ProjectId;
   readonly abort: AbortController;
   endedBy: EndedBy | null;
+  /** Why the run was cut short by 10db itself (its process could not be tracked); null otherwise. */
+  failure: string | null;
+  /** Set once the run's end is decided, so a Stop that comes after changes nothing. */
+  decided: boolean;
   readonly settled: Promise<void>;
 }
 
@@ -130,6 +134,8 @@ const dtoOf = (row: EvalLiveRunRow): EvalLiveRunDto => ({
 export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
   const { state } = deps;
   const active = new Map<EvalLiveRunId, ActiveRun>();
+  /** Set when the daemon stops: nothing starts after it. */
+  let closed = false;
   /** Stop commands of interrupted runs still running after a start, by project: a new Run waits for them. */
   const recovering = new Map<EvalLiveRunId, { projectId: ProjectId; done: Promise<void> }>();
   const recoveringIn = (projectId: ProjectId): boolean =>
@@ -197,7 +203,7 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
         pattern,
       })),
       checkouts: deps.checkouts(),
-      dotEnvReadable: live?.envFiles ?? [],
+      dotEnvReadable: docker ? (live?.envFiles ?? []) : [],
       ...extra,
     };
   }
@@ -211,6 +217,15 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
       );
     });
   }
+
+  /** Tracks a spawned group in the ledger; `lost` runs when it can't be, since the group would outlive the daemon. */
+  const tracking =
+    (ledger: PreviewLedger, lost: (message: string) => void) =>
+    (pid: number): void => {
+      ledger.track(pid).catch((error: unknown) => {
+        lost(error instanceof Error ? error.message : String(error));
+      });
+    };
 
   /** Runs the suite's stop command once, in the run's ledger; true when it ran to an answer. */
   async function runStop(
@@ -229,7 +244,14 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
           command,
           join(deps.dataDir, 'logs', 'evals', `${runId}.stop.log`),
           STOP_COMMAND_MS,
-          { onSpawn: (pid) => void ledger.track(pid).catch(() => undefined) },
+          {
+            onSpawn: tracking(ledger, (message) => {
+              deps.logger.warn(
+                { runId, err: message },
+                'could not track a live eval’s stop command',
+              );
+            }),
+          },
         ),
       );
       return true;
@@ -258,22 +280,16 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
   function end(
     row: EvalLiveRunRow,
     runState: EvalLiveRunState,
-    result: Pick<GateResult, 'exitCode' | 'tail'> | null,
+    result: { readonly exitCode: number | null; readonly tail: string },
     stopRan: boolean,
-    cost: number | null,
   ): void {
     state.write((ctx) => {
-      const changed = finishEvalLiveRun(
-        ctx,
-        row.id,
-        {
-          state: runState,
-          exitCode: result?.exitCode ?? null,
-          tail: result?.tail ?? '',
-          stopRan,
-        },
-        cost,
-      );
+      const changed = finishEvalLiveRun(ctx, row.id, {
+        state: runState,
+        exitCode: result.exitCode,
+        tail: result.tail,
+        stopRan,
+      });
       if (!changed) return;
       announce(ctx, row, runState);
       // The Evals page and a covered task's block refetch on the project's change.
@@ -287,9 +303,9 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
     suite: EvalManifestSuite,
     ledger: PreviewLedger,
     run: ActiveRun,
-    cost: number | null,
   ): Promise<void> {
     let result: GateResult | null = null;
+    let crashed: string | null = null;
     try {
       result = await deps.gates.run(
         requestOf(
@@ -300,25 +316,36 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
           (suite.live?.timeoutMinutes ?? 60) * 60_000,
           {
             signal: run.abort.signal,
-            onSpawn: (pid) => void ledger.track(pid).catch(() => undefined),
+            onSpawn: tracking(ledger, (message) => {
+              // A paid run no ledger holds would outlive the daemon: end it.
+              run.failure ??= `The run's processes could not be tracked, so it was ended: ${message}`;
+              run.abort.abort();
+            }),
           },
         ),
       );
     } catch (error) {
-      deps.logger.warn(
-        { runId: row.id, err: error instanceof Error ? error.message : String(error) },
-        'a live eval run failed to run',
-      );
+      crashed = error instanceof Error ? error.message : String(error);
+      deps.logger.warn({ runId: row.id, err: crashed }, 'a live eval run failed to run');
     }
-    const cut = run.endedBy !== null || result?.timedOut === true;
-    const stopRan = cut ? await runStop(project, suite, row.id, ledger) : false;
-    await ledger.end();
+    // The end is decided here, once: a Stop that comes while the stop command or the ledger settles is too late.
     let finalState: EvalLiveRunState;
     if (run.endedBy !== null) finalState = run.endedBy;
     else if (result?.timedOut === true) finalState = EvalLiveRunState.TimedOut;
     else finalState = result?.exitCode === 0 ? EvalLiveRunState.Passed : EvalLiveRunState.Failed;
-    end(row, finalState, result, stopRan, cost);
-    active.delete(row.id);
+    run.decided = true;
+    const cut = run.endedBy !== null || result?.timedOut === true || run.failure !== null;
+    let outcome = { exitCode: result?.exitCode ?? null, tail: result?.tail ?? '' };
+    const why = run.failure ?? (crashed === null ? null : `The run could not start: ${crashed}`);
+    if (why !== null)
+      outcome = { exitCode: outcome.exitCode, tail: `${why}\n${outcome.tail}`.trim() };
+    try {
+      const stopRan = cut ? await runStop(project, suite, row.id, ledger) : false;
+      await ledger.end();
+      end(row, finalState, outcome, stopRan);
+    } finally {
+      active.delete(row.id);
+    }
   }
 
   /** Runs the stop command of a run a crash left, when its suite still hashes as the run did. */
@@ -329,6 +356,7 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
     );
     // A suite that changed since the run began may stop something else: its stop command stays unrun.
     if (suite === undefined || previewHash(suite, project) !== row.previewHash) return;
+    if (!deps.sandboxed) return;
     const ledger = openLedger();
     if (ledger === null) return;
     const ran = await runStop(project, suite, row.id, ledger);
@@ -341,6 +369,7 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
   }
 
   async function endAll(by: EndedBy, only: ProjectId | null): Promise<void> {
+    if (only === null) closed = true;
     const runs = [...active.values()].filter((r) => only === null || r.projectId === only);
     for (const r of runs) {
       r.endedBy ??= by;
@@ -373,7 +402,13 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
     },
 
     async start(projectId, suiteKey, shown) {
+      const cost = await lastCostUsd(getProject(state.db, projectId), suiteKey);
+      // Nothing below awaits before the run is registered, so a stop that comes during the cost read, or
+      // after, finds the run or refuses it: nothing starts once the daemon or the project is stopping.
+      if (closed) throw new EvalLiveRefused(EvalLiveRefusal.Busy, REFUSAL_TEXT.shuttingDown);
       const project = getProject(state.db, projectId);
+      if (project.archivedAt !== null)
+        throw new EvalLiveRefused(EvalLiveRefusal.Busy, REFUSAL_TEXT.archived);
       const suite = suiteOf(projectId, suiteKey);
       const refused = refusalOf(suite, project);
       if (refused !== null)
@@ -389,7 +424,6 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
       // Refused above when either is missing.
       if (live === undefined || command === undefined)
         throw new EvalLiveRefused(EvalLiveRefusal.NoLive, REFUSAL_TEXT[EvalLiveRefusal.NoLive]);
-      const cost = await lastCostUsd(project, suiteKey);
       const ledger = openLedger();
       if (ledger === null)
         throw new EvalLiveRefused(
@@ -397,57 +431,78 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
           REFUSAL_TEXT[EvalLiveRefusal.NoSandbox],
         );
       const id = mintId('EvalLiveRun');
-      const row = state.write((ctx) => {
-        const inserted = insertEvalLiveRun(ctx, {
-          id,
-          projectId,
-          suiteKey,
-          command,
-          stopCommand: live.stopCommand ?? null,
-          previewHash: shown,
-          docker: live.docker,
-          hostsJson: JSON.stringify(live.hosts),
-          envFilesJson: JSON.stringify(live.envFiles),
-          logPath: join(deps.dataDir, 'logs', 'evals', `${id}.log`),
+      let row: EvalLiveRunRow | null;
+      try {
+        row = state.write((ctx) => {
+          const inserted = insertEvalLiveRun(ctx, {
+            id,
+            projectId,
+            suiteKey,
+            command,
+            stopCommand: live.stopCommand ?? null,
+            previewHash: shown,
+            docker: live.docker,
+            hostsJson: JSON.stringify(live.hosts),
+            envFilesJson: JSON.stringify(live.envFiles),
+            costShownUsd: cost,
+            logPath: join(deps.dataDir, 'logs', 'evals', `${id}.log`),
+          });
+          if (inserted !== null) announce(ctx, inserted, EvalLiveRunState.Running);
+          return inserted;
         });
-        if (inserted !== null) announce(ctx, inserted, EvalLiveRunState.Running);
-        return inserted;
-      });
+      } catch (error) {
+        await ledger.end();
+        throw error;
+      }
       if (row === null) {
         await ledger.end();
         throw new EvalLiveRefused(EvalLiveRefusal.Busy, REFUSAL_TEXT[EvalLiveRefusal.Busy]);
       }
+      const started = row;
       const abort = new AbortController();
       let settle: () => void = () => undefined;
       const run: ActiveRun = {
         projectId,
         abort,
         endedBy: null,
+        failure: null,
+        decided: false,
         settled: new Promise<void>((resolve) => {
           settle = resolve;
         }),
       };
       active.set(id, run);
-      void execute(row, project, suite, ledger, run, cost)
+      void execute(started, project, suite, ledger, run)
         .catch((error: unknown) => {
-          deps.logger.error(
-            { runId: id, err: error instanceof Error ? error.message : String(error) },
-            'a live eval run could not be settled',
-          );
-          end(row, EvalLiveRunState.Failed, null, false, cost);
-          active.delete(id);
+          const message = error instanceof Error ? error.message : String(error);
+          deps.logger.error({ runId: id, err: message }, 'a live eval run could not be settled');
+          // The row must not stay running: it would hold the project busy until the next start.
+          try {
+            end(started, EvalLiveRunState.Failed, { exitCode: null, tail: message }, false);
+          } catch (again) {
+            deps.logger.error(
+              { runId: id, err: again instanceof Error ? again.message : String(again) },
+              'could not record a live eval run’s end',
+            );
+          }
         })
-        .finally(settle);
-      return dtoOf(row);
+        .finally(() => {
+          active.delete(id);
+          settle();
+        });
+      return dtoOf(started);
     },
 
-    async stop(projectId, runId) {
+    // Answers once the abort is sent: the run's own end, and its stop command, settle in the background.
+    stop(projectId, runId) {
       const found = active.get(runId);
       const run = found?.projectId === projectId ? found : undefined;
-      if (run === undefined) throw new NotFoundError('running eval run', runId);
-      run.endedBy ??= EvalLiveRunState.Stopped;
-      run.abort.abort();
-      await run.settled;
+      if (run === undefined) return Promise.reject(new NotFoundError('running eval run', runId));
+      if (!run.decided) {
+        run.endedBy ??= EvalLiveRunState.Stopped;
+        run.abort.abort();
+      }
+      return Promise.resolve();
     },
 
     list(projectId, suiteKey) {
@@ -467,7 +522,7 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
         }
         return interrupted;
       });
-      // The stop commands can take minutes: they run after start, tracked, and a new Run waits for them.
+      // The stop commands can take minutes: they run after start, tracked, and a new Run is refused busy until they settle.
       for (const row of rows) {
         if (row.stopCommand === null) continue;
         const done = stopLeftBy(row)

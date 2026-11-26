@@ -1514,7 +1514,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         : null,
     sandboxed: sandboxes?.gate != null,
     dataDir: opts.dataDir,
-    clock,
     state,
     evals: evalsService,
     checkouts: () => allCheckouts(state.db),

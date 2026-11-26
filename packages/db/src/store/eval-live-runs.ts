@@ -22,6 +22,7 @@ export type EvalLiveRunInput = Pick<
   | 'docker'
   | 'hostsJson'
   | 'envFilesJson'
+  | 'costShownUsd'
   | 'logPath'
 >;
 
@@ -65,7 +66,6 @@ export function insertEvalLiveRun(
     endedAt: null,
     exitCode: null,
     tail: '',
-    costShownUsd: null,
     stopRan: false,
   };
   ctx.tx.insert(schema.evalLiveRuns).values(row).run();
@@ -77,11 +77,10 @@ export function finishEvalLiveRun(
   ctx: WriteContext,
   id: EvalLiveRunId,
   end: EvalLiveRunEnd,
-  costShownUsd: number | null,
 ): boolean {
   const result = ctx.tx
     .update(schema.evalLiveRuns)
-    .set({ ...end, costShownUsd, endedAt: ctx.now })
+    .set({ ...end, endedAt: ctx.now })
     .where(
       and(eq(schema.evalLiveRuns.id, id), eq(schema.evalLiveRuns.state, EvalLiveRunState.Running)),
     )

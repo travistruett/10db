@@ -83,5 +83,5 @@
   Docker on), the project's Docker and loopback switches only where the suite also asks, only the suite's own hosts
   as rules (none for Docker), the suite's env files as `dotEnvReadable`, no key, and its group in a process ledger.
   Stop, the time limit, daemon stop and archive abort it and then run the suite's `stopCommand` (2 minutes) in the
-  same ledger; a start after a crash marks `running` rows `interrupted` and runs the stop command (in the background after start; a Run waits) only when the
+  same ledger; a start after a crash marks `running` rows `interrupted` and runs the stop command (in the background after start; a Run is refused `busy` until they settle) only when the
   suite still hashes as the row did. Exit 0 is `passed`: the suite's verdict is the result file it writes.
