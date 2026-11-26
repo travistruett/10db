@@ -88,7 +88,7 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
 `src/<module>/` directories are flat; each exports its public surface from `index.ts`, and other
 modules import only that (ESLint enforces it). Dependencies point one way:
 
-`clock`, `log`, `events`, `agent-skill`, `judge`, `slack`, `guard`, `permissions`, `trust`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge`, `sizing`, `test-value` → `plan-record` → `sessions`, `inbox`, `briefing`, `team` → `session-setup` →
+`clock`, `log`, `events`, `agent-skill`, `judge`, `slack`, `guard`, `permissions`, `trust`, `sandbox`, `git`, `watchpoints`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge`, `sizing`, `test-value` → `plan-record` → `sessions`, `inbox`, `briefing`, `team` → `session-setup` →
 `delivery`, `stakeholders`, `accounts` → `conversation` → `pass` → `pictures` → `mcp` → `screens` → `thread`, `shape` → `chat` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks`, `self-update` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.
@@ -140,6 +140,7 @@ write a module's notes there, not here. This file keeps what crosses modules.
 - `team/`: the team configuration and each task's step plan (`src/team/AGENTS.md`)
 - `trust/`: each session's trust policy, and 10db's judge: the fast path, `crosses_limit` and the grants (`src/trust/AGENTS.md`)
 - `verify/`: the gate runner and machine-wide gate slots (`src/verify/AGENTS.md`)
+- `watchpoints/`: matches a run's change against the builder's watchpoints, and the notes and briefs about them (`src/watchpoints/AGENTS.md`)
 - `watcher/`: flags writes to sensitive paths and strays outside claims (`src/watcher/AGENTS.md`)
 
 ### Across modules

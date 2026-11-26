@@ -24,6 +24,7 @@ describe('the rail', () => {
       'Board',
       'UI Workbench',
       'Knowledge',
+      'Evals',
       'Settings',
     ]);
     const current = rail.querySelectorAll('[aria-current="page"]');

@@ -389,7 +389,11 @@ describe('shipping', () => {
       `https://github.com/acme/widgets/commit/${h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)}/checks`,
     );
     expect(body).toContain('## Checklist\n\n- [ ] `make gate` prints `GATE PASS`.');
-    expect(body).not.toContain('<!--');
+    // The template's placeholder comments are gone; the only comments left are the For you markers a later
+    // ship replaces between.
+    expect(
+      body.replace('<!-- 10db:for-you -->', '').replace('<!-- /10db:for-you -->', ''),
+    ).not.toContain('<!--');
     expect(body).not.toContain('Exited');
   });
 

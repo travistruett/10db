@@ -1,0 +1,182 @@
+import { describe, expect, it } from 'vitest';
+import {
+  effectiveWatchpoints,
+  WatchpointFileStatus,
+  WatchpointLoudness,
+  type Watchpoint,
+  type WatchpointFileHit,
+} from '@10db/contracts';
+import { matchWatchpoints } from './match';
+import { splitPatch } from './split-patch';
+
+const watchpoint = (key: string, globs: string[], over: Partial<Watchpoint> = {}): Watchpoint => ({
+  key,
+  label: key,
+  why: `why ${key}`,
+  globs,
+  guidance: `check ${key}`,
+  loudness: WatchpointLoudness.Show,
+  starter: null,
+  ...over,
+});
+
+const file = (path: string, over: Partial<WatchpointFileHit> = {}): WatchpointFileHit => ({
+  path,
+  status: WatchpointFileStatus.Modified,
+  added: 3,
+  removed: 1,
+  patch: `diff --git a/${path} b/${path}\n`,
+  clipped: false,
+  ...over,
+});
+
+const keys = (hits: ReturnType<typeof matchWatchpoints>) => hits.map((h) => h.watchpoint.key);
+
+describe('matchWatchpoints', () => {
+  it('matches a glob across dot folders and names', () => {
+    const hits = matchWatchpoints(
+      [file('.codex/AGENTS.md'), file('.claude/.hidden/rule.md'), file('src/a.ts')],
+      [watchpoint('agent', ['**/AGENTS.md', '.claude/**'])],
+    );
+    expect(hits.map((h) => h.files.map((f) => f.path))).toEqual([
+      ['.codex/AGENTS.md', '.claude/.hidden/rule.md'],
+    ]);
+  });
+
+  it('puts one file under every watchpoint that covers it, and drops a watchpoint nothing hits', () => {
+    const hits = matchWatchpoints(
+      [file('packages/contracts/prompts/a.ts')],
+      [
+        watchpoint('contracts', ['**/contracts/**']),
+        watchpoint('prompts', ['**/prompts/**']),
+        watchpoint('evals', ['**/evals/**']),
+      ],
+    );
+    expect(keys(hits)).toEqual(['contracts', 'prompts']);
+  });
+
+  it('keeps a clipped file clipped, and snapshots the watchpoint without its globs', () => {
+    const [hit] = matchWatchpoints(
+      [file('db/migrations/0001.sql', { patch: '', clipped: true })],
+      [watchpoint('migrations', ['**/migrations/**'], { loudness: WatchpointLoudness.Ask })],
+    );
+    expect(hit?.files[0]?.clipped).toBe(true);
+    expect(hit?.watchpoint).toEqual({
+      key: 'migrations',
+      label: 'migrations',
+      why: 'why migrations',
+      guidance: 'check migrations',
+      loudness: 'ask',
+    });
+  });
+});
+
+describe('effectiveWatchpoints', () => {
+  const yours = [
+    watchpoint('migrations', ['**/migrations/**']),
+    watchpoint('prompts', ['**/prompts/**']),
+  ];
+
+  it('lets a project override one of yours by key, add its own, and turn one off', () => {
+    const override = watchpoint('migrations', ['db/**'], { why: 'this project' });
+    const own = watchpoint('infra', ['infra/**']);
+    const list = effectiveWatchpoints(yours, [override, own, { key: 'prompts', off: true }]);
+    expect(list.map((f) => [f.key, f.from])).toEqual([
+      ['migrations', 'override'],
+      ['infra', 'project'],
+    ]);
+    expect(list[0]?.globs).toEqual(['db/**']);
+  });
+
+  it('tags the rest as yours, and ignores an off entry for a key you lack', () => {
+    const list = effectiveWatchpoints(yours, [{ key: 'unknown', off: true }]);
+    expect(list.map((f) => [f.key, f.from])).toEqual([
+      ['migrations', 'you'],
+      ['prompts', 'you'],
+    ]);
+  });
+});
+
+describe('splitPatch', () => {
+  // A real `git diff-tree -p --no-renames` of one commit: a modified, an added and a deleted file, a rename
+  // (shown as a delete and an add), a path with spaces and two that git quotes (an accented name in octal bytes, and a bell), whose ---/+++ lines git ends with a tab.
+  const diff = [
+    'diff --git a/added.txt b/added.txt',
+    'new file mode 100644',
+    'index 0000000..92d5444',
+    '--- /dev/null',
+    '+++ b/added.txt',
+    '@@ -0,0 +1 @@',
+    '+fresh',
+    'diff --git a/dir with space/a b.md b/dir with space/a b.md',
+    'index 587be6b..975fbec 100644',
+    '--- a/dir with space/a b.md\t',
+    '+++ b/dir with space/a b.md\t',
+    '@@ -1 +1 @@',
+    '-x',
+    '+y',
+    'diff --git "a/caf\\303\\251.txt" "b/caf\\303\\251.txt"',
+    'index 1111111..2222222 100644',
+    '--- "a/caf\\303\\251.txt"',
+    '+++ "b/caf\\303\\251.txt"',
+    '@@ -1 +1 @@',
+    '-a',
+    '+b',
+    'diff --git "a/bell\\a.txt" "b/bell\\a.txt"',
+    'index 3333333..4444444 100644',
+    '--- "a/bell\\a.txt"',
+    '+++ "b/bell\\a.txt"',
+    '@@ -1 +1 @@',
+    '-c',
+    '+d',
+    'diff --git a/mod.txt b/mod.txt',
+    'index 814f4a4..879de50 100644',
+    '--- a/mod.txt',
+    '+++ b/mod.txt',
+    '@@ -1,2 +1,2 @@',
+    ' one',
+    '-two',
+    '+TWO',
+    'diff --git a/new.txt b/new.txt',
+    'new file mode 100644',
+    'index 0000000..ed0d042',
+    '--- /dev/null',
+    '+++ b/new.txt',
+    '@@ -0,0 +1,3 @@',
+    '+moved',
+    'diff --git a/old.txt b/old.txt',
+    'deleted file mode 100644',
+    'index ed0d042..0000000',
+    '--- a/old.txt',
+    '+++ /dev/null',
+    '@@ -1,3 +0,0 @@',
+    '-moved',
+    '',
+  ].join('\n');
+
+  it('keys each file by its path, with its status, and keeps the hunks under its own header', () => {
+    const found = splitPatch(diff, { fileBytes: 24 * 1024, diffCut: false });
+    expect([...found.values()].map((f) => [f.path, f.status, f.clipped])).toEqual([
+      ['added.txt', 'A', false],
+      ['dir with space/a b.md', 'M', false],
+      ['café.txt', 'M', false],
+      ['bell\x07.txt', 'M', false],
+      ['mod.txt', 'M', false],
+      ['new.txt', 'A', false],
+      ['old.txt', 'D', false],
+    ]);
+    expect(found.get('mod.txt')?.patch).toBe(
+      'diff --git a/mod.txt b/mod.txt\nindex 814f4a4..879de50 100644\n--- a/mod.txt\n+++ b/mod.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+TWO\n',
+    );
+  });
+
+  it('clips the last file when the diff itself was cut, and a file past its own cap', () => {
+    const cut = splitPatch(diff, { fileBytes: 40, diffCut: true });
+    expect(cut.get('old.txt')?.clipped).toBe(true);
+    expect(cut.get('mod.txt')?.clipped).toBe(true);
+    expect(cut.get('mod.txt')?.patch.endsWith('\n')).toBe(true);
+    expect(splitPatch(diff, { fileBytes: 24 * 1024, diffCut: true }).get('mod.txt')?.clipped).toBe(
+      false,
+    );
+  });
+});

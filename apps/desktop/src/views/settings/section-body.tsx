@@ -29,6 +29,7 @@ import { ProjectLinear } from './project-linear';
 import { ProjectPagesForm } from './project-pages-form';
 import { SandboxSection } from './sandbox-section';
 import { ProjectTrustSection } from './project-trust-section';
+import { WatchpointsSection } from './watchpoints-section';
 import { sectionByKey, SettingsScope, SettingsSectionKey } from './sections';
 import { ProjectPlaybook } from './project-playbook';
 import { SessionsSection } from './sessions-section';
@@ -128,6 +129,13 @@ export function SectionBody({
         <>
           {heading}
           {project ? <ProjectAreas key={project.id} project={project} /> : <NoProject />}
+        </>
+      );
+    case SettingsSectionKey.Watchpoints:
+      return (
+        <>
+          {heading}
+          {project ? <WatchpointsSection key={project.id} project={project} /> : <NoProject />}
         </>
       );
     case SettingsSectionKey.NetworkHosts:

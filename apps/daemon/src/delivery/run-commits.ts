@@ -61,22 +61,24 @@ export async function runCommits(
 /**
  * The changes `ranges` make, as one diff: each range's diff in order, cut to `maxBytes` in all, and
  * each file's line counts summed over the ranges that change it (null when any shows it as binary).
+ * With `paths.only`, the diff and the counts cover only those files.
  */
 export async function diffOfRanges(
   git: Pick<Git, 'diffSince'>,
   checkout: string,
   ranges: readonly CommitRange[],
   maxBytes: number,
+  paths?: { readonly only: readonly string[] },
 ): Promise<DiffSince> {
-  const [only] = ranges;
-  if (only !== undefined && ranges.length === 1)
-    return git.diffSince(checkout, only.base, only.head, maxBytes);
+  const [single] = ranges;
+  if (single !== undefined && ranges.length === 1)
+    return git.diffSince(checkout, single.base, single.head, maxBytes, paths);
   const parts: string[] = [];
   let left = maxBytes;
   let truncated = false;
   const files = new Map<string, { added: number | null; removed: number | null }>();
   for (const range of ranges) {
-    const part = await git.diffSince(checkout, range.base, range.head, Math.max(left, 0));
+    const part = await git.diffSince(checkout, range.base, range.head, Math.max(left, 0), paths);
     parts.push(part.diff);
     left -= Buffer.byteLength(part.diff, 'utf8');
     truncated ||= part.truncated;

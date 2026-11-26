@@ -51,6 +51,9 @@ import {
   type WorkstreamId,
   type FigmaSignInsDto,
   type LinearSignInsDto,
+  effectiveWatchpoints,
+  type ProjectWatchpointsDto,
+  type ProjectId,
 } from '@10db/contracts';
 import {
   closeTask,
@@ -134,6 +137,10 @@ import {
   offerAllowThis,
   offeredText,
   offerToAgent,
+  readProjectWatchpoints,
+  readYourWatchpoints,
+  writeProjectWatchpoints,
+  writeYourWatchpoints,
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService, type McpSignIns } from '../accounts';
 import type { Clock } from '../clock';
@@ -159,6 +166,7 @@ import {
   type PassOpenInput,
   type PassPullRequests,
   type Shipper,
+  watchpointHitsOf,
 } from '../delivery';
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
 import type { EventBus, LiveFrames, StateStore } from '../events';
@@ -166,6 +174,7 @@ import { inspectFolder, proposeAreas, proposeSetupAreas, type AreaNamer } from '
 import { dropPendingPageLabels } from './page-label-guess';
 import { adoptGoal } from '../goals';
 import { taskSession } from '../chat';
+import type { EvalsService } from '../evals';
 import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
@@ -398,6 +407,8 @@ export function createServices(deps: {
   readonly probe: AddressProbe;
   /** Works out each project's hazards from its repository. */
   readonly hazards: Pick<HazardAssessor, 'assess'>;
+  /** Reads each project's committed eval results and keeps the manifest an agent recorded. */
+  readonly evals: EvalsService;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
   /** Settings › Trust: the switches, the builder's plugins and each project's preview. */
@@ -409,6 +420,11 @@ export function createServices(deps: {
   readonly figmaSignIns: { list(): Promise<FigmaSignInsDto> };
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
+  const effectiveWatchpointsOf = (projectId: ProjectId): ProjectWatchpointsDto => {
+    getProject(db, projectId);
+    const entries = readProjectWatchpoints(db, projectId);
+    return { effective: effectiveWatchpoints(readYourWatchpoints(db), entries), entries };
+  };
   const restarts = createFailedRestarts(deps);
   const catalogueStatus = (): CatalogueStatusDto => ({
     ...deps.catalogue.status(),
@@ -881,6 +897,22 @@ export function createServices(deps: {
         benchmarkSync: syncWarning(deps.benchmarks.status()),
       };
     },
+    yourWatchpoints: () => readYourWatchpoints(db),
+    setYourWatchpoints(watchpoints) {
+      deps.state.write((ctx) => {
+        writeYourWatchpoints(ctx, watchpoints);
+      });
+      return readYourWatchpoints(db);
+    },
+    projectWatchpoints: (projectId) => effectiveWatchpointsOf(projectId),
+    setProjectWatchpoints(projectId, entries) {
+      getProject(db, projectId);
+      deps.state.write((ctx) => {
+        writeProjectWatchpoints(ctx, projectId, entries);
+      });
+      return effectiveWatchpointsOf(projectId);
+    },
+    watchpointHits: (id) => watchpointHitsOf(db, id),
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
     agentSkill: () => deps.agentSkill.status(),
@@ -917,6 +949,15 @@ export function createServices(deps: {
     getHazardAssessment(projectId) {
       getProject(db, projectId);
       return hazardAssessmentDto(db, projectId);
+    },
+    evals(projectId) {
+      return deps.evals.read(projectId, getProject(db, projectId).repoPath);
+    },
+    evalSuite(projectId, key, run) {
+      return deps.evals.suite(projectId, getProject(db, projectId).repoPath, key, run);
+    },
+    recordEvalManifest(projectId, manifest) {
+      return deps.evals.record(projectId, getProject(db, projectId).repoPath, manifest);
     },
     async lookAgainAtHazards(projectId, signal) {
       getProject(db, projectId);

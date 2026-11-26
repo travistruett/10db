@@ -51,6 +51,8 @@ import {
   ModelsQuery,
   AgentSkillInput,
   KeepAwakeInput,
+  ProjectWatchpoints,
+  YourWatchpoints,
   SKILL_VERSION_HEADER,
   KindId,
   KindInput,
@@ -84,6 +86,9 @@ import {
   PersonaId,
   PersonaInput,
   PersonaPatch,
+  EvalManifest,
+  EvalSuiteKey,
+  EvalSuiteQuery,
   PersonInput,
   PickSize,
   ProjectId,
@@ -1579,6 +1584,32 @@ export function createApp(deps: ApiDeps) {
     .post('/projects/:projectId/network-hosts/scan', async (c) =>
       c.json(await deps.services.scanNetworkHosts(ProjectId.parse(c.req.param('projectId')))),
     )
+    .get('/projects/:projectId/evals', async (c) =>
+      c.json(await deps.services.evals(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/evals/manifest',
+      validator('json', (value): EvalManifest => EvalManifest.parse(value)),
+      async (c) => {
+        const result = await deps.services.recordEvalManifest(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.valid('json'),
+        );
+        return c.json(result, result.ok ? 200 : 400);
+      },
+    )
+    .get(
+      '/projects/:projectId/evals/:suiteKey',
+      validator('query', (value): EvalSuiteQuery => EvalSuiteQuery.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.evalSuite(
+            ProjectId.parse(c.req.param('projectId')),
+            EvalSuiteKey.parse(c.req.param('suiteKey')),
+            c.req.valid('query').run,
+          ),
+        ),
+    )
     .get('/projects/:projectId/hazard-assessment', (c) =>
       c.json(deps.services.getHazardAssessment(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -2193,6 +2224,23 @@ export function createApp(deps: ApiDeps) {
     .get('/tasks/:taskId/session', (c) =>
       c.json(deps.services.taskSession(TaskId.parse(c.req.param('taskId')))),
     )
+    .get('/projects/:projectId/watchpoints', (c) =>
+      c.json(deps.services.projectWatchpoints(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/watchpoints',
+      validator('json', (value): ProjectWatchpoints => ProjectWatchpoints.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setProjectWatchpoints(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/workstreams/:id/watchpoint-hits', (c) =>
+      c.json(deps.services.watchpointHits(WorkstreamId.parse(c.req.param('id')))),
+    )
     .get('/workstreams/:id/skips', (c) =>
       c.json(deps.services.listWorkstreamSkips(WorkstreamId.parse(c.req.param('id')))),
     )
@@ -2276,6 +2324,12 @@ export function createApp(deps: ApiDeps) {
       '/settings/keep-awake',
       validator('json', (value): z.infer<typeof KeepAwakeInput> => KeepAwakeInput.parse(value)),
       (c) => c.json(deps.services.setKeepAwake(c.req.valid('json').mode)),
+    )
+    .get('/settings/watchpoints', (c) => c.json(deps.services.yourWatchpoints()))
+    .put(
+      '/settings/watchpoints',
+      validator('json', (value): YourWatchpoints => YourWatchpoints.parse(value)),
+      (c) => c.json(deps.services.setYourWatchpoints(c.req.valid('json'))),
     )
     .get('/settings/agent-skill', (c) => c.json(deps.services.agentSkill()))
     .put(

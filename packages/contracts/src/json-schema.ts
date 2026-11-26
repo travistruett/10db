@@ -314,6 +314,8 @@ import {
   SystemCheckDto,
 } from './system';
 import { AgentCapabilitiesDto } from './agent-capabilities';
+import { WatchpointHitsDto } from './watchpoint-hit';
+import { ProjectWatchpoints, ProjectWatchpointsDto, YourWatchpoints } from './watchpoints';
 import {
   InstalledPluginDto,
   ProjectTrustDto,
@@ -434,6 +436,10 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'inbox-card-context-dto': InboxCardContextDto,
   'inbox-item-dto': InboxItemDto,
   'system-check-dto': SystemCheckDto,
+  'watchpoint-hits-dto': WatchpointHitsDto,
+  'project-watchpoints-dto': ProjectWatchpointsDto,
+  'your-watchpoints': YourWatchpoints,
+  'project-watchpoints': ProjectWatchpoints,
   'keep-awake-status': KeepAwakeStatus,
   'events-head': EventsHead,
   'keep-awake-input': KeepAwakeInput,

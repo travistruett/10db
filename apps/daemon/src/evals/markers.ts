@@ -1,0 +1,82 @@
+/** A gate report file: `evals/reports/<task>/<UTC timestamp>.json`. */
+export interface ReportMarker {
+  readonly path: string;
+  /** The folder name, the suite key when the report names no task of its own. */
+  readonly folder: string;
+  /** The run's time, from the file name. */
+  readonly at: string;
+}
+
+/** A lane-pipeline baseline: `evals/lane-pipeline/baselines/<rigor>.json`. */
+export interface BaselineMarker {
+  readonly path: string;
+  readonly rigor: string;
+}
+
+/** The files of a repository that say something about its evals. */
+export interface EvalMarkers {
+  readonly reports: readonly ReportMarker[];
+  readonly baselines: readonly BaselineMarker[];
+  /** Eval definition files found by name. */
+  readonly definitions: readonly string[];
+  /** `claude plugin eval` cases (`<evals dir>/<case>/prompt.md`) by their evals directory. */
+  readonly promptCases: ReadonlyMap<string, readonly string[]>;
+}
+
+const REPORT =
+  /(?:^|\/)evals\/reports\/([^/]+)\/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\d+)Z\.json$/u;
+const BASELINE = /(?:^|\/)evals\/lane-pipeline\/baselines\/([^/]+)\.json$/u;
+const DEFINITION = /(?:^|\/)evals\/([^/]+)\/([^/]+)\.py$/u;
+const TEST_EVAL = /(?:^|\/)tests\/eval\/test_[^/]*_eval\.py$/u;
+const PROMPT_CASE = /^((?:.*\/)?evals)\/([^/]+)\/prompt\.md$/u;
+/** The longest repository path the contracts carry (`RepoPath`). */
+const MAX_PATH = 300;
+
+/** The ISO time a report's file name holds; the digits after the seconds are a fraction of one. */
+function reportTime(m: RegExpExecArray): string {
+  const [, , year, month, day, hour, minute, second, fraction] = m;
+  const millis = `${fraction ?? ''}000`.slice(0, 3);
+  return `${year ?? ''}-${month ?? ''}-${day ?? ''}T${hour ?? ''}:${minute ?? ''}:${second ?? ''}.${millis}Z`;
+}
+
+function isDefinition(path: string): boolean {
+  const named = DEFINITION.exec(path);
+  if (named === null) return TEST_EVAL.test(path);
+  const [, area = '', name = ''] = named;
+  if (name === '__init__' || name.startsWith('_')) return false;
+  return area !== 'reports' && !area.endsWith('.recorded');
+}
+
+/** What a tracked path list says about a repository's evals: result files and definition files, by name alone. */
+export function findEvalMarkers(tracked: readonly string[]): EvalMarkers {
+  const reports: ReportMarker[] = [];
+  const baselines: BaselineMarker[] = [];
+  const definitions: string[] = [];
+  const promptCases = new Map<string, string[]>();
+  for (const path of tracked) {
+    // A path longer than the contracts carry could never be shown, so it is never found.
+    if (path.length > MAX_PATH) continue;
+    const report = REPORT.exec(path);
+    if (report !== null) {
+      const at = reportTime(report);
+      // A name that is no real time (month 99) is no report, and an invalid date can't be formatted.
+      const time = new Date(at);
+      if (!Number.isNaN(time.getTime()) && time.toISOString() === at)
+        reports.push({ path, folder: report[1] ?? '', at });
+      continue;
+    }
+    const baseline = BASELINE.exec(path);
+    if (baseline !== null) {
+      baselines.push({ path, rigor: baseline[1] ?? '' });
+      continue;
+    }
+    const prompt = PROMPT_CASE.exec(path);
+    if (prompt !== null && prompt[2] !== 'reports' && prompt[2] !== 'lane-pipeline') {
+      const dir = prompt[1] ?? '';
+      promptCases.set(dir, [...(promptCases.get(dir) ?? []), path]);
+      continue;
+    }
+    if (isDefinition(path)) definitions.push(path);
+  }
+  return { reports, baselines, definitions, promptCases };
+}
