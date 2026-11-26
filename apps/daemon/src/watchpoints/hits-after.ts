@@ -11,7 +11,7 @@ import {
 } from '@10db/contracts';
 import { lineChecks } from './covers';
 import { readLineVerdicts } from './line-reading';
-import type { LineCheck, LineVerdicts } from './line-verdicts';
+import { verdictKey, type LineCheck, type LineVerdict, type LineVerdicts } from './line-verdicts';
 import { matchWatchpoints } from './match';
 import { splitPatch, type PatchSection } from './split-patch';
 
@@ -165,20 +165,26 @@ export async function watchpointHitsAfter(input: {
     }
   }
   const read = withSections(listed, sections);
-  const checks = lineChecks(read, input.watchpoints);
-  let verdicts: LineVerdicts = new Map();
-  if (checks.length > 0) {
+  // A file with no text read has no verdict: an ask or hold watchpoint can't clear it.
+  const verdicts = new Map<string, LineVerdict>();
+  const verdictsFor = async (paths: ReadonlySet<string>): Promise<void> => {
+    const checks = lineChecks(withSections(listed, sections), input.watchpoints).filter((c) =>
+      paths.has(c.path),
+    );
+    if (checks.length === 0) return;
     const answered = await readLines(checks);
     if (answered === null) input.onLinesUnread?.([...new Set(checks.map((c) => c.key))]);
-    else verdicts = answered;
-  }
-  // Which files are hits is decided here; the hunks read below never change it.
+    else for (const [key, verdict] of answered) verdicts.set(key, verdict);
+  };
+  await verdictsFor(new Set(sections.keys()));
+  // Which files are hits is decided here; the hunks read below never drop one.
   const first = joined(sources, read, input.watchpoints, verdicts);
   const matched = new Set(first.flatMap((hit) => hit.files.map((f) => f.path)));
   if (matched.size === 0) return { hits: [], head: input.head, skipped: null };
   // Each file is read at its own cap, so one huge file cannot starve the files after it; reading stops
   // once the row's budget is spent, and the rest keep their counts, clipped. A file already read is not read again.
   let spent = 0;
+  const newlyRead = new Set<string>();
   for (const path of matched) {
     if (spent >= WATCHPOINT_ROW_PATCH_BYTES) break;
     let section = sections.get(path);
@@ -186,34 +192,32 @@ export async function watchpointHitsAfter(input: {
       section = splitOf(await input.read([path], WATCHPOINT_FILE_PATCH_BYTES + 1024)).get(path);
       if (section === undefined) continue;
       sections.set(path, section);
+      newlyRead.add(path);
     }
     spent += Buffer.byteLength(section.patch, 'utf8');
   }
-  // The sources run again on the files with their hunks (an eval definition is classified on its patch), kept to
-  // the files decided above and to the clipped mark the decision was made on.
-  const keptKey = new Map(first.map((hit) => [hit.watchpoint.key, hit]));
-  const final = joined(sources, withSections(listed, sections), input.watchpoints, verdicts).map(
-    (hit) => {
-      const decided = new Map(
-        (keptKey.get(hit.watchpoint.key)?.files ?? []).map((f) => [f.path, f]),
-      );
-      const byLines = input.watchpoints.some(
-        (w) => w.key === hit.watchpoint.key && w.lines.length > 0,
-      );
-      return {
-        ...hit,
-        files: hit.files.flatMap((f): WatchpointFileHit[] => {
-          const was = decided.get(f.path);
-          return was === undefined
-            ? []
-            : [{ ...f, clipped: f.clipped || (byLines && was.clipped) }];
-        }),
-      };
-    },
+  // A file first read now is judged on that text, which can only add to what it was held for.
+  await verdictsFor(newlyRead);
+  // The sources run again on the files with their hunks only to classify an eval definition on its patch.
+  const definitions = new Map(
+    joined(sources, withSections(listed, sections), input.watchpoints, verdicts).flatMap((hit) =>
+      hit.files.flatMap((f) =>
+        f.evalDefinition === undefined ? [] : [[f.path, f.evalDefinition] as const],
+      ),
+    ),
   );
-  return {
-    hits: withinRowBudget(final.filter((hit) => hit.files.length > 0)),
-    head: input.head,
-    skipped: null,
-  };
+  const lined = new Set(input.watchpoints.filter((w) => w.lines.length > 0).map((w) => w.key));
+  const final = first.map((hit) => ({
+    ...hit,
+    files: withSections(hit.files, sections).map((f): WatchpointFileHit => {
+      const evalDefinition = definitions.get(f.path) ?? f.evalDefinition;
+      // A file a line watchpoint holds without a matching line is held for what could not be read: it says so.
+      const held =
+        lined.has(hit.watchpoint.key) &&
+        verdicts.get(verdictKey(hit.watchpoint.key, f.path))?.matched !== true;
+      const out = held ? { ...f, clipped: true } : f;
+      return evalDefinition === undefined ? out : { ...out, evalDefinition };
+    }),
+  }));
+  return { hits: withinRowBudget(final), head: input.head, skipped: null };
 }

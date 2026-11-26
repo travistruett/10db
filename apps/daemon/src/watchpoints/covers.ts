@@ -32,6 +32,12 @@ export function lineChecks(
     .flatMap((w) =>
       files
         .filter((file) => w.globs.some((glob) => areaMatches(file.path, glob)))
-        .map((file) => ({ key: w.key, path: file.path, patterns: w.lines, patch: file.patch })),
+        .map((file) => ({
+          key: w.key,
+          path: file.path,
+          patterns: w.lines,
+          patch: file.patch,
+          changed: file.added !== 0 || file.removed !== 0,
+        })),
     );
 }

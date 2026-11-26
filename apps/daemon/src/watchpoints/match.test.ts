@@ -14,6 +14,7 @@ import {
 import { evalDefinitionSource } from './eval-definition-source';
 import { lineChecks } from './covers';
 import { runChecks } from './line-verdicts';
+import { watchpointHitsAfter } from './hits-after';
 import { matchWatchpoints } from './match';
 import { splitPatch } from './split-patch';
 
@@ -156,6 +157,19 @@ describe('matchWatchpoints with line patterns', () => {
     // No verdict at all, as when the worker timed out: ask counts the file, show does not.
     expect(matchWatchpoints([plain], [asking]).length).toBe(1);
     expect(matchWatchpoints([plain], [lined])).toEqual([]);
+  });
+
+  it('counts a binary or hidden file of an ask watchpoint, whose lines could not be read', () => {
+    const asking = { ...lined, loudness: WatchpointLoudness.Ask };
+    const hidden = (path: string, over: Partial<WatchpointFileHit>) =>
+      file(path, {
+        patch: `diff --git a/${path} b/${path}\nBinary files a/${path} and b/${path} differ\n`,
+        ...over,
+      });
+    const binary = hidden('src/b.bin', { added: null, removed: null });
+    expect(hitPaths([binary], asking)).toEqual(['src/b.bin']);
+    expect(hitPaths([binary])).toEqual([]);
+    expect(hitPaths([hidden('src/mode.sh', { added: 0, removed: 0 })], asking)).toEqual([]);
   });
 
   it('reads a stored watchpoint with no lines as having none', () => {
@@ -321,5 +335,50 @@ describe('evalDefinitionSource', () => {
     const hits = source([file('evals/gate.py'), file('tests/llm/cases.jsonl')], [evals], new Map());
     expect(hits).toHaveLength(1);
     expect(hits[0]?.files.map((f) => f.path)).toEqual(['evals/gate.py', 'tests/llm/cases.jsonl']);
+  });
+});
+
+describe('watchpointHitsAfter with line patterns', () => {
+  it('keeps an ask file the scan never reached when its own read then shows the line', async () => {
+    const patch = (path: string, body: string[]): string =>
+      [
+        `diff --git a/${path} b/${path}`,
+        'index 1..2 100644',
+        `--- a/${path}`,
+        `+++ b/${path}`,
+        '@@ -1 +1 @@',
+        ...body,
+      ].join('\n') + '\n';
+    const filler = Array.from(
+      { length: 280 },
+      (_, i) => `+-- harmless filler line number ${String(i)} ${'x'.repeat(48)}`,
+    );
+    const texts = new Map<string, string>();
+    for (let i = 0; i < 29; i++) {
+      const path = `db/f${String(i).padStart(2, '0')}.sql`;
+      texts.set(path, patch(path, filler));
+    }
+    texts.set('db/m.sql', patch('db/m.sql', ['+CREATE INDEX idx_users ON users (email);']));
+    const read = (only: readonly string[] | null, maxBytes: number) => {
+      const buffer = Buffer.from((only ?? []).map((p) => texts.get(p) ?? '').join(''), 'utf8');
+      return Promise.resolve({
+        diff: buffer.subarray(0, maxBytes).toString('utf8'),
+        truncated: buffer.length > maxBytes,
+        files: [...texts.keys()].map((path) => ({ path, added: 1, removed: 0 })),
+      });
+    };
+    const detail = await watchpointHitsAfter({
+      watchpoints: [
+        watchpoint('indexes', ['db/**'], {
+          loudness: WatchpointLoudness.Ask,
+          lines: ['create\\s+index'],
+        }),
+      ],
+      head: 'abc',
+      read,
+      readLines: (checks) => Promise.resolve(runChecks(checks)),
+    });
+    const paths = detail.hits.flatMap((h) => h.files.map((f) => f.path));
+    expect(paths).toContain('db/m.sql');
   });
 });
