@@ -133,6 +133,23 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     ],
   });
   expect(watched.ok()).toBe(true);
+  // The project's evals as an assessment records them: one suite covering the greeting folder. The run
+  // snapshots it as it starts, and nothing has run the suite since.
+  const recorded = await request.put(`${daemonUrl}/projects/${projectId}/evals/manifest`, {
+    headers: { Authorization: `Bearer ${E2E_TOKEN}` },
+    data: {
+      suites: [
+        {
+          key: 'greeting.tone',
+          label: 'Greeting tone',
+          coveredPaths: ['src/greeting/**'],
+          liveCommand: 'make eval-greeting',
+        },
+      ],
+      gaps: [],
+    },
+  });
+  expect(recorded.ok()).toBe(true);
   await page.goto('/board');
 
   // A new project starts with an Icebox column for parked work. While it is empty it is folded to a rail.
@@ -290,6 +307,12 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(forYou.getByText('✓ A plain text file, as the gate expects.')).toBeVisible();
   await expect(forYou.getByText('src/greeting/hello.txt')).toBeVisible();
   await expect(forYou.getByText('added line 1: hello')).toBeAttached();
+  // Evals sits beside it: the suite the change touched hasn't run since, with its live command to copy.
+  const evals = taskDrawer.getByTestId('eval-coverage');
+  await expect(evals.getByText('Greeting tone')).toBeVisible();
+  await expect(evals.getByText('not run', { exact: true })).toBeVisible();
+  await expect(evals.getByText('Changes src/greeting/hello.txt')).toBeVisible();
+  await expect(evals.getByText('make eval-greeting')).toBeVisible();
   // A Board task nobody watches is never asked anything: the agent's question was answered at once. The
   // task is done, so the drawer lists it and the Inbox raised no card for it.
   await expect(
@@ -323,6 +346,10 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await reportSwitch.locator('xpath=..').click();
   await expect(reportSwitch).not.toBeChecked();
   await open(page, 'Board');
+  // The Board's card for the finished task carries the same marker.
+  await expect(
+    page.getByTestId('task-card').filter({ hasText: TASK }).getByTestId('eval-marker'),
+  ).toHaveText('Greeting tone · not run');
 
   // Knowledge: a decision written through the API (as Claude Code would) appears in the open view
   // without a reload, with where it came from.

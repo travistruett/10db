@@ -23,7 +23,11 @@ import {
 /** The detail key naming whether a Review follows the run, so the card says where the work went. */
 const ACCEPTANCE_REVIEW_FOLLOWS_KEY = 'reviewFollows';
 
-function bodyOf(detail: AcceptanceDetail, reviewFollows: boolean): string {
+function bodyOf(
+  detail: AcceptanceDetail,
+  reviewFollows: boolean,
+  evalLines: readonly string[],
+): string {
   const open = detail.criteria
     .filter((c) => c.verdict !== AcceptanceVerdict.Met)
     .map((c) => `- ${c.criterion} (${c.note})`);
@@ -33,6 +37,7 @@ function bodyOf(detail: AcceptanceDetail, reviewFollows: boolean): string {
     ...(detail.unasked === null
       ? []
       : ['', `It may also do something the task didn't ask for: ${detail.unasked}`]),
+    ...(evalLines.length === 0 ? [] : ['', 'Evals:', ...evalLines.map((l) => `- ${l}`)]),
     '',
     'Accept the work as it is, or send it back with a note.',
   ].join('\n');
@@ -50,12 +55,14 @@ export function raiseAcceptanceCard(
     taskTitle: string;
     detail: AcceptanceDetail;
     reviewFollows: boolean;
+    /** What the eval suites the change touched have to say; the card is never raised for them alone. */
+    evalLines: readonly string[];
   },
 ): InboxItemDto {
   const live = openItemsForWorkstream(ctx.tx, input.workstreamId).find(
     (item) => item.kind === InboxKind.Acceptance && item.state === InboxState.Open,
   );
-  const body = bodyOf(input.detail, input.reviewFollows);
+  const body = bodyOf(input.detail, input.reviewFollows, input.evalLines);
   const detail = { ...input.detail, [ACCEPTANCE_REVIEW_FOLLOWS_KEY]: input.reviewFollows };
   if (live) return updateInboxItem(ctx, live.id, { body, detail });
   return insertInboxItem(ctx, {

@@ -24,6 +24,8 @@ function git(...args: string[]): void {
 }
 
 writeFileSync(join(E2E_REPO, 'src', 'greeting', '.gitkeep'), '');
+// A file a covered glob can hold: `**` does not match a dot file.
+writeFileSync(join(E2E_REPO, 'src', 'greeting', 'README.md'), 'Greetings.\n');
 git('init', '-b', 'main');
 // Every test repository sets these two keys (.claude/rules/testing.md); daemon test code is not
 // importable from here. Without them git leaves a detached `git maintenance run --auto` writing
@@ -33,7 +35,7 @@ git('config', 'gc.auto', '0');
 git('config', 'user.email', 'e2e@10db.invalid');
 git('config', 'user.name', '10db e2e');
 git('config', 'commit.gpgsign', 'false');
-git('add', 'src/greeting/.gitkeep');
+git('add', 'src/greeting/.gitkeep', 'src/greeting/README.md');
 git('commit', '-m', 'Initial commit');
 console.log(`e2e repo: ${E2E_REPO}`);
 console.log(`e2e data: ${E2E_DATA}`);

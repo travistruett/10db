@@ -262,6 +262,8 @@ export const EvidenceKind = {
   Acceptance: 'acceptance',
   /** The watchpoints a finished run's change hit, kept with their hunks. */
   Watchpoint: 'watchpoint',
+  /** The suites of the project's evals a finished run's change touched, matched against the manifest as the run began. */
+  EvalCoverage: 'eval_coverage',
 } as const;
 export type EvidenceKind = ValueOf<typeof EvidenceKind>;
 

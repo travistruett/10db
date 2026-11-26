@@ -44,3 +44,18 @@
 - By Model (`models.ts`, `GET /projects/:id/eval-models`, not under `/evals/` where `models` would be a suite key):
   each model's newest result per suite, its cost for one run of each (unknown if any is) and the median of its p50s.
   A result from a run whose fingerprint differs from the suite's newest run is `olderEval`. Compare is the UI's join.
+- Covered tasks (`coverage.ts`, `task-coverage.ts`): the runner records an `eval_coverage` evidence row (no
+  migration) as a run's first session starts: each manifest suite with `coveredPaths` as the manifest stood, and
+  the time of the commit the run branched from, so a lane that edits the manifest mid-run cannot drop its own
+  marker. After the gate (`evalCoverageAfter`, beside `reviewForcedAfter`, and in `finishWithoutGate`) the run's own
+  changed files are matched against that snapshot as a hazard's globs match (`matchedSuites`) and a newer row
+  records the matches, the last commit's time and what each suite last showed before. `coverageOf` (pure) reads a
+  suite's runs by time: before is the newest run older than the branch point, after the first newer than the last
+  commit; `not_run`, `passing`, `failing`, `regressed` (a model that passed before fails after) and `eval_changed`
+  (the fingerprints differ). `GET /projects/:id/eval-markers` (card markers) and `GET /tasks/:id/eval-coverage`
+  (the drawer) read the newest row per task and the results as they are now, so a result that lands later changes
+  the marker with no event. The run's one Inbox card, the acceptance card when one is raised, gains a line per
+  touched suite with the live command; no card is made for a suite alone. Not built: a lane's manifest write held
+  as a proposal. The HTTP API carries one token for the builder's UI and every agent's CLI, so a lane's `PUT
+/projects/:id/evals/manifest` can't be told from the builder's; the snapshot is what keeps a lane from dropping
+  its own marker.
