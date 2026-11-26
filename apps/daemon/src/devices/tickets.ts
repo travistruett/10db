@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { DeviceId, EventTicketDto, TicketScope } from '@10db/contracts';
-import type { Listener } from '../api';
+import type { Listener } from '../listeners';
 import type { Clock } from '../clock';
 
 export interface TicketOwner {

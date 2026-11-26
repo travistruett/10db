@@ -2,7 +2,7 @@ import { TicketScope, type DeviceId } from '@10db/contracts';
 import type { Context, MiddlewareHandler } from 'hono';
 import type { TicketOwner } from '../devices';
 import { AuthVerdict, Credential, RouteClass, authorize, routeClassOf } from './auth-matrix';
-import { Listener, listenerOf } from './listener';
+import { Listener, listenerOf } from '../listeners';
 import type { Principal } from './principal';
 import type { ApiEnv } from './request-context';
 

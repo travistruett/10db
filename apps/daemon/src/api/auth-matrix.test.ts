@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AuthVerdict, Credential, RouteClass, authorize, routeClassOf } from './auth-matrix';
-import { Listener } from './listener';
+import { Listener } from '../listeners';
 
 const P = AuthVerdict.Pass;
 const U = AuthVerdict.Unauthorized;

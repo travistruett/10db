@@ -1,4 +1,4 @@
-import { Listener } from './listener';
+import { Listener } from '../listeners';
 
 export const RouteClass = {
   Health: 'health',

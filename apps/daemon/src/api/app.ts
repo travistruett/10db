@@ -165,6 +165,7 @@ import {
   EventTicketDto,
   PairRequest,
   PutSharingBody,
+  type SharingStatusDto,
   DeviceId,
 } from '@10db/contracts';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
@@ -177,19 +178,13 @@ import { z } from 'zod';
 import type { ApiServices } from './services';
 import type { SelfUpdateServices, TaskRemovalServices } from './services';
 import { PairingRefusedError, SharingNotReadyError, type DeviceService } from '../devices';
-import { SharingRefusedError, type SharingService } from '../sharing';
 import { credentialMiddleware, type CredentialDeps } from './credential';
 import type { SocketRegistry, Tickets } from '../devices';
-import { Listener, listenerOf } from './listener';
+import { Listener, listenerOf } from '../listeners';
 import { ticketScopeOf } from './principal';
 import type { ApiEnv } from './request-context';
-import {
-  hostGuard,
-  originGuard,
-  remoteMark,
-  type ListenerAllowlists,
-  type RequestGuardDeps,
-} from './request-guards';
+import { hostGuard, originGuard, remoteMark, type RequestGuardDeps } from './request-guards';
+import type { ListenerAllowlists } from '../listeners';
 import { streamEvents } from './stream';
 
 /** A kept picture never changes. */
@@ -213,6 +208,16 @@ export interface ScreenRoutes {
   ): { readonly bytes: Uint8Array; readonly mediaType: string } | null;
 }
 
+/**
+ * What the sharing routes call. Declared here, not imported, so the API (and the desktop's `AppType`) never pulls in
+ * the sharing module's daemon-only imports; the sharing service fits it.
+ */
+export interface SharingRoutes {
+  status(): SharingStatusDto;
+  set(body: PutSharingBody): Promise<SharingStatusDto>;
+  requestCertificate(): Promise<SharingStatusDto>;
+}
+
 export interface ApiDeps {
   readonly startedAt: Date;
   /** Origins the UI is served from (Vite dev server, Tauri webview). */
@@ -233,7 +238,7 @@ export interface ApiDeps {
   /** Open stream sockets, so a revoked device or a stopped listener closes them. */
   readonly sockets: SocketRegistry;
   /** The sharing and device-management services behind their routes; the routes answer 501 without it. */
-  readonly remote?: { readonly sharing: SharingService; readonly devices: DeviceService };
+  readonly remote?: { readonly sharing: SharingRoutes; readonly devices: DeviceService };
   readonly services: ApiServices;
   /** Removes tasks that haven't started; the route answers 501 without it. */
   readonly taskRemoval?: TaskRemovalServices;
@@ -2406,8 +2411,6 @@ export function createApp(deps: ApiDeps) {
     if (error instanceof DomainError) {
       return c.json({ error: error.code, message: error.message }, STATUS[error.code]);
     }
-    if (error instanceof SharingRefusedError)
-      return c.json({ error: 'refused', message: error.message }, 409);
     if (error instanceof SharingNotReadyError)
       return c.json({ error: 'not_ready', message: error.message }, 409);
     if (error instanceof PairingRefusedError) {

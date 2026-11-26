@@ -7,10 +7,11 @@ import {
   SharingStepStatus,
   type PutSharingBody,
   type SharingStatusDto,
+  DomainError,
 } from '@10db/contracts';
 import { getAppSetting, setAppSetting } from '@10db/db';
 import { z } from 'zod';
-import { Listener, type ListenerAllowlists } from '../api';
+import { Listener, type ListenerAllowlists } from '../listeners';
 import type { Clock, Timer } from '../clock';
 import type { SocketRegistry } from '../devices';
 import type { StateStore } from '../events';
@@ -46,8 +47,12 @@ export interface SharingService {
 }
 
 /** Share was refused; the message says why and is shown to the builder. */
-export class SharingRefusedError extends Error {
-  override readonly name = 'SharingRefusedError';
+/** A Share, Stop or certificate request 10db refuses; the API answers it as a 409 with its sentence. */
+export class SharingRefusedError extends DomainError {
+  override readonly name: string = 'SharingRefusedError';
+  constructor(message: string) {
+    super('conflict', message);
+  }
 }
 
 class ServeUnreadableError extends Error {

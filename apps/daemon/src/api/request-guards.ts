@@ -1,12 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 import { RouteClass, routeClassOf } from './auth-matrix';
-import { Listener, listenerOf } from './listener';
+import { Listener, listenerOf, type ListenerAllowlists } from '../listeners';
 import type { ApiEnv } from './request-context';
-
-export interface ListenerAllowlists {
-  readonly hosts: readonly string[];
-  readonly origins: readonly string[];
-}
 
 export interface RequestGuardDeps {
   /** Read per request: the share listener's lists change when sharing turns on, off or the name changes. */

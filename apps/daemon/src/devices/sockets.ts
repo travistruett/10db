@@ -1,5 +1,5 @@
 import type { DeviceId } from '@10db/contracts';
-import type { Listener } from '../api';
+import type { Listener } from '../listeners';
 import type { TicketOwner } from './tickets';
 
 export interface SocketLike {

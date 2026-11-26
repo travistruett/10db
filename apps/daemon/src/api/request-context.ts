@@ -1,5 +1,5 @@
 import type { TicketOwner } from '../devices';
-import type { ApiBindings } from './listener';
+import type { ApiBindings } from '../listeners';
 import type { Principal } from './principal';
 
 /** The Hono env of the API: the listener binding and what the guards and the credential set per request. */

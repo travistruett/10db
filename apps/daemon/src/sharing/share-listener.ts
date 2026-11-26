@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
 import { serve, type WebSocketServerLike } from '@hono/node-server';
 import { WebSocketServer } from 'ws';
-import { Listener, type ApiBindings } from '../api';
+import { Listener, type ApiBindings } from '../listeners';
 import type { SocketRegistry } from '../devices';
 
 export interface ShareListener {

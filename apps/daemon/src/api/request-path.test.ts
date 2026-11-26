@@ -26,8 +26,7 @@ import { createEventBus, createStateStore } from '../events';
 import { silentLogger } from '../log';
 import { createSharingService, startShareListener } from '../sharing';
 import { createApp } from './app';
-import { Listener } from './listener';
-import type { ListenerAllowlists } from './request-guards';
+import { Listener, type ListenerAllowlists } from '../listeners';
 
 const UI = 'ui-token-for-tests';
 const DEV_UI = 'dev-ui-token-for-tests';

@@ -92,7 +92,8 @@ import {
   createUsageReports,
   type AccountLimits,
 } from '../accounts';
-import { createApp, Listener, type SelfUpdateServices } from '../api';
+import { createApp, type SelfUpdateServices } from '../api';
+import { Listener } from '../listeners';
 import {
   createBenchmarkSync,
   createOpenRouterSync,

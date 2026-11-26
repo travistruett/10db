@@ -1,6 +1,6 @@
 import { mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { Listener } from '../api';
+import { Listener } from '../listeners';
 import { ManualClock } from '../clock';
 import { createTickets } from './tickets';
 
