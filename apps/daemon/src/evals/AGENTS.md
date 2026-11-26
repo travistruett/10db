@@ -49,3 +49,12 @@
   golden changed; grader changed; model judge added; else `unclassified`) and names the line each kind came from. It
   is pure and calls no model, so it is the same on every provider. A manifest `bar` edit is an app setting, not a
   patch line, and is not read. The watchpoints' eval source (`watchpoints/eval-definition-source.ts`) uses it.
+- New Eval (`new-eval-task.ts`, `POST /projects/:id/evals/tasks`, `NewEvalRequest`): files a normal task on the
+  project's account, "Write the eval for <behavior>", through the ordinary task-create path (`createTask`). Its brief
+  holds the six rationale sections (Decision, Evidence, Oracle, Coverage and bar, Models, Execution), the paths
+  the behavior lives in, the project's eval skills and a few existing suites as format examples, and forbids the
+  live command and any paid model call. The skills are the tracked `.claude/skills/*/SKILL.md` and
+  `.agents/skills/*/SKILL.md` at HEAD whose front matter name or description mentions evals; the brief gives
+  each one's name and file path, so a Claude or Codex lane uses it by name or reads the file. With none, it points
+  at the existing eval files. The task's areas are those the `where` paths fall in, else the catch-all or the first
+  area. It reads, files a task and runs nothing.
