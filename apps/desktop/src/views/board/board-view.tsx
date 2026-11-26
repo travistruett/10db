@@ -19,6 +19,7 @@ import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
+import { useEvalMarkers } from '../../daemon/evals-queries';
 import { useGoals } from '../../daemon/goal-queries';
 import {
   useAbandonBatch,
@@ -181,6 +182,7 @@ function BoardColumns({
   goalTitles,
 }: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
+  const evalMarkers = useEvalMarkers(projectId);
   const retry = useRetryWorkstream();
   const abandon = useAbandonBatch();
   const closeTask = useCloseTask();
@@ -328,6 +330,7 @@ function BoardColumns({
                 place={ws ? places.get(ws.id) : undefined}
                 peers={peers}
                 goalTitle={task.goalId ? goalTitles.get(task.goalId) : undefined}
+                evalMarkers={evalMarkers.data?.tasks[task.id]}
               />
             );
           }}
