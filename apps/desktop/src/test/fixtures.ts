@@ -61,6 +61,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     appUrl: null,
     devLoginCommand: null,
     previewCommand: null,
+    appStartCommand: null,
     screens: { viewports: [{ width: 1440, height: 900 }], themes: ['default'] },
     createdAt: AT,
     updatedAt: AT,
