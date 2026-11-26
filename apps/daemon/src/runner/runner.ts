@@ -780,7 +780,7 @@ const PERMISSION_ANSWER_TEXT: Readonly<Record<string, string>> = {
     'allowed once. Retry the call now; 10db lets this exact call through once.',
   [PermissionChoice.AllowWorkstream]: 'allowed for the rest of this workstream. Retry the call.',
   [PermissionChoice.AllowProject]: 'always allowed in this project. Retry the call.',
-  [PermissionChoice.AllowChat]: 'allowed in this chat. Retry the call.',
+  [PermissionChoice.AllowChat]: 'allowed in this turn. Retry the call.',
   [PermissionChoice.AllowMcpServer]:
     'allowed, with every tool the server listed, in this project. Retry the call.',
   [PermissionChoice.Deny]:

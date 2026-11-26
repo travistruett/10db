@@ -403,6 +403,7 @@ export function createShapePreparer(
                     bump: input.unsandboxedAsk.bump,
                     background: input.unsandboxedAsk.background,
                     remembers: input.unsandboxedAsk.remembers,
+                    checkoutState: input.unsandboxedAsk.checkoutState,
                   },
                 }),
           },
