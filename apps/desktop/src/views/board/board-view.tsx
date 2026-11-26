@@ -43,7 +43,6 @@ import { BatchSheet } from './batch/batch-sheet';
 import { closeNote } from './batch/close-note';
 import { batchTaskCount } from './batch/batch-task-count';
 import { TaskExternalLink } from './task-external-link';
-import { AcceptanceLine } from './acceptance-line';
 import { BoardColumn } from './board-column';
 import { BoardScroll, COLUMNS_MIN_HEIGHT } from './board-scroll';
 import { BoardSkeleton } from './board-skeleton';
@@ -614,7 +613,6 @@ export function BoardView() {
         }
       />
       <PageIntro
-        description={project ? <AcceptanceLine projectId={project.id} /> : undefined}
         toolbar={
           filterGoal ? (
             <GoalLine
