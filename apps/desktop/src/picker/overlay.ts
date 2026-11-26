@@ -26,19 +26,24 @@ const STYLE = `
 @keyframes flash { 50% { transform: translate(-50%,-50%) scale(1.5); } }
 .marquee { position: fixed; border: 1.5px dashed #f275be; background: rgba(242,117,190,.07); display: none; }
 .note { position: fixed; width: 360px; background: #103c48; color: #adbcbc; border: 1px solid #2d5b69; border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0,0,0,.4); padding: 10px; pointer-events: auto; display: none; }
+  box-shadow: 0 12px 32px rgba(0,0,0,.4); padding: 12px 14px 12px; pointer-events: auto; display: none; }
 .note.faded { opacity: .2; pointer-events: none; }
-.head { display: flex; gap: 6px; align-items: center; font-size: 11.5px; margin-bottom: 6px; min-width: 0; }
+.head { display: flex; gap: 7px; align-items: center; font-size: 12px; margin: 0 -4px 4px 0; min-width: 0; }
 .n { background: #f275be; color: #103c48; border-radius: 9px; padding: 0 6px; font-weight: 600; flex: none; }
 .scope { color: #cad8d9; font-weight: 600; }
 .src { display: block; font: 11px ui-monospace, Menlo, monospace; color: #41c7b9; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; margin: -2px 0 6px; }
+  white-space: nowrap; margin: 0 0 10px; }
 textarea { width: 100%; min-height: 88px; resize: none; background: #184956; color: #cad8d9; border: 1px solid #2d5b69;
   border-radius: 7px; padding: 7px 8px; font: 13px/1.4 -apple-system, system-ui, sans-serif; outline: none; }
 textarea:focus { border-color: #4695f7; }
 .foot { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 11px; color: #72898f; }
 .quiet { background: none; border: 0; color: #72898f; font-size: 11.5px; padding: 3px 4px; }
 .quiet:hover { color: #cad8d9; }
+.danger { color: #c1747a; }
+.danger:hover { color: #fa5750; }
+.close { margin-left: auto; width: 22px; height: 22px; display: grid; place-items: center; padding: 0; background: none;
+  border: 0; border-radius: 5px; color: #72898f; flex: none; }
+.close:hover { background: #184956; color: #cad8d9; }
 .save { background: #f275be; color: #103c48; border: 0; border-radius: 6px; padding: 4px 12px; font-size: 12px; font-weight: 600; }
 .save:hover { background: #f58bca; }
 .grow { flex: 1; }
@@ -65,14 +70,14 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; background: #184956; border: 
 .picking .mode { display: inline-flex; }
 .sep { width: 1px; height: 18px; background: #2d5b69; }
 .count { color: #72898f; }
-.send { display: none; background: #f275be; color: #103c48; border: 0; height: 26px; border-radius: 13px; padding: 0 11px;
-  font-weight: 600; font-size: 12px; margin-right: 5px; }
+.send { display: none; background: #f275be; color: #103c48; border: 0; height: 22px; border-radius: 11px; padding: 0 9px;
+  font-weight: 600; font-size: 11.5px; margin: 0 2px 0 4px; }
 .has .send { display: inline-block; }
 .has .sep, .has .count { display: none; }
 .clear { display: none; background: none; border: 0; color: #72898f; height: 26px; padding: 0 6px; font-size: 12px; }
 .clear:hover { color: #cad8d9; }
 .has .clear { display: inline-block; }
-.pill:not(.picking) .clear { color: #103c48; }
+.pill:not(.picking) .clear { color: #103c48; margin-right: 8px; }
 .exit { display: none; width: 26px; height: 26px; border-radius: 13px; margin-right: 5px; background: none; border: 0;
   color: #72898f; place-items: center; padding: 0; }
 .exit:hover { background: #184956; color: #cad8d9; }
@@ -138,14 +143,16 @@ export function createOverlay(): Overlay {
   const head = el('div', 'head', note);
   const noteNumber = el('span', 'n', head);
   const noteScope = el('span', 'scope', head);
+  const noteCancel = el('button', 'close', head);
+  noteCancel.innerHTML = CLOSE;
+  noteCancel.title = 'Close without saving (esc)';
+  noteCancel.setAttribute('aria-label', 'Close without saving');
   const noteSource = el('code', 'src', note);
   const noteText = el('textarea', '', note);
   noteText.placeholder = 'What should change?';
   noteText.setAttribute('aria-label', 'Note for this pick');
   const foot = el('div', 'foot', note);
-  const noteCancel = el('button', 'quiet', foot);
-  noteCancel.textContent = 'Cancel';
-  const noteRemove = el('button', 'quiet', foot);
+  const noteRemove = el('button', 'quiet danger', foot);
   noteRemove.textContent = 'Remove';
   el('span', 'grow', foot);
   const noteDictate = el('button', 'ghost mic', foot);
