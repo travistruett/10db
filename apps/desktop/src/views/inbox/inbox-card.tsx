@@ -11,6 +11,7 @@ import {
   type InboxItemDto,
 } from '@10db/contracts';
 import { Anchor, Badge, Code, Group, Kbd, Radio, Spoiler, Stack, Text } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { Link } from '@tanstack/react-router';
 import type { ReactNode, RefObject } from 'react';
 import { z } from 'zod';
@@ -182,10 +183,13 @@ export function InboxCard({
   onDismiss,
   framed = true,
   context = null,
-  shortcuts = true,
+  shortcuts: shortcutsWanted = true,
   answeringMyself = false,
   onAnswerMyself = () => undefined,
 }: InboxCardProps) {
+  // A touch screen has no keys, so its cards show no key hints.
+  const touch = useMediaQuery('(pointer: coarse)', false);
+  const shortcuts = shortcutsWanted && !touch;
   const people = usePeople().data ?? [];
   const slackTeam = useProjectIntegrations(item.projectId).data?.slack.teamId ?? null;
   const mode = stakeholderMode(item, people, slackTeam);

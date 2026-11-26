@@ -1,4 +1,4 @@
-import { ActionIcon, Group, Kbd, Modal, Stack, Text } from '@mantine/core';
+import { Group, Kbd, Modal, Stack, Text } from '@mantine/core';
 
 /** Every Inbox shortcut, as the list shows it. */
 const SHORTCUTS: readonly { readonly keys: readonly string[]; readonly action: string }[] = [
@@ -13,44 +13,38 @@ const SHORTCUTS: readonly { readonly keys: readonly string[]; readonly action: s
 
 export interface InboxShortcutsProps {
   readonly opened: boolean;
-  readonly onOpen: () => void;
   readonly onClose: () => void;
 }
 
-/** The ? button and the list of shortcuts it opens. */
-export function InboxShortcuts({ opened, onOpen, onClose }: InboxShortcutsProps) {
+/** The list of shortcuts the ? key opens. */
+export function InboxShortcuts({ opened, onClose }: InboxShortcutsProps) {
   return (
-    <>
-      <ActionIcon variant="subtle" size="xs" aria-label="Keyboard shortcuts" onClick={onOpen}>
-        ?
-      </ActionIcon>
-      <Modal
-        opened={opened}
-        onClose={onClose}
-        title="Keyboard Shortcuts"
-        centered
-        closeButtonProps={{ 'aria-label': 'Close' }}
-        // Back on the page, not on the ? button, where the Inbox keys would not count.
-        returnFocus={false}
-      >
-        <Stack gap="xs">
-          {SHORTCUTS.map(({ keys, action }) => (
-            <Group key={action} justify="space-between" wrap="nowrap">
-              <Text size="sm">{action}</Text>
-              <Group gap={4} wrap="nowrap">
-                {keys.map((k) => (
-                  <Kbd key={k} size="xs">
-                    {k}
-                  </Kbd>
-                ))}
-              </Group>
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title="Keyboard Shortcuts"
+      centered
+      closeButtonProps={{ 'aria-label': 'Close' }}
+      // Back on the page, where the Inbox keys count.
+      returnFocus={false}
+    >
+      <Stack gap="xs">
+        {SHORTCUTS.map(({ keys, action }) => (
+          <Group key={action} justify="space-between" wrap="nowrap">
+            <Text size="sm">{action}</Text>
+            <Group gap={4} wrap="nowrap">
+              {keys.map((k) => (
+                <Kbd key={k} size="xs">
+                  {k}
+                </Kbd>
+              ))}
             </Group>
-          ))}
-          <Text size="xs" c="dimmed">
-            A check card is answered with its own buttons; these keys leave it alone.
-          </Text>
-        </Stack>
-      </Modal>
-    </>
+          </Group>
+        ))}
+        <Text size="xs" c="dimmed">
+          A check card is answered with its own buttons; these keys leave it alone.
+        </Text>
+      </Stack>
+    </Modal>
   );
 }
