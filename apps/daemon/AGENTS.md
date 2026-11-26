@@ -31,6 +31,8 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   `daemonOptionsFromEnv`; every decision then keeps today's rule), and keeps the OpenRouter sync (`benchmarks/openrouter-sync.ts`) from running. Only the installed app's daemon asks models;
   the e2e web server, the live acceptance daemon and `scripts/dev.sh` set it, and
   `tests/repo/src/benchmarks-off.test.ts` checks they do. A new launcher of a throwaway daemon sets it too.
+- Every outbound `fetch` is `outboundFetch` (`src/outbound/`, HTTP/1.1 only; ESLint refuses the global `fetch`
+  elsewhere in `src`). Its `AGENTS.md` has the rest.
 - `TENDB_SLACK=off` keeps a daemon from reading the Slack bot tokens (Keychain service `10db`, one
   account per workspace, `slack-bot:<teamId>`, `slackBotAccount`) and from calling Slack (`slackOnFromEnv`; `DaemonOptions.slack` is off unless
   given, so an in-process harness never reaches Slack). Only the installed app's daemon messages people; the e2e
