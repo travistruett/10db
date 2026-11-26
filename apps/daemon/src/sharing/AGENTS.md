@@ -26,6 +26,9 @@ Shares this Mac's daemon on the builder's tailnet through `tailscale serve`.
   (`blocked`); a start that fails for Tailscale or certificate reasons (`retry`) is tried again by the monitor, a held
   port is not, and the monitor only removes 10db's mapping while the listener is down. `set` refuses with
   `SharingRefusedError`, whose message is shown to the builder (task 10 maps it to 409).
+- A daemon that is not sharing (no listener, not enabled) neither unserves its port on Stop or shutdown nor records an owed
+  unserve: the port's mapping may be another daemon's (`notSharing` in `sharing-service.ts`). An unserve an earlier Stop
+  owed is still retried by the monitor and at start.
 - `share-listener.ts` is the second `serve()` on `127.0.0.1:<port>` with its own `WebSocketServer({ noServer: true })`
   and the same app. Its fetch wrapper (and the main listener's in `start.ts`) marks the **env object in place**
   (`Object.assign(env, { listener })`): `@hono/node-server` reads back a symbol the upgrade helper writes on that very
