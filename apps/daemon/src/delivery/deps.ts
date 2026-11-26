@@ -7,7 +7,7 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { getBatch, getTask, latestDoneWorkstream, type DbReader } from '@10db/db';
+import { getBatch, getTask, isLocalCopy, latestDoneWorkstream, type DbReader } from '@10db/db';
 import { PrState, type Gh, type GhCall } from '../github';
 
 export interface BlockedTask {
@@ -52,7 +52,8 @@ export interface UnmergedDependency {
 /**
  * Done dependencies outside the batch whose code is not on origin/<base>: they finished in a batch
  * that was abandoned or whose pull request is not merged. A dependency done in a batch that closed
- * (no commits), or done in local delivery, counts as on the base.
+ * (no commits), done in local delivery, or shipped from a separate copy (landed on the local base
+ * branch), counts as on the base.
  */
 export async function unmergedDependencies(input: {
   readonly db: DbReader;
@@ -68,20 +69,32 @@ export async function unmergedDependencies(input: {
       if (input.inBatch.has(depId)) continue;
       const done = latestDoneWorkstream(input.db, depId);
       if (!done?.batchId || done.batchId === input.batchId) continue;
-      const reason = await notOnBase(getBatch(input.db, done.batchId), input.gh, input.call);
+      const reason = await notOnBase(
+        input.db,
+        getBatch(input.db, done.batchId),
+        input.gh,
+        input.call,
+      );
       if (reason !== null) found.push({ task, dep: getTask(input.db, depId), reason });
     }
   }
   return found;
 }
 
-async function notOnBase(batch: BatchDto, gh: Gh, call: GhCall): Promise<string | null> {
+async function notOnBase(
+  db: DbReader,
+  batch: BatchDto,
+  gh: Gh,
+  call: GhCall,
+): Promise<string | null> {
   switch (batch.state) {
     case BatchState.Closed:
       return null;
     case BatchState.Abandoned:
       return `its batch "${batch.title}" was abandoned, so its code is only on the local branch ${batch.branch ?? '(none)'}`;
     case BatchState.Shipped: {
+      // A separate copy ships by landing on the local base branch and never has a pull request.
+      if (isLocalCopy(db, batch.id)) return null;
       if (batch.prUrl === null || batch.repo === null)
         return `its batch "${batch.title}" has no pull request`;
       const pr = await gh.prView({ repo: batch.repo, ref: batch.prUrl }, call);

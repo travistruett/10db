@@ -20,6 +20,7 @@ import {
 } from './api-views';
 import type { Api } from './connection';
 import { TendbError, UnknownCommandError } from './errors';
+import { evalsCommand } from './evals-command';
 import { mergeHazards } from './hazards';
 import {
   KnowledgeItemView,
@@ -439,7 +440,10 @@ const joinBatch: Command = async ([rawTask, rawBatch], deps) => {
       batchId: batch,
     },
   );
-  deps.out(`Started ${id} in ${batches.map((b) => `${b.id} (${b.state})`).join(', ')}.`);
+  // The daemon answers before it checks the join, so the answer can't say it was refused.
+  deps.out(
+    `Asked to start ${id} in ${batches.map((b) => `${b.id} (${b.state})`).join(', ')}. Not started yet: a refusal after this shows on the Board and in the Inbox.`,
+  );
 };
 
 const runNext: Command = async ([raw], deps) => {
@@ -660,12 +664,13 @@ const COMMANDS: Record<string, Command> = {
   next: runNext,
   hold,
   hazards,
+  evals: evalsCommand,
   'resave-account': resaveAccount,
   'account-settings': accountSettings,
 };
 
 const USAGE =
-  'usage: node tendb.mjs context|project|areas|create|goal|plan-import|knowledge|decision|principle|supersede|edit|remove|start|move|inbox|answer|ship|abandon|close|join|next ... (commands and arguments: SKILL.md beside this file)';
+  'usage: node tendb.mjs context|project|areas|create|goal|plan-import|knowledge|decision|principle|supersede|edit|remove|start|move|inbox|answer|ship|abandon|close|join|next|hazards|evals ... (commands and arguments: SKILL.md beside this file)';
 
 /** Runs one command line, as `node tendb.mjs <argv>` does. */
 export async function runCommand(argv: readonly string[], deps: CommandDeps): Promise<void> {

@@ -7,9 +7,20 @@ import {
   type TaskId,
   type WorkstreamDto,
 } from '@10db/contracts';
-import { Accordion, Box, Collapse, Group, Stack, Text, Title, UnstyledButton } from '@mantine/core';
+import {
+  Accordion,
+  Badge,
+  Box,
+  Collapse,
+  Group,
+  HoverCard,
+  Stack,
+  Text,
+  Title,
+  UnstyledButton,
+} from '@mantine/core';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { ProjectTile } from '../../shell/project-tile';
 import { useSelectedProject } from '../../shell/selected-project';
 import {
@@ -21,10 +32,12 @@ import {
   type LiveRow,
 } from './factory-summary';
 import classes from './factory-overview.module.css';
+import { useBarColumn } from './bar-column';
+import { ClippedText } from './clipped-text';
 import { GoalList } from './goal-list';
 import { LiveGroup, lastMoment } from './live-groups';
 import { shortAgo } from './short-ago';
-import { BarLegend, StackedBar } from './stacked-bar';
+import { BarBreakdown, StackedBar } from './stacked-bar';
 import { doing, failedAt, LineTone, RunMark, TaskLine } from './task-line';
 import { FailureDot } from './failure-card';
 import { STATE_COLORS } from './workstream-state';
@@ -92,12 +105,8 @@ function Fold({
               setOpen(!open);
             }}
           >
-            <span className={`${classes['lineTitle'] ?? ''} ${classes['clip'] ?? ''}`}>
-              {label}
-            </span>
-            <Text component="span" size="xs" c="dimmed" truncate className={classes['lineState']}>
-              {detail}
-            </Text>
+            <ClippedText text={label} className={classes['lineTitle']} />
+            <ClippedText text={detail} c="dimmed" className={classes['lineState']} wide />
             <span className={classes['when']}>
               <Chevron size={14} stroke={1.5} aria-hidden />
             </span>
@@ -138,14 +147,7 @@ function Work({
         key={run.id}
         mark={
           failed ? (
-            <FailureDot
-              run={run}
-              canRetry={canRetry(run)}
-              canClose={canClose(run)}
-              onOpen={() => {
-                onOpen(run);
-              }}
-            />
+            <FailureDot run={run} canRetry={canRetry(run)} canClose={canClose(run)} />
           ) : (
             // A finished run whose pull request is open is in review: blue, never done's green.
             <RunMark color={group === LiveGroup.InReview ? 'blue' : STATE_COLORS[run.state]} />
@@ -217,26 +219,71 @@ function ProjectItem({
   const { select } = useSelectedProject();
   const counts = withPasses(entry);
   const line = projectLine(counts);
+  // Nothing needs the builder, runs or waits: the bar steps back so busy projects stand out.
+  const idle = projectRank(counts) === 2;
   const latest = latestOf(entry);
   const hasGoals = goals !== undefined && goals.goals.length > 0;
   const loose = hasGoals
     ? rows.filter((r) => (props.goalOf.get(r.run.taskId) ?? null) === null)
     : rows;
+  const card = useRef<HTMLDivElement>(null);
+  const header = useRef<HTMLDivElement>(null);
+  // The bar starts on the goal bars' edge and runs to their status column; folded, it keeps its own size.
+  const column = useBarColumn(card, header, classes['cols']);
   return (
-    <Accordion.Item value={project.id}>
+    <Accordion.Item value={project.id} ref={card}>
       <Accordion.Control aria-label={`${project.name} ${line}`}>
-        <Group gap={12} wrap="nowrap">
+        <Group ref={header} gap={12} wrap="nowrap">
           <ProjectTile name={project.name} size={18} />
-          {/* 220 px puts the bar on the goal rows' bar column below. */}
-          <Text fw={600} c="bright" truncate w={220} style={{ flex: 'none' }}>
+          <Text
+            fw={600}
+            c="bright"
+            truncate
+            // The tile and two gaps sit before the name.
+            w={column === null ? 220 : Math.max(0, column.left - 42)}
+            style={{ flex: 'none' }}
+          >
             {project.name}
           </Text>
-          <Box w={240} style={{ flex: 'none' }}>
-            <StackedBar counts={counts} />
-          </Box>
-          <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
-            {line}
-          </Text>
+          {/* The card repeats the control's accessible name, so it adds no popup roles to the bar. */}
+          <HoverCard
+            position="bottom-start"
+            openDelay={150}
+            shadow="md"
+            width={220}
+            withRoles={false}
+          >
+            <HoverCard.Target>
+              <Box
+                py={6}
+                // The bar gives way before the badges do on a narrow card.
+                style={{
+                  flex: column === null ? '0 1 240px' : `0 1 ${String(column.width)}px`,
+                  minWidth: 60,
+                  opacity: idle ? 0.45 : undefined,
+                }}
+              >
+                <StackedBar counts={counts} tips={false} />
+              </Box>
+            </HoverCard.Target>
+            {/* Words only, so the card never takes a click meant for the rows it lies over. */}
+            <HoverCard.Dropdown style={{ pointerEvents: 'none' }}>
+              <BarBreakdown counts={counts} />
+            </HoverCard.Dropdown>
+          </HoverCard>
+          {/* Only what needs the builder has words beside the bar; the hover card says the rest. */}
+          <Group gap={6} wrap="nowrap" ml={10} style={{ flex: '1 0 auto' }}>
+            {counts.needs_you > 0 ? (
+              <Badge size="xs" variant="light" color="yellow" tt="none" style={{ flex: 'none' }}>
+                {`${String(counts.needs_you)} ${counts.needs_you === 1 ? 'needs' : 'need'} you`}
+              </Badge>
+            ) : null}
+            {counts.failed > 0 ? (
+              <Badge size="xs" variant="light" color="red" tt="none" style={{ flex: 'none' }}>
+                {`${String(counts.failed)} failed`}
+              </Badge>
+            ) : null}
+          </Group>
           <Text size="xs" c="dimmed" w={64} ta="right" style={{ flex: 'none' }}>
             {latest === '' ? '' : shortAgo(latest, props.now)}
           </Text>
@@ -315,12 +362,9 @@ export function ProjectList(props: ProjectListProps) {
     .map((e) => e.project.id);
   return (
     <Stack component="section" aria-labelledby="factory-projects" gap={12}>
-      <Group justify="space-between" align="baseline">
-        <Title id="factory-projects" order={2} fz={14} fw={600} c="bright">
-          Projects
-        </Title>
-        <BarLegend />
-      </Group>
+      <Title id="factory-projects" order={2} fz={14} fw={600} c="bright">
+        Projects
+      </Title>
       <Accordion
         multiple
         variant="separated"

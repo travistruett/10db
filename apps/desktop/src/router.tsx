@@ -15,6 +15,7 @@ import { FactoryMode, FactoryView } from './views/factory/factory-view';
 import { inboxSearch } from './views/inbox/inbox-search';
 import { InboxView } from './views/inbox/inbox-view';
 import { KnowledgeView } from './views/knowledge/knowledge-view';
+import { EvalsView } from './views/evals/evals-view';
 import { recordSearch } from './views/sessions/plan/record/record-tabs';
 import { useRenderMode } from './screens/render-context';
 import { PlanScreen } from './views/sessions/plan/plan-screen';
@@ -51,6 +52,14 @@ function KnowledgePage() {
   return (
     <ViewBoundary name="Knowledge">
       <KnowledgeView />
+    </ViewBoundary>
+  );
+}
+
+function EvalsPage() {
+  return (
+    <ViewBoundary name="Evals">
+      <EvalsView />
     </ViewBoundary>
   );
 }
@@ -149,13 +158,16 @@ function projectFilter(search: Record<string, unknown>): { project?: ProjectId }
 const factoryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/factory',
-  // `goal` opens that goal's row, so the Board's "Open in Factory" lands on the goal expanded.
+  // `goal` opens that goal's row, so the Board's "Open in Factory" lands on the goal expanded. `task` opens
+  // that task's drawer over the page, so Back and a shared link reopen it.
   validateSearch: (
     search: Record<string, unknown>,
-  ): { goal?: GoalId; project?: ProjectId; view?: FactoryMode } => {
+  ): { goal?: GoalId; project?: ProjectId; view?: FactoryMode; task?: TaskId } => {
     const goal = GoalId.safeParse(search['goal']);
+    const task = TaskId.safeParse(search['task']);
     return {
       ...(goal.success ? { goal: goal.data } : {}),
+      ...(task.success ? { task: task.data } : {}),
       ...projectFilter(search),
       // Only Metrics is named in the link; Live is the page without it.
       ...(search['view'] === FactoryMode.Metrics ? { view: FactoryMode.Metrics } : {}),
@@ -208,6 +220,11 @@ const knowledgeRoute = createRoute({
     return principle.success ? { principle: principle.data } : {};
   },
   component: KnowledgePage,
+});
+const evalsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/evals',
+  component: EvalsPage,
 });
 const boardRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -280,6 +297,7 @@ const routeTree = rootRoute.addChildren([
   workbenchRoute,
   sessionsRoute,
   knowledgeRoute,
+  evalsRoute,
   tasksRoute,
   settingsIndexRoute,
   settingsRoute,

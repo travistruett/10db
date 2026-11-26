@@ -1,6 +1,6 @@
 ---
 name: 10db-task
-description: Use when the user asks to create, add, file or queue a task, card or ticket in 10db (the local Claude Code factory app), or to edit, remove or start one, e.g. "create a task for this in 10db", "put this on the 10db board", "file that as a bug", from any Claude Code session. Also use to list, record or supersede 10db Knowledge (principles and decisions) when you learn a rule or make a choice worth keeping, and to assess or fix a 10db project's hazards (lockfiles, migrations, the commands that write them), e.g. after a project is added or when its hazards look wrong, and to read or verify a project's settings (gate, delivery, base branch, account, rigor, areas) or what a task depends on.
+description: Use when the user asks to create, add, file or queue a task, card or ticket in 10db (the local Claude Code factory app), or to edit, remove or start one, e.g. "create a task for this in 10db", "put this on the 10db board", "file that as a bug", from any Claude Code session. Also use to list, record or supersede 10db Knowledge (principles and decisions) when you learn a rule or make a choice worth keeping, and to assess or fix a 10db project's hazards (lockfiles, migrations, the commands that write them), e.g. after a project is added or when its hazards look wrong, or its evals (the suites, their bar and the LLM work with no eval), and to read or verify a project's settings (gate, delivery, base branch, account, rigor, areas) or what a task depends on.
 ---
 
 # Create and manage 10db tasks
@@ -23,6 +23,7 @@ node $T join <taskId> <batchId>          # start a task inside an open batch: on
 node $T goal <projectId> <brief.md> [--dry-run]  # adopt a goal brief (goals spec §11)
 node $T plan-import <projectId> <bundle.json> [--dry-run]  # import a planning effort's bundle into one Plan
 node $T hazards <projectId> [additions.json] [--dry-run]  # print hazards, or add to them (never removes)
+node $T evals <projectId> [manifest.json]  # print the project's eval suites, or record an assessment's manifest
 node $T knowledge <projectId> [--q <text>] [--kind ...] [--scope ...] [--shelf current|past|all] [--page <n>]
 node $T decision <projectId> <decision.json> [--dry-run]   # record a decision
 node $T principle <projectId> <principle.json> [--dry-run] # record a principle
@@ -198,6 +199,31 @@ The builder never edits hazards by hand; you assess and fix them.
    no lane should ever run (one that touches a remote or production database, or deploys) is not a
    hazard. Report it to the builder as a guard gap instead.
 6. **Report** what you added and the evidence for each entry, in a few lines.
+
+## Assess a project's evals
+
+10db reads a project's eval files at HEAD and its eval results in the checkout, and shows them; it defines no eval format, runs no eval and calls no
+model for this. Result files and eval files are found by name. What no file name says (which code a suite covers,
+its bar and commands, the LLM work with no eval) is yours to record, as a manifest beside the project's settings,
+never a file in the repo.
+
+1. **Read what 10db found:** `evals <projectId>`. It lists the suites, their latest result, the eval files no suite
+   links and the gaps (unknown until you record a manifest).
+2. **Gather evidence from the repo, never from memory:**
+   - The project's own LLM-task registry and its eval bindings, and the eval files (`git ls-files | grep -i eval`).
+   - The bar as the repo words it (a gate's minimum, a README or AGENTS.md line), kept in its words.
+   - The free and live commands, from `AGENTS.md`, the `Makefile` or `package.json` (the free arm runs in the
+     project's own gate, such as a replay; the live arm calls a paid model).
+   - The code each suite covers, as globs that match tracked files.
+   - The LLM work with no eval, where the model call is (`path` or `path:line`), and the repo's own words for why
+     it has none.
+3. **Never run a live eval.** Designing an eval doesn't grant paid calls. Read results; run nothing.
+4. **Write the manifest JSON** in the scratchpad: `{ "suites": [{ key, label?, bar?, definitionPaths, coveredPaths,
+freeCommand?, liveCommand? }], "gaps": [{ label, where, why }] }`. A suite `key` is a result file's task (as
+   `evals <projectId>` shows it) or a new key for a suite with no results yet.
+5. **Apply** with `evals <projectId> <file>`. It refuses, and keeps nothing, when a `definitionPaths` entry is not a
+   tracked file or a `coveredPaths` glob matches no tracked file; fix those and rerun until it refuses nothing.
+6. **Report** the suites linked, the gaps and the evidence for each, in a few lines.
 
 ## Errors
 

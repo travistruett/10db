@@ -13,6 +13,20 @@ export function isEqualOrUnder(path: string, root: string): boolean {
   return p === r || p.startsWith(r.endsWith('/') ? r : `${r}/`);
 }
 
+/**
+ * Tailscale's local API: the standalone app's port link and same-user proof (readable by every admin
+ * user) and the open-source daemon's socket. A command holding the proof, with localhost on, could
+ * drive `tailscale serve` or Funnel and put this Mac's ports on the internet. The App Store app keeps
+ * its proof under the home directory, which lanes can't read, with its token in the file's name; what
+ * keeps that name from a lane is the sandbox's `process-info` limit to its own processes, which hides
+ * the Tailscale extension's open files from `lsof`, so that limit must stay.
+ */
+const TAILSCALE_LOCAL_API = [
+  '/Library/Tailscale',
+  '/var/run/tailscaled.socket',
+  '/private/var/run/tailscaled.socket',
+] as const;
+
 /** The protected reads that live under the home directory, whatever the data and config dirs are. */
 export function homeProtectedReads(home: string): string[] {
   return [
@@ -29,16 +43,19 @@ export function homeProtectedReads(home: string): string[] {
 
 /**
  * Paths a lane's commands can never read: 10db's data, the builder's config dirs, Claude Code's
- * state and credentials, and the Keychain files, with the `security` tool's binary. Absolute (a
- * relative entry is resolved) and deduplicated.
+ * state and credentials, the Keychain files, with the `security` tool's binary, and Tailscale's
+ * local API credentials. Absolute (a relative entry is resolved) and deduplicated.
  */
 export function protectedReads(input: {
   home: string;
   dataDir: string;
   configDirs: readonly string[];
 }): string[] {
-  const all = [input.dataDir, ...input.configDirs, ...homeProtectedReads(input.home)].map((path) =>
-    resolve(path),
-  );
+  const all = [
+    input.dataDir,
+    ...input.configDirs,
+    ...homeProtectedReads(input.home),
+    ...TAILSCALE_LOCAL_API,
+  ].map((path) => resolve(path));
   return [...new Set(all)];
 }

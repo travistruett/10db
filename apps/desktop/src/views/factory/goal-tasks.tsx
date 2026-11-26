@@ -1,4 +1,3 @@
-import type { GoalId } from '@10db/contracts';
 import { Alert, Badge, Box, Group, Loader, Stack, Text, Tooltip } from '@mantine/core';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { PullRequestLink } from '../board/pull-request-link';
@@ -7,13 +6,12 @@ import { RelativeTime } from './relative-time';
 import { StatusDot } from './status-dot';
 import type { TaskRow } from './task-rows';
 
-/** The Board link of a task: its drawer, and its goal as the filter. */
-function boardSearch(row: TaskRow, goalId: GoalId) {
-  return { task: row.taskId, goal: goalId };
+/** A task's link: its drawer over Factory, with the page's own filters kept. */
+function drawerSearch(row: TaskRow) {
+  return <T extends object>(prev: T) => ({ ...prev, task: row.taskId });
 }
 
 export interface GoalTasksProps {
-  readonly goalId: GoalId;
   readonly rows: readonly TaskRow[];
   readonly loading: boolean;
   readonly error: string | null;
@@ -22,11 +20,11 @@ export interface GoalTasksProps {
 /**
  * The goal's tasks as one list. Each row is a state dot, the title, its state, a pull request
  * link and the last activity; only a running row adds its step, model and context. A row opens the
- * task's drawer on the Board. A failed run is retried from Needs you, and a run is cancelled from its
+ * task's drawer over Factory. A failed run is retried from Needs you, and a run is cancelled from its
  * card or drawer, so a row has no buttons of its own.
  */
-export function GoalTasks({ goalId, rows, loading, error }: GoalTasksProps) {
-  const navigate = useNavigate();
+export function GoalTasks({ rows, loading, error }: GoalTasksProps) {
+  const navigate = useNavigate({ from: '/factory' });
   return (
     <Stack gap={4}>
       <Text size="xs" c="dimmed" fw={600} tt="uppercase">
@@ -56,12 +54,12 @@ export function GoalTasks({ goalId, rows, loading, error }: GoalTasksProps) {
               onClick={(event) => {
                 // The task's link and the pull request link act on their own.
                 if (event.target instanceof Element && event.target.closest('a, button')) return;
-                void navigate({ to: '/board', search: boardSearch(row, goalId) });
+                void navigate({ search: drawerSearch(row) });
               }}
             >
               <StatusDot color={row.color} />
               <Text size="sm" style={{ flex: 1, minWidth: 0 }} lineClamp={1}>
-                <Link to="/board" search={boardSearch(row, goalId)}>
+                <Link from="/factory" to="/factory" search={drawerSearch(row)}>
                   {row.label}
                 </Link>
               </Text>

@@ -85,6 +85,10 @@ import type {
   DaemonEvent,
   FolderInspectResult,
   FoundHostDto,
+  EvalManifest,
+  EvalManifestResult,
+  EvalsDto,
+  EvalSuiteDetailDto,
   HazardAssessmentDto,
   HazardLookAgainResult,
   GoalAdoptInput,
@@ -701,6 +705,8 @@ export interface ApiServices extends PlanRecordServices {
   taskSession(taskId: TaskId): TaskSessionDto;
   /** What the run skipped and the questions it was answered at once, oldest first. */
   listWorkstreamSkips(id: WorkstreamId): SkippedActionDto[];
+  /** Run These Now from the task's drawer: the follow-up task that runs what the run skipped, approved. */
+  runSkippedCalls(id: WorkstreamId): TaskDto;
   /** Every card in these states (all of them for null), most urgent and then oldest first. */
   listInbox(filter: { readonly states: readonly InboxState[] | null }): InboxItemDto[];
   /** One page of open, waiting or resolved cards, filtered and sorted; `total` counts every match. */
@@ -906,6 +912,16 @@ export interface ApiServices extends PlanRecordServices {
    * file. Allows nothing: the builder allows a host by name, after seeing it.
    */
   scanNetworkHosts(projectId: ProjectId): Promise<FoundHostDto[]>;
+  /** The project's eval files at HEAD and result files from its checkout, with the recorded manifest laid over them; nothing is run. */
+  evals(projectId: ProjectId): Promise<EvalsDto>;
+  /** One suite's drawer; throws NotFoundError for an unknown suite, or a run that is not one of its results. */
+  evalSuite(
+    projectId: ProjectId,
+    key: string,
+    run: string | undefined,
+  ): Promise<EvalSuiteDetailDto>;
+  /** Records an eval manifest unless it names a path HEAD does not track; nothing is kept then. */
+  recordEvalManifest(projectId: ProjectId, manifest: EvalManifest): Promise<EvalManifestResult>;
   /** What 10db added to the project's hazards by itself and why, and how many removals wait on the builder. */
   getHazardAssessment(projectId: ProjectId): HazardAssessmentDto;
   /**

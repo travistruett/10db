@@ -68,6 +68,8 @@
   a left-out card for a batch that is over), the card is `BY_ANSWER`, keeps its Dismiss, and may
   still carry the event closer by writing `[CARD_RESOLVES_WHEN]` into its own `detail`, so `resolveStaleCards` still closes
   it by itself. A ship-failure card is a condition card whose batch's abandon withdraws it (`shipFailureFoldKey`).
+- `stall_cleared` closes a Stuck card once the stall sweep (`stalls/sweep.ts`) no longer finds the stall its
+  `key` names.
 - The three event closers are `update_installed` (`SelfUpdate.closeInstalled`, at start: a card whose commit is the
   running one or behind it), `branch_ready` (`resolveBranchReadyCards`, from the scheduler's `onBranchReady` and
   after Switch Back) and `mcp_config_changed` (`resolveMcpConfigCards`, on every repo MCP config read; a card
@@ -78,7 +80,9 @@
   raises no card, and `set` answers the server's open approval card through `InboxService` (so `applyMcpApproval`
   writes and the card closes) or, with none open, records the same verdict itself. A hash that is no longer current is
   a `ConflictError`.
-- A skipped-calls card (`closeFinishedSkippedCards`) closes when its task is abandoned. A Done task's card closes only once it lists no calls or its follow-up exists, since a run that succeeded still has calls the builder meant to approve. It keeps Dismiss, also when it rides on a failed run's card.
+- A skipped-calls card (`closeFinishedSkippedCards`) closes when its task is done or abandoned; a later run of the task finishing makes it done. The calls it listed stay in the task's drawer, whose Run These Now (`POST /workstreams/:id/skips/run`, `runSkippedCalls`) makes the follow-up the card's answer makes. A finished task's run raises no card for its skips alone; a card that lists config the run wrote (`detail.listsConfig`) is raised and stays after the task is done, since that config waits on the builder's approval. It keeps Dismiss, also when it rides on a failed run's card.
 - A stray-write card could still be owned by a Failed run whose task is open (Retry), so it stays until the task finishes or is abandoned.
 - A chat's command outside the sandbox (`judgeBash` with `sandbox.unsandboxed`) is a `chatOnce` ask: no stored rule, carried allowance or project grant answers it, and the card offers Allow once, `allow_chat` and Deny. `allow_chat` remembers the exact tool and command in the broker's closure, so it ends with the session and is never a rule or a decision. Every yes calls `mayRun` again; a refusal denies. A conversation's denial text (`chatDenialMessage`) invites another way instead of saying not to retry. `withdrawStaleConversationCards` withdraws every open conversation permission and question card at start, before any session starts, since the call that raised each ended with the daemon.
 - A remembered `allow_chat` call lasts only until the chat changes something: the broker stores the session's change count (`sandbox.unsandboxed.changes`, from `chat/hooks.ts`) and the call's cwd with the key, and a changed count asks again.
+- The CI cap card replaces "Pull request checks failed": `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's
+  `prCardKey.checks` card in the stop card's write, and `pr-watch` raises none while `ciStopped` is set.

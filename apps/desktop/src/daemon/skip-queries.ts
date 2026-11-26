@@ -1,5 +1,5 @@
-import { SkippedActionDto, type WorkstreamId } from '@10db/contracts';
-import { useQuery } from '@tanstack/react-query';
+import { SkippedActionDto, TaskDto, type WorkstreamId } from '@10db/contracts';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson } from './client';
 import { useDaemon } from './provider';
@@ -24,5 +24,16 @@ export function useWorkstreamSkips(id: WorkstreamId | undefined) {
           )
         : [],
     enabled: id !== undefined,
+  });
+}
+
+/** Run These Now: a follow-up task that runs, approved, the calls the run skipped. */
+export function useRunSkippedCalls() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: WorkstreamId) =>
+      readJson(await client.workstreams[':id'].skips.run.$post({ param: { id } }), TaskDto),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
   });
 }
