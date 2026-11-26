@@ -66,7 +66,9 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   stopped; `.dev/data` for `pnpm dev`) seeds three demo projects with goals and tasks in every Factory state
   (`scripts/seed-factory-demo.ts`). Their account is paused with no end, so nothing runs; startup recovery
   re-queues the runs seeded as running.
-- Listen on `127.0.0.1` only.
+- Listen on `127.0.0.1` only. The share listener is a second `127.0.0.1` port behind `tailscale serve`, tailnet only;
+  `api/auth-matrix.ts` says which credential each route takes on each listener
+  (`decisions/2026-11-25-a-shared-mac-answers-on-its-tailnet-address.md`).
 - Browser origins: only the Tauri webview's are built in. `TENDB_DEV_UI_ORIGIN` opts one loopback http origin in
   (`decisions/2026-10-29-dev-ui-over-the-factory.md`); a launcher of a daemon a browser UI talks to sets it.
 - `pnpm --filter @10db/daemon build [outDir]` bundles everything into `dist/daemon.mjs`, bundles srt's

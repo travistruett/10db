@@ -17,6 +17,7 @@ export type EnvDaemonOptions = Pick<
   | 'benchmarksOff'
   | 'openRouterSync'
   | 'slack'
+  | 'tailscaleOff'
   | 'disk'
   | 'catalogueSync'
   | 'pictures'
@@ -61,6 +62,7 @@ export function daemonOptionsFromEnv(env: DaemonEnv): EnvDaemonOptions {
     ...(env.TENDB_BENCHMARKS === 'off' ? { benchmarksOff: true } : {}),
     openRouterSync: env.TENDB_JUDGE !== 'off' && env.TENDB_BENCHMARKS !== 'off',
     slack: slackOnFromEnv(env),
+    ...(env.TENDB_TAILSCALE === 'off' ? { tailscaleOff: true } : {}),
     ...(env.TENDB_SLACK_API === undefined
       ? {}
       : { fetch: slackApiAt(env.TENDB_SLACK_API, outboundFetch) }),

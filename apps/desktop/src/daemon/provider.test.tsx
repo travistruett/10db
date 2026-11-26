@@ -112,6 +112,9 @@ describe('DaemonProvider', () => {
           startedAt: '2026-10-14T08:00:00.000Z',
         }),
       ),
+      http.post(daemonUrl('/events/ticket', portB.url), () =>
+        HttpResponse.json({ ticket: 'ticket-b', expiresAt: '2026-10-14T08:00:30.000Z' }),
+      ),
       http.get(daemonUrl('/events/head', portB.url), () => {
         headCallsB += 1;
         return HttpResponse.json({ seq: 99 });
@@ -130,7 +133,7 @@ describe('DaemonProvider', () => {
     });
     const resumed = new URL(urlsB[0] ?? 'ws://missing');
     expect(resumed.searchParams.get('after')).toBe('12');
-    expect(resumed.searchParams.get('token')).toBe('test-token-2');
+    expect(resumed.searchParams.get('ticket')).toBe('ticket-b');
     // It resumed from its own cursor; it didn't skip to the new daemon's head.
     expect(headCallsB).toBe(0);
   });

@@ -61,7 +61,8 @@ describe('useEventStream', () => {
     });
     const url = new URL(urls[0] ?? 'ws://missing');
     expect(url.searchParams.get('after')).toBe('41');
-    expect(url.searchParams.get('token')).toBe('test-token');
+    expect(url.searchParams.get('ticket')).toBe('test-ticket');
+    expect(url.searchParams.get('token')).toBeNull();
   });
 
   it('refetches once when the stream first opens, so nothing between the list fetch and the head is missed', async () => {
@@ -136,11 +137,11 @@ describe('useEventStream', () => {
   });
 
   it('builds ws and wss stream URLs', () => {
-    expect(eventStreamUrl({ url: 'http://127.0.0.1:4317', token: 't k' }, 7)).toBe(
-      'ws://127.0.0.1:4317/events/stream?after=7&token=t+k',
+    expect(eventStreamUrl({ url: 'http://127.0.0.1:4317', token: 'secret' }, 7, 't k')).toBe(
+      'ws://127.0.0.1:4317/events/stream?after=7&ticket=t+k',
     );
-    expect(eventStreamUrl({ url: 'https://example.test', token: 't' }, 0)).toBe(
-      'wss://example.test/events/stream?after=0&token=t',
+    expect(eventStreamUrl({ url: 'https://example.test', token: 'secret' }, 0, 't')).toBe(
+      'wss://example.test/events/stream?after=0&ticket=t',
     );
   });
 });
