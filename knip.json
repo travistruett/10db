@@ -14,7 +14,7 @@
       "ignoreDependencies": ["@anthropic-ai/sandbox-runtime"]
     },
     "apps/desktop": {
-      "entry": ["scripts/*.ts", "e2e/*.spec.ts"]
+      "entry": ["scripts/*.ts", "e2e/*.spec.ts", "served-public/sw.js"]
     },
     "packages/agent-skill": {
       "entry": ["src/main.ts"]
