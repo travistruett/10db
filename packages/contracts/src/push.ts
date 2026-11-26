@@ -5,9 +5,38 @@ import { InboxKind, InboxState } from './states';
 import { PassCheckDetail } from './passes';
 import { shouldNotifyOpened } from './worth-notifying';
 
+/**
+ * The push services a subscription may name. The daemon POSTs to the endpoint a device gives it, so a device
+ * that is paired but not trusted with the Mac's network must not be able to point it at an address behind the
+ * firewall (SSRF): only the hosts the browsers' own push services use, over https.
+ */
+export const PUSH_SERVICE_HOSTS = {
+  /** Chrome and Android (FCM), and Firefox. */
+  exact: ['fcm.googleapis.com', 'updates.push.services.mozilla.com'],
+  /** Safari (Apple) and Edge (Windows) name a host under these. */
+  suffixes: ['.push.apple.com', '.notify.windows.com'],
+} as const;
+
+/** Whether an endpoint is an https URL, on port 443, at a known push service and with no credentials in it. */
+export function isPushServiceEndpoint(endpoint: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:' || (url.port !== '' && url.port !== '443')) return false;
+  if (url.username !== '' || url.password !== '') return false;
+  const host = url.hostname.toLowerCase();
+  return (
+    PUSH_SERVICE_HOSTS.exact.some((name) => name === host) ||
+    PUSH_SERVICE_HOSTS.suffixes.some((suffix) => host.endsWith(suffix))
+  );
+}
+
 /** What a phone's browser hands over when it subscribes to push (`PushSubscription.toJSON()`'s keys). */
 export const PushSubscriptionInput = z.object({
-  endpoint: z.url().max(2048),
+  endpoint: z.url().max(2048).refine(isPushServiceEndpoint, 'Not a known push service'),
   p256dh: z.string().min(1).max(256),
   auth: z.string().min(1).max(64),
 });

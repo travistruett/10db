@@ -40,7 +40,6 @@
     "@10db/agent-skill": "workspace:*",
     "@anthropic-ai/sdk": "0.137.0",
     "@types/better-sqlite3": "9.6.0",
-    "@types/web-push": "3.6.4",
     "@types/ws": "8.18.2",
     "drizzle-orm": "0.45.4",
     "esbuild": "0.28.2",

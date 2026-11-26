@@ -1,6 +1,7 @@
 import {
   EventType,
   InboxItemId,
+  isPushServiceEndpoint,
   pushPayloadOf,
   triagedToBuilder,
   type DaemonEvent,
@@ -70,6 +71,13 @@ export function startPushSender(deps: {
     const body = JSON.stringify(payload);
     await Promise.all(
       subscriptions.map(async (subscription) => {
+        // The endpoint was checked when it was stored; a row put there another way never goes out.
+        if (!isPushServiceEndpoint(subscription.endpoint)) {
+          deps.state.write((ctx) => {
+            deletePushSubscriptionByEndpoint(ctx, subscription.endpoint);
+          });
+          return;
+        }
         try {
           await send(subscription, body, vapid);
         } catch (error) {

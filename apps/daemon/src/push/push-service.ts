@@ -1,19 +1,13 @@
-import type { DeviceId, PushKeyDto, PushSubscriptionInput } from '@10db/contracts';
 import { deletePushSubscriptionsOf, upsertPushSubscription } from '@10db/db';
+import type { PushRoutes } from '../api';
 import type { StateStore } from '../events';
 import type { VapidKeyStore } from './vapid-keys';
 
-/** What a paired device does about push: reads the key to subscribe with, keeps or drops its subscription. */
-export interface PushService {
-  key(): Promise<PushKeyDto>;
-  subscribe(deviceId: DeviceId, input: PushSubscriptionInput): Promise<void>;
-  unsubscribe(deviceId: DeviceId): void;
-}
-
+/** The push routes' service: the key to subscribe with, and a device keeping or dropping its subscription. */
 export function createPushService(deps: {
   readonly state: StateStore;
   readonly keys: VapidKeyStore;
-}): PushService {
+}): PushRoutes {
   return {
     async key() {
       return { key: (await deps.keys.ensure()).publicKey };

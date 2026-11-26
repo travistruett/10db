@@ -29,6 +29,7 @@ import {
   ProposalVerdictReject,
   EventsHead,
   PushSubscriptionInput,
+  type PushKeyDto,
   FolderInspectInput,
   GoalAdoptInput,
   PlanExportInput,
@@ -174,7 +175,6 @@ import {
   type SharingStatusDto,
   DeviceId,
 } from '@10db/contracts';
-import type { PushService } from '../push';
 import { serveApp } from './app-static';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -268,7 +268,7 @@ export interface ApiDeps {
     mayRead(method: string, path: string): boolean;
   } | null;
   /** Push for paired devices; its routes answer 501 without it. */
-  readonly push?: PushService;
+  readonly push?: PushRoutes;
   /** The built served app (`dist-app/`) that `/app/` serves on the share listener; null or absent when there is none. */
   readonly appDir?: string | null;
   /** The self-update setting; its routes answer 501 without it. */
@@ -412,6 +412,13 @@ const RecentChatsQuery = z.strictObject({
 
 /** The conversation a `/conversations/:id…` path names, when it does. */
 const CONVERSATION_PATH = /^\/conversations\/([^/]+)/;
+
+/** What a paired device does about push; `push/` implements it (this file is typechecked by the desktop). */
+export interface PushRoutes {
+  key(): Promise<PushKeyDto>;
+  subscribe(deviceId: DeviceId, input: PushSubscriptionInput): Promise<void>;
+  unsubscribe(deviceId: DeviceId): void;
+}
 
 export function createApp(deps: ApiDeps) {
   /**
