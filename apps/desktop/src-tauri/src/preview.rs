@@ -507,7 +507,15 @@ pub fn preview_dictation(
         }
         preview.last_dictation = Some(now);
     }
-    crate::dictation::start_dictation(app)
+    // Checked again where it runs: `startDictation:` goes to whichever window is key by then, and the
+    // page could have brought 10db's main window forward in between.
+    let window = webview.window();
+    app.run_on_main_thread(move || {
+        if window.is_focused().unwrap_or(false) {
+            crate::dictation::send_start_dictation();
+        }
+    })
+    .map_err(|error| error.to_string())
 }
 
 /// Forgets a preview once its window is gone.

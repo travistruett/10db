@@ -176,6 +176,8 @@ export function startPicker(config: PickerConfig): void {
   function openNote(pick: Pick) {
     // Already open on this pick (a ⇧-click grew or shrank it): its header changes, and what is typed
     // and where it was dragged stay.
+    // Another pick's open note is saved first, so what was typed there is never dropped.
+    if (open !== null && open !== pick) closeNote();
     const already = open === pick && ui.note.style.display === 'block';
     open = pick;
     ui.noteNumber.textContent = String(picks.indexOf(pick) + 1);
@@ -307,6 +309,11 @@ export function startPicker(config: PickerConfig): void {
     if (wasOpen && next !== undefined) openNote(next);
   }
 
+  /** A saved note, or words typed into its open note: either is never dropped by a click. */
+  function hasNote(pick: Pick): boolean {
+    return pick.note !== '' || (open === pick && ui.noteText.value.trim() !== '');
+  }
+
   function track(pick: Pick, element: Element) {
     pick.elements.push(element);
     pick.described.set(element, describe(element, config.repoPath));
@@ -324,16 +331,22 @@ export function startPicker(config: PickerConfig): void {
     const newest = picks[picks.length - 1];
     if (shift && newest !== undefined) {
       if (newest.area === null && newest.elements.includes(element)) {
-        if (newest.elements.length === 1) {
+        if (newest.elements.length === 1 && !hasNote(newest)) {
           removeAndReopen(newest, wasOpen === newest);
           return;
         }
-        untrack(newest, element);
-      } else if (newest.elements.length < PAGE_PICK_ELEMENTS_MAX) {
+        if (newest.elements.length > 1) untrack(newest, element);
+      } else if (
+        !newest.elements.includes(element) &&
+        newest.elements.length < PAGE_PICK_ELEMENTS_MAX
+      ) {
         track(newest, element);
         newest.kind = PickKind.Group;
         newest.area = null;
       }
+      // A saved pick's chip follows its outlines at once, so closing its note without saving keeps them
+      // the same in the page and in 10db.
+      if (!newest.fresh) void send(newest);
       openNote(newest);
       render();
       return;
@@ -580,10 +593,12 @@ export function startPicker(config: PickerConfig): void {
       head.removeEventListener('pointermove', move);
       head.removeEventListener('pointerup', end);
       head.removeEventListener('pointercancel', end);
+      head.removeEventListener('lostpointercapture', end);
     };
     head.addEventListener('pointermove', move);
     head.addEventListener('pointerup', end);
     head.addEventListener('pointercancel', end);
+    head.addEventListener('lostpointercapture', end);
   });
   ui.noteSave.addEventListener('click', closeNote);
   ui.pillClear.addEventListener('click', () => {

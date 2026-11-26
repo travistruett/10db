@@ -181,7 +181,7 @@ export function createOverlay(): Overlay {
   pillClear.title = 'Remove every pick';
   const pillExit = el('button', 'exit', pill);
   pillExit.innerHTML = CLOSE;
-  pillExit.title = 'Stop picking (esc)';
+  pillExit.title = 'Stop picking; an open note is saved';
   pillExit.setAttribute('aria-label', 'Stop picking');
   const notice = el('div', 'notice', root);
   document.documentElement.appendChild(host);

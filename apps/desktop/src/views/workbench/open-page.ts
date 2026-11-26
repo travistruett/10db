@@ -53,6 +53,10 @@ export interface OpenPageRefusal {
   readonly dismiss: () => void;
 }
 
+/** Which of the control's actions failed, so Try Again reruns it with the current connection. */
+const OpenAction = { Launch: 'launch', Preview: 'preview', Copy: 'copy' } as const;
+type OpenAction = (typeof OpenAction)[keyof typeof OpenAction];
+
 export interface OpenPageControl {
   /** The page has been opened in this pass: the button copies its link. */
   readonly opened: boolean;
@@ -113,7 +117,11 @@ function originOf(appUrl: string | null): string | null {
 export function useOpenPage(target: OpenPageTarget): OpenPageControl {
   const [openedHere, setOpenedHere] = useState<ReadonlySet<string>>(new Set());
   const [refused, setRefused] = useState<
-    (Omit<OpenPageRefusal, 'dismiss'> & { readonly key: string }) | null
+    | (Omit<OpenPageRefusal, 'dismiss' | 'retry'> & {
+        readonly key: string;
+        readonly action: OpenAction;
+      })
+    | null
   >(null);
   const { client, connection } = useDaemon();
   const status = useDaemonStatus();
@@ -126,6 +134,7 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
     !devUi && (openedHere.has(key) || readOpened(target.passId).includes(target.taskId));
   const daemonDown = status.kind !== 'connected';
   const attempt = async (
+    action: OpenAction,
     title: string,
     step: (address: Address) => Promise<void>,
     setup = true,
@@ -145,14 +154,14 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
             ? error.message
             : String(error),
         failure: unreachable ? OpenFailure.Daemon : setup ? OpenFailure.Setup : OpenFailure.Other,
-        retry: () => attempt(title, step, setup),
+        action,
       });
     }
   };
   const copy = ({ appUrl, route }: Address) =>
     navigator.clipboard.writeText(appPageUrl(appUrl, route));
   const launch = () =>
-    attempt("Couldn't open the page in your browser", async (address) => {
+    attempt(OpenAction.Launch, "Couldn't open the page in your browser", async (address) => {
       // 10db's own dev UI gets the daemon's read-only dev UI token in the fragment, never the app's
       // own; a copied link carries neither.
       const handed = devUi
@@ -166,14 +175,14 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
       rememberOpened(target.passId, target.taskId);
       setOpenedHere((held) => new Set(held).add(key));
     });
-  const copyLink = () => attempt("Couldn't copy the page's link", copy, false);
+  const copyLink = () => attempt(OpenAction.Copy, "Couldn't copy the page's link", copy, false);
   const act = () => (opened ? copyLink() : launch());
   const ownWindow = originOf(target.appUrl) === window.location.origin;
   const about = target.preview;
   const preview =
     about !== undefined && previewAvailable() && !devUi && !ownWindow
       ? () =>
-          attempt("Couldn't open Mark Up Page", async ({ appUrl, route }) => {
+          attempt(OpenAction.Preview, "Couldn't open Mark Up Page", async ({ appUrl, route }) => {
             const signIn = await readJson(
               await client.projects[':projectId'].preview['sign-in'].$post({
                 param: { projectId: about.projectId },
@@ -196,7 +205,15 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
     refusal:
       refused?.key === key
         ? {
-            ...refused,
+            title: refused.title,
+            reason: refused.reason,
+            failure: refused.failure,
+            retry:
+              refused.action === OpenAction.Preview
+                ? (preview ?? launch)
+                : refused.action === OpenAction.Copy
+                  ? copyLink
+                  : launch,
             dismiss: () => {
               setRefused(null);
             },

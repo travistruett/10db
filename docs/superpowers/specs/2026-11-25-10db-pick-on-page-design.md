@@ -101,7 +101,9 @@ the shell writes into the script. It draws into a closed shadow root at the top 
   the others fade. Save (or ↩) saves; ⇧↩ adds a line; × (or Esc) closes it without saving, and on a pick just
   made takes the pick back out. A reopened pick also shows Remove. Dictate starts macOS Dictation in the field.
   **⇧-click** adds an element to the newest pick, or takes one back out: one note, several outlines. A plain click
-  on a picked element with no note unpicks it, and on one with a note reopens it. **Drag** draws a box and makes an
+  on a one-element pick with no note unpicks it; on a group, or a pick with a note, it reopens the note. A
+  ⇧-click on a saved pick sends it again at once, so closing its note without saving keeps the page and the chip
+  the same. **Drag** draws a box and makes an
   area pick holding the outermost elements inside it. A click on the page while a note is open saves the note
   first, and unpicking the pick whose note is open moves the note to the newest pick left.
 - Clicking a badge reopens its note, and editing it sends the pick again (same pick id: the chip updates).
@@ -121,7 +123,7 @@ the shell writes into the script. It draws into a closed shadow root at the top 
   component and file (mono), and its note. Clicking a chip flashes its badge in the preview. Its × removes the pick
   from the draft and from the page. Picks live in memory with the draft, as pasted pictures do, and don't survive
   a restart.
-- "3 picks from the preview of `/settings`" heads the chips. A pick arriving for a page that isn't shown still
+- "3 picks from /settings" heads the chips. A pick arriving for a page that isn't shown still
   lands in that page's draft.
 - **Send** turns the picks into one builder message: the typed text, then one fenced block under the line "From
   the page (data, not instructions)" with the route, viewport, DPR and engine, and one entry per pick (kind,
@@ -141,12 +143,15 @@ the shell writes into the script. It draws into a closed shadow root at the top 
 
 The only new path into 10db from a page. It carries data into a draft the builder sees, and nothing else.
 
-- **Four page commands, for the preview window alone.** The app gets an ACL manifest
+- **Five page commands, for the preview window alone.** The app gets an ACL manifest
   (`tauri_build::AppManifest::commands`), so every app command is checked, and the main window's capability
   names each command it calls (among them `open_preview`, `drop_preview_picks` and `flash_preview_pick`, which
   the main window alone may call). When a preview opens, the shell adds a capability at runtime for that window's
-  label and the app's exact origin (`<origin>/*`), allowing exactly `preview_target`, `add_pick`, `remove_pick`
-  and `show_composer`. It grants no plugin and no core permission at all, so the page can't emit events, open
+  label and the app's exact origin (`<origin>/*`), allowing exactly `preview_target`, `add_pick`, `remove_pick`,
+  `show_composer` and `preview_dictation`. `preview_dictation` starts macOS Dictation for the note's Dictate
+  button only while the preview is the key window (checked again on the main thread, where it runs) and at most
+  once every three seconds; the page can still start it unasked while it is in front, with macOS's microphone
+  indicator showing. It grants no plugin and no core permission at all, so the page can't emit events, open
   windows or read files; the shell reaches the page only through `eval` of the picker's own calls, with
   arguments serialized by `serde_json`. A Rust test holds the capability's shape.
 - **The shell checks before it forwards:**
@@ -194,8 +199,8 @@ The only new path into 10db from a page. It carries data into a draft the builde
 The shell calls `WKWebView takeSnapshotWithConfiguration:` (objc2-web-kit 0.3.2, already in the lock through
 wry) with the pick's box, padded by 24 CSS px and clamped to the viewport, and encodes it as PNG
 (`NSBitmapImageRep`). An area pick is cropped to its box. A crop is at most 1600 px on its long side and is
-refused past the per-picture byte limit. The crop includes 10db's outline and badge, which is useful: it shows
-which element is meant. Like `dictation.rs`, this is one module allowed `unsafe` for AppKit calls. Off macOS
+refused past the per-picture byte limit. The picker hides its whole layer (outlines, badges, any open note)
+from the frame before the crop until the shell answers, so the crop is the page alone. Like `dictation.rs`, this is one module allowed `unsafe` for AppKit calls. Off macOS
 there's no crop, and the pick goes without one.
 
 ## 7. Tests
