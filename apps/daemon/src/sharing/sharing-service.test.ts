@@ -1,5 +1,7 @@
+import { EventType, SharingState } from '@10db/contracts';
 import { createTestStore, getAppSetting, setAppSetting } from '@10db/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { ManualClock } from '../clock';
 import { createSocketRegistry } from '../devices';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -30,6 +32,9 @@ const TAILSCALE_STATUS = {
 
 const ok = (stdout = ''): CliResult => ({ code: 0, stdout, stderr: '', timedOut: false });
 
+/** The data of `sharing.changed`: the state it reports. */
+const SharingChangedData = z.object({ state: z.enum(SharingState) });
+
 let state: StateStore;
 let closeStore: () => void;
 let order: string[];
@@ -37,6 +42,11 @@ let calls: string[];
 let serveJson: unknown;
 let listenCalls: number;
 let failUnserve: boolean;
+let clock: ManualClock;
+/** What the CLI lookup returns; null is a Mac with no Tailscale installed. */
+let cliPath: string | null;
+/** The state of each `sharing.changed` event, in the order they were published. */
+let sharingStates: SharingState[];
 
 /** A Tailscale that answers status, tracks serve mappings and records every call. */
 const run: TailscaleRun = (args) => {
@@ -61,6 +71,7 @@ const run: TailscaleRun = (args) => {
 
 /** `cli` is the Tailscale CLI's path, or null where Tailscale is not installed. */
 function make(cli: string | null = '/usr/local/bin/tailscale') {
+  cliPath = cli;
   const sockets = createSocketRegistry();
   sockets.add(
     { scope: 'full', deviceId: null, listener: 'share' },
@@ -85,9 +96,9 @@ function make(cli: string | null = '/usr/local/bin/tailscale') {
   };
   return createSharingService({
     state,
-    clock: new ManualClock(),
+    clock,
     log: silentLogger,
-    cli: () => cli,
+    cli: () => cliPath,
     run: () => run,
     listen,
     sockets,
@@ -98,12 +109,20 @@ function make(cli: string | null = '/usr/local/bin/tailscale') {
 beforeEach(() => {
   const created = createTestStore();
   closeStore = created.close;
-  state = createStateStore(created.store, createEventBus());
+  sharingStates = [];
+  const bus = createEventBus();
+  bus.subscribe((event) => {
+    if (event.type === EventType.SharingChanged) {
+      sharingStates.push(SharingChangedData.parse(event.data).state);
+    }
+  });
+  state = createStateStore(created.store, bus);
   order = [];
   calls = [];
   serveJson = {};
   listenCalls = 0;
   failUnserve = false;
+  clock = new ManualClock();
 });
 afterEach(() => {
   closeStore();
@@ -199,5 +218,38 @@ describe('the sharing service', () => {
     expect(again.state).toBe('ready');
     expect(serveJson).toEqual(TENDB_SERVE);
     expect(listenCalls).toBe(1);
+  });
+
+  it('publishes the sharing state when the Tailscale CLI goes away while shared', async () => {
+    const service = make();
+    await service.requestCertificate();
+    await service.set({ enabled: true, port: PORT });
+    const before = sharingStates.length;
+
+    cliPath = null;
+    clock.advance(60_000); // one monitor tick
+    await vi.waitFor(() => {
+      expect(sharingStates.slice(before)).toEqual([SharingState.Paused]);
+    });
+    expect(service.status().steps).toEqual([]);
+  });
+
+  it('publishes once when the CLI goes away while sharing is paused', async () => {
+    const service = make();
+    state.write((ctx) => {
+      setAppSetting(ctx, 'sharing.enabled', true);
+      setAppSetting(ctx, 'sharing.port', PORT);
+    });
+    // No certificate yet, so start leaves sharing Paused on the certificate step.
+    await service.start();
+    expect(service.status().state).toBe(SharingState.Paused);
+    const before = sharingStates.length;
+
+    cliPath = null;
+    clock.advance(60_000); // one monitor tick
+    await vi.waitFor(() => {
+      expect(sharingStates.slice(before)).toEqual([SharingState.Paused]);
+    });
+    expect(service.status().steps).toEqual([]);
   });
 });
