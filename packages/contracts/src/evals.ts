@@ -151,12 +151,36 @@ export const EvalDriftDto = z.object({
 });
 export type EvalDriftDto = z.infer<typeof EvalDriftDto>;
 
+/** Where 10db's own assessment of a project's evals stands. */
+export const EvalAssessmentState = {
+  Idle: 'idle',
+  Assessing: 'assessing',
+  /** The last one gave nothing usable; `reason` says why. */
+  Failed: 'failed',
+  /** 10db has no model it can ask for this project; `reason` says why. */
+  Unavailable: 'unavailable',
+} as const;
+export type EvalAssessmentState = (typeof EvalAssessmentState)[keyof typeof EvalAssessmentState];
+
+export const EvalAssessmentDto = z.object({
+  state: z.enum([
+    EvalAssessmentState.Idle,
+    EvalAssessmentState.Assessing,
+    EvalAssessmentState.Failed,
+    EvalAssessmentState.Unavailable,
+  ]),
+  /** Why the last assessment gave nothing, in a sentence for the builder; null otherwise. */
+  reason: z.string().nullable(),
+});
+export type EvalAssessmentDto = z.infer<typeof EvalAssessmentDto>;
+
 /** What 10db has found of a project's evals at its checkout's HEAD. */
 export const EvalsDto = z.object({
   /** The commit read; null for a repository with no commit. */
   commit: z.string().nullable(),
-  /** When an agent last assessed the project's evals; null when only file names found them. */
+  /** When the project's evals were last assessed; null when only file names found them. */
   assessedAt: z.iso.datetime().nullable(),
+  assessment: EvalAssessmentDto,
   suites: z.array(EvalSuiteDto),
   /** Eval files found by name that no suite links to yet. Empty once assessed. */
   unlinked: z.array(RepoPath),

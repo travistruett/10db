@@ -8,6 +8,7 @@ import {
   RigorSource,
   powersDecisions,
   type AcceptanceFigures,
+  type EvalsDto,
   TaskKindSource,
   type Rigor,
   type TaskDto,
@@ -177,7 +178,7 @@ import { dropPendingPageLabels } from './page-label-guess';
 import { adoptGoal } from '../goals';
 import { classifyPath } from '../guard';
 import { taskSession } from '../chat';
-import { suitesOfTasks, type EvalsService } from '../evals';
+import { suitesOfTasks, type EvalsAssessor, type EvalsService } from '../evals';
 import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
@@ -412,6 +413,8 @@ export function createServices(deps: {
   readonly hazards: Pick<HazardAssessor, 'assess'>;
   /** Reads each project's committed eval results and keeps the manifest an agent recorded. */
   readonly evals: EvalsService;
+  /** Assesses each project's evals with a model, on add, on a commit to eval files, and on request. */
+  readonly evalsAssessor: Pick<EvalsAssessor, 'assess' | 'status'>;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
   /** Settings › Trust: the switches, the builder's plugins and each project's preview. */
@@ -515,6 +518,11 @@ export function createServices(deps: {
       branch,
       'new tasks',
     );
+  }
+  /** What was found of a project's evals, with where 10db's own assessment of them stands. */
+  async function readEvalsPage(projectId: ProjectId): Promise<EvalsDto> {
+    const read = await deps.evals.read(projectId, getProject(db, projectId).repoPath);
+    return { ...read, assessment: deps.evalsAssessor.status(projectId) };
   }
   return {
     listProjects: () => listProjectViews(db),
@@ -982,8 +990,11 @@ export function createServices(deps: {
       getProject(db, projectId);
       return hazardAssessmentDto(db, projectId);
     },
-    evals(projectId) {
-      return deps.evals.read(projectId, getProject(db, projectId).repoPath);
+    evals: (projectId) => readEvalsPage(projectId),
+    async assessEvals(projectId, signal) {
+      getProject(db, projectId);
+      await deps.evalsAssessor.assess(projectId, signal);
+      return readEvalsPage(projectId);
     },
     evalModels(projectId) {
       return deps.evals.models(projectId, getProject(db, projectId).repoPath);

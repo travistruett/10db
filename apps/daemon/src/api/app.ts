@@ -1589,6 +1589,14 @@ export function createApp(deps: ApiDeps) {
     .get('/projects/:projectId/evals', async (c) =>
       c.json(await deps.services.evals(ProjectId.parse(c.req.param('projectId')))),
     )
+    .post('/projects/:projectId/evals/assess', async (c) =>
+      c.json(
+        await deps.services.assessEvals(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.raw.signal,
+        ),
+      ),
+    )
     .get('/projects/:projectId/eval-models', async (c) =>
       c.json(await deps.services.evalModels(ProjectId.parse(c.req.param('projectId')))),
     )

@@ -1,7 +1,7 @@
 # apps/daemon/src/evals
 
 - `evals/` reads a registered project's eval results and shows them. 10db defines no eval format: it reads each
-  project's own, runs no eval, calls no model and writes nothing. Definitions and the manifest's path checks are read
+  project's own and runs no eval. Reading calls no model and writes nothing; only the assessor (below) asks one. Definitions and the manifest's path checks are read
   at HEAD through `Git.survey` (the tracked list). Results are read from the checkout's working tree
   (`result-files.ts`), because projects keep them out of git (ampsio's `evals/reports/` is gitignored): only
   `.json` files under each tracked `X/evals/reports` and `X/evals/lane-pipeline/baselines`, found with `readdir`
@@ -18,8 +18,8 @@
 - `read-results.ts` keeps the parsed results per checkout while HEAD stays put (memory only). `build.ts` lays the
   manifest over them: the list's order, the unlinked files, the drawer and its flaky cases (a source case with a
   failed and a passed trial over the last eight runs).
-- The manifest is an app setting (`evals-manifest:<project id>`, `manifest-store.ts`), recorded by an agent
-  (`evals <projectId> <file>` in the agent skill) and never a file in the repository. `service.ts` records it only
+- The manifest is an app setting (`evals-manifest:<project id>`, `manifest-store.ts`), recorded by 10db's assessor or an
+  agent (`evals <projectId> <file>` in the agent skill) and never a file in the repository. `service.ts` records it only
   when every `definitionPaths` entry is tracked at HEAD and every `coveredPaths` glob holds a tracked file (matched as
   a hazard's glob, `guard`'s `classifyPath`); else it answers the untracked names and keeps nothing. A recording emits
   the project's change event.
@@ -74,3 +74,16 @@
   each one's name and file path, so a Claude or Codex lane uses it by name or reads the file. With none, it points
   at the existing eval files. The task's areas are those the `where` paths fall in, else the catch-all or the first
   area. It reads, files a task and runs nothing.
+- Assessing (`assess.ts`, `assess-prompt.ts`, `assess-triggers.ts`; modelled on `hazards/`): `createEvalsAssessor`
+  picks files at HEAD (the project's eval skills, eval definition files, `claude plugin eval` prompts, the files the
+  stock call patterns find, root `AGENTS.md`/`Makefile`/`package.json`/`README.md`; at most 60 files, 48 KB each, 300 KB
+  in all, 400 lines of 240 characters each) through `Git.survey`/`surveyTexts`/`grepAt`, gives them as numbered data
+  lines to the area namer's model (no tool; a Codex-only builder is asked on the default non-Codex account, and with
+  none the state is `unavailable`), parses an `EvalManifest` with zod and records it through `EvalsService.record`,
+  whose path checks stay the gate. An unusable answer, one with no suite and no gap, a refusal or a slow model records
+  nothing and keeps the reason for the page (`status`: `idle`, `assessing`, `failed`, `unavailable`; in memory, cleared
+  by the next run). One run per project is joined. `subscribeEvalAssessment` schedules one (`SCHEDULE_MS` later,
+  bursts joined) on `ProjectCreated` and on a `CommitRecorded` whose paths include an eval definition, an eval skill
+  or a file under an `evals` folder that isn't a result; a commit to model-calling code alone doesn't (that would
+  cost a call per code commit), Assess now covers it. `POST /projects/:id/evals/assess` runs one and answers the page;
+  `ProjectChanged` is emitted when a run starts and when it fails (a recorded manifest emits it itself).

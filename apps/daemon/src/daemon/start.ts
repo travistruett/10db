@@ -492,7 +492,7 @@ import { createAnswerWriter } from './answer-writer-launch';
 import { createAreaNamer } from './area-namer';
 import { systemListeners, type ListenerReader } from './listening-ports';
 import { loopbackProbe, type AddressProbe } from './loopback-probe';
-import { createEvalsService } from '../evals';
+import { createEvalsAssessor, createEvalsService, subscribeEvalAssessment } from '../evals';
 import { createServices } from './services';
 import {
   allSandboxRootsOf,
@@ -2803,6 +2803,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     hazardAssessor,
   );
+  // Assesses each project's evals the same way: when it is added, when a commit changes an eval file, and
+  // when the Evals page asks.
+  const evalsAssessor = createEvalsAssessor({
+    state,
+    git,
+    evals: evalsService,
+    asker: areaNamer,
+    logger: logger.child({ module: 'evals' }),
+  });
+  const unsubscribeEvalAssessment = subscribeEvalAssessment(
+    bus,
+    {
+      projectOfWorkstream: (id) => {
+        try {
+          return getWorkstreamRow(state.db, id).projectId;
+        } catch {
+          return null;
+        }
+      },
+    },
+    evalsAssessor,
+  );
   const github = createGithubServices({
     clock,
     spawn: opts.githubLoginSpawn ?? spawnGhLogin({ git: gitBin }),
@@ -3143,6 +3165,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     probe: opts.probe ?? loopbackProbe(),
     hazards: hazardAssessor,
     evals: evalsService,
+    evalsAssessor,
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
       git.gitDirs(repoPath).catch(() => undefined);
@@ -3645,6 +3668,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeYields();
       unsubscribeHazards();
       hazardAssessor.stop();
+      unsubscribeEvalAssessment();
+      evalsAssessor.stop();
       watcher?.stop();
       keepAwake.stop();
       // A probe in flight writes to the database; the runner can ask for another while it stops.
