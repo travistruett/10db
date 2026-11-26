@@ -1,6 +1,38 @@
-import { Group, Stack, Text, Title } from '@mantine/core';
+import { Box, Group, Stack, Text, Title } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { HelpHint } from './help-hint';
+
+/** The space between a heading's text and its action, wider than Mantine's largest gap. */
+const HEADING_GUTTER = 48;
+
+/**
+ * The one layout for a title with a dimmed line under it and an action at the right: the text takes the
+ * room and wraps, the action keeps its full width and is centered on the text, and a fixed gutter sits
+ * between them.
+ */
+export function HeadingRow({
+  heading,
+  line,
+  action,
+}: {
+  readonly heading: ReactNode;
+  readonly line?: string | undefined;
+  readonly action?: ReactNode;
+}) {
+  return (
+    <Group justify="space-between" align="center" wrap="nowrap" gap={HEADING_GUTTER}>
+      <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+        {heading}
+        {line === undefined ? null : (
+          <Text size="xs" c="dimmed">
+            {line}
+          </Text>
+        )}
+      </Stack>
+      {action === undefined ? null : <Box style={{ flexShrink: 0 }}>{action}</Box>}
+    </Group>
+  );
+}
 
 /**
  * A section's heading: its title with an optional info button whose card holds the longer explanation, one
@@ -20,21 +52,17 @@ export function SectionHeading({
   readonly action?: ReactNode;
 }) {
   return (
-    <Group justify="space-between" align="flex-start" wrap="nowrap">
-      <Stack gap={2}>
+    <HeadingRow
+      line={line}
+      action={action}
+      heading={
         <Group gap={4} wrap="nowrap">
           <Title order={4} size="md" fw={600}>
             {title}
           </Title>
           {help === undefined ? null : <HelpHint label={title}>{help}</HelpHint>}
         </Group>
-        {line === undefined ? null : (
-          <Text size="xs" c="dimmed">
-            {line}
-          </Text>
-        )}
-      </Stack>
-      {action}
-    </Group>
+      }
+    />
   );
 }
