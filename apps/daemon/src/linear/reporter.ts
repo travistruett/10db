@@ -4,6 +4,7 @@ import {
   ConversationItemKind,
   ConversationState,
   harnessOf,
+  LinearWithheldPattern,
   type AccountId,
   type ConversationId,
   type LinearPostDto,
@@ -47,6 +48,7 @@ import { reporterBlockedBy } from './reporter-events';
 import { refreshReporterCard } from './reporter-inbox';
 import { taskPrUrl } from './reporter-brief';
 import { judgeReporterCall, type ReporterRun } from './reporter-guard';
+import { nothingToReport } from './reporter-needs';
 import { reporterPictures, uploadPicture } from './reporter-pictures';
 import { accountRunStart, checkSaysSignedOut, reachOutcome } from './reporter-reach';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
@@ -322,7 +324,25 @@ export function createLinearReporter(
     const row = (await deps.signIns.list()).rows.find((r) => r.accountId === accountId);
     if (halted() || flights.has(taskId)) return;
     const now = clock.now().getTime();
-    const due = pendingLinearPosts(state.db, { taskId }).filter((p) => dueAtMs(p) <= now);
+    const owed = pendingLinearPosts(state.db, { taskId }).filter((p) => dueAtMs(p) <= now);
+    // A row with nothing to report is withheld here, seen at once: no session, no hold and no card.
+    const empty = owed.filter(nothingToReport);
+    if (empty.length > 0) {
+      state.write((ctx) => {
+        recordLinearPosts(
+          ctx,
+          empty.map((p) => p.id),
+          { state: 'withheld', pattern: LinearWithheldPattern.NothingToReport },
+          { dismissed: true },
+        );
+      });
+      log.info(
+        { taskId, events: empty.map((p) => p.event) },
+        'Linear updates with nothing to report were withheld',
+      );
+      refreshCard(task.projectId);
+    }
+    const due = owed.filter((p) => !nothingToReport(p));
     if (due.length === 0) {
       arm(taskId);
       return;

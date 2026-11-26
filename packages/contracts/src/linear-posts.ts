@@ -10,8 +10,18 @@ export const LinearEventKind = {
   Ended: 'ended',
   PrOpened: 'pr_opened',
   PrMerged: 'pr_merged',
+  /** The work landed on its base branch with no pull request, as a Commit Directly copy does. */
+  Landed: 'landed',
 } as const;
 export type LinearEventKind = (typeof LinearEventKind)[keyof typeof LinearEventKind];
+
+/** The patterns 10db itself withholds an update for, apart from the guard's secret patterns. */
+export const LinearWithheldPattern = {
+  /** The update's detail lacks what its post needs, such as a pull request url. */
+  NothingToReport: 'nothing to report',
+} as const;
+export type LinearWithheldPattern =
+  (typeof LinearWithheldPattern)[keyof typeof LinearWithheldPattern];
 
 export const LinearPostState = {
   Pending: 'pending',
@@ -27,7 +37,7 @@ export const LinearPostDto = z.strictObject({
   taskId: TaskId,
   event: z.enum(LinearEventKind),
   attempt: z.number().int().min(1),
-  /** What the event was: the verdict, the end state, the PR url, the Inbox card's title. */
+  /** What the event was: the verdict, the end state, the PR url, the landed base branch and commit, the Inbox card's title. */
   detail: z.record(z.string(), z.json()),
   state: z.enum(LinearPostState),
   tries: z.number().int().min(0),

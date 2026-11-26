@@ -199,8 +199,9 @@ const RULES = [
   'A `run_started` update states run facts only: the task, the attempt, the account or provider when the facts name it, and which step starts. It says nothing about what the work did, what is verified, what is missing or which commit does what, since none of that exists yet.',
   "A `verdict` or `ended` update maps each claim to the commit that does it, using only the commits listed for that run and the implementation report's own pairing of claim and commit. A claim with no listed commit is said to have none. A commit is never named for work the report does not attribute to it.",
   'A `verdict` or `ended` update ends with the deferrals: what was skipped, left undone or not verified, each with the reason the facts give. Say none when the facts record none.',
+  'A `landed` update says the work landed on the base branch at the commit its detail names, as `Landed on <baseBranch> at <first 12 characters of commit>`. It was committed directly, with no pull request: it adds no link and says nothing was opened or merged on GitHub.',
   'One comment per update. Each ends with the footer its owed update gives, exactly as written.',
-  'When the PR opens, add one link titled `10db` to the PR with `save_issue` `links`, unless the issue already has a `10db` link to that URL. Links are append-only, so there is no in-place update; the live state is in the comments and the status.',
+  'When a `pr_opened` update is owed, add one link titled `10db` to the PR with `save_issue` `links`, unless the issue already has a `10db` link to that URL. Links are append-only, so there is no in-place update; the live state is in the comments and the status.',
   "After posting, call `report_linear_post` once per outcome. A write refused as withheld is reported as withheld with the pattern's name. When Linear itself fails the update (the issue is not found, you may not write it), report it as failed with the error's words.",
   'Change nothing but this issue. Say nothing else.',
 ];
@@ -278,7 +279,7 @@ export function reporterBrief(facts: ReporterFacts): string {
               `- ${r.id}: ${r.event}, attempt ${String(r.attempt)}, comments [${r.commentIds.join(', ')}], status set ${r.statusSet ?? 'none'}, attachment ${r.attachmentUrl ?? 'none'}`,
           )
           .join('\n')}`,
-    `Pull request: ${facts.prUrl ?? 'none yet'}`,
+    `Pull request: ${facts.prUrl ?? 'none'}`,
   ];
   for (const w of facts.workstreams) {
     const lines = [`Run ${String(w.attempt)}:`];

@@ -258,15 +258,19 @@ afterEach(async () => {
   closeStore();
 });
 
-const oweOne = (dedupeKey = 'run_started:1:0'): LinearPostId => {
+const oweOne = (
+  dedupeKey = 'run_started:1:0',
+  event: LinearEventKind = LinearEventKind.RunStarted,
+  detail: Record<string, string | null> = {},
+): LinearPostId => {
   const row = store.write((ctx) =>
     enqueueLinearPost(ctx, {
       taskId: task.id,
       projectId: project.id,
-      event: LinearEventKind.RunStarted,
+      event,
       dedupeKey,
       attempt: 1,
-      detail: {},
+      detail,
       dueAt: new Date(clock.now().getTime() + 30_000).toISOString(),
     }),
   ).value;
@@ -348,6 +352,22 @@ describe('the Linear reporter', () => {
       )
       .toBe(LinearPostState.Recorded);
     expect(card()).toBeUndefined();
+  });
+
+  it('withholds an update with nothing to report without a session, a hold or a card', async () => {
+    oweOne('pr_opened:1', LinearEventKind.PrOpened, { prUrl: null });
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Withheld);
+    expect(rows()[0]).toMatchObject({
+      withheldPattern: 'nothing to report',
+      tries: 0,
+      lastError: null,
+    });
+    expect(rows()[0]?.dismissedAt).not.toBeNull();
+    expect(adapter.shapeSessions).toHaveLength(0);
+    expect(
+      findOpenByFoldKey(store.db, project.id, linearReporterFoldKey(project.id)),
+    ).toBeUndefined();
   });
 
   it('spends a try on a run that made no Linear call after Linear answered in the conversation, and posts next time', async () => {
