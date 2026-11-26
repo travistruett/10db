@@ -39,7 +39,7 @@
   flex-direction: column;
   overflow: hidden;
   background: var(--mantine-color-body);
-  border-radius: 10px 10px 0 0;
+  border-top: 1px solid var(--mantine-color-default-border);
 }
 
 .main {
@@ -48,7 +48,7 @@
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  --shell-content-padding-block: 12px;
+  --shell-content-padding-block: 16px;
   --shell-content-padding-inline: 16px;
   padding: var(--shell-content-padding-block) var(--shell-content-padding-inline);
 }
