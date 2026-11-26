@@ -1,5 +1,5 @@
-import { lstat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { lstat, realpath } from 'node:fs/promises';
+import { join, sep } from 'node:path';
 import {
   NotFoundError,
   type EvalManifest,
@@ -113,16 +113,20 @@ function untrackedIn(manifest: EvalManifest, found: FoundEvals): string[] {
 
 /**
  * The env files a manifest's live settings name that are not a regular file in the working tree. They are
- * untracked, so HEAD can't vouch for them; a link is refused so a name can't lead the sandbox's read grant
- * outside the checkout.
+ * untracked, so HEAD can't vouch for them; a link, or a name that resolves outside the checkout, is refused so
+ * the sandbox's read grant can't be led out of it.
  */
 async function missingEnvFiles(manifest: EvalManifest, repoPath: string): Promise<string[]> {
   const out = new Set<string>();
+  const root = await realpath(repoPath).catch(() => '');
   for (const suite of manifest.suites) {
     for (const file of suite.live?.envFiles ?? []) {
       if (out.has(file)) continue;
-      const stat = await lstat(join(repoPath, file)).catch(() => null);
-      if (!stat?.isFile()) out.add(file);
+      const path = join(repoPath, file);
+      const stat = await lstat(path).catch(() => null);
+      // A linked directory in the name can lead outside the checkout, so the resolved path must stay inside it.
+      const real = stat?.isFile() ? await realpath(path).catch(() => '') : '';
+      if (root === '' || !real.startsWith(root + sep)) out.add(file);
     }
   }
   return [...out];
