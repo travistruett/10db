@@ -1762,8 +1762,10 @@ export function createRunner(opts: RunnerOptions): Runner {
         read,
         // In shadow: the answers are kept on the reading and logged, and nothing reads them to act.
         ask: (candidates) => {
-          // The same head was asked already (a Review or QA step with no new commits): its answers stand.
-          const kept = earlier?.head === head ? (earlier.shadow ?? []) : [];
+          // The same head was answered already (a Review or QA step with no new commits): its answers stand.
+          // An unanswered one (a timeout, an outage) is asked again.
+          const kept =
+            earlier?.head === head ? (earlier.shadow ?? []).filter((s) => s.yes !== null) : [];
           if (candidates.every((c) => kept.some((s) => s.key === c.key)))
             return Promise.resolve(kept.filter((s) => candidates.some((c) => c.key === s.key)));
           return askWatchpointQuestions({ judge: opts.judge, read }, candidates, {
