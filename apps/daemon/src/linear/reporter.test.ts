@@ -43,11 +43,14 @@ import {
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
+import type { PicturesOutlook } from '../pictures';
 import { createMcpHandler, mintSessionToken } from '../mcp';
 import { FakeAdapter, type FakeScriptBook } from '../sessions';
 import {
   createLinearReporter,
   HOLD_RETRY_MS,
+  PICTURES_POLL_MS,
+  PICTURES_WAIT_MS,
   REPORTER_STARTER,
   type LinearReporter,
 } from './reporter';
@@ -90,8 +93,9 @@ let writeError: { message: string; refused: boolean; signedOut?: boolean } | nul
 /** The pictures 10db asked Linear to prepare, and the files it sent to the signed address. */
 let prepared: { filename: string; size: number }[] = [];
 let sent: { url: string; method: string | undefined }[] = [];
-/** Why the pictures service says the task has none. */
-let skippedReason: string | null = null;
+/** What the pictures service says of the task's after picture; a test may change it as the capture goes on. */
+let outlook: () => PicturesOutlook = () => ({ kind: 'none' });
+let outlookCalls = 0;
 let bus: EventBus;
 /** The world's Inbox, wired as `daemon/start.ts` wires it: a Retry on the reporter's card wakes the reporter. */
 let inbox: InboxService;
@@ -144,7 +148,10 @@ function makeReporter(): LinearReporter {
         }),
     },
     inbox,
-    picturesSkipped: () => skippedReason,
+    picturesOutlook: () => {
+      outlookCalls += 1;
+      return outlook();
+    },
     send: (url, init) => {
       sent.push({
         url: typeof url === 'string' ? url : url instanceof URL ? url.href : url.url,
@@ -244,7 +251,8 @@ beforeEach(async () => {
   writeError = null;
   prepared = [];
   sent = [];
-  skippedReason = null;
+  outlook = () => ({ kind: 'none' });
+  outlookCalls = 0;
   clock = new ManualClock();
   // The store writes on the world's clock, as the daemon's does.
   ({ store, close: closeStore } = createTestStore(() => clock.now()));
@@ -612,7 +620,7 @@ describe('the Linear reporter', () => {
 
   it('says once, with the reason, that a finished task has no pictures, and never names a pull request', async () => {
     linearHeaders = { Authorization: 'Bearer lin_api_x' };
-    skippedReason = 'The dev login command failed (exit 1)';
+    outlook = () => ({ kind: 'skipped', reason: 'The dev login command failed (exit 1)' });
     const body = await endedComment(oweOne('ended:1:0', LinearEventKind.Ended));
     expect(body).toContain(
       'No before and after pictures were taken. The dev login command failed (exit 1).',
@@ -620,6 +628,57 @@ describe('the Linear reporter', () => {
     expect(body.match(/dev login command failed/g)).toHaveLength(1);
     expect(body).not.toMatch(/pull request/i);
     expect(prepared).toEqual([]);
+  });
+
+  it('waits for a capture still running when the update comes due, and the comment carries the picture it kept', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    // The capture ends after the row first came due: its answer is "wait" once, and its after is kept as it ends.
+    outlook = () => {
+      if (outlookCalls > 1) return { kind: 'none' };
+      keepPicture(ScreenKind.After, 'after-bytes');
+      return { kind: 'wait' };
+    };
+    const id = oweOne('ended:1:0', LinearEventKind.Ended);
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: id, body: 'The run ended and its change landed.' },
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => outlookCalls, { timeout: 10_000 }).toBeGreaterThan(0);
+    // Nothing was written, and no try was spent.
+    expect(written).toEqual([]);
+    expect(rows()[0]).toMatchObject({ state: LinearPostState.Pending, tries: 0 });
+    clock.advance(PICTURES_POLL_MS);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    expect(written[0]?.body).toContain('![1-home-after.png]');
+    expect(written[0]?.body).not.toContain('still being taken');
+  });
+
+  it('stops waiting for the pictures after a bound and says they were still being taken', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    outlook = () => ({ kind: 'wait' });
+    const id = oweOne('ended:1:0', LinearEventKind.Ended);
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: id, body: 'The run ended and its change landed.' },
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => outlookCalls, { timeout: 10_000 }).toBeGreaterThan(0);
+    clock.advance(PICTURES_WAIT_MS);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    expect(written[0]?.body).toContain('still being taken');
   });
 
   it('owes an update again when its own write is refused, and does not hold it for a sign-in', async () => {

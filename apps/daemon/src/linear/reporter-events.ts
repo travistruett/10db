@@ -1,5 +1,6 @@
 import {
   BatchId,
+  BatchState,
   EventType,
   InboxItemId,
   LinearEventKind,
@@ -20,6 +21,7 @@ import {
   getTask,
   getWorkstream,
   getWorkstreamRow,
+  isLocalCopy,
   listActiveProjects,
   listLinearPosts,
   listWorkstreams,
@@ -35,6 +37,9 @@ import { reporterSettings } from './reporter-settings';
 
 /** How long an event waits before it is posted, so a burst becomes one update. */
 export const REPORT_DELAY_MS = 30_000;
+
+/** The detail key of a landing comment of a local copy's task: its change landed in the project, with no pull request. */
+export const LOCAL_LANDING = 'localCopy';
 
 /** One update an event makes: the row's task, kind, key and what it was. */
 export interface LinearRowDraft {
@@ -68,6 +73,8 @@ export interface LinearEventRead {
   readonly batch?: {
     readonly prUrl: string | null;
     readonly prState: string | null;
+    /** The batch is a local copy and has shipped: its finished runs landed in the project. */
+    readonly shippedLocalCopy: boolean;
     readonly workstreams: readonly { readonly id: WorkstreamId; readonly taskId: TaskId }[];
   };
 }
@@ -155,6 +162,16 @@ export function linearRowOf(event: DaemonEvent, read: LinearEventRead): LinearRo
     const batch = read.batch;
     if (batch === undefined) return [];
     const changed = data['changed'];
+    // A separate copy that lands in the project has no pull request: its change landing is the landing, and the
+    // comment its pictures ride in (they are taken once it has landed).
+    if (data['to'] === BatchState.Shipped && batch.shippedLocalCopy)
+      return batch.workstreams.map((w) => ({
+        taskId: w.taskId,
+        workstreamId: w.id,
+        event: LinearEventKind.PrMerged,
+        dedupeKey: `landed:${event.entityId}`,
+        detail: { workstreamId: w.id, prUrl: null, [LOCAL_LANDING]: true },
+      }));
     const merged =
       Array.isArray(changed) && changed.includes('pr') && batch.prState === PullRequestState.Merged;
     // The landing is the merge, the one comment of that phase. A pull request that is only opened is told in the
@@ -225,19 +242,22 @@ function readFor(db: DbReader, event: DaemonEvent): LinearEventRead {
   }
   if (event.type === EventType.BatchUpdated) {
     const changed = event.data['changed'];
-    if (!Array.isArray(changed) || !changed.includes('pr')) return {};
+    const shipped = event.data['to'] === BatchState.Shipped;
+    if (!shipped && (!Array.isArray(changed) || !changed.includes('pr'))) return {};
     const parsed = BatchId.safeParse(event.entityId);
     if (!parsed.success) return {};
     const batchId = parsed.data;
     const batch = getBatch(db, batchId);
+    const shippedLocalCopy = shipped && isLocalCopy(db, batchId);
     return {
       batch: {
         prUrl: batch.prUrl,
         prState: batch.pr?.state ?? null,
-        workstreams: listWorkstreams(db, { batchId }).map((w) => ({
-          id: w.id,
-          taskId: w.taskId,
-        })),
+        shippedLocalCopy,
+        workstreams: listWorkstreams(db, { batchId })
+          // Only a run that finished landed; a failed or cancelled one did not.
+          .filter((w) => !shippedLocalCopy || w.state === WorkstreamState.Done)
+          .map((w) => ({ id: w.id, taskId: w.taskId })),
       },
     };
   }

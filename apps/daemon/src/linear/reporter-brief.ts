@@ -212,7 +212,7 @@ const RULES = [
   'A `waiting` update says what is blocked and what it waits on, and who: the builder, a reviewer, a sign-in, a permission. Its facts hold the latest item; the run may have raised several, so say what the run needs, not a count.',
   "A `verdict` update is the run's one comment on review: say in a sentence or two what the reviews found, the plan review first when the facts hold one, then the review of the work. Say approved or sent back, with the open findings in plain words and the file when one is named.",
   'An `ended` update says how the run ended (done, failed or cancelled, and why), what landed, and what is left. Name the landed commit once, by its short id from the facts, and the pull request link when the facts have one; never map claims to commits. Close with what is skipped or not verified, each with its reason, or say nothing is. Say what waits on someone (a review, a merge, a decision), or that nothing does. A pull request that is open waits on its review and merge.',
-  'A `pr_merged` update says what landed: the pull request link and that it is merged.',
+  'A `pr_merged` update says what landed: the pull request link and that it is merged. When its detail has `prUrl` null the change landed in the project with no pull request: say that it landed, and name no pull request.',
   'Open findings and unverified checks are named in plain words wherever they apply.',
   "One comment per update, with real line breaks, never a typed `\\n`, and no footer (10db adds it). Status, links and pictures are 10db's to set: do not write about doing them.",
 ];

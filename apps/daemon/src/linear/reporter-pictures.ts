@@ -15,6 +15,8 @@ import {
 } from '@10db/db';
 import { z } from 'zod';
 import { picturePlan } from '../delivery';
+import type { PicturesOutlook } from '../pictures';
+import { LOCAL_LANDING } from './reporter-events';
 
 // A finished task's before and after pictures go into its `ended` comment on the Linear issue (its
 // `pr_merged` comment when the `ended` one carried none), the pairs its pull request and Slack show. 10db
@@ -274,35 +276,59 @@ export const skippedText = (reason: string): string =>
 export const NOT_UPLOADABLE_TEXT =
   "The before and after pictures are in 10db: this account's Linear sign-in is held by its agent, so 10db can't upload them here.";
 
+/** Said on the `ended` comment of a local copy's task, whose after is taken once its change lands. */
+export const LATER_TEXT =
+  'The before and after pictures follow in a comment when the change lands in the project.';
+
+/** Said when the pictures were still being taken as the comment was written. */
+export const STILL_TAKING_TEXT =
+  'The before and after pictures were still being taken when this was written; they are in 10db once done.';
+
+/** Whether an owed update waits for its task's pictures: it carries them, or the word on why it has none. */
+export const carriesPictures = (event: LinearEventKind): boolean =>
+  event === LinearEventKind.Ended || event === LinearEventKind.PrMerged;
+
 /**
  * What an owed update adds to its comment, and the first picture's address to record on its row. Pictures go in
- * the `ended` comment, or in the `pr_merged` one when none showed before; the reason there are none is said on the
- * first `ended` comment only.
+ * the `ended` comment, or in the `pr_merged` one when none showed before. What there is to say about missing
+ * ones is said once: on the first `ended` comment, or, for a local copy (whose `ended` comment says they follow),
+ * on its landing comment.
  */
 export async function picturesFor(input: {
   readonly db: DbReader;
-  readonly post: Pick<LinearPostDto, 'id' | 'event' | 'taskId'>;
+  readonly post: Pick<LinearPostDto, 'id' | 'event' | 'taskId' | 'detail'>;
   /** Null when 10db can't sign in to Linear itself: the pictures can't be uploaded. */
   readonly uploader: PictureUploader | null;
-  readonly skipped: (taskId: TaskId) => string | null;
+  readonly outlook: (taskId: TaskId) => PicturesOutlook;
   readonly send: typeof fetch;
 }): Promise<{ readonly text: string; readonly attachmentUrl: string | null }> {
   const { db, post } = input;
   const none = { text: '', attachmentUrl: null };
-  if (post.event !== LinearEventKind.Ended && post.event !== LinearEventKind.PrMerged) return none;
+  if (!carriesPictures(post.event)) return none;
   const earlier = listLinearPosts(db, post.taskId).filter(
     (p) => p.id !== post.id && p.state === LinearPostState.Recorded,
   );
   if (earlier.some((p) => p.attachmentUrl !== null)) return none;
-  const firstEnded =
-    post.event === LinearEventKind.Ended && !earlier.some((p) => p.event === LinearEventKind.Ended);
+  const speaks =
+    post.event === LinearEventKind.Ended
+      ? !earlier.some((p) => p.event === LinearEventKind.Ended)
+      : post.detail[LOCAL_LANDING] === true;
   const { pictures, more } = reporterPictures(db, post.taskId);
   if (pictures.length === 0) {
-    const reason = firstEnded ? input.skipped(post.taskId) : null;
-    return { text: reason === null ? '' : skippedText(reason), attachmentUrl: null };
+    if (!speaks) return none;
+    const outlook = input.outlook(post.taskId);
+    const text =
+      outlook.kind === 'skipped'
+        ? skippedText(outlook.reason)
+        : outlook.kind === 'wait'
+          ? STILL_TAKING_TEXT
+          : outlook.kind === 'later' && post.event === LinearEventKind.Ended
+            ? LATER_TEXT
+            : '';
+    return { text, attachmentUrl: null };
   }
   if (input.uploader === null)
-    return { text: firstEnded ? NOT_UPLOADABLE_TEXT : '', attachmentUrl: null };
+    return { text: speaks ? NOT_UPLOADABLE_TEXT : '', attachmentUrl: null };
   const uploaded = await uploadPictures(db, pictures, input.uploader, input.send);
   return {
     text: picturesText({ uploaded, more, offered: pictures.length }),

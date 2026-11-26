@@ -36,7 +36,9 @@ import {
 } from '@10db/contracts';
 import {
   findPass,
+  getBatch,
   getDesignCheck,
+  latestWorkstreamOf,
   latestTaskDesignChecks,
   getPassTurn,
   getProject,
@@ -194,6 +196,17 @@ export class PicturesStoppedError extends Error {
   }
 }
 
+/**
+ * What a task's after picture can still be expected to do, for the updates that show it:
+ * - `none`: the task names no page, already has its pictures, or nothing says they were skipped;
+ * - `wait`: a capture of its after is waiting or running, so its answer is not in yet;
+ * - `later`: a local copy whose change has not landed, so its after is taken then;
+ * - `skipped`: no picture was or will be taken, and why (a sentence with no full stop).
+ */
+export type PicturesOutlook =
+  | { readonly kind: 'none' | 'wait' | 'later' }
+  | { readonly kind: 'skipped'; readonly reason: string };
+
 export interface Pictures {
   /**
    * A task's first launch: asks its before, under the before rule, and waits for it at most
@@ -202,11 +215,8 @@ export interface Pictures {
   awaitBefore(task: TaskDto, signal: AbortSignal): Promise<void>;
   /** Settings › App Preview's status line for a project. */
   status(projectId: ProjectId): PicturesStatusDto;
-  /**
-   * Why a task that names a page has no pictures (a sentence with no full stop), or null when nothing says they
-   * were skipped: the task names no page, or nothing kept them from being taken.
-   */
-  skipped(taskId: TaskId): string | null;
+  /** What a task that names a page can still expect of its after picture; see `PicturesOutlook`. */
+  outlook(taskId: TaskId): PicturesOutlook;
   /**
    * Shots of the routes as they are now, for a design check: the first viewport and theme of the
    * project's matrix, signed in as a capture is, one at a time with every other capture. Nothing is
@@ -995,20 +1005,33 @@ export function startPictures(deps: PicturesDeps): Pictures {
         beforeWaiters.set(task.id, [...(beforeWaiters.get(task.id) ?? []), finish]);
       });
     },
-    skipped(taskId) {
+    outlook(taskId) {
       const task = getTask(db, taskId);
       const project = getProject(db, task.projectId);
-      if (project.appUrl === null) return null;
+      if (project.appUrl === null) return { kind: 'none' };
       const reported = reportedFor(ScreenKind.After, task, null, task.passId != null);
-      if (pictureRoutes(project, task, reported).length === 0) return null;
-      if (!takesPictures(project, task, reported, inLocalCopy(task)))
-        return 'The task ran in a separate copy of the project, and 10db takes pictures only of tasks in Your folder, in a local copy or on a page of a pass';
+      if (pictureRoutes(project, task, reported).length === 0) return { kind: 'none' };
+      if (hasTaskScreen(db, taskId, ScreenKind.After)) return { kind: 'none' };
+      const localCopy = inLocalCopy(task);
+      if (!takesPictures(project, task, reported, localCopy))
+        return {
+          kind: 'skipped',
+          reason:
+            'The task ran in a separate copy of the project, and 10db takes pictures only of tasks in Your folder, in a local copy or on a page of a pass',
+        };
+      // A local copy's after is taken once its change is in the project.
+      const batchId = localCopy ? (latestWorkstreamOf(db, taskId)?.batchId ?? null) : null;
+      if (batchId !== null && getBatch(db, batchId).state !== BatchState.Shipped)
+        return { kind: 'later' };
+      const asked = (r: CaptureRequest | null): boolean =>
+        r !== null && r.kind === ScreenKind.After && r.taskId === taskId;
+      if (queue.waiting.some(asked) || asked(queue.loading)) return { kind: 'wait' };
       const failed = signInRecordOf(db, project.id);
-      if (failed !== null) return failed.problem;
+      if (failed !== null) return { kind: 'skipped', reason: failed.problem };
       const browser = deps.camera.status();
       return browser.state === BrowserState.Refused
-        ? `The pictures browser is not available (${browser.problem})`
-        : null;
+        ? { kind: 'skipped', reason: `The pictures browser is not available (${browser.problem})` }
+        : { kind: 'none' };
     },
     status(projectId) {
       const { appUrl } = getProject(db, projectId);

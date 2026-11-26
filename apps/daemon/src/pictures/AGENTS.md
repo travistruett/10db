@@ -57,9 +57,10 @@
   carries the command, its exit code and `loginOutputTail` (the last eight lines with any line holding the app's
   address or a secret pattern removed), and `runSignIn` records it per project (`pictures-sign-in.<projectId>`) and
   raises one card, "Pictures Cannot Sign In", withdrawn with the record when a sign-in succeeds or the app address or
-  dev login command changes. `Pictures.skipped(taskId)` is the one place that says why a task that names a page has
-  no pictures (a separate copy, the recorded sign-in failure, a refused browser); the Linear `ended` comment and the
-  Slack post read it.
+  dev login command changes. `Pictures.outlook(taskId)` is the one place that says what a task that names a page can expect of
+  its after: `none`, `wait` (an After capture of it is queued or running), `later` (a local copy not yet shipped) or
+  `skipped` with the reason (a separate copy, the recorded sign-in failure, a refused browser); the Linear `ended` and
+  landing comments and the Slack post read it, and the Linear reporter waits on `wait`.
 - The broken preview (Workbench spec §8.2, §8.4,
   `decisions/2026-11-10-a-broken-preview-is-read-from-the-page-load-that-takes-the-picture.md`): each capture of
   a pass page judges the load of its page route (`pageRoute`, its viewports and themes as one, `routeLoad`) by

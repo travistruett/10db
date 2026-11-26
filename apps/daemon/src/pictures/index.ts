@@ -1,6 +1,6 @@
 export type { BrowserStatus, DrawInput, PageCamera, ShootInput, Shot } from './camera';
 export { refusedCamera, ShotOutcome } from './camera';
-export type { Pictures } from './pictures';
+export type { Pictures, PicturesOutlook } from './pictures';
 export { MISSED_AFTER_MS, startPictures } from './pictures';
 export { createSignInReporter } from './sign-in-record';
 export {

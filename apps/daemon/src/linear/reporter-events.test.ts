@@ -58,6 +58,7 @@ describe('linearRowOf', () => {
       batch: {
         prUrl: 'https://github.com/a/b/pull/1',
         prState,
+        shippedLocalCopy: false,
         workstreams: [{ id: ws, taskId: task }],
       },
     });
@@ -70,5 +71,18 @@ describe('linearRowOf', () => {
     expect(linearRowOf(prChanged, batch('merged')).map((d) => [d.event, d.dedupeKey])).toEqual([
       [LinearEventKind.PrMerged, `pr_merged:${batchId}`],
     ]);
+    // A local copy has no pull request: its landing is the batch shipping, and its comment carries the pictures.
+    const shipped = event(EventType.BatchUpdated, { to: 'SHIPPED' }, batchId);
+    const landed = linearRowOf(shipped, {
+      batch: {
+        prUrl: null,
+        prState: null,
+        shippedLocalCopy: true,
+        workstreams: [{ id: ws, taskId: task }],
+      },
+    });
+    expect(
+      landed.map((d) => [d.event, d.dedupeKey, d.detail['prUrl'], d.detail['localCopy']]),
+    ).toEqual([[LinearEventKind.PrMerged, `landed:${batchId}`, null, true]]);
   });
 });

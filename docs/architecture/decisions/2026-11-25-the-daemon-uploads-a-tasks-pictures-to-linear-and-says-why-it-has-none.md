@@ -16,10 +16,21 @@
   without it and says the rest are in 10db.
 - **No pull request in the words.** The text 10db adds says "in 10db", never "in the pull request": a project that
   commits directly has no pull request.
+- **The comment waits for the capture.** The after picture is asked at the same event that owes the `ended`
+  comment, so a due `ended` or `pr_merged` row whose task has an after capture waiting or running
+  (`Pictures.outlook` is `wait`) is picked up again every 15 s instead of run, with no try spent, for at most five
+  minutes; then the comment goes out and says the pictures were still being taken. The reason a task has none is
+  read after the capture ended, so a sign-in that failed during it is said.
+- **A local copy's landing is a comment.** A local copy's after is taken when its batch ships, so the batch
+  shipping makes a `pr_merged` row for each finished run (`landed:<batch>`, detail `prUrl: null`,
+  `localCopy: true`); its `ended` comment says the pictures follow when the change lands, and the landing comment
+  carries them or the reason there are none. The brief tells the agent to name no pull request when `prUrl` is
+  null. The footer still reads `pr_merged`, the event's stored name.
 - **Why there are none.** A task that names a page and has no after picture says so once, on its first `ended`
-  comment, with the reason (`Pictures.skipped`): the task ran in a separate copy (10db pictures only Your folder,
-  a local copy or a pass's page), its project's picture sign-in failed, or the pictures browser is refused. Slack
-  says the same once per task, in the channel, when the project shares pictures.
+  comment (a local copy's landing comment), with the reason (`Pictures.outlook`, `skipped`): the task ran in a
+  separate copy (10db pictures only Your folder, a local copy or a pass's page), its project's picture sign-in
+  failed, or the pictures browser is refused. Slack says the same once per task, in the channel, when the project
+  shares pictures.
 - **A failed picture sign-in reaches the builder.** `pictures/sign-in-record.ts` keeps the latest failure per
   project (`pictures-sign-in.<projectId>` in `app_settings`) and raises one Inbox card per project, "Pictures
   Cannot Sign In", naming the dev login command, its exit code and the last eight lines of its output with every

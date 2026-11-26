@@ -1644,7 +1644,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           state,
           inbox,
           logger: logger.child({ component: 'slack-pictures' }),
-          skipped: (taskId) => pictures?.skipped(taskId) ?? null,
+          skipped: (taskId) => {
+            const outlook = pictures?.outlook(taskId);
+            return outlook?.kind === 'skipped' ? outlook.reason : null;
+          },
           channelOf: (projectId) => {
             const sharing = readSlackSharing(state.db, projectId);
             // The channel belongs to the workspace it was picked in; another binding now leaves it unused.
@@ -2873,7 +2876,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     conversations: reporterConversations(state),
     signIns: linearSignIns,
     inbox,
-    picturesSkipped: (taskId) => pictures.skipped(taskId),
+    picturesOutlook: (taskId) => pictures.outlook(taskId),
   });
   lateLinearReporter = linearReporter;
   /** Each service's own next step once it works for a project. Linear: the project reports to it. */

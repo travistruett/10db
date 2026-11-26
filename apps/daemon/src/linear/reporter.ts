@@ -47,7 +47,8 @@ import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { ShapeToolRequest, ShapeVerdict } from '../sessions';
 import { reporterBlockedBy } from './reporter-events';
-import { picturesFor } from './reporter-pictures';
+import type { PicturesOutlook } from '../pictures';
+import { carriesPictures, picturesFor } from './reporter-pictures';
 import { refreshReporterCard } from './reporter-inbox';
 import { LinearWriteError, type LinearCommentWriter } from './reporter-writer';
 import {
@@ -95,6 +96,10 @@ const maxTriesOf = (event: LinearEventKind): number =>
  * signed out is taken as signed out. A wake (a move, a sign-in, Linear switched on) ends the wait at once.
  */
 export const HOLD_RETRY_MS = 30 * 60_000;
+
+/** How often a task's due rows look again for the capture of its after picture, and how long they wait for it. */
+export const PICTURES_POLL_MS = 15_000;
+export const PICTURES_WAIT_MS = 5 * 60_000;
 
 /** The line that starts a run; only a trigger, the brief carries what to do. */
 export const REPORTER_STARTER = 'Report the pending Linear updates.';
@@ -200,7 +205,7 @@ export interface LinearReporterDeps {
   readonly signIns: { list(): Promise<LinearSignInsDto> };
   readonly inbox: InboxService;
   /** Why a task that names a page has no pictures, or null; said once in its `ended` comment. */
-  readonly picturesSkipped?: (taskId: TaskId) => string | null;
+  readonly picturesOutlook?: (taskId: TaskId) => PicturesOutlook;
   /** Sends a picture to Linear's storage; the platform's `fetch` when absent. */
   readonly send?: typeof fetch;
 }
@@ -252,6 +257,8 @@ export function createLinearReporter(
   const { state, clock, log, engine } = deps;
   const timers = new Map<TaskId, Timer>();
   const flights = new Map<TaskId, Flight>();
+  /** When each task's due rows first waited for its pictures: the wait ends `PICTURES_WAIT_MS` after. */
+  const pictureWaits = new Map<TaskId, number>();
   const bySession = new Map<SessionId, Flight>();
   const byConversation = new Map<ConversationId, Flight>();
   /** The zero-delay timers that retire a settled run's conversation and re-arm its task. */
@@ -323,27 +330,53 @@ export function createLinearReporter(
     const rows = pendingLinearPosts(state.db, { taskId });
     if (rows.length === 0) return;
     const due = Math.min(...rows.map(dueAtMs));
-    const timer = clock.setTimeout(
-      () => {
-        timers.delete(taskId);
-        pickup(taskId).catch((error: unknown) => {
-          log.error({ err: error, taskId }, 'the Linear reporter could not pick up a task');
-          // Its due rows fail with the error and back off, and the task is armed again.
-          try {
-            const now = clock.now().getTime();
-            fail(
-              pendingLinearPosts(state.db, { taskId }).filter((p) => dueAtMs(p) <= now),
-              error instanceof Error ? error.message : String(error),
-            );
-          } catch (failure) {
-            log.error({ err: failure, taskId }, 'the Linear reporter could not fail its rows');
-          }
-          arm(taskId);
-        });
-      },
-      Math.max(0, due - clock.now().getTime()),
-    );
-    timers.set(taskId, timer);
+    timers.set(taskId, pickupAt(taskId, Math.max(0, due - clock.now().getTime())));
+  };
+
+  /** A timer that picks the task up after `delayMs`; a pickup that throws fails its due rows and arms the task again. */
+  const pickupAt = (taskId: TaskId, delayMs: number): Timer =>
+    clock.setTimeout(() => {
+      timers.delete(taskId);
+      pickup(taskId).catch((error: unknown) => {
+        log.error({ err: error, taskId }, 'the Linear reporter could not pick up a task');
+        // Its due rows fail with the error and back off, and the task is armed again.
+        try {
+          const now = clock.now().getTime();
+          fail(
+            pendingLinearPosts(state.db, { taskId }).filter((p) => dueAtMs(p) <= now),
+            error instanceof Error ? error.message : String(error),
+          );
+        } catch (failure) {
+          log.error({ err: failure, taskId }, 'the Linear reporter could not fail its rows');
+        }
+        arm(taskId);
+      });
+    }, delayMs);
+
+  /**
+   * Whether the task's due rows should wait a little longer for its pictures: one of them is an update that
+   * shows them and a capture of the after is still running. The wait is bounded, and spends no try.
+   */
+  const waitingForPictures = (
+    taskId: TaskId,
+    due: readonly LinearPostDto[],
+    now: number,
+  ): boolean => {
+    if (deps.picturesOutlook === undefined || !due.some((p) => carriesPictures(p.event))) {
+      pictureWaits.delete(taskId);
+      return false;
+    }
+    if (deps.picturesOutlook(taskId).kind !== 'wait') {
+      pictureWaits.delete(taskId);
+      return false;
+    }
+    const since = pictureWaits.get(taskId) ?? now;
+    pictureWaits.set(taskId, since);
+    if (now - since >= PICTURES_WAIT_MS) {
+      pictureWaits.delete(taskId);
+      return false;
+    }
+    return true;
   };
 
   const refreshCard = (projectId: ProjectId): void => {
@@ -396,6 +429,11 @@ export function createLinearReporter(
       arm(taskId);
       return;
     }
+    if (waitingForPictures(taskId, due, now)) {
+      timers.set(taskId, pickupAt(taskId, PICTURES_POLL_MS));
+      return;
+    }
+    pictureWaits.delete(taskId);
     trigger(taskId, task.projectId, due, null);
   };
 
@@ -849,7 +887,7 @@ export function createLinearReporter(
           db: state.db,
           post,
           uploader: writer,
-          skipped: deps.picturesSkipped ?? (() => null),
+          outlook: deps.picturesOutlook ?? (() => ({ kind: 'none' })),
           send: deps.send ?? fetch,
         });
       } catch (error) {
