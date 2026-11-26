@@ -33,6 +33,7 @@ import { CardOpensLink, cardOpens } from './card-opens-link';
 import { AcceptanceCard } from './acceptance-card';
 import { CheckCard } from './check-card';
 import { PlanCard } from './plan-card';
+import { isPrecedentCard, PrecedentCard } from './precedent-card';
 import { ReviewRejection, reviewRejection } from '../review/review-rejection';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
 import { CardActions } from './card-actions';
@@ -205,6 +206,10 @@ export function InboxCard({
         header={header()}
       />
     );
+  }
+
+  if (isPrecedentCard(item)) {
+    return <PrecedentCard item={item} framed={framed} header={header()} />;
   }
 
   if (item.kind === InboxKind.Acceptance) {

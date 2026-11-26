@@ -17,6 +17,7 @@ import {
 } from '../../daemon/trust-queries';
 import { HelpHint } from './help-hint';
 import { SettingRow, SettingsCard } from './setting-row';
+import { StandingApprovals } from './standing-approvals';
 import { TrustRowText } from './trust-section';
 import { GRANTS_DESCRIPTION, GRANTS_EMPTY, grantDescription, TRUST_ROWS } from './trust-rows';
 import { previewItems } from './trust/preview-items';
@@ -264,6 +265,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
       )}
       <RepoMcpServers projectId={project.id} />
       <ProductionSystems projectId={project.id} />
+      <StandingApprovals projectId={project.id} />
       <AllowedInProject projectId={project.id} />
     </Stack>
   );

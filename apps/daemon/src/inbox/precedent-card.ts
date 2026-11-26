@@ -4,6 +4,7 @@ import {
   InboxState,
   InvalidError,
   LimitName,
+  PRECEDENT_CARD_DETAIL,
   PrecedentChoice,
   PrecedentKind,
   PrecedentState,
@@ -42,8 +43,6 @@ export const precedentFoldKey = (projectId: ProjectId): string => `precedent:${p
 export const precedentConflictFoldKey = (id: TrustPrecedentId): string =>
   `precedent-conflict:${id}`;
 
-/** The detail key naming the project a proposal card is for; the desktop draws the card from it. */
-const PRECEDENT_CARD_DETAIL = 'precedentProject';
 /** The detail key naming the precedent a conflict card is about. */
 export const PRECEDENT_CONFLICT_DETAIL = 'precedentConflict';
 

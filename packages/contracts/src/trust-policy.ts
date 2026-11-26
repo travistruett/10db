@@ -248,6 +248,9 @@ export const PrecedentCandidateDto = z.object({
 });
 export type PrecedentCandidateDto = z.infer<typeof PrecedentCandidateDto>;
 
+/** The `detail` key of a project's proposal card; its value is the project's id, and the desktop draws the card from it. */
+export const PRECEDENT_CARD_DETAIL = 'precedentProject';
+
 /** `POST /projects/:projectId/precedents/answer`. */
 export const PrecedentAnswer = z.object({
   kinds: z
