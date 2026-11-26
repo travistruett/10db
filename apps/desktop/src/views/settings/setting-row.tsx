@@ -26,7 +26,6 @@ export function SettingsCard({
     <Stack gap="xs">
       {title ? (
         <HeadingRow
-          align="flex-end"
           line={description === undefined || description === '' ? undefined : description}
           action={action}
           heading={

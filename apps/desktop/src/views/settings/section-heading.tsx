@@ -2,23 +2,25 @@ import { Box, Group, Stack, Text, Title } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { HelpHint } from './help-hint';
 
+/** The space between a heading's text and its action, wider than Mantine's largest gap. */
+const HEADING_GUTTER = 48;
+
 /**
  * The one layout for a title with a dimmed line under it and an action at the right: the text takes the
- * room and wraps, the action keeps its full width, and a fixed gap sits between them.
+ * room and wraps, the action keeps its full width and is centered on the text, and a fixed gutter sits
+ * between them.
  */
 export function HeadingRow({
   heading,
   line,
   action,
-  align = 'flex-start',
 }: {
   readonly heading: ReactNode;
   readonly line?: string | undefined;
   readonly action?: ReactNode;
-  readonly align?: 'flex-start' | 'flex-end';
 }) {
   return (
-    <Group justify="space-between" align={align} wrap="nowrap" gap="md">
+    <Group justify="space-between" align="center" wrap="nowrap" gap={HEADING_GUTTER}>
       <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
         {heading}
         {line === undefined ? null : (
