@@ -11,7 +11,7 @@
   file counts only when one of them matches, judged on the text that was read. A watchpoint without `lines` matches as before.
   `lineCandidates` (`match.ts`) names the files a line watchpoint's globs cover; `watchpointHitsAfter` reads their text
   once, up to `WATCHPOINT_LINE_SCAN_BYTES` (512 KB), splits it at the per-file cap, matches on it and reuses those sections as
-  the matched files' hunks. A file past the scan budget has no text, so it is not a line hit (a miss costs a For You line on a show watchpoint).
+  the matched files' hunks. A file the scan didn't reach, or cut with no matching line in the text read, is clipped: an ask or hold watchpoint counts it (fail closed, so a huge change can't slip past a watchpoint the builder asked to judge), a show watchpoint doesn't (Model choice on `**` would flag every file of a big change). The matcher holds this rule (`file.clipped`); matching is judged on the scan alone.
 - `hits-after.ts` (`watchpointHitsAfter`) reads the whole change's file counts first (a zero-byte read), matches on
   those (and, for line watchpoints, on the scan above), then reads only the matched files' text (`diffOfRanges` with `paths.only`) and splits it per file
   (`split-patch.ts`, which reads git's headers; diffs here are read without renames). It matches on the

@@ -129,6 +129,17 @@ describe('matchWatchpoints with line patterns', () => {
     ).toEqual(['src/x.ts']);
   });
 
+  it('counts a clipped file with no matching line for an ask watchpoint, and not for a show one', () => {
+    const cut = file('src/d.ts', { patch: patch('src/d.ts', ['+bar']), clipped: true });
+    const unread = file('src/e.ts', { patch: '', clipped: true });
+    const asking = { ...lined, loudness: WatchpointLoudness.Ask };
+    expect(hitPaths([cut, unread], asking)).toEqual(['src/d.ts', 'src/e.ts']);
+    expect(hitPaths([cut, unread])).toEqual([]);
+    expect(hitPaths([file('src/f.ts', { patch: patch('src/f.ts', ['+bar']) })], asking)).toEqual(
+      [],
+    );
+  });
+
   it('reads a stored watchpoint with no lines as having none', () => {
     const stored: Record<string, unknown> = { ...watchpoint('old', ['a/**']) };
     delete stored['lines'];

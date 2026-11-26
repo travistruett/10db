@@ -118,43 +118,45 @@ export async function watchpointHitsAfter(input: {
     clipped: true,
   }));
   // A watchpoint with line patterns needs the text of the files its globs cover. Read it once, within the scan
-  // budget; a file the read did not reach has no text, so it is not a hit.
-  const sections = new Map<string, PatchSection>();
+  // budget. A file the read did not reach, or cut, is still listed clipped: an ask or hold watchpoint counts it
+  // (it cannot be shown clear), a show watchpoint does not.
+  const scanned = new Map<string, PatchSection>();
   const candidates = lineCandidates(listed, input.watchpoints);
   if (candidates.length > 0) {
     const scan = await input.read(candidates, WATCHPOINT_LINE_SCAN_BYTES);
-    const found = splitPatch(scan.diff, {
+    const split = splitPatch(scan.diff, {
       fileBytes: WATCHPOINT_FILE_PATCH_BYTES,
       diffCut: scan.truncated,
     });
-    for (const [path, section] of found) sections.set(path, section);
+    for (const [path, section] of split) scanned.set(path, section);
   }
-  const matched = new Set(
-    joined(sources, withSections(listed, sections), input.watchpoints).flatMap((hit) =>
-      hit.files.map((f) => f.path),
-    ),
-  );
+  // Matching is judged on the scan alone, so the hunks read below never change which files are hits.
+  const found = joined(sources, withSections(listed, scanned), input.watchpoints);
+  const matched = new Set(found.flatMap((hit) => hit.files.map((f) => f.path)));
   if (matched.size === 0) return { hits: [], head: input.head, skipped: null };
   // Each file is read at its own cap, so one huge file cannot starve the files after it; reading stops
   // once the row's budget is spent, and the rest keep their counts, clipped. A file the line scan read is not
   // read again.
+  const sections = new Map(scanned);
   let spent = 0;
   for (const path of matched) {
     if (spent >= WATCHPOINT_ROW_PATCH_BYTES) break;
-    let found = sections.get(path);
-    if (found === undefined) {
+    let section = sections.get(path);
+    if (section === undefined) {
       const changes = await input.read([path], WATCHPOINT_FILE_PATCH_BYTES + 1024);
-      found = splitPatch(changes.diff, {
+      section = splitPatch(changes.diff, {
         fileBytes: WATCHPOINT_FILE_PATCH_BYTES,
         diffCut: changes.truncated,
       }).get(path);
-      if (found === undefined) continue;
-      sections.set(path, found);
+      if (section === undefined) continue;
+      sections.set(path, section);
     }
-    spent += Buffer.byteLength(found.patch, 'utf8');
+    spent += Buffer.byteLength(section.patch, 'utf8');
   }
   return {
-    hits: withinRowBudget(joined(sources, withSections(listed, sections), input.watchpoints)),
+    hits: withinRowBudget(
+      found.map((hit) => ({ ...hit, files: withSections(hit.files, sections) })),
+    ),
     head: input.head,
     skipped: null,
   };

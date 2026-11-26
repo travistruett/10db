@@ -20,8 +20,10 @@ added inside a migration.
 **What could go wrong, and how we'd know.**
 - *A slow or runaway pattern.* Each line is cut at 2,000 characters before it is tested, and the scan reads at most
   512 KB of a change. A pattern that doesn't compile is refused when it is saved.
-- *A missed line in a huge change.* A file past the scan budget isn't scanned, so it isn't a hit. Model choice is show,
-  so a miss costs a line in For You, not a block.
+- *A missed line in a huge change.* A file past the scan budget, or cut by the per-file cap with no matching line in
+  the text read, can't be shown clear. For an **ask** or **hold** watchpoint it counts as a hit, kept clipped, so a
+  huge change can't slip an index or a model id past a watchpoint you asked to judge. A **show** watchpoint doesn't
+  count it: Model choice on `**` would flag every file of a big change, and a miss costs a line in For You, not a block.
 - *Model choice is noisy.* It matches model ids in tests and fixtures too. The last-30-days column shows this, and you
   can narrow its paths.
 
@@ -55,7 +57,7 @@ The same on every provider. The daemon does the matching; no model is asked.
      headers or the marker, each cut at 2,000 characters.
 2. **Daemon matching** (`apps/daemon/src/watchpoints/`):
    - `matchWatchpoints` stays pure. A watchpoint with `lines` covers a file only when its globs cover it **and** one
-     of `changedLines(file.patch)` matches a pattern. A clipped file is judged on the text that was read.
+     of `changedLines(file.patch)` matches a pattern. A clipped file is judged on the text that was read; an ask or hold watchpoint also counts a clipped file with no matching line (fail closed).
    - `lineCandidates(files, watchpoints)`: the glob-covered paths of watchpoints that have lines.
    - `watchpointHitsAfter`: after the counts read, if there are line candidates, read their text once, at
      `WATCHPOINT_LINE_SCAN_BYTES` (512 KB), and split it with `splitPatch` at the per-file cap. Then match with that
