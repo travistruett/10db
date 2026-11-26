@@ -102,8 +102,9 @@ the shell writes into the script. It draws into a closed shadow root at the top 
   made takes the pick back out. A reopened pick also shows Remove. Dictate starts macOS Dictation in the field.
   **⇧-click** adds an element to the newest pick, or takes one back out: one note, several outlines. A plain click
   on a one-element pick with no note unpicks it; on a group, or a pick with a note, it reopens the note. A
-  ⇧-click on a saved pick sends it again at once, so closing its note without saving keeps the page and the chip
-  the same. **Drag** draws a box and makes an
+  ⇧-click that changes a saved pick's elements marks it, and closing its note without saving still sends it once
+  with its saved words, so the page and the chip stay the same. Each send takes the pick as it is when it starts,
+  and one overtaken by a newer send of the same pick is dropped. **Drag** draws a box and makes an
   area pick holding the outermost elements inside it. A click on the page while a note is open saves the note
   first, and unpicking the pick whose note is open moves the note to the newest pick left.
 - Clicking a badge reopens its note, and editing it sends the pick again (same pick id: the chip updates).

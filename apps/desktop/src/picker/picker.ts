@@ -30,6 +30,10 @@ interface Pick {
   note: string;
   /** Not yet saved once: Cancel takes it back out rather than just closing its note. */
   fresh: boolean;
+  /** Its elements changed by a ⇧-click since it was last sent: closing its note sends it, even unsaved. */
+  dirty: boolean;
+  /** Counts its sends, so one overtaken by a newer send is dropped. */
+  sends: number;
   /** The shell took it once: its chip exists, so a refused edit keeps the badge. */
   added: boolean;
 }
@@ -229,8 +233,17 @@ export function startPicker(config: PickerConfig): void {
   }
 
   async function send(pick: Pick) {
+    // What it sends is fixed now, and only the newest send of a pick goes: a ⇧-click while an older
+    // send waits on a lookup can't land last with old members.
+    pick.sends += 1;
+    pick.dirty = false;
+    const sent = pick.sends;
+    const members = [...pick.elements];
+    const kind = pick.kind;
+    const area = pick.area;
+    const note = pick.note;
     const elements = await Promise.all(
-      pick.elements.map((element) =>
+      members.map((element) =>
         Promise.race([
           pick.described.get(element) ?? describe(element, config.repoPath),
           sleep(LOOKUP_WAIT_MS),
@@ -239,13 +252,13 @@ export function startPicker(config: PickerConfig): void {
     );
     const input: PagePickInput = {
       id: pick.id,
-      kind: pick.kind,
+      kind,
       elements: elements.map((e, i) => {
-        const element = pick.elements[i];
+        const element = members[i];
         return element === undefined ? e : { ...e, rect: boxOf(element) };
       }),
-      area: pick.area === null ? null : scrollBox(pick.area),
-      note: pick.note.slice(0, 2_000),
+      area: area === null ? null : scrollBox(area),
+      note: note.slice(0, 2_000),
       route: `${location.pathname}${location.search}`.slice(0, 512),
       viewport: {
         width: window.innerWidth,
@@ -254,8 +267,8 @@ export function startPicker(config: PickerConfig): void {
       },
       engine: 'WebKit',
     };
-    // Removed while its lookup ran: nothing goes.
-    if (!picks.includes(pick)) return;
+    // Removed while its lookup ran, or overtaken by a newer send: nothing goes.
+    if (!picks.includes(pick) || sent !== pick.sends) return;
     // The crop is WebKit's picture of the page as painted, so the picker's whole layer (badges, boxes,
     // any note open by now) is hidden from the frame before it until the shell answers.
     shooting += 1;
@@ -299,6 +312,8 @@ export function startPicker(config: PickerConfig): void {
     }
     open = null;
     ui.note.style.display = 'none';
+    // Its words go back to what was saved, but its outlines stay as ⇧-clicked, so its chip is sent to match.
+    if (pick.dirty) void send(pick);
     render();
   }
 
@@ -335,7 +350,10 @@ export function startPicker(config: PickerConfig): void {
           removeAndReopen(newest, wasOpen === newest);
           return;
         }
-        if (newest.elements.length > 1) untrack(newest, element);
+        if (newest.elements.length > 1) {
+          untrack(newest, element);
+          newest.dirty = true;
+        }
       } else if (
         !newest.elements.includes(element) &&
         newest.elements.length < PAGE_PICK_ELEMENTS_MAX
@@ -343,10 +361,8 @@ export function startPicker(config: PickerConfig): void {
         track(newest, element);
         newest.kind = PickKind.Group;
         newest.area = null;
+        newest.dirty = true;
       }
-      // A saved pick's chip follows its outlines at once, so closing its note without saving keeps them
-      // the same in the page and in 10db.
-      if (!newest.fresh) void send(newest);
       openNote(newest);
       render();
       return;
@@ -373,6 +389,8 @@ export function startPicker(config: PickerConfig): void {
       note: '',
       added: false,
       fresh: true,
+      dirty: false,
+      sends: 0,
     };
     track(pick, element);
     picks.push(pick);
@@ -412,6 +430,8 @@ export function startPicker(config: PickerConfig): void {
       note: '',
       added: false,
       fresh: true,
+      dirty: false,
+      sends: 0,
     };
     for (const element of outermost.slice(0, PAGE_PICK_ELEMENTS_MAX)) track(pick, element);
     picks.push(pick);

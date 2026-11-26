@@ -534,7 +534,7 @@ test('a pick from the Preview becomes a chip, and Send makes one message with it
   await expect(page.getByRole('menuitem', { name: 'Open in Browser' })).toBeVisible();
   await page.keyboard.press('Escape');
 
-  const live = await request.get(`${daemonUrl}/passes?live=true`, { headers: auth });
+  const live = await request.get(`${daemonUrl}/passes?live=true`, { headers: auth, maxRetries: 2 });
   const taskId = Live.parse(await live.json())
     .find((view) => view.pass.projectId === projectId)
     ?.pages.find((p) => p.label === 'Settings')?.taskId;

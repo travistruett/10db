@@ -9,7 +9,7 @@ import { askPicksFocus } from './preview-focus';
 /**
  * Pick on Page spec §4, §5: what the Previews hand the main window, for as long as the window is open,
  * whichever view shows. A pick only ever lands in its page's draft as a chip, or is refused there; the
- * Preview's "N in <page> ›" selects that page and brings the window forward on its picks.
+ * Preview's "Back to 10db ›" selects that page and brings the window forward on its picks.
  */
 export function usePreviewPicks(): void {
   const navigate = useNavigate();
