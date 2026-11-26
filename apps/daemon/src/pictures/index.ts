@@ -27,3 +27,5 @@ export { startPruning } from './prune';
 export { keepScreen, pngSize, removeUnnamed, writePicture } from './picture-files';
 export { keptRoute, pageAreaRoutes } from './kept-route';
 export { checkShotsOf, missingLines } from './design-shots';
+export { realAccountProblem } from './fictional-account';
+export { loginOutputTail } from './sign-in-output';
