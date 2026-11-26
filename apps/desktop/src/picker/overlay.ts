@@ -44,6 +44,10 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; background: #184956; border: 
   background: #103c48; color: #cad8d9; box-shadow: 0 6px 20px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.06) inset;
   font-size: 12.5px; user-select: none; pointer-events: auto; z-index: 2147483647; }
 .pill.picking { box-shadow: 0 6px 20px rgba(0,0,0,.35), 0 0 0 2px #f275be; }
+.pill:not(.picking) { background: #f275be; color: #103c48; font-weight: 600;
+  box-shadow: 0 6px 18px rgba(242,117,190,.4), 0 1px 4px rgba(0,0,0,.25); }
+.pill:not(.picking):hover { background: #f58bca; }
+.pill:not(.picking) .send { background: #103c48; color: #f58bca; }
 .mark { width: 36px; height: 36px; display: grid; place-items: center; background: none; border: 0; color: inherit; padding: 0; }
 .picking .mark { color: #f275be; }
 .start { display: inline-flex; align-items: center; gap: 8px; padding: 0 12px 0 0; height: 36px; background: none;
@@ -135,7 +139,8 @@ export function createOverlay(): Overlay {
   pillMark.title = 'Mark up this page (⌘⇧C)';
   pillMark.setAttribute('aria-label', 'Mark up this page');
   const pillStart = el('button', 'start', pill);
-  pillStart.innerHTML = 'Mark up <kbd>⌘⇧C</kbd>';
+  pillStart.textContent = 'Mark up';
+  pillStart.title = 'Mark up this page (⌘⇧C)';
   const mode = el('span', 'mode', pill);
   mode.append('Picking');
   el('span', 'sep', mode);
