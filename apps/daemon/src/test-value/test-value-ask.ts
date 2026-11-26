@@ -1,4 +1,4 @@
-import { JudgeDecision, type JudgeCallId, type TaskId } from '@10db/contracts';
+import { JudgeBudget, JudgeDecision, type JudgeCallId, type TaskId } from '@10db/contracts';
 import { fenced, type JudgeAnswer, type JudgeRequest } from '../judge';
 
 /** What the judge makes of a new test. */
@@ -107,6 +107,8 @@ export function testValueRequest(
     question: TEST_VALUE_QUESTION,
     options,
     criteria,
+    // It runs after a step, off any path a person waits on.
+    budget: JudgeBudget.Unattended,
     taskId: asked.taskId,
     ...(asked.signal === undefined ? {} : { signal: asked.signal }),
   };
