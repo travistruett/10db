@@ -24,8 +24,8 @@ export const SaveDevLoginInput = z
       .max(2000)
       .optional()
       .describe(
-      'The dev login command, run from the project folder. 10db checks it signs the picture browser in and saves it only then.',
-    ),
+        'The dev login command, run from the project folder. 10db checks it signs the picture browser in and saves it only then.',
+      ),
     cannot: z
       .object({
         found: Line.describe('What you found in the repository about how users sign in.'),

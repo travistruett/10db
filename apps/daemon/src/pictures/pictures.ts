@@ -199,6 +199,11 @@ export interface PicturesDeps {
    */
   readonly onSignIn?: (report: SignInReport) => void;
   /**
+   * Told when a live project's app address or dev login changed and it is left with an address and no
+   * dev login, so 10db can offer to set one up. It is never told at start-up, so a declined offer holds.
+   */
+  readonly onNoSignIn?: (projectId: ProjectId) => void;
+  /**
    * 10db's own dev UI: the browser origin the daemon trusts as it, and its read-only token. A shot of
    * an app at that origin is handed the token and may read the daemon, since the dev UI draws nothing
    * without it; null when the daemon trusts no dev UI.
@@ -236,6 +241,11 @@ export interface Pictures {
    * again rather than started twice.
    */
   checkSignIn(projectId: ProjectId): Promise<SignInCheckDto>;
+  /**
+   * Checks a dev login command that is not saved yet, as Check Sign-in checks the saved one. It is
+   * neither the project's last sign-in nor announced, and keeps no sign-in unless it signed in.
+   */
+  checkDevLogin(projectId: ProjectId, command: string): Promise<SignInCheckDto>;
   /**
    * Shots of the routes as they are now, for a design check: the first viewport and theme of the
    * project's matrix, signed in as a capture is, one at a time with every other capture. Nothing is
@@ -491,15 +501,20 @@ export function startPictures(deps: PicturesDeps): Pictures {
     ask({ kind: ScreenKind.After, projectId: project.id, passId, taskId: task.id, turnId: null });
   }
 
-  /** Runs the dev login once and records it as the project's last sign-in; null when it was stopped. */
+  /**
+   * Runs the dev login once and, unless it is a command not saved yet (`record` false), records it as
+   * the project's last sign-in; null when it was stopped.
+   */
   async function signInOnce(
     project: SignInProject,
     signal: AbortSignal,
     site?: PictureSite,
+    record = true,
   ): Promise<SignInResult | null> {
     const result = await signIn({ ...deps.signIn, camera: deps.camera }, project, signal, site);
     // A login stopped with its capture says nothing of the project's sign-in.
     if (signal.aborted) return null;
+    if (!record) return result;
     signIns.set(project.id, {
       problem: result.ok ? null : result.problem,
       at: deps.clock.now().toISOString(),
@@ -1107,8 +1122,18 @@ export function startPictures(deps: PicturesDeps): Pictures {
     });
   }
 
-  async function performCheck(projectId: ProjectId, signal: AbortSignal): Promise<SignInCheckDto> {
-    const project = getProject(db, projectId);
+  /**
+   * The check of the project's saved dev login, or of `candidate` in its place. A candidate's check is
+   * never the project's sign-in: it is not recorded or announced, and a candidate that did not sign in
+   * keeps no storage state.
+   */
+  async function performCheck(
+    projectId: ProjectId,
+    signal: AbortSignal,
+    candidate: string | null = null,
+  ): Promise<SignInCheckDto> {
+    const saved = getProject(db, projectId);
+    const project = candidate === null ? saved : { ...saved, devLoginCommand: candidate };
     const unchecked = (problem: string): SignInCheckDto =>
       uncheckedReport(deps.clock.now(), problem);
     if (project.appUrl === null) return unchecked('The project has no app address');
@@ -1123,7 +1148,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const check = await runSignInCheck({
       now: () => deps.clock.now(),
       hold: () => deps.holdApp?.(projectId) ?? Promise.resolve({ up: true as const }),
-      signIn: () => signInOnce(project, signal),
+      signIn: () => signInOnce(project, signal, undefined, candidate === null),
       shoot: (route, storageState) =>
         sameAddress()
           ? deps.camera.shoot({ appUrl, route, viewport, theme, storageState, devUi, signal })
@@ -1132,9 +1157,25 @@ export function startPictures(deps: PicturesDeps): Pictures {
       appUrl,
       route: firstRoutedPage(project),
     });
+    if (candidate !== null) {
+      if (check.state !== SignInCheckState.SignedIn) forgetStorageState(deps.dataDir, projectId);
+      return check;
+    }
     // A check stopped by a newer one, or by shutdown, says nothing of the project's sign-in.
     if (!signal.aborted) settleCheck(projectId, check);
     return check;
+  }
+
+  /** Checks a dev login command not saved yet, as the saved one is checked; nothing is recorded of it. */
+  async function checkDevLogin(projectId: ProjectId, command: string): Promise<SignInCheckDto> {
+    whileRunning();
+    const abort = new AbortController();
+    nowRuns.add(abort);
+    try {
+      return await performCheck(projectId, abort.signal, command);
+    } finally {
+      nowRuns.delete(abort);
+    }
   }
 
   /** Checks under way, by project: a second ask shares the first unless `fresh` replaces it. */
@@ -1173,14 +1214,24 @@ export function startPictures(deps: PicturesDeps): Pictures {
     project: (projectId) => getProject(db, projectId),
     check: checkSignIn,
     nothingToCheck: (projectId) => {
-      // With no app address or dev login left there is no sign-in to fail.
       signIns.delete(projectId);
+      const project = getProject(db, projectId);
+      // An app address with no dev login has nothing to sign its pictures in with: 10db offers one.
+      if (project.archivedAt === null && project.appUrl !== null)
+        try {
+          deps.onNoSignIn?.(projectId);
+          return;
+        } catch (error) {
+          log.warn({ projectId, err: errorText(error) }, 'no sign-in offer raised');
+        }
+      // With no app address left there is no sign-in to fail.
       reportSignIn({ projectId, problem: null, exitCode: null, output: '' });
     },
   });
 
   return {
     checkSignIn: (projectId) => checkSignIn(projectId, false),
+    checkDevLogin,
     shootNow,
     drawMockup,
     bytesOf(sha256) {

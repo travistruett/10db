@@ -128,6 +128,7 @@ import type { LinearReporter } from '../linear';
 import type { ChatToolsFor } from './chat-tools';
 import type { LaneBrowsers, LaneBrowserSession } from '../lane-browser';
 import type { ShapeToolsFor } from './shape-tools';
+import type { SignInSetup } from './sign-in-setup-tool';
 import type { ToolImages } from './tool-images';
 import { answerAway, routedToPerson, type AwayLane } from '../trust';
 
@@ -168,6 +169,8 @@ export interface McpDeps {
   readonly reporter?: Pick<LinearReporter, 'reportPost' | 'pickStatus' | 'uploadPicture'>;
   /** Draws a mock-up and shoots the app for `check_design`; absent, a lane is not offered it. */
   readonly pictures?: Pick<Pictures, 'shootNow' | 'drawMockup' | 'bytesOf'>;
+  /** Checks and saves a dev login for `save_dev_login`; absent, no lane is offered it. */
+  readonly signInSetup?: SignInSetup;
   /** The data directory, where the lane browser keeps its screenshots; absent, no browser tools are offered. */
   readonly dataDir?: string;
   /** Each lane session's browser; absent, a lane is not offered the browser tools. */
