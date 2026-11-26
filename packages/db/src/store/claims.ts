@@ -233,6 +233,11 @@ export function activeClaims(db: DbReader, workstreamId: WorkstreamId): ClaimRow
     .all();
 }
 
+/** Every claim the workstream has held, released ones included: what a run that ended worked under. */
+export function claimsHeldBy(db: DbReader, workstreamId: WorkstreamId): ClaimRow[] {
+  return db.select().from(schema.claims).where(eq(schema.claims.workstreamId, workstreamId)).all();
+}
+
 export function renewClaimLeases(
   ctx: WriteContext,
   workstreamIds: readonly WorkstreamId[],

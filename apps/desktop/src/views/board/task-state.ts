@@ -87,6 +87,8 @@ function whatHappened(kind: string | null, step: string | null): string {
       return 'The copy’s installed packages are broken, so the checks could not start. Nothing in the task’s code was at fault.';
     case WorkstreamFailure.NoPnpm:
       return 'The copy’s installed packages are broken and 10db found no trustworthy pnpm to install them, so the checks could not start. Nothing in the task’s code was at fault.';
+    case WorkstreamFailure.LandingRefused:
+      return 'The work passed its checks but could not land on the base branch, so it stays on its lane branch.';
     case null:
     default:
       return `The ${step ? `${step} step` : 'run'} failed.`;

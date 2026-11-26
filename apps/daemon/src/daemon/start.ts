@@ -123,6 +123,7 @@ import {
   type JudgeService,
 } from '../judge';
 import { createBenchmarkServices } from './benchmark-services';
+import { checkoutState } from './checkout-state';
 import { createSizingService } from '../sizing';
 import { settleSecondOpinionModel } from './decision-offer';
 import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
@@ -424,6 +425,7 @@ import {
   type RunnerLimits,
   type StopPassLane,
   startTurnChecks,
+  subscribeLaneTakeOut,
   TURN_CHECK_TIMEOUT_MS,
   withTurnChecks,
 } from '../runner';
@@ -2316,6 +2318,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       live: chatLive,
       state,
       folderHold,
+      checkoutState: (checkout) => checkoutState(git, checkout),
       firstStartAfterMove,
       log: logger.child({ component: 'chat' }),
       dataDir: opts.dataDir,
@@ -2418,6 +2421,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger.info({ closed: closedNoticeCards }, 'closed open cards that are notices now');
   }
   const queueWaits = createQueueWaits({ state, clock });
+  // One gate for the scheduler and the take-out of a failed run's work, which holds the run's Retry.
+  const keptWork = createKeptWorkGate(delivery);
   const createdScheduler = createScheduler({
     state,
     folderHold,
@@ -2438,7 +2443,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     connecting: () => accountService.connecting(),
     // A run in Your folder of a local project waits for its task's saved work to go back (call 33).
-    keptWork: createKeptWorkGate(delivery),
+    keptWork,
     modelWait,
     clock,
     instanceId,
@@ -2848,6 +2853,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // started task's saved work goes once its work lands.
   const unsubscribePassSettles = subscribePassSettles(bus, delivery);
   const unsubscribeKeptWork = subscribeKeptWorkLanding(bus, delivery);
+  // A failed Your-folder run of a Commit Directly project takes its work out of the folder.
+  const unsubscribeLaneTakeOut = subscribeLaneTakeOut(bus, delivery, keptWork);
   resumePassSettles(delivery);
   // A close a restart cut short goes on from its last step, once recovery has swept what the stopped
   // daemon left: its scratch gate's worktree and process are its own from here.
@@ -3785,6 +3792,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeSignOffWaits();
       unsubscribeMergedPasses();
       unsubscribeKeptWork();
+      unsubscribeLaneTakeOut();
       unsubscribePrWatch();
       await prWatch.stop();
       await Promise.all([replyWatches.stop(), timerWatch.stop()]);

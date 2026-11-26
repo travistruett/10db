@@ -116,6 +116,8 @@ export interface ChatWorld {
 export function chatWorld(
   opts: {
     readonly prepare?: ChatHooksDeps['prepare'];
+    /** What the checkout's HEAD and working tree read as; unchanged by default. */
+    readonly checkoutState?: ChatHooksDeps['checkoutState'];
     /** The fake adapter's scripts, by `Chat: <first message>`. */
     readonly book?: FakeScriptBook;
     readonly judge?: JudgeKind;
@@ -243,6 +245,7 @@ export function chatWorld(
       live: createChatLiveSessions(),
       state,
       folderHold,
+      checkoutState: opts.checkoutState ?? (() => Promise.resolve('unchanged')),
       firstStartAfterMove,
       log: silentLogger,
       dataDir: dir.path,

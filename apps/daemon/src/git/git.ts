@@ -55,6 +55,12 @@ import { lockedOwner, parseWorktreeList, type WorktreeEntry } from './worktree-l
 
 /** The trailer the commit tool writes on every commit it makes, naming the call's opId. */
 export const OP_TRAILER = '10db-Op';
+/**
+ * The trailer of a commit made on a branch that is not checked out (`commitOnBranch`): the commit the
+ * folder's own branch was at as its files were taken, so every change that branch had made by then
+ * to a file the commit names is in the commit.
+ */
+export const BASE_TRAILER = '10db-Base';
 const OP_TRAILER_LINE = new RegExp(`^${OP_TRAILER}:`, 'm');
 const OP_SEARCH_DEPTH = 200;
 const OBJECT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
@@ -750,6 +756,22 @@ export interface Git extends ChatGit {
     branch: string;
   }): Promise<{ sha: string; alreadyCommitted: boolean }>;
   /**
+   * Commits `paths` as the folder holds them on `branch`, which is not checked out: the tree is the
+   * branch's tip (or `startAt`'s, when the branch is not there yet) with those paths taken from disk.
+   * The folder must be on `checkedOut`, the branch its files belong to, or nothing is committed. HEAD,
+   * the folder's index and every other branch stay as they are, and the branch moves only if nothing
+   * moved it meanwhile. A rerun of `opId` answers the commit it made.
+   */
+  commitOnBranch(input: {
+    repo: string;
+    branch: string;
+    checkedOut: string;
+    startAt: string;
+    paths: readonly string[];
+    message: string;
+    opId: string;
+  }): Promise<{ sha: string; alreadyCommitted: boolean }>;
+  /**
    * Brings commit `from` into `branch`, which `repo` must have checked out, running nothing from the
    * repository: up to date when the branch holds it, a fast-forward when the branch has nothing of
    * its own, else a merge commit with the branch as first parent, made from `merge-tree`'s tree with
@@ -884,6 +906,29 @@ export interface Git extends ChatGit {
     paths: readonly string[],
   ): Promise<string>;
   /**
+   * Of `paths`, those whose changes from commit `from` to commit `other` commit `tip` lacks: a
+   * three-way merge of `other` into `tip` from `from` (merge-tree, which writes objects only) would
+   * change them, or conflicts on them. Empty when `tip` already holds everything `other` did to them.
+   */
+  changesMissing(input: {
+    readonly repo: string;
+    readonly tip: string;
+    readonly other: string;
+    readonly from: string;
+    readonly paths: readonly string[];
+  }): Promise<string[]>;
+  /**
+   * The `key` trailer of the newest commit after `from`, up to `to`, that changes `path`; null when
+   * none does or it carries none.
+   */
+  lastChangeTrailer(input: {
+    readonly repo: string;
+    readonly from: string;
+    readonly to: string;
+    readonly path: string;
+    readonly key: string;
+  }): Promise<string | null>;
+  /**
    * Brings `path` as commit `theirs` has it into the file on disk, by a three-way merge from its
    * version in `base` (`merge-file`, which runs no driver), under the repo lock. `merged` when the file
    * now holds both sides, or already did; `conflict` when they don't merge cleanly, a side is not a
@@ -947,7 +992,9 @@ export interface Git extends ChatGit {
    * branch's tip for the paths again; a tree equal to the tip's makes none and answers null. Refused
    * with `PassFolderOffBranchError` while HEAD names another branch. A compare-and-swap that loses
    * a race is refused; with `willRetry` (the caller lands once more from the new tip) the refusal is
-   * thrown without reaching `onRefused`, so a race the caller recovers from raises no card.
+   * thrown without reaching `onRefused`, so a race the caller recovers from raises no card. With
+   * `expect`, the tip the caller checked the paths against, a branch that holds another tip and no
+   * commit of `opId` is refused the same way, before anything is written.
    */
   landPaths(input: {
     readonly repo: string;
@@ -957,6 +1004,7 @@ export interface Git extends ChatGit {
     readonly message: string;
     readonly opId: string;
     readonly willRetry?: boolean;
+    readonly expect?: string;
   }): Promise<LandedPaths>;
   /** Sets `ref`, under `refs/10db/`, to commit `sha`, whatever it held. */
   keepRef(repo: string, ref: string, sha: string): Promise<void>;
@@ -3085,6 +3133,7 @@ export function createGit(opts: GitOptions = {}): Git {
     readonly message: string;
     readonly opId: string;
     readonly willRetry?: boolean;
+    readonly expect?: string;
   }): Promise<LandedPaths> {
     const named = [...new Set(input.paths.map(checkPathName))].sort();
     return withRepoLock(realpathSync(input.repo), async () => {
@@ -3108,6 +3157,9 @@ export function createGit(opts: GitOptions = {}): Git {
       // A rerun's index follows the branch too: the run it repeats may have stopped before it did.
       if (existing)
         return { sha: existing, alreadyLanded: true, indexStale: await followIndex(tip) };
+      const raced = { kind: GitTrustFailure.Ref, ref, reason: 'raced' } as const;
+      if (input.expect !== undefined && tip !== input.expect)
+        throw input.willRetry === true ? new GitTrustError(c.real, raced) : refusal(c.real, raced);
       const from = await revParse(c, `${input.from}^{commit}`);
       if (from === null) throw new InvalidError(`${input.from} names no commit`);
       const tree = await treeTaking(c, tip, from, named);
@@ -3124,7 +3176,6 @@ export function createGit(opts: GitOptions = {}): Git {
         await git(c, ['update-ref', '--no-deref', '-m', `10db: ${input.opId}`, ref, sha, tip]);
       } catch (error) {
         if (!(error instanceof GitError)) throw error;
-        const raced = { kind: GitTrustFailure.Ref, ref, reason: 'raced' } as const;
         throw input.willRetry === true ? new GitTrustError(c.real, raced) : refusal(c.real, raced);
       }
       return { sha, alreadyLanded: false, indexStale: await followIndex(sha) };
@@ -3218,6 +3269,56 @@ export function createGit(opts: GitOptions = {}): Git {
       }
       return { written, left };
     });
+  }
+
+  async function changesMissing(input: {
+    readonly repo: string;
+    readonly tip: string;
+    readonly other: string;
+    readonly from: string;
+    readonly paths: readonly string[];
+  }): Promise<string[]> {
+    const c = await pinned(input.repo);
+    const merged = await mergeTree(c, input.tip, input.other, input.from);
+    const conflicted = new Set(merged.conflicted);
+    const missing: string[] = [];
+    for (const path of [...new Set(input.paths.map(checkPathName))].sort()) {
+      if (conflicted.has(path)) {
+        missing.push(path);
+        continue;
+      }
+      const [held, wanted] = await Promise.all([
+        treeEntry(c, input.tip, path),
+        treeEntry(c, merged.tree, path),
+      ]);
+      if (held?.oid !== wanted?.oid || held?.mode !== wanted?.mode) missing.push(path);
+    }
+    return missing;
+  }
+
+  async function lastChangeTrailer(input: {
+    readonly repo: string;
+    readonly from: string;
+    readonly to: string;
+    readonly path: string;
+    readonly key: string;
+  }): Promise<string | null> {
+    const c = await pinned(input.repo);
+    const out = await git(
+      c,
+      [
+        'log',
+        '-1',
+        '--no-show-signature',
+        `--format=%(trailers:key=${input.key},valueonly,separator=%x2c)`,
+        `${input.from}..${input.to}`,
+        '--',
+        checkPathName(input.path),
+      ],
+      { env: { GIT_LITERAL_PATHSPECS: '1' } },
+    );
+    const value = out.trim().split(',').at(-1)?.trim() ?? '';
+    return value === '' ? null : value;
   }
 
   async function mergeFileBack(input: {
@@ -3985,6 +4086,75 @@ export function createGit(opts: GitOptions = {}): Git {
           found: await currentBranch(c),
           committed: true,
         });
+      }
+      return { sha, alreadyCommitted: false };
+    });
+  }
+
+  async function commitOnBranch(input: {
+    repo: string;
+    branch: string;
+    checkedOut: string;
+    startAt: string;
+    paths: readonly string[];
+    message: string;
+    opId: string;
+  }): Promise<{ sha: string; alreadyCommitted: boolean }> {
+    const named = checkPaths(input.repo, input.paths);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const { real } = c;
+      const ref = `refs/heads/${input.branch}`;
+      if (await isSymbolic(c, ref))
+        throw refusal(real, { kind: GitTrustFailure.Ref, ref, reason: 'symbolic' });
+      // The folder's files are the work only while it is on the branch they were made on.
+      const head = await currentBranch(c);
+      if (head !== input.checkedOut)
+        throw refusal(real, {
+          kind: GitTrustFailure.Branch,
+          expected: input.checkedOut,
+          found: head,
+          committed: false,
+        });
+      const held = await revParse(c, `${ref}^{commit}`);
+      const tip = held ?? (await revParse(c, `${input.startAt}^{commit}`));
+      if (tip === null) throw new InvalidError(`${input.startAt} names no commit`);
+      if (held !== null) {
+        const existing = await findCommitByOp(c, held, input.opId);
+        if (existing) return { sha: existing, alreadyCommitted: true };
+      }
+      const based = await revParse(c, `refs/heads/${input.checkedOut}^{commit}`);
+      if (based === null) throw new InvalidError(`Branch ${input.checkedOut} does not exist`);
+      const tree = await withPrivateIndex(c, tip, async (env) => {
+        const changed = await stage(c, env, named, tip);
+        const filtered = await filteredPaths(c, env, changed);
+        if (filtered.length > 0)
+          throw refusal(real, { kind: GitTrustFailure.Filter, paths: filtered });
+        return (await git(c, ['write-tree'], { env })).trim();
+      });
+      if (tree === (await revParse(c, `${tip}^{tree}`)))
+        throw new InvalidError(`Nothing to commit in ${named.join(', ')}`);
+      const sign = signing(c, await configEntries(c));
+      const sha = (
+        await git(c, ['commit-tree', ...sign.flags, tree, '-p', tip], {
+          input: `${withOpTrailer(input.message, input.opId)}${BASE_TRAILER}: ${based}\n`,
+          config: sign.config,
+        })
+      ).trim();
+      try {
+        // Compare and swap: a branch made or moved meanwhile is refused.
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          `10db: ${input.opId}`,
+          ref,
+          sha,
+          held ?? '0'.repeat(sha.length),
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw refusal(real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
       }
       return { sha, alreadyCommitted: false };
     });
@@ -4957,6 +5127,7 @@ export function createGit(opts: GitOptions = {}): Git {
       return filters(await pinned(repo), rev);
     },
     commit,
+    commitOnBranch,
     mergeIntoBranch,
     promoteFastForward,
     classifyFolder,
@@ -4970,6 +5141,8 @@ export function createGit(opts: GitOptions = {}): Git {
     pageChanges,
     hashOnDisk,
     restoreFiles,
+    changesMissing,
+    lastChangeTrailer,
     moveKeptRef,
     narrowKeptRef,
     mergeFileBack,

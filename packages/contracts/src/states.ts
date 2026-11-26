@@ -87,7 +87,7 @@ export const PermissionChoice = {
   AllowOnce: 'allow_once',
   AllowWorkstream: 'allow_workstream',
   AllowProject: 'allow_project',
-  /** On a chat's command-outside-the-sandbox card: this exact call again, in this chat's session only. */
+  /** On a chat's command-outside-the-sandbox card: this exact call again, in this turn only. */
   AllowChat: 'allow_chat',
   /** Only on a card for an approved project MCP server's tool: every tool the server listed, in this project. */
   AllowMcpServer: 'allow_mcp_server',
@@ -447,6 +447,12 @@ export const WorkstreamFailure = {
    * same refusal until the builder fixes pnpm.
    */
   NoPnpm: 'no_pnpm',
+  /**
+   * A Your-folder run of a Commit Directly project passed its checks, but its lane branch could not
+   * land on the base (Your folder was on another branch, or the base moved under the landing):
+   * nothing reached the base, and the work stays on the lane branch.
+   */
+  LandingRefused: 'landing_refused',
 } as const;
 export type WorkstreamFailure = ValueOf<typeof WorkstreamFailure>;
 

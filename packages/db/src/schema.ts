@@ -695,6 +695,12 @@ export const workstreams = sqliteTable(
      * HEAD again; a batch's branch takes its place for batch work.
      */
     branch: text('branch'),
+    /**
+     * The lane branch a Your-folder run of a Commit Directly project with a gate commits on, pinned
+     * with `branch` and never recomputed, so a project change mid-run never moves where its commits
+     * go or whether they land. Null for a run that commits on `branch` itself.
+     */
+    laneBranch: text('lane_branch'),
     leaseOwner: text('lease_owner'),
     leaseExpiresAt: text('lease_expires_at'),
     fence: integer('fence').notNull(),

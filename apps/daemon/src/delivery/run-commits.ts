@@ -1,6 +1,7 @@
 import { McpToolName, McpToolOutputs } from '@10db/contracts';
 import { getProject, listToolOpResults, type DbReader, type WorkstreamRow } from '@10db/db';
 import type { Git } from '../git';
+import { laneBranchOf, type LaneBranch } from './lane-branch';
 
 type DiffSince = Awaited<ReturnType<Git['diffSince']>>;
 
@@ -34,12 +35,14 @@ function committedByRun(db: DbReader, row: WorkstreamRow): Set<string> {
  * 10db's commits, base merges included: every commit is the run's, in one range from `base` to `head`.
  */
 export async function runCommits(
-  deps: { readonly db: DbReader; readonly git: Pick<Git, 'commitsSince'> },
+  deps: { readonly db: DbReader; readonly git: Pick<Git, 'commitsSince' | 'branchTip'> },
   row: WorkstreamRow,
   checkout: string,
   base: string,
   head: string,
 ): Promise<RunCommits> {
+  const lane = laneBranchOf(row);
+  if (lane !== null) return laneCommits(deps.git, checkout, lane);
   const all = await deps.git.commitsSince(checkout, base, head);
   if (checkout !== getProject(deps.db, row.projectId).repoPath)
     return { commits: all, ranges: [{ base, head }] };
@@ -56,6 +59,24 @@ export async function runCommits(
     }
   }
   return { commits: all.filter((sha) => own.has(sha)), ranges };
+}
+
+/**
+ * A Your-folder run of a Commit Directly project commits on its own lane branch, which starts on the
+ * base: its work is the branch's commits the base lacks, in one range. A landing adds one commit of
+ * its own to the base, so the lane's commits stay its work after it lands.
+ */
+async function laneCommits(
+  git: Pick<Git, 'commitsSince' | 'branchTip'>,
+  checkout: string,
+  lane: LaneBranch,
+): Promise<RunCommits> {
+  const tip = await git.branchTip(checkout, lane.lane);
+  if (tip === null) return { commits: [], ranges: [] };
+  const commits = await git.commitsSince(checkout, `refs/heads/${lane.base}`, tip);
+  const [first] = commits;
+  if (first === undefined) return { commits: [], ranges: [] };
+  return { commits, ranges: [{ base: `${first}^`, head: tip }] };
 }
 
 /**
