@@ -45,6 +45,7 @@ import {
 import { z } from 'zod';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
+import { coverageLinesOf, coverageSection } from '../evals';
 import { flagCard, rewordCard, BY_ANSWER, CardTier, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { defaultPrecedentKind, LIMITS, writtenConfig } from '../trust';
@@ -127,6 +128,11 @@ const named = (skip: SkippedActionDto): string =>
   oneLine(skip.kind === SkipKind.Host ? `reach ${skip.summary}` : skip.summary);
 
 /** The item's body, every row shown. `config` is null when the run's changed paths couldn't be read. */
+/** A card body with the eval suites the run's change touched closing it. */
+function withEvals(db: DbReader, workstreamId: WorkstreamId, body: string): string {
+  return [body, ...coverageSection(coverageLinesOf(db, workstreamId))].join('\n');
+}
+
 function bodyOf(skips: readonly SkippedActionDto[], config: readonly string[] | null): string {
   const asked = skips.filter((s) => s.kind === SkipKind.Question);
   const skipped = skips.filter((s) => s.kind !== SkipKind.Question);
@@ -282,6 +288,7 @@ export async function raiseSkippedCard(
           )
         : undefined;
     if (failed !== undefined) {
+<<<<<<< b3003c46b579f0b8b49cafaf87d7445072e14948
       rewordCard(ctx, failed.id, `${failed.body}\n\n${bodyOf(skips, written)}`, {
         // Closing itself adds to the card; the builder can still dismiss a notice they have read.
         options: [
@@ -298,6 +305,36 @@ export async function raiseSkippedCard(
         ],
         detail: { ...failed.detail, [SKIPPED_DETAIL]: workstreamId, skipIds },
       });
+||||||| ff4c17a6c
+      rewordCard(ctx, failed.id, `${failed.body}\n\n${bodyOf(skips, written)}`, {
+        // Closing itself adds to the card; the builder can still dismiss a notice they have read.
+        options: [
+          ...failed.options.filter((o) => o.label !== DISMISS.label),
+          ...(skipIds.length === 0
+            ? []
+            : [runOption(followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait')]),
+          DISMISS,
+        ],
+        detail: { ...failed.detail, [SKIPPED_DETAIL]: workstreamId, skipIds },
+      });
+=======
+      rewordCard(
+        ctx,
+        failed.id,
+        `${failed.body}\n\n${withEvals(ctx.tx, workstreamId, bodyOf(skips, written))}`,
+        {
+          // Closing itself adds to the card; the builder can still dismiss a notice they have read.
+          options: [
+            ...failed.options.filter((o) => o.label !== DISMISS.label),
+            ...(skipIds.length === 0
+              ? []
+              : [runOption(followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait')]),
+            DISMISS,
+          ],
+          detail: { ...failed.detail, [SKIPPED_DETAIL]: workstreamId, skipIds },
+        },
+      );
+>>>>>>> 4edfb74ace0012666cd5740d83d575d05e00528a
       markListed(ctx, workstreamId, through, failed.id, configHead);
       return;
     }
@@ -308,7 +345,7 @@ export async function raiseSkippedCard(
       urgency: Urgency.Normal,
       closesWhen: BY_ANSWER,
       title: `Skipped while you were away: ${task.title}`,
-      body: bodyOf(skips, written),
+      body: withEvals(ctx.tx, workstreamId, bodyOf(skips, written)),
       options:
         skipIds.length === 0
           ? [DISMISS]

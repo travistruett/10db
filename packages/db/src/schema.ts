@@ -2,6 +2,7 @@ import type {
   AaModelDto,
   AcceptanceDetail,
   WatchpointDetail,
+  EvalCoverageDetail,
   ChatId,
   ConversationFileId,
   ConversationId,
@@ -914,8 +915,10 @@ export const evidence = sqliteTable('evidence', {
   screenId: text('screen_id')
     .$type<TaskScreenId>()
     .references(() => taskScreens.id),
-  /** The reading an `acceptance` or `watchpoint` row carries; null for every other kind. */
-  detail: text('detail', { mode: 'json' }).$type<AcceptanceDetail | WatchpointDetail>(),
+  /** The reading an `acceptance`, `watchpoint` or `eval_coverage` row carries; null for every other kind. */
+  detail: text('detail', { mode: 'json' }).$type<
+    AcceptanceDetail | WatchpointDetail | EvalCoverageDetail
+  >(),
   createdAt: createdAt(),
 });
 

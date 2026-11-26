@@ -142,10 +142,23 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     ],
   });
   expect(watched.ok()).toBe(true);
-  // The project's eval suite is defined by evals/gate.py, so a run that changes it is read as an eval change.
+  // The project's evals as an assessment records them: one suite covering the greeting folder (snapshotted as
+  // the run starts, and nothing has run it since) and one defined by evals/gate.py, so a run that changes
+  // that file is read as an eval change.
   const recorded = await request.put(`${daemonUrl}/projects/${projectId}/evals/manifest`, {
     headers: { Authorization: `Bearer ${E2E_TOKEN}` },
-    data: { suites: [{ key: 'gate', definitionPaths: ['evals/gate.py'] }], gaps: [] },
+    data: {
+      suites: [
+        {
+          key: 'greeting.tone',
+          label: 'Greeting tone',
+          coveredPaths: ['src/greeting/**'],
+          liveCommand: 'make eval-greeting',
+        },
+        { key: 'gate', definitionPaths: ['evals/gate.py'] },
+      ],
+      gaps: [],
+    },
   });
   expect(recorded.ok()).toBe(true);
   await page.goto('/board');
@@ -305,6 +318,12 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(forYou.getByText('✓ A plain text file, as the gate expects.')).toBeVisible();
   await expect(forYou.getByText('src/greeting/hello.txt')).toBeVisible();
   await expect(forYou.getByText('added line 1: hello')).toBeAttached();
+  // Evals sits beside it: the suite the change touched hasn't run since, with its live command to copy.
+  const evals = taskDrawer.getByTestId('eval-coverage');
+  await expect(evals.getByText('Greeting tone')).toBeVisible();
+  await expect(evals.getByText('not run', { exact: true })).toBeVisible();
+  await expect(evals.getByText('Changes src/greeting/hello.txt')).toBeVisible();
+  await expect(evals.getByText('make eval-greeting')).toBeVisible();
   // The run lowered the eval's bar, and the Evals watchpoint says so, naming the line it read.
   await forYou.getByRole('button', { name: /Evals/ }).click();
   await expect(forYou.getByText('bar lowered (GATE = dict(minimum_rate=0.5))')).toBeVisible();
@@ -341,6 +360,10 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await reportSwitch.locator('xpath=..').click();
   await expect(reportSwitch).not.toBeChecked();
   await open(page, 'Board');
+  // The Board's card for the finished task carries the same marker.
+  await expect(
+    page.getByTestId('task-card').filter({ hasText: TASK }).getByTestId('eval-marker'),
+  ).toHaveText('Greeting tone · not run');
 
   // Knowledge: a decision written through the API (as Claude Code would) appears in the open view
   // without a reload, with where it came from.

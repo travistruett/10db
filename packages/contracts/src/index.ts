@@ -35,6 +35,7 @@ export * from './goals';
 export * from './handoff';
 export * from './eval-definition-change';
 export * from './evals';
+export * from './eval-coverage';
 export * from './hazard-assessment';
 export * from './human-touch';
 export * from './inbox-card-types';

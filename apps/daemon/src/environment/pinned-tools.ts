@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { z } from 'zod';
+import { outboundFetch } from '../outbound';
 import { defaultDataDir } from '../runtime-files';
 import { AGENT_PINS, AgentTool, type AgentPin } from './agent-pins';
 import {
@@ -57,7 +58,7 @@ export type PinnedProbe = (
 const LatestDocument = z.object({ version: z.string() });
 
 export const fetchLatestVersion: FetchLatest = async (url) => {
-  const response = await fetch(url, {
+  const response = await outboundFetch(url, {
     headers: { accept: 'application/json' },
     signal: AbortSignal.timeout(LATEST_TIMEOUT_MS),
   });
