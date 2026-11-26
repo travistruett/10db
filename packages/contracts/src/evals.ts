@@ -363,9 +363,17 @@ export const EvalManifest = z
   });
 export type EvalManifest = z.infer<typeof EvalManifest>;
 
+/** Who recorded a manifest. A stored manifest with no source was an agent's. */
+export const EvalManifestSource = { Agent: 'agent', Auto: 'auto' } as const;
+export type EvalManifestSource = (typeof EvalManifestSource)[keyof typeof EvalManifestSource];
+
 /** The manifest as stored: what was recorded, the commit it read, and when. */
 export const StoredEvalManifest = z.object({
   manifest: EvalManifest,
+  /** Who recorded it: a builder's agent, or 10db's own assessment, which only an agent's later one replaces. */
+  source: z
+    .enum([EvalManifestSource.Agent, EvalManifestSource.Auto])
+    .default(EvalManifestSource.Agent),
   commit: z.string().nullable(),
   assessedAt: z.iso.datetime(),
 });

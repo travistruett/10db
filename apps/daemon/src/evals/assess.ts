@@ -1,6 +1,6 @@
 import {
   EvalAssessmentState,
-  EvalManifest,
+  EvalManifestSource,
   EventType,
   type AccountId,
   type EvalAssessmentDto,
@@ -8,10 +8,12 @@ import {
 } from '@10db/contracts';
 import { getProject } from '@10db/db';
 import type { StateStore } from '../events';
-import { askWithin, modelJson, type AreaNamer } from '../folders';
+import { askWithin, type AreaNamer } from '../folders';
 import type { Git } from '../git';
 import type { Logger } from '../log';
-import { CompletionError } from '../sessions';
+import { CODEX_NO_QUESTIONS, CompletionError, NO_DEFAULT_ACCOUNT } from '../sessions';
+import { parseAssessAnswer } from './assess-answer';
+import { readEvalManifest } from './manifest-store';
 import { evalAssessmentPrompt, type AssessFile } from './assess-prompt';
 import { STOCK_CALL_PATTERNS, findCallSites } from './call-sites';
 import { findEvalMarkers } from './markers';
@@ -36,7 +38,10 @@ export type EvalAssessOutcome =
   | { readonly ok: false; readonly unavailable: boolean; readonly message: string };
 
 export interface EvalsAssessor {
-  /** Reads the project's evals at HEAD and records what the model makes of them. A run in progress is joined. */
+  /**
+   * Reads the project's evals at HEAD and records what the model makes of them; the builder pressing Assess now
+   * may replace what is recorded. A run in progress is joined.
+   */
   assess(projectId: ProjectId, signal?: AbortSignal): Promise<EvalAssessOutcome>;
   /** Where the project's assessment stands, for the page. */
   status(projectId: ProjectId): EvalAssessmentDto;
@@ -132,9 +137,14 @@ export function createEvalsAssessor(deps: EvalsAssessorDeps): EvalsAssessor {
     });
   };
 
+  /**
+   * `scheduled` is 10db's own timing, not the builder's click: it fills an empty manifest or replaces one 10db
+   * recorded, never an agent's, and asks nothing when HEAD is the commit already assessed.
+   */
   async function look(
     projectId: ProjectId,
     signal: AbortSignal | undefined,
+    scheduled: boolean,
   ): Promise<EvalAssessOutcome> {
     if (deps.asker === null) return refuse('There is no model to read the project with.', true);
     const project = getProject(deps.state.db, projectId);
@@ -144,6 +154,14 @@ export function createEvalsAssessor(deps: EvalsAssessorDeps): EvalsAssessor {
       return refuse("10db couldn't read this project's files.");
     }
     const commit = await deps.git.commitAt(project.repoPath, 'HEAD');
+    const stored = readEvalManifest(deps.state.db, projectId);
+    if (
+      scheduled &&
+      stored !== null &&
+      (stored.source === EvalManifestSource.Agent || stored.commit === commit)
+    ) {
+      return { ok: true };
+    }
     const picked = await pickFiles(deps.git, project.repoPath, commit, survey.files);
     if (picked === null) return refuse("10db couldn't read this project's files.");
     let asked: unknown = null;
@@ -169,26 +187,35 @@ export function createEvalsAssessor(deps: EvalsAssessorDeps): EvalsAssessor {
       project.accountId,
     );
     if (asked instanceof CompletionError) {
-      return refuse(asked.message, true);
+      // Only a model that can't be asked at all is final; a limit or a stopped model is tried again.
+      const final = asked.message === NO_DEFAULT_ACCOUNT || asked.message === CODEX_NO_QUESTIONS;
+      return refuse(final ? `${asked.message} Nothing changed.` : asked.message, final);
     }
     if (reply === null) return refuse('The model was not available in time, so nothing changed.');
-    const parsed = EvalManifest.safeParse(modelJson(reply));
-    if (!parsed.success) return refuse("The model's answer could not be used, so nothing changed.");
-    if (parsed.data.suites.length === 0 && parsed.data.gaps.length === 0) {
-      return refuse('The assessment found no evals and no model calls it could use.');
-    }
-    const recorded = await deps.evals.record(projectId, project.repoPath, parsed.data);
+    const answer = parseAssessAnswer(reply);
+    if (!answer.ok) return refuse(answer.reason);
+    const recorded = await deps.evals.record(
+      projectId,
+      project.repoPath,
+      answer.manifest,
+      EvalManifestSource.Auto,
+    );
     if (!recorded.ok) return refuse(recorded.message);
     return { ok: true };
   }
 
-  function assess(projectId: ProjectId, signal?: AbortSignal): Promise<EvalAssessOutcome> {
+  function run(
+    projectId: ProjectId,
+    signal: AbortSignal | undefined,
+    scheduled: boolean,
+  ): Promise<EvalAssessOutcome> {
     const joined = running.get(projectId);
     if (joined !== undefined) return joined;
     lastFailure.delete(projectId);
     const started = look(
       projectId,
       signal === undefined ? closing.signal : AbortSignal.any([signal, closing.signal]),
+      scheduled,
     )
       .catch((error: unknown): EvalAssessOutcome => {
         if (closing.signal.aborted) return refuse('The daemon is stopping.');
@@ -200,13 +227,15 @@ export function createEvalsAssessor(deps: EvalsAssessorDeps): EvalsAssessor {
       })
       .then((outcome) => {
         running.delete(projectId);
-        if (!outcome.ok && !closing.signal.aborted) {
+        if (closing.signal.aborted) return outcome;
+        if (!outcome.ok) {
           lastFailure.set(projectId, {
             unavailable: outcome.unavailable,
             message: outcome.message,
           });
-          changed(projectId);
         }
+        // Whatever the outcome, the page stops saying Assessing.
+        changed(projectId);
         return outcome;
       });
     running.set(projectId, started);
@@ -215,7 +244,7 @@ export function createEvalsAssessor(deps: EvalsAssessorDeps): EvalsAssessor {
   }
 
   return {
-    assess,
+    assess: (projectId, signal) => run(projectId, signal, false),
     status(projectId) {
       if (running.has(projectId)) return { state: EvalAssessmentState.Assessing, reason: null };
       const failed = lastFailure.get(projectId);
@@ -232,7 +261,7 @@ export function createEvalsAssessor(deps: EvalsAssessorDeps): EvalsAssessor {
         projectId,
         setTimeout(() => {
           waiting.delete(projectId);
-          void assess(projectId);
+          void run(projectId, undefined, true);
         }, deps.scheduleMs ?? SCHEDULE_MS),
       );
     },

@@ -82,8 +82,12 @@
   none the state is `unavailable`), parses an `EvalManifest` with zod and records it through `EvalsService.record`,
   whose path checks stay the gate. An unusable answer, one with no suite and no gap, a refusal or a slow model records
   nothing and keeps the reason for the page (`status`: `idle`, `assessing`, `failed`, `unavailable`; in memory, cleared
-  by the next run). One run per project is joined. `subscribeEvalAssessment` schedules one (`SCHEDULE_MS` later,
-  bursts joined) on `ProjectCreated` and on a `CommitRecorded` whose paths include an eval definition, an eval skill
-  or a file under an `evals` folder that isn't a result; a commit to model-calling code alone doesn't (that would
+  by the next run). `unavailable` is only for a model that can't be asked at all (`NO_DEFAULT_ACCOUNT`, or
+  `CODEX_NO_QUESTIONS` with no other account); any other failure is `failed` and Assess Now stays. A manifest
+  records its `source`: a scheduled run only fills an empty manifest or replaces one 10db recorded (`auto`), and asks
+  nothing when HEAD is the commit already assessed; the builder's Assess Now may replace any, and a manifest with no
+  source is an agent's. One run per project is joined. `subscribeEvalAssessment` schedules one (`SCHEDULE_MS` later,
+  bursts joined) on `ProjectCreated` and on a `CommitRecorded` whose paths include an eval definition, a `claude plugin eval`
+  case or a skill folder named for evals; a commit to model-calling code alone doesn't (that would
   cost a call per code commit), Assess now covers it. `POST /projects/:id/evals/assess` runs one and answers the page;
   `ProjectChanged` is emitted when a run starts and when it fails (a recorded manifest emits it itself).

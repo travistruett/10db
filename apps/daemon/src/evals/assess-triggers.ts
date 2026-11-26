@@ -3,12 +3,17 @@ import type { EventBus } from '../events';
 import type { EvalsAssessor } from './assess';
 import { findEvalMarkers } from './markers';
 
-/** Eval skills the agents read, and anything under an `evals` or `eval` folder that isn't a recorded result. */
-const WATCHED = /^\.(?:claude|agents)\/skills\/[^/]+\/SKILL\.md$|(?:^|\/)evals?\/(?!reports\/)/u;
+/** An eval skill the agents read: a project skill whose folder is named for evals. */
+const EVAL_SKILL = /^\.(?:claude|agents)\/skills\/[^/]*eval[^/]*\/SKILL\.md$/iu;
 
-/** Whether any committed path is an eval definition, an eval skill or a file inside an evals folder. */
+/** Whether any committed path is an eval definition, a `claude plugin eval` case or an eval skill. */
 export function changesEvalFiles(paths: readonly string[]): boolean {
-  return findEvalMarkers(paths).definitions.length > 0 || paths.some((path) => WATCHED.test(path));
+  const markers = findEvalMarkers(paths);
+  return (
+    markers.definitions.length > 0 ||
+    markers.promptCases.size > 0 ||
+    paths.some((path) => EVAL_SKILL.test(path))
+  );
 }
 
 /**
@@ -23,11 +28,13 @@ export function subscribeEvalAssessment(
 ): () => void {
   return bus.subscribe((event) => {
     if (event.type === EventType.ProjectCreated) {
+      // A project event's entity is the project, as the hazard assessment's subscription reads it.
       assessor.schedule(event.entityId as ProjectId);
     } else if (event.type === EventType.CommitRecorded) {
       const paths = event.data['paths'];
       if (!Array.isArray(paths)) return;
       if (!changesEvalFiles(paths.filter((p): p is string => typeof p === 'string'))) return;
+      // A commit event's entity is its workstream.
       const projectId = projects.projectOfWorkstream(event.entityId as WorkstreamId);
       if (projectId !== null) assessor.schedule(projectId);
     }

@@ -44,7 +44,7 @@ export function evalAssessmentPrompt(input: AssessPromptInput): string {
     '  sites below that no suite covers. "why" is one plain sentence for the builder.',
     '- "callPatterns": how this project marks one unit of LLM work (a decorator or registry call), as git extended',
     '  regexes (use [0-9] and [[:space:]], never \\d or \\b) with "label", "regex" and "globs". Only when the text shows one.',
-    '- Use only paths from the tracked lists below. When unsure, leave it out.',
+    '- Use only paths from the lists below the marker DATA. When unsure, leave it out.',
     '',
     'Reply with JSON only, in this shape and nothing else:',
     '{"suites":[{"key":"chat.answer","label":"Chat answer","definitionPaths":["evals/chat/answer.py"],"coveredPaths":["app/chat/**"],',
@@ -52,11 +52,11 @@ export function evalAssessmentPrompt(input: AssessPromptInput): string {
     '"gaps":[{"label":"Summary call","where":"app/summary.py:41","why":"Nothing grades its output."}],',
     '"callPatterns":[]}',
     '',
+    'DATA',
     `Eval files found by name: ${JSON.stringify(input.definitions)}`,
     `Call patterns searched: ${JSON.stringify(input.patterns.map((p) => ({ label: p.label, regex: p.regex })))}`,
     `Model calls found (path:line): ${JSON.stringify(input.callSites)}`,
     '',
-    'DATA',
     ...files,
   ].join('\n');
 }

@@ -132,7 +132,7 @@ function AssessmentNotice({
     );
   if (assessment.failure !== null)
     return (
-      <Notice lead="The last assessment found nothing it could use." action={action}>
+      <Notice lead="The last assessment failed." action={action}>
         {assessment.failure}
       </Notice>
     );
@@ -243,12 +243,15 @@ function Gaps({
   callSites,
   project,
   assessment,
+  said,
   onNewEval,
 }: {
   readonly gaps: readonly EvalGapDto[] | null;
   readonly callSites: readonly EvalCallSiteCountDto[];
   readonly project: ProjectViewDto;
   readonly assessment: EvalAssessment;
+  /** Why 10db can't assess or the last assessment changed nothing, when it did not. */
+  readonly said: string | null;
   readonly onNewEval: (prefill: NewEvalPrefill) => void;
 }) {
   if (gaps === null)
@@ -262,13 +265,13 @@ function Gaps({
       >
         {assessment.busy
           ? 'Reading the code that calls a model to find what has no eval.'
-          : 'Assess now to find the LLM work that has no eval.'}
+          : (said ?? 'Assess Now to find the LLM work that has no eval.')}
       </EmptyState>
     );
   if (gaps.length === 0)
     return (
       <EmptyState icon={IconListCheck} title="Every LLM task has an eval">
-        Every model call it found is covered by a suite.
+        Every model call found is covered by a suite.
       </EmptyState>
     );
   return (
@@ -372,7 +375,7 @@ function NoEvals({
       action={{ label: 'New Eval', icon: IconPlus, emphasis: 'filled', onClick: onNewEval }}
       extra={<AssessAction assessment={assessment} project={project} />}
     >
-      {said ?? 'Write one with New Eval, or Assess now to find the ones this project already has.'}
+      {said ?? 'Write one with New Eval, or Assess Now to find the ones this project already has.'}
     </EmptyState>
   );
 }
@@ -494,6 +497,7 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
           callSites={data.callSites}
           project={project}
           assessment={assessment}
+          said={assessment.failure ?? (assessment.unavailable ? data.assessment.reason : null)}
           onNewEval={setNewEval}
         />
       )}

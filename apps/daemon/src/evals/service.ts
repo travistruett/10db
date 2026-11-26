@@ -1,5 +1,6 @@
 import {
   NotFoundError,
+  EvalManifestSource,
   type EvalManifest,
   type EvalCoverageSideDto,
   type EvalCoverageState,
@@ -59,6 +60,7 @@ export interface EvalsService {
     projectId: ProjectId,
     repoPath: string,
     manifest: EvalManifest,
+    source?: EvalManifestSource,
   ): Promise<EvalManifestResult>;
   /** Where each queried suite stands against its task's times, in the checkout's results as read now. */
   standing(repoPath: string, queries: readonly CoverageQuery[]): Promise<CoverageStanding[]>;
@@ -277,7 +279,7 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
       const skills = read === null ? [] : await findEvalSkills(deps.git, repoPath, read.tracked);
       return evalTaskDraft(request, skills, suites);
     },
-    async record(projectId, repoPath, manifest) {
+    async record(projectId, repoPath, manifest, source = EvalManifestSource.Agent) {
       const read = await found(repoPath);
       if (read === null) {
         return { ok: false, untracked: [], message: 'The repository has no commit to read.' };
@@ -290,7 +292,7 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
           message: `Not tracked at HEAD, so nothing was recorded: ${untracked.join(', ')}`,
         };
       }
-      const stored = { manifest, commit: read.commit, assessedAt: deps.state.now() };
+      const stored = { manifest, source, commit: read.commit, assessedAt: deps.state.now() };
       deps.state.write((ctx) => {
         writeEvalManifest(ctx, projectId, stored);
       });

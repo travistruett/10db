@@ -12,7 +12,12 @@ import { defaultAccountId, getAccountRow, listAccountModels, type DbReader } fro
 import type { Launcher } from '../environment';
 import type { AreaNamer } from '../folders';
 import { chooseModel } from '../routing';
-import { CODEX_NO_QUESTIONS, CompletionError, type AgentAdapter } from '../sessions';
+import {
+  CODEX_NO_QUESTIONS,
+  CompletionError,
+  NO_DEFAULT_ACCOUNT,
+  type AgentAdapter,
+} from '../sessions';
 import { routingInputs } from '../team';
 
 /** The tier that names areas: a cheap, quick model, since naming and merging a few dozen candidates needs no more. */
@@ -35,7 +40,7 @@ export interface AreaNamerDeps {
 export function createAreaNamer(deps: AreaNamerDeps): AreaNamer {
   return async (prompt, signal, accountId) => {
     let id = accountId ?? defaultAccountId(deps.db);
-    if (id === null) throw new CompletionError('There is no default account to ask.');
+    if (id === null) throw new CompletionError(NO_DEFAULT_ACCOUNT);
     // A Codex adapter answers no one-shot question, so the default account is asked in its place.
     if (harnessOf(getAccountRow(deps.db, id)) === Provider.Codex) {
       const fallback = defaultAccountId(deps.db);

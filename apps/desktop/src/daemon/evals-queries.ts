@@ -108,10 +108,7 @@ export function useTaskEvalCoverage(taskId: TaskId | undefined) {
   });
 }
 
-/**
- * Asks 10db to assess the project's evals now. The answer is the page as it stands after, so the cache takes it
- * at once; the change events refetch the rest.
- */
+/** Asks 10db to assess the project's evals now; the change events and the settled request refetch the page. */
 export function useAssessEvals(projectId: ProjectId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();

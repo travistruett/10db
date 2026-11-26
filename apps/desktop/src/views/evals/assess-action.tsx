@@ -32,7 +32,7 @@ export function useEvalAssessment(assessment: EvalAssessmentDto, projectId: Proj
 }
 
 /**
- * The one way to have the evals assessed: Assess now, busy while it runs. Where 10db can't ask a model for this
+ * The one way to have the evals assessed: Assess Now, busy while it runs. Where 10db can't ask a model for this
  * project it offers the prompt to paste in the builder's own session instead.
  */
 export function AssessAction({
@@ -55,7 +55,7 @@ export function AssessAction({
           clipboard.copy(assessAsk(project));
         }}
       >
-        {clipboard.copied ? 'Copied' : 'Copy a prompt for your own session'}
+        {clipboard.copied ? 'Copied' : 'Copy a Prompt for Your Own Session'}
       </Button>
     );
   }
@@ -67,7 +67,7 @@ export function AssessAction({
       leftSection={<IconSparkles size={14} stroke={1.5} />}
       onClick={assessment.run}
     >
-      Assess now
+      Assess Now
     </Button>
   );
 }

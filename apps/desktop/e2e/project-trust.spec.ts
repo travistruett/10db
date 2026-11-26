@@ -139,14 +139,13 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await expect(suites).toContainText('complete 0.5 < 1');
   // A trial with no answer is availability, said apart from the gates.
   await expect(suites).toContainText('1 provider error');
-  // Until the evals are assessed the page says so; where the daemon has no model to ask (the fake adapter has
-  // none), Assess now ends in the prompt to paste in the builder's own session.
-  await expect(page.getByText('Not assessed yet.')).toBeVisible();
-  await page.getByRole('button', { name: 'Assess now' }).click();
-  await expect(page.getByText("10db can't assess these on its own.")).toBeVisible();
-  await expect(
-    page.getByRole('button', { name: 'Copy a prompt for your own session' }),
-  ).toBeVisible();
+  // Until the evals are assessed the byline says so. The fake adapter has no model, so Assess Now ends in a
+  // reason and can be pressed again; the project's own scheduled run may have failed the same way first.
+  await expect(page.getByText(/Not assessed yet/u).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Assess Now' }).click();
+  await expect(page.getByText('The last assessment failed.')).toBeVisible();
+  await expect(page.getByText('The fake adapter has no model to ask.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Assess Now' })).toBeEnabled();
   await expect(page.getByText('evals/ingest/mapping.py')).toBeVisible();
   await suites.getByText('ingest.mapping').click();
   const drawer = page.getByRole('dialog', { name: 'Suite' });

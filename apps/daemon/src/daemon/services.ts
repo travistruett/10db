@@ -991,9 +991,9 @@ export function createServices(deps: {
       return hazardAssessmentDto(db, projectId);
     },
     evals: (projectId) => readEvalsPage(projectId),
-    async assessEvals(projectId, signal) {
+    async assessEvals(projectId) {
       getProject(db, projectId);
-      await deps.evalsAssessor.assess(projectId, signal);
+      await deps.evalsAssessor.assess(projectId);
       return readEvalsPage(projectId);
     },
     evalModels(projectId) {

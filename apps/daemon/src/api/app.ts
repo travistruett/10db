@@ -1643,10 +1643,8 @@ export function createApp(deps: ApiDeps) {
     )
     .post('/projects/:projectId/evals/assess', async (c) =>
       c.json(
-        await deps.services.assessEvals(
-          ProjectId.parse(c.req.param('projectId')),
-          c.req.raw.signal,
-        ),
+        // Not tied to the request: a dropped connection must not end a run another page is waiting on.
+        await deps.services.assessEvals(ProjectId.parse(c.req.param('projectId'))),
       ),
     )
     .get('/projects/:projectId/eval-models', async (c) =>

@@ -14,15 +14,15 @@
   never $0 (`eval-figures.ts`). The table lists every suite: a project has tens, so it isn't paged.
 - The byline under the title says what is found and when it was assessed ("Assessed 2 hours ago", the exact time and
   commit in a tooltip; "Assessing…"; "Not assessed yet"). It never names a commit or says no model ran.
-- `assess-action.tsx` is the one **Assess now** button (busy while an assessment runs, whoever started it). Where the
+- `assess-action.tsx` is the one **Assess Now** button (busy while an assessment runs, whoever started it). Where the
   daemon says it has no model to ask (`unavailable`: a Codex-only builder with no other account), the same place
-  offers "Copy a prompt for your own session", the sentence to paste in a session that runs the `10db-task` skill's
+  offers "Copy a Prompt for Your Own Session", the sentence to paste in a session that runs the `10db-task` skill's
   "Assess a project's evals", and says why. `AssessmentNotice` heads Suites with the state: assessing, unavailable,
-  failed (the reason) or "Not assessed yet" with Assess now. A project with no eval file and no result is the
-  `NoEvals` empty state: New Eval (primary) and Assess now. Eval files found by name that no suite links to list
+  failed (the reason) or "Not assessed yet" with Assess Now. A project with no eval file and no result is the
+  `NoEvals` empty state: New Eval (primary) and Assess Now. Eval files found by name that no suite links to list
   under the table, folded past six.
 - No Eval lists the manifest's gaps (LLM work with no eval, where, and why it counts); before an assessment it
-  is an `EmptyState` with Assess now.
+  is an `EmptyState` with Assess Now.
 - A row opens `SuiteDrawer` (`suite-drawer.tsx`, `GET /projects/:id/evals/:suiteKey?run=`): the bar; the gates
   of one run, failing first, with a model switch when the run has several (the failing model first); every run
   (newest first, eight shown), where a click shows that run whole; flaky cases across the last runs; and what
@@ -36,7 +36,7 @@
   runs mark "new eval" where the fingerprint changed.
 - When HEAD has moved past the assessed commit and the manifest misses something (`drift`), Suites opens with a
   bordered "Changed since the last assessment" line: new eval files no suite links, new LLM calls with no eval and
-  paths the manifest names that are gone, each listed, with Assess now. It is information on the page only.
+  paths the manifest names that are gone, each listed, with Assess Now. It is information on the page only.
 - No Eval says under each `where` whether the gap was `assessed` or `found at HEAD` by a call pattern, and above
   the table how many sites each pattern found, so a pattern that is too broad shows.
 - By Model (`by-model.tsx`, `GET /projects/:id/eval-models`, fetched when the tab opens): one row per model, its
