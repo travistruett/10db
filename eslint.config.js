@@ -122,6 +122,30 @@ export default defineConfig(
     languageOptions: { globals: globals.node },
   },
   {
+    // The daemon's outbound calls go through `outboundFetch`, which never offers HTTP/2
+    // (apps/daemon/src/outbound/AGENTS.md). The fake sessions talk to the daemon's own loopback server.
+    files: ['apps/daemon/src/**/*.ts'],
+    ignores: ['**/*.test.ts', 'apps/daemon/src/outbound/**', 'apps/daemon/src/sessions/fake-*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        { selector: 'TSEnumDeclaration', message: 'Use an `as const` object and a derived type.' },
+        ...[
+          "CallExpression[callee.name='fetch']",
+          "MemberExpression[object.name='globalThis'][property.name='fetch']",
+          "LogicalExpression > Identifier.right[name='fetch']",
+          "AssignmentPattern > Identifier.right[name='fetch']",
+          "VariableDeclarator > Identifier.init[name='fetch']",
+          "Property > Identifier.value[name='fetch']",
+        ].map((selector) => ({
+          selector,
+          message:
+            'Use `outboundFetch` from the outbound module, or a `fetch` the caller passes in: the global one offers HTTP/2.',
+        })),
+      ],
+    },
+  },
+  {
     // Test code names the environment of every git it runs: an inherited GIT_DIR (git exports it
     // to hooks) would aim the command at another repository. See tests/git-isolation.setup.ts.
     files: [
