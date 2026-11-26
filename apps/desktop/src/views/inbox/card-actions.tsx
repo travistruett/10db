@@ -1,6 +1,6 @@
 import { Button, Group, Kbd, Stack, Text, Textarea } from '@mantine/core';
 import {
-  Children,
+  Fragment,
   useEffect,
   useRef,
   useState,
@@ -121,8 +121,8 @@ export function CardActions({
     focusNext.current = null;
   }, [composing]);
 
-  // Keyed by place, as the holder lists them; a way the card lacks is null and takes no room.
-  const ways = Children.toArray(start);
+  // A way the card lacks is null and takes no room.
+  const ways = start.filter((node) => node !== null && node !== undefined && node !== false);
   if (
     ways.length === 0 &&
     note === null &&
@@ -262,7 +262,12 @@ export function CardActions({
         </Text>
       )}
       <Group justify="space-between" align="flex-end" gap="sm">
-        <Group gap="sm">{ways}</Group>
+        <Group gap="sm">
+          {ways.map((node, place) => (
+            // Each card lists its ways in a fixed order, so a place names one.
+            <Fragment key={place}>{node}</Fragment>
+          ))}
+        </Group>
         <Group justify="flex-end" align="flex-end" gap="sm" style={{ flex: '1 1 auto' }}>
           {answers}
         </Group>
