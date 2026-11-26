@@ -7,6 +7,7 @@ import {
   McpSignInChangedData,
   McpSignInState,
   PullRequestState,
+  StepRole,
   WorkstreamId,
   WorkstreamState,
   type DaemonEvent,
@@ -53,13 +54,16 @@ export interface LinearEventRead {
     readonly taskId: TaskId;
     readonly failureKind: string | null;
     readonly ends: number;
-    /** The `at` of the result the step recorded. */
-    readonly stepResultAt: string | null;
   };
   /** The Inbox item an `inbox.opened` names, with the workstreams its targets point at. */
   readonly inbox?: {
     readonly title: string;
-    readonly workstreams: readonly { readonly id: WorkstreamId; readonly taskId: TaskId }[];
+    readonly workstreams: readonly {
+      readonly id: WorkstreamId;
+      readonly taskId: TaskId;
+      /** How many Ended rows the workstream already has, as in `workstream`. */
+      readonly ends: number;
+    }[];
   };
   /** The batch a `batch.updated` names, its workstreams and its pull request. */
   readonly batch?: {
@@ -122,23 +126,24 @@ export function linearRowOf(event: DaemonEvent, read: LinearEventRead): LinearRo
       taskId: w.taskId,
       workstreamId: w.id,
       event: LinearEventKind.Waiting,
-      dedupeKey: `waiting:${event.entityId}`,
+      // One update per run phase: a burst of Inbox items is a single "waiting" comment.
+      dedupeKey: `waiting:${w.id}:${String(w.ends)}`,
       detail: { workstreamId: w.id, title, kind: text(data['kind']) },
     }));
   }
   if (event.type === EventType.StepChanged) {
     const verdict = data['verdict'];
     if (ws === undefined || typeof verdict !== 'string') return [];
-    const stepIndex = data['stepIndex'];
     return [
       {
         taskId: ws.taskId,
         workstreamId: ws.id,
         event: LinearEventKind.Verdict,
-        dedupeKey: `verdict:${ws.id}:${String(typeof stepIndex === 'number' ? stepIndex : -1)}:${ws.stepResultAt ?? event.at}`,
+        // One update per run phase: the plan reviews of a run are one comment and its reviews and checks another,
+        // so a send-back and a second round are told in the end's words, not as a comment each.
+        dedupeKey: `verdict:${ws.id}:${String(ws.ends)}:${data['role'] === StepRole.PlanReview ? 'plan' : 'work'}`,
         detail: {
           workstreamId: ws.id,
-          stepIndex: typeof stepIndex === 'number' ? stepIndex : null,
           role: text(data['role']),
           verdict,
         },
@@ -195,15 +200,12 @@ function readFor(db: DbReader, event: DaemonEvent): LinearEventRead {
     const id = WorkstreamId.safeParse(event.entityId);
     if (!id.success) return {};
     const ws = getWorkstream(db, id.data);
-    const stepIndex = event.data['stepIndex'];
-    const result = typeof stepIndex === 'number' ? ws.steps[stepIndex]?.result : undefined;
     return {
       workstream: {
         id: ws.id,
         taskId: ws.taskId,
         failureKind: ws.failureKind,
         ends: endsOf(db, ws.taskId, ws.id),
-        stepResultAt: result?.at ?? null,
       },
     };
   }
@@ -216,7 +218,7 @@ function readFor(db: DbReader, event: DaemonEvent): LinearEventRead {
         title: item.title,
         workstreams: item.targets.flatMap((t) => {
           const ws = getWorkstream(db, t.workstreamId);
-          return [{ id: ws.id, taskId: ws.taskId }];
+          return [{ id: ws.id, taskId: ws.taskId, ends: endsOf(db, ws.taskId, ws.id) }];
         }),
       },
     };

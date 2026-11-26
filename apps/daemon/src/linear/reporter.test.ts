@@ -514,7 +514,8 @@ describe('the Linear reporter', () => {
     expect(written).toHaveLength(1);
     expect(written[0]?.issueId).toBe(ISSUE);
     expect(written[0]?.body).toContain(BODY);
-    expect(written[0]?.body).toContain(`10db · run_started · attempt 1 · ${id}`);
+    expect(written[0]?.body).toContain('10db · run_started · attempt 1');
+    expect(written[0]?.body).not.toContain(id);
     expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(1);
     expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(0);
   });
