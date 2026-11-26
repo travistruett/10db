@@ -9,14 +9,16 @@ A finished task's post (with pictures, or with the one line saying why there are
 short lines plus its files (`delivery/slack-picture-text.ts`, facts from `delivery/slack-task-facts.ts`):
 
 1. The project, the task's Linear issue as a link labelled with its key (`<url|AMP-84>`) when the task was made
-   from one, the task's title, and where the work went: `<url|PR #n> opened` (or `merged`) when a pull request
-   carried it, or `landed on \`<branch>\`` for local delivery: a local copy's batch base, or the branch the run
-   pinned at its start in Your folder. A task in a pull-request project whose pull request does not exist yet
-   says neither.
+   from one, the task's title, and where the work went, read from the run that finished the task only:
+   `<url|PR #n> opened` (or `merged`) when that run's batch has a pull request that was not closed unmerged, or
+   `landed on \`<branch>\`` for local delivery when the run committed something: a local copy's batch base, or
+   the branch the run pinned at its start in Your folder. Otherwise it says neither.
 2. The task's why, in italics, when it has one.
-3. What 10db already recorded about the run that finished it: how many runs the task took, `review approved`
-   when each review role's latest round approved, `checks passed` or `checks failed` from the run's newest gate
-   evidence (else its batch's gate), and the short id of its last commit when it landed on a branch directly.
+3. What 10db already recorded about the run that finished it: how many of the task's runs got as far as a
+   session, `review approved` when its code review's latest round approved (plan review and QA don't count),
+   `checks passed` or `checks failed` from the run's newest gate evidence (else its batch's gate), and the short id
+   of its last commit when it committed on the branch it landed on. A lane run's work lands as another commit,
+   which 10db does not keep, so its post names no commit.
    Each part is left out when it was not recorded; nothing is computed from git or guessed.
 4. With no pictures, `No before and after pictures: <reason>.`, the pictures service's reason read on after the
    colon and cut to 300 characters. Otherwise the count of pictures that did not fit, as before.
@@ -26,7 +28,9 @@ A pass's post opens with the project, the pass and `<url|PR #n> opened`, lists i
 left in the pull request. The link at the end ("Open the pull request") is gone: the headline carries it.
 
 Every value is escaped for `mrkdwn`, every address is a `<url|label>` link with `|`, `<`, `>` and spaces
-encoded, and no bare URL is posted. Only a task's own Linear link is shown; a follow-up of a linked task, which
+encoded, and no bare URL is posted. The whole text is cut to 3,000 characters after escaping, never inside a
+link or an entity, so Slack never refuses a post for its length; a refused post would retry forever. A failed
+read of the facts posts without them, and the daemon logs it. Only a task's own Linear link is shown; a follow-up of a linked task, which
 reports to its source's issue on Linear, posts no issue link.
 
 The posts are the same on every account kind: Slack, the database and the picture store are all they read, so a

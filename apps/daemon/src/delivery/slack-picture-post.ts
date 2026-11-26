@@ -9,6 +9,7 @@ import {
   type PassId,
   type ProjectDto,
   type ProjectId,
+  type TaskDto,
 } from '@10db/contracts';
 import {
   findOpenByFoldKey,
@@ -30,7 +31,7 @@ import { raise, type DeliveryContext } from './context';
 import { signedOffTasks } from './pass-signed-off';
 import { picturePlan } from './pr-pictures';
 import { passPostText, taskPostText } from './slack-picture-text';
-import { postLinkOf, taskPostFacts } from './slack-task-facts';
+import { noFacts, postLinkOf, taskPostFacts, type TaskPostFacts } from './slack-task-facts';
 
 // Decision 2026-11-23-a-projects-pictures-can-go-to-its-slack-channel: with the project's setting on,
 // a pass's pull request is announced once in its channel with the signed-off pages' before and after
@@ -208,6 +209,19 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
     });
   }
 
+  /** What the post says of the task's run; a read that fails leaves the facts out rather than failing the post. */
+  function factsOf(project: ProjectDto, task: TaskDto): TaskPostFacts {
+    try {
+      return taskPostFacts(deps.state.db, project, task);
+    } catch (error) {
+      deps.logger.warn(
+        { taskId: task.id, error: error instanceof Error ? error.message : String(error) },
+        'task facts not read for Slack',
+      );
+      return noFacts(task);
+    }
+  }
+
   /** The id of the task's newest after picture; null when it has none. */
   const newestAfterOf = (taskId: TaskId): string | null =>
     listTaskScreens(deps.state.db, taskId).findLast((s) => s.kind === ScreenKind.After)?.id ?? null;
@@ -262,7 +276,7 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
           project: project.name,
           title: task.title,
           why: task.why,
-          facts: taskPostFacts(deps.state.db, project, task),
+          facts: factsOf(project, task),
         },
         { skipped: reason },
       );
@@ -301,7 +315,7 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
         project: project.name,
         title: task.title,
         why: task.why,
-        facts: taskPostFacts(deps.state.db, project, task),
+        facts: factsOf(project, task),
       },
       { more: moreOf(planned.length) },
     );

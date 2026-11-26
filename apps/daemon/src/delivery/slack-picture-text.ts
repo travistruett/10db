@@ -7,8 +7,23 @@ import type { PostLink, TaskPostFacts } from './slack-task-facts';
 /** The most pages a pass's post lists by name; the rest are counted. */
 const MAX_LISTED_PAGES = 10;
 
-/** A skip's reason is cut here, so a post with no pictures stays within the 3,000 characters a Slack section holds. */
+/** A skip's reason is cut here, so it never crowds out the lines before it. */
 const MAX_REASON_CHARS = 300;
+
+/** The most characters a post's text holds: a Slack section's limit, which the skip post's one section is held to. */
+const MAX_POST_CHARS = 3000;
+
+/**
+ * The text cut to `MAX_POST_CHARS` once escaped, never inside a link (`<…>`) or an entity (`&…;`), so what is cut
+ * reads as text and Slack never refuses the post.
+ */
+function clipped(text: string): string {
+  if (text.length <= MAX_POST_CHARS) return text;
+  let cut = text.slice(0, MAX_POST_CHARS - 1);
+  if (cut.lastIndexOf('<') > cut.lastIndexOf('>')) cut = cut.slice(0, cut.lastIndexOf('<'));
+  if (cut.lastIndexOf('&') > cut.lastIndexOf(';')) cut = cut.slice(0, cut.lastIndexOf('&'));
+  return `${cut}…`;
+}
 
 /** Slack reads these three characters as markup. */
 const escapeSlack = (text: string): string =>
@@ -93,14 +108,16 @@ export function taskPostText(
       : pictures.more > 0
         ? `${String(pictures.more)} more ${pictures.more === 1 ? 'picture is' : 'pictures are'} in 10db.`
         : null;
-  return [
-    headline(input.project, input.title, input.facts),
-    whyLine(input.why),
-    contextLine(input.facts),
-    tail,
-  ]
-    .filter((line) => line !== null)
-    .join('\n');
+  return clipped(
+    [
+      headline(input.project, input.title, input.facts),
+      whyLine(input.why),
+      contextLine(input.facts),
+      tail,
+    ]
+      .filter((line) => line !== null)
+      .join('\n'),
+  );
 }
 
 /** A pass's post: the pull request, then each signed-off page with its issue. */
@@ -113,17 +130,19 @@ export function passPostText(input: {
 }): string {
   const count = input.pages.length;
   const hidden = count - MAX_LISTED_PAGES;
-  return [
-    `*${escapeSlack(input.project)}* · *${escapeSlack(input.pass)}* · ${slackLink(input.url, prLabel(input.url))} opened`,
-    `${String(count)} ${count === 1 ? 'page' : 'pages'} signed off:`,
-    ...input.pages
-      .slice(0, MAX_LISTED_PAGES)
-      .map((page) => `• ${issueLink(page.link)}${escapeSlack(page.title)}`),
-    ...(hidden > 0 ? [`• and ${String(hidden)} more`] : []),
-    ...(input.more > 0
-      ? [
-          `${String(input.more)} more ${input.more === 1 ? 'picture is' : 'pictures are'} in the pull request.`,
-        ]
-      : []),
-  ].join('\n');
+  return clipped(
+    [
+      `*${escapeSlack(input.project)}* · *${escapeSlack(input.pass)}* · ${slackLink(input.url, prLabel(input.url))} opened`,
+      `${String(count)} ${count === 1 ? 'page' : 'pages'} signed off:`,
+      ...input.pages
+        .slice(0, MAX_LISTED_PAGES)
+        .map((page) => `• ${issueLink(page.link)}${escapeSlack(page.title)}`),
+      ...(hidden > 0 ? [`• and ${String(hidden)} more`] : []),
+      ...(input.more > 0
+        ? [
+            `${String(input.more)} more ${input.more === 1 ? 'picture is' : 'pictures are'} in the pull request.`,
+          ]
+        : []),
+    ].join('\n'),
+  );
 }

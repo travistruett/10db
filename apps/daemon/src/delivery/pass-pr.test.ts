@@ -3,8 +3,11 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
+  EventType,
+  EvidenceKind,
   PassGateState,
   PassNoticeKind,
+  WorkstreamStep,
   type PassId,
   type ScreenKind,
   type ProjectInput,
@@ -25,7 +28,11 @@ import {
   getPassProgress,
   getPassPullRequest,
   getTask,
+  insertEvidence,
+  insertSession,
   insertTaskScreen,
+  insertWorkstream,
+  patchWorkstream,
   setTaskStatus,
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -698,7 +705,7 @@ describe('Pictures to Slack', () => {
       timeoutMs: 5_000,
     });
     let channel: { teamId: string; channelId: string; enabledAt: string | null } | null = null;
-    setup({}, { slack: { channelOf: () => channel, clientFor: () => client } });
+    setup({ delivery: 'local' }, { slack: { channelOf: () => channel, clientFor: () => client } });
     const post = poster;
     if (post === null) throw new Error('no poster');
     const { people } = await openedPass();
@@ -721,7 +728,67 @@ describe('Pictures to Slack', () => {
     });
     picture(task, 'before', '/settings', 'billing before');
     picture(task, 'after', '/settings', 'billing after');
-    done(task);
+    // A run cancelled before it had a session, then the run that finished the task: a lane run in Your folder,
+    // its code review approved and its gate passed, its work landed on main as a commit 10db does not keep.
+    const first = { model: 'claude-sonnet-5-5', effort: 'medium' } as const;
+    const cancelled = h.state.write((c) => insertWorkstream(c, task.id, { first }));
+    h.settle(cancelled.id, 'CANCELLED');
+    const finished = h.state.write((c) => {
+      const run = insertWorkstream(c, task.id, { first });
+      const session = insertSession(c, {
+        workstreamId: run.id,
+        provider: 'claude',
+        model: first.model,
+        effort: first.effort,
+        mode: 'managed',
+        mcpTokenHash: 'h',
+        briefed: false,
+        briefingBaselinePct: null,
+      });
+      const at = c.now;
+      const verdict = (role: 'plan_review' | 'review', v: 'approve' | 'reject') =>
+        WorkstreamStep.parse({
+          role,
+          personaId: null,
+          personaName: role === 'review' ? 'Reviewer' : 'Plan reviewer',
+          tools: 'read_only',
+          profileId: null,
+          model: first.model,
+          effort: first.effort,
+          need: 50,
+          reason: 'test',
+          overBudget: false,
+          pinned: false,
+          status: 'done',
+          attempts: 0,
+          startedAt: at,
+          sessionFloor: 0,
+          result: { summary: 'Looks right.', verdict: v, sessionId: session.id, at },
+        });
+      patchWorkstream(c, run.id, null, {
+        branch: 'main',
+        laneBranch: `10db/lane-${run.id}`,
+        // A plan review's rejection is not the code review's verdict.
+        steps: [verdict('plan_review', 'reject'), verdict('review', 'approve')],
+      });
+      c.emit({
+        type: EventType.CommitRecorded,
+        entityType: 'workstream',
+        entityId: run.id,
+        data: { sha: 'a'.repeat(40), paths: ['src/billing.tsx'], alreadyCommitted: false },
+      });
+      insertEvidence(c, {
+        workstreamId: run.id,
+        kind: EvidenceKind.Gate,
+        command: GATE,
+        exitCode: 0,
+        summary: 'gate passed',
+        logPath: null,
+        commitShas: [],
+      });
+      return run;
+    });
+    h.settle(finished.id, 'DONE');
     // A refused join turns any wrong post into an Inbox item, so each gate below fails loudly.
     slack.joinError = 'method_not_supported_for_channel_type';
     const settled = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -762,7 +829,11 @@ describe('Pictures to Slack', () => {
     expect(slack.uploads).toHaveLength(1);
     expect(slack.uploads[0]).toMatchObject({ channel_id: 'C1', files: 2 });
     expect(slack.uploads[0]?.comment).toBe(
-      `*${h.project.name}* · <https://linear.app/acme/issue/AMP-84/billing-page|AMP-84> *Billing page*\n_Teams pay from one place_`,
+      [
+        `*${h.project.name}* · <https://linear.app/acme/issue/AMP-84/billing-page|AMP-84> *Billing page* · landed on \`main\``,
+        '_Teams pay from one place_',
+        '1 run · review approved · checks passed',
+      ].join('\n'),
     );
     expect(h.cards().filter((c) => c.title.includes('did not reach Slack'))).toHaveLength(0);
     expect(getAppSetting(h.state.db, `slack-pictures-posted.${h.project.id}`)).toHaveProperty(
