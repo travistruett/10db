@@ -46,23 +46,32 @@ function placeholder(label: string, phase: PagePhase, firstMessage: boolean): st
 }
 
 /**
- * The composer of a page in `phase`, with or without something typed or pasted. Send shows, disabled
- * until there is something to send, wherever the table neither hides it nor makes Commit the primary.
+ * The composer of a page in `phase`, with or without something typed or pasted, and with or without
+ * picks from its Preview. Send shows, disabled until there is something to send, wherever the table
+ * neither hides it nor makes Commit the primary. Picks come from a page that runs agent-written code,
+ * so they never turn Stop into Stop and Redo (Pick on Page spec §4): only the builder's own words and
+ * pictures do.
  */
 export function pageComposerPhase(
   phase: PagePhase,
-  input: { readonly hasContent: boolean; readonly label: string; readonly firstMessage: boolean },
+  input: {
+    readonly typed: boolean;
+    readonly picks: boolean;
+    readonly label: string;
+    readonly firstMessage: boolean;
+  },
 ): PageComposerPhase {
   const base = { placeholder: placeholder(input.label, phase, input.firstMessage), hint: null };
-  const { hasContent } = input;
+  const { typed, picks } = input;
   switch (phase) {
     case PagePhase.Ready:
-      return hasContent
+      return typed || picks
         ? { phase: { ...base, stop: null, send: 'filled' }, commit: 'default' }
         : { phase: { ...base, stop: null, send: 'hidden' }, commit: 'filled' };
     case PagePhase.Working:
-      return hasContent
-        ? { phase: { ...base, stop: 'stop_and_redo', send: 'filled' }, commit: null }
+      if (typed) return { phase: { ...base, stop: 'stop_and_redo', send: 'filled' }, commit: null };
+      return picks
+        ? { phase: { ...base, stop: 'stop', send: 'filled' }, commit: null }
         : { phase: { ...base, stop: 'stop', send: 'hidden' }, commit: null };
     case PagePhase.Signing:
     case PagePhase.Other:
