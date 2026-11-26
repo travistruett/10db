@@ -59,6 +59,8 @@ const sleep = (ms: number) =>
     }, ms),
   );
 
+const CHEVRON = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>`;
+
 const nextFrame = () =>
   new Promise<void>((resolve) =>
     requestAnimationFrame(() =>
@@ -125,7 +127,9 @@ export function startPicker(config: PickerConfig): void {
     ui.pill.classList.toggle('picking', picking);
     ui.pill.classList.toggle('has', picks.length > 0);
     ui.pillCount.textContent = 'click an element';
-    ui.pillSend.textContent = `${String(picks.length)} in ${page ?? '10db'} ›`;
+    ui.pillSend.replaceChildren('Back to 10db');
+    ui.pillSend.insertAdjacentHTML('beforeend', CHEVRON);
+    ui.pillSend.title = `${String(picks.length)} pick${picks.length === 1 ? '' : 's'} on ${page ?? 'this page'} in 10db`;
     ui.marks.replaceChildren();
     picks.forEach((pick, index) => {
       boxesOf(pick).forEach((r, i) => {
@@ -170,21 +174,10 @@ export function startPicker(config: PickerConfig): void {
   }
 
   function openNote(pick: Pick) {
+    // Already open on this pick (a ⇧-click grew or shrank it): its header changes, and what is typed
+    // and where it was dragged stay.
+    const already = open === pick && ui.note.style.display === 'block';
     open = pick;
-    const boxes = boxesOf(pick);
-    const anchor = boxes[boxes.length - 1] ?? { x: 16, y: 16, width: 0, height: 0 };
-    let left = anchor.x + anchor.width + 12;
-    let top = anchor.y - 6;
-    if (left + 364 > window.innerWidth) {
-      left = Math.min(anchor.x, window.innerWidth - 372);
-      top = anchor.y + anchor.height + 8;
-      if (top + 170 > window.innerHeight) top = anchor.y - 168;
-    }
-    ui.note.style.display = 'block';
-    // Kept inside the window, measured once it is drawn.
-    const bottom = window.innerHeight - ui.note.offsetHeight - 8;
-    ui.note.style.left = `${String(Math.max(8, left))}px`;
-    ui.note.style.top = `${String(Math.max(8, Math.min(top, bottom)))}px`;
     ui.noteNumber.textContent = String(picks.indexOf(pick) + 1);
     ui.noteScope.textContent = scopeLine(pick);
     ui.noteSource.textContent = sourceLine(pick, null);
@@ -193,8 +186,30 @@ export function startPicker(config: PickerConfig): void {
     void lookup?.then((d) => {
       if (open === pick) ui.noteSource.textContent = sourceLine(pick, d);
     });
+    if (already) {
+      ui.noteText.focus();
+      render();
+      return;
+    }
     ui.noteText.value = pick.note;
     ui.noteRemove.style.display = pick.fresh ? 'none' : '';
+    ui.note.style.display = 'block';
+    // Placed beside the pick, or below or above it, and kept inside the window, measured once drawn.
+    const width = ui.note.offsetWidth;
+    const height = ui.note.offsetHeight;
+    const boxes = boxesOf(pick);
+    const anchor = boxes[boxes.length - 1] ?? { x: 16, y: 16, width: 0, height: 0 };
+    let left = anchor.x + anchor.width + 12;
+    let top = anchor.y - 6;
+    if (left + width + 8 > window.innerWidth) {
+      left = anchor.x;
+      top = anchor.y + anchor.height + 8;
+      if (top + height + 8 > window.innerHeight) top = anchor.y - height - 8;
+    }
+    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+    top = Math.max(8, Math.min(top, window.innerHeight - height - 8));
+    ui.note.style.left = `${String(left)}px`;
+    ui.note.style.top = `${String(top)}px`;
     ui.noteText.focus();
     ui.hover.style.display = 'none';
     render();
@@ -207,7 +222,6 @@ export function startPicker(config: PickerConfig): void {
     pick.fresh = false;
     open = null;
     ui.note.style.display = 'none';
-    ui.note.classList.remove('faded');
     render();
     void send(pick);
   }
@@ -283,7 +297,6 @@ export function startPicker(config: PickerConfig): void {
     }
     open = null;
     ui.note.style.display = 'none';
-    ui.note.classList.remove('faded');
     render();
   }
 
@@ -508,7 +521,6 @@ export function startPicker(config: PickerConfig): void {
         passthrough = true;
         ui.hover.style.display = 'none';
       }
-      if (event.key === 'Shift' && open !== null) ui.note.classList.add('faded');
     },
     true,
   );
@@ -516,7 +528,6 @@ export function startPicker(config: PickerConfig): void {
     'keyup',
     (event) => {
       if (event.key === 'Alt') passthrough = false;
-      if (event.key === 'Shift') ui.note.classList.remove('faded');
     },
     true,
   );
@@ -546,6 +557,34 @@ export function startPicker(config: PickerConfig): void {
     if (open !== null) removeAndReopen(open, true);
   });
   ui.noteCancel.addEventListener('click', cancelNote);
+  // The note moves by its header, so whatever it covers can still be picked.
+  const head = ui.noteScope.parentElement;
+  head?.addEventListener('pointerdown', (event) => {
+    // Anywhere on the header but its close button.
+    const onButton = event.target instanceof Element && event.target.closest('button') !== null;
+    if (event.button !== 0 || onButton) return;
+    event.preventDefault();
+    const box = ui.note.getBoundingClientRect();
+    const dx = event.clientX - box.left;
+    const dy = event.clientY - box.top;
+    head.setPointerCapture(event.pointerId);
+    ui.note.classList.add('dragging');
+    const move = (e: PointerEvent) => {
+      const left = Math.min(Math.max(8, e.clientX - dx), window.innerWidth - box.width - 8);
+      const top = Math.min(Math.max(8, e.clientY - dy), window.innerHeight - box.height - 8);
+      ui.note.style.left = `${String(left)}px`;
+      ui.note.style.top = `${String(top)}px`;
+    };
+    const end = () => {
+      ui.note.classList.remove('dragging');
+      head.removeEventListener('pointermove', move);
+      head.removeEventListener('pointerup', end);
+      head.removeEventListener('pointercancel', end);
+    };
+    head.addEventListener('pointermove', move);
+    head.addEventListener('pointerup', end);
+    head.addEventListener('pointercancel', end);
+  });
   ui.noteSave.addEventListener('click', closeNote);
   ui.pillClear.addEventListener('click', () => {
     for (const pick of [...picks]) remove(pick);

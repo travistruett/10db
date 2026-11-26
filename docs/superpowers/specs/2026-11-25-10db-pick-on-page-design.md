@@ -10,8 +10,8 @@ window already signed in with the project's dev login. A small pill in its botto
 pick mode. Hover outlines an element and names its component and file. A click picks it and opens a note beside
 it: type, or press fn fn to dictate, then ↩. ⇧-click adds more elements to the same pick, and a drag picks an
 area. Each pick shows up at once as a numbered chip in that page's composer, with its crop, component,
-`file:line` and note. The pill's **3 in Settings ›** brings 10db forward. One Enter sends the lot to the agent.
-Open in Browser and Copy Link stay in the Open menu, each with a line saying how it differs.
+`file:line` and note. The pill's **Back to 10db ›** brings 10db forward. One Enter sends the lot to the agent.
+Open in Browser and Copy Link stay in the Mark Up Page menu.
 
 **What it buys.** Most "screenshot it, paste it, say which button" round trips go away. The agent gets
 `SaveButton (app/settings/general-card.tsx:37)`, the selector, the crop and your note, so it doesn't have to guess.
@@ -88,18 +88,22 @@ Built from `react-grab/primitives` (MIT, pinned exactly) plus 10db's UI, bundled
 adds as the preview's initialization script. It does nothing unless `location.origin` is the app's origin, which
 the shell writes into the script. It draws into a closed shadow root at the top of the page.
 
-- **The pill**, bottom-left: a pointer mark. Clicking it, or ⌘⇧C, toggles pick mode. While picking it reads
-  "Picking · 3 picks" with **3 in `<Page>` ›**, which asks the shell to bring 10db forward with that page's
-  composer focused.
+- **The pill**, bottom-left: filled pink and reading "Mark up" when off. Clicking it, or ⌘⇧C, toggles pick mode.
+  While picking it is dark with a pink ring and reads "Picking", then, once there are picks, **Back to 10db ›**
+  (which asks the shell to bring 10db forward on that page's picks) and Clear (which removes every pick), then ×,
+  which leaves pick mode.
 - **Pick mode.** The page gets no clicks, and hover outlines the element under the pointer (blue) with a tag:
   `button "Save changes" · SaveButton app/settings/general-card.tsx:37`. Holding ⌥ hands the page back, so a menu
   can be opened and the picking resumed inside it. Esc closes an open note first, then leaves pick mode.
-- **Click** picks one element (magenta outline, numbered badge) and opens its note beside it: one text field,
-  ↩ saves, ⇧↩ adds a line, Esc keeps the pick with no note, and Remove drops it. macOS Dictation (fn fn) works in
-  the field as in any text field. **⇧-click** adds an element to the newest pick: one note, several outlines,
-  shown as "N elements". Holding ⇧ fades an open note so the page under it can be clicked. **Drag** draws a box
-  and makes an area pick holding the outermost elements inside it. A click on the page while a note is open saves
-  the note first.
+- **Click** picks one element (magenta outline, numbered badge) and opens its note beside it. The note's header
+  says whom it is for ("Note for this element only", "One note for these 3 elements", "One note for this area")
+  over the component and `file:line`, and it is dragged by that header. While it is open its pick stands out and
+  the others fade. Save (or ↩) saves; ⇧↩ adds a line; × (or Esc) closes it without saving, and on a pick just
+  made takes the pick back out. A reopened pick also shows Remove. Dictate starts macOS Dictation in the field.
+  **⇧-click** adds an element to the newest pick, or takes one back out: one note, several outlines. A plain click
+  on a picked element with no note unpicks it, and on one with a note reopens it. **Drag** draws a box and makes an
+  area pick holding the outermost elements inside it. A click on the page while a note is open saves the note
+  first, and unpicking the pick whose note is open moves the note to the newest pick left.
 - Clicking a badge reopens its note, and editing it sends the pick again (same pick id: the chip updates).
 - What a pick carries (built in the page, parsed in 10db, §5): a pick id, its kind (`element`, `group`, `area`),
   and for each element (at most 6) the tag, a selector, the first 200 characters of its text, its box in viewport

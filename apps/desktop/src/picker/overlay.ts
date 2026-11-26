@@ -27,12 +27,11 @@ const STYLE = `
 .marquee { position: fixed; border: 1.5px dashed #f275be; background: rgba(242,117,190,.07); display: none; }
 .note { position: fixed; width: 360px; background: #103c48; color: #adbcbc; border: 1px solid #2d5b69; border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0,0,0,.4); padding: 12px 14px 12px; pointer-events: auto; display: none; }
-.note.faded { opacity: .2; pointer-events: none; }
-.head { display: flex; gap: 7px; align-items: center; font-size: 12px; margin: 0 -4px 4px 0; min-width: 0; }
+.head { display: flex; gap: 7px; align-items: center; cursor: grab; user-select: none; font-size: 12px; margin: 0 -4px 4px 0; min-width: 0; }
 .n { background: #f275be; color: #103c48; border-radius: 9px; padding: 0 6px; font-weight: 600; flex: none; }
 .scope { color: #cad8d9; font-weight: 600; }
 .src { display: block; font: 11px ui-monospace, Menlo, monospace; color: #41c7b9; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; margin: 0 0 10px; }
+  white-space: nowrap; margin: 0 0 10px; min-height: 1.4em; }
 textarea { width: 100%; min-height: 88px; resize: none; background: #184956; color: #cad8d9; border: 1px solid #2d5b69;
   border-radius: 7px; padding: 7px 8px; font: 13px/1.4 -apple-system, system-ui, sans-serif; outline: none; }
 textarea:focus { border-color: #4695f7; }
@@ -70,9 +69,11 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; background: #184956; border: 
 .picking .mode { display: inline-flex; }
 .sep { width: 1px; height: 18px; background: #2d5b69; }
 .count { color: #72898f; }
-.send { display: none; background: #f275be; color: #103c48; border: 0; height: 22px; border-radius: 11px; padding: 0 9px;
+.dragging, .dragging .head { cursor: grabbing; }
+.send { display: none; align-items: center; gap: 2px; background: #f275be; color: #103c48; border: 0; height: 22px; border-radius: 11px; padding: 0 9px;
   font-weight: 600; font-size: 11.5px; margin: 0 2px 0 4px; }
-.has .send { display: inline-block; }
+.has .send { display: inline-flex; }
+.send svg { display: block; }
 .has .sep, .has .count { display: none; }
 .clear { display: none; background: none; border: 0; color: #72898f; height: 26px; padding: 0 6px; font-size: 12px; }
 .clear:hover { color: #cad8d9; }
