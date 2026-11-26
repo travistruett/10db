@@ -62,7 +62,10 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   setting (`slack-sharing.<projectId>`, `stakeholders/slack-sharing.ts`) is cleared of its channel by
   `rebindProjectSlack`; the posted marks are written by no one else. A task posts only when it is Done and its
   after (and its Done time) is at or after the setting's `enabledAt`, set when the switch goes on and cleared when it
-  goes off; a setting with none posts no tasks until saved again.
+  goes off; a setting with none posts no tasks until saved again. A post's words are `delivery/slack-picture-text.ts`
+  over `delivery/slack-task-facts.ts`, which reads only rows 10db keeps (the task's Linear link, its runs, review
+  rounds, gate evidence, commits and pull request), never git or the network
+  (`decisions/2026-11-26-a-slack-pictures-post-links-its-issue-and-says-how-it-went.md`).
 - `src/api/` is typechecked by the desktop app too (it imports `AppType`). Code there must not import
   `node:*` modules or `@10db/db`; receive services through the `ApiServices` interface (passed in `ApiDeps`).
 - The package entry (`src/index.ts`) exports types only.
