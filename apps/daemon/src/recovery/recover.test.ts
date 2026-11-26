@@ -112,7 +112,7 @@ function inState(
   return { ...seeded, session };
 }
 
-const recover = (extra: { cleanShutdown?: boolean; git?: Git } = {}) =>
+const recover = (extra: { cleanShutdown?: boolean; frozenKill?: boolean; git?: Git } = {}) =>
   recoverOnStartup({
     state,
     inbox,
@@ -478,6 +478,20 @@ describe('recoverOnStartup', () => {
       recoveryAttempts: 3,
     });
 
+    // The app killed the daemon as frozen: a run mid-session is not charged for it either.
+    fresh();
+    const usedUpFrozen = inState(['STARTING', 'RUNNING']);
+    state.write((ctx) => {
+      patchWorkstream(ctx, usedUpFrozen.workstream.id, null, { recoveryAttempts: 3 });
+    });
+    const usedUpFrozenReport = await recover({ frozenKill: true });
+    expect(usedUpFrozenReport.requeued).toEqual([usedUpFrozen.workstream.id]);
+    expect(usedUpFrozenReport.failed).toEqual([]);
+    expect(getWorkstream(state.db, usedUpFrozen.workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      recoveryAttempts: 3,
+    });
+
     fresh();
     const usedUp = inState(['STARTING', 'RUNNING']);
     state.write((ctx) => {
@@ -490,6 +504,50 @@ describe('recoverOnStartup', () => {
       failureKind: 'session_failed',
     });
     expect(listInbox(state.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['flag']);
+  });
+
+  it('holds a run found starting at two unclean restarts in a row, with one card naming it, unless a clean shutdown came between', async () => {
+    const openCards = () => listInbox(state.db, { states: ['OPEN'] });
+    const startAgain = (id: (typeof looping)['workstream']['id']) => {
+      state.write((ctx) => {
+        transitionWorkstream(ctx, id, { to: 'STARTING', fence: null });
+      });
+    };
+    const looping = inState(['STARTING'], { title: 'Fix CI' });
+    const first = await recover({ frozenKill: true });
+    expect(first.requeued).toEqual([looping.workstream.id]);
+    expect(getWorkstream(state.db, looping.workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      recoveryAttempts: 0,
+    });
+    startAgain(looping.workstream.id);
+    const second = await recover({ frozenKill: true });
+    expect(second.held).toEqual([looping.workstream.id]);
+    expect(second.requeued).toEqual([]);
+    expect(getWorkstream(state.db, looping.workstream.id)).toMatchObject({
+      state: 'HELD',
+      recoveryAttempts: 0,
+    });
+    const cards = openCards();
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ kind: 'flag' });
+    expect(cards[0]?.title).toContain('Fix CI');
+    expect(cards[0]?.targets.map((t) => t.workstreamId)).toEqual([looping.workstream.id]);
+    // A later restart leaves the held run, and its one card, as they are.
+    await recover();
+    expect(getWorkstream(state.db, looping.workstream.id).state).toBe('HELD');
+    expect(openCards()).toHaveLength(1);
+
+    fresh();
+    const cleared = inState(['STARTING']);
+    await recover();
+    startAgain(cleared.workstream.id);
+    await recover({ cleanShutdown: true });
+    startAgain(cleared.workstream.id);
+    const afterClean = await recover();
+    expect(afterClean.held).toEqual([]);
+    expect(afterClean.requeued).toEqual([cleared.workstream.id]);
+    expect(openCards()).toHaveLength(0);
   });
 
   it('brings back the next action a restart must keep: a fix, an answer, or a fresh start once a failed gate passed', async () => {
@@ -675,12 +733,13 @@ describe('recoverOnStartup', () => {
       attempts: number;
     }[] = [
       {
+        // A run whose session never reported started lost nothing to the restart.
         name: 'STARTING',
         path: ['STARTING'],
         state: 'QUEUED',
         report: 'requeued',
         nextAction: 'resume',
-        attempts: 1,
+        attempts: 0,
       },
       {
         name: 'RUNNING',

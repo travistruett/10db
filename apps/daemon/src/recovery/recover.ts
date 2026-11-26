@@ -6,12 +6,15 @@ import {
   WorkstreamState as S,
   type InboxItemId,
   type NextAction,
-  type WorkstreamId,
+  WorkstreamId,
 } from '@10db/contracts';
+import { z } from 'zod';
 import { coverageLinesOf } from '../evals';
 import {
   clearLease,
+  deleteAppSetting,
   endSession,
+  getAppSetting,
   getProject,
   getTask,
   getWorkstreamRow,
@@ -25,6 +28,7 @@ import {
   openPassTurn,
   patchWorkstream,
   releaseClaims,
+  setAppSetting,
   transitionWorkstream,
   type DbReader,
   type WorkstreamRow,
@@ -38,7 +42,7 @@ import {
 } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
-import { flagFailedRun, type InboxService } from '../inbox';
+import { flagFailedRun, raiseStartHoldCard, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { Clock } from '../clock';
 import {
@@ -62,7 +66,24 @@ export interface RecoveryReport {
   readonly requeued: WorkstreamId[];
   readonly failed: WorkstreamId[];
   readonly parked: WorkstreamId[];
+  /** Runs held because they were starting at this unclean restart and at the one before it. */
+  readonly held: WorkstreamId[];
   readonly redelivered: InboxItemId[];
+}
+
+/**
+ * The app setting naming the runs that were starting at the last unclean restart (a crash, or the app
+ * killing a frozen daemon). A run found starting again at the next one is held, so a run that brings
+ * 10db down on every start stops instead of looping: a starting run is never charged an attempt.
+ */
+const STARTING_AT_RESTART_KEY = 'recovery.starting_at_unclean_restart';
+const StartingAtRestart = z.object({ workstreamIds: z.array(WorkstreamId) });
+
+/** The runs the setting names; a value 10db can't read names none. */
+function startingAtLastRestart(db: DbReader): ReadonlySet<WorkstreamId> {
+  // The setting is JSON read back from the database: a boundary, so parse it.
+  const parsed = StartingAtRestart.safeParse(getAppSetting(db, STARTING_AT_RESTART_KEY));
+  return new Set(parsed.success ? parsed.data.workstreamIds : []);
 }
 
 /** The thread's note that a page's turn goes on after 10db restarted (Workbench spec §4.3). */
@@ -104,14 +125,29 @@ export async function recoverOnStartup(opts: {
   readonly logger: Logger;
   /** The previous daemon stopped cleanly, so this restart is not a failed attempt. */
   readonly cleanShutdown?: boolean;
+  /**
+   * The app killed the previous daemon because it stopped answering. No run is charged for that, as on a
+   * clean shutdown, but the restart is unclean: a run starting at it may be what froze the daemon.
+   */
+  readonly frozenKill?: boolean;
   /** The delivery jobs and the clock a page of a pass keeps its work beside. */
   readonly jobs: DeliveryJobs;
   readonly clock: Clock;
 }): Promise<RecoveryReport> {
   const db = opts.state.db;
-  const report: RecoveryReport = { requeued: [], failed: [], parked: [], redelivered: [] };
+  const report: RecoveryReport = {
+    requeued: [],
+    failed: [],
+    parked: [],
+    held: [],
+    redelivered: [],
+  };
   // One stamp for every workstream this run re-queues, so they keep their start order among themselves.
   const recoveredAt = opts.state.now();
+  const unclean = opts.cleanShutdown !== true;
+  // A clean shutdown between two unclean restarts means they were not in a row.
+  const startingBefore = unclean ? startingAtLastRestart(db) : new Set<WorkstreamId>();
+  const startingNow: WorkstreamId[] = [];
 
   for (const ws of listWorkstreams(db, { states: ACTIVE_STATES })) {
     const row = getWorkstreamRow(db, ws.id);
@@ -142,7 +178,10 @@ export async function recoverOnStartup(opts: {
       clearLease(ctx, ws.id);
     });
     if (KEEP_STATE.has(row.state)) continue;
-    const attempts = opts.cleanShutdown ? row.recoveryAttempts : row.recoveryAttempts + 1;
+    // A STARTING run's session never reported started in this launch (its `started` event moves it to
+    // RUNNING), so the restart cost it nothing. Queued, held and paused runs kept their state above.
+    const charged = unclean && opts.frozenKill !== true && row.state !== S.Starting;
+    const attempts = charged ? row.recoveryAttempts + 1 : row.recoveryAttempts;
     if (
       await recoverPage(
         { ...opts, maxRecoveryAttempts: opts.maxRecoveryAttempts },
@@ -247,6 +286,9 @@ export async function recoverOnStartup(opts: {
       : crashAction;
     // A waiting workstream has no edge to FAILED, and it never ran a session this boot.
     const failed = !waiting && !pass && attempts > opts.maxRecoveryAttempts;
+    const startingAtUncleanRestart = unclean && !waiting && !pass && row.state === S.Starting;
+    if (startingAtUncleanRestart && !startingBefore.has(ws.id)) startingNow.push(ws.id);
+    const held = !failed && startingAtUncleanRestart && startingBefore.has(ws.id);
     opts.state.write((ctx) => {
       if (row.state !== S.Recovering && !waiting) {
         transitionWorkstream(ctx, ws.id, {
@@ -254,7 +296,9 @@ export async function recoverOnStartup(opts: {
           fence: null,
           reason: opts.cleanShutdown
             ? 'daemon restarted after a clean shutdown'
-            : 'daemon restarted',
+            : opts.frozenKill
+              ? 'daemon restarted after the app killed it as frozen'
+              : 'daemon restarted',
         });
       }
       ctx.emit({
@@ -290,6 +334,17 @@ export async function recoverOnStartup(opts: {
           patch: { nextAction, recoveryAttempts: attempts, runNextAt: recoveredAt },
           reason: 'recovered after restart',
         });
+        if (held) {
+          transitionWorkstream(ctx, ws.id, {
+            to: S.Held,
+            fence: null,
+            patch: { runNextAt: null },
+            reason: 'held: it was starting at two unclean restarts in a row',
+          });
+          // As a failed run does: one on a lane branch keeps its claims until its work is out of Your folder.
+          if (laneBranchOf(row) === null) releaseClaims(ctx, ws.id);
+          raiseStartHoldCard(ctx, row, { frozen: opts.frozenKill === true });
+        }
         // Workbench spec §4.3: a page's turn the restart cut short goes on, and its thread says so,
         // once, in the write that queues it; a closing or abandoning pass takes no turn further.
         if (
@@ -307,10 +362,21 @@ export async function recoverOnStartup(opts: {
         });
       });
       report.failed.push(ws.id);
+    } else if (held) {
+      opts.logger.warn(
+        { workstreamId: ws.id },
+        'held a run that was starting at two unclean restarts in a row',
+      );
+      report.held.push(ws.id);
     } else {
       report.requeued.push(ws.id);
     }
   }
+
+  opts.state.write((ctx) => {
+    if (startingNow.length === 0) deleteAppSetting(ctx, STARTING_AT_RESTART_KEY);
+    else setAppSetting(ctx, STARTING_AT_RESTART_KEY, { workstreamIds: startingNow });
+  });
 
   for (const item of listInbox(db, { states: ['ANSWERED', 'DELIVERING'] })) {
     opts.inbox.redeliver(item.id);

@@ -37,8 +37,14 @@ const HOLDER_POLL: Duration = Duration::from_secs(1);
 const HOLDER_SILENCE: Duration = Duration::from_secs(30);
 /// How often the supervisor's own daemon is asked for /health once it serves.
 const HEALTH_INTERVAL: Duration = Duration::from_secs(5);
-/// How long that daemon may stay silent on /health before it is killed and replaced.
-const FROZEN_AFTER: Duration = Duration::from_secs(30);
+/// How long that daemon may stay silent on /health before it is killed and replaced, when no freeze
+/// kill came in the last `FREEZE_WINDOW`. Each one in the window doubles it, up to `FROZEN_AFTER_MAX`,
+/// so a freeze that would end by itself gets to end, and a daemon truly wedged is still replaced.
+pub const FROZEN_AFTER: Duration = Duration::from_secs(30);
+/// The longest a daemon may stay silent before it is killed, however many freeze kills came before.
+pub const FROZEN_AFTER_MAX: Duration = Duration::from_mins(8);
+/// A freeze kill this long after the last one starts the threshold over.
+pub const FREEZE_WINDOW: Duration = Duration::from_mins(10);
 /// How long a killed daemon gets to exit before the supervisor moves on without collecting it.
 const KILL_WAIT: Duration = Duration::from_secs(5);
 /// How long one /health probe may take to connect, and again to answer.
@@ -48,6 +54,10 @@ const HEALTH_PATH: &str = "/health";
 /// What a healthy daemon's /health reply starts with.
 const HEALTH_OK: &[u8; 12] = b"HTTP/1.1 200";
 const LOCK_FILE: &str = "daemon.lock";
+/// Written beside `daemon.lock` just before a frozen daemon is killed, so the next daemon knows the
+/// restart was this shell's kill and not a crash. Its name and shape match `FROZEN_KILL_FILE` in
+/// `apps/daemon/src/daemon/frozen-kill.ts`.
+const FROZEN_KILL_FILE: &str = "daemon.frozen-kill";
 const LOGS_DIR: &str = "logs";
 const SIDECAR_LOG: &str = "sidecar.log";
 /// Development and test settings of the daemon; a value in the shell's own environment must not
@@ -92,6 +102,61 @@ impl Backoff {
     pub fn reset(&mut self) {
         self.attempt = 0;
     }
+}
+
+/// The freeze kills of the last `FREEZE_WINDOW`, and the silence they allow the next daemon.
+#[derive(Debug, Clone, Default)]
+pub struct FreezeKills {
+    last: Option<Instant>,
+    count: u32,
+}
+
+impl FreezeKills {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            last: None,
+            count: 0,
+        }
+    }
+
+    /// The kills that still count at `now`: none once the last is `FREEZE_WINDOW` old.
+    fn counted(&self, now: Instant) -> u32 {
+        match self.last {
+            Some(last) if now.saturating_duration_since(last) < FREEZE_WINDOW => self.count,
+            _ => 0,
+        }
+    }
+
+    /// Notes a freeze kill at `now`.
+    pub fn record(&mut self, now: Instant) {
+        self.count = self.counted(now).saturating_add(1);
+        self.last = Some(now);
+    }
+
+    /// How long a daemon started at `now` may stay silent on /health before it is killed.
+    #[must_use]
+    pub fn frozen_after(&self, now: Instant) -> Duration {
+        let factor = 2_u32.saturating_pow(self.counted(now));
+        FROZEN_AFTER.saturating_mul(factor).min(FROZEN_AFTER_MAX)
+    }
+}
+
+/// Leaves the freeze-kill marker for the next daemon: written whole, then renamed into place.
+fn write_frozen_marker(data_dir: &Path, pid: u32, frozen_after: Duration) -> io::Result<()> {
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(io::Error::other)?
+        .as_millis();
+    let marker = serde_json::json!({
+        "pid": pid,
+        "at": u64::try_from(at).map_err(io::Error::other)?,
+        "frozenAfterMs": u64::try_from(frozen_after.as_millis()).map_err(io::Error::other)?,
+    });
+    let path = data_dir.join(FROZEN_KILL_FILE);
+    let staged = data_dir.join(format!("{FROZEN_KILL_FILE}.tmp"));
+    fs::write(&staged, marker.to_string())?;
+    fs::rename(&staged, &path)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,6 +349,7 @@ impl Supervisor {
 
 fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, data_dir: &Path, log_dir: &Path) {
     let mut backoff = Backoff::new(BACKOFF_BASE, BACKOFF_MAX);
+    let mut freezes = FreezeKills::new();
     loop {
         {
             let mut guard = lock(shared);
@@ -293,8 +359,9 @@ fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, data_dir: &Path, log_di
             guard.spawning = true;
         }
         let started = Instant::now();
+        let frozen_after = freezes.frozen_after(started);
         let spawned = spawn_daemon(resource_dir, log_dir);
-        let code = {
+        let (code, killed_as_frozen) = {
             let mut guard = lock(shared);
             guard.spawning = false;
             match spawned {
@@ -303,15 +370,18 @@ fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, data_dir: &Path, log_di
                     guard.stdin = child.stdin.take();
                     guard.child = Some(child);
                     drop(guard);
-                    wait_for_exit(shared, data_dir, log_dir)
+                    wait_for_exit(shared, data_dir, log_dir, frozen_after)
                 }
                 Err(error) => {
                     drop(guard);
                     report(log_dir, &format!("could not start the daemon: {error}"));
-                    None
+                    (None, false)
                 }
             }
         };
+        if killed_as_frozen {
+            freezes.record(Instant::now());
+        }
         let quitting = lock(shared).quitting;
         match exit_policy(code, quitting) {
             ExitPolicy::Stop => return,
@@ -336,7 +406,7 @@ enum ChildHealth {
     /// No longer running, though its exit has not been collected: a daemon that takes minutes to
     /// tear down stays unreaped that long.
     Gone,
-    /// Running, but silent on /health for `FROZEN_AFTER`.
+    /// Running, but silent on /health for its `frozen_after`.
     Frozen,
 }
 
@@ -347,13 +417,16 @@ struct HealthWatch {
     /// When the child last answered, or when it was first found silent. `None` until then: a daemon
     /// that is still starting has no `daemon.json` and is never judged.
     last_answer: Option<Instant>,
+    /// How long the child may stay silent before it counts as frozen.
+    frozen_after: Duration,
 }
 
 impl HealthWatch {
-    fn new() -> Self {
+    fn new(frozen_after: Duration) -> Self {
         Self {
             last_check: Instant::now(),
             last_answer: None,
+            frozen_after,
         }
     }
 
@@ -376,7 +449,7 @@ impl HealthWatch {
             return ChildHealth::Gone;
         }
         let silent_since = *self.last_answer.get_or_insert_with(Instant::now);
-        if silent_since.elapsed() >= FROZEN_AFTER {
+        if silent_since.elapsed() >= self.frozen_after {
             ChildHealth::Frozen
         } else {
             ChildHealth::Fine
@@ -426,9 +499,15 @@ fn release_child(
 }
 
 /// Polls rather than blocking in `wait`, so `stop` can take the lock to signal the child. Between
-/// polls it watches the child's health: the mutex is free while a probe runs.
-fn wait_for_exit(shared: &Mutex<Shared>, data_dir: &Path, log_dir: &Path) -> Option<i32> {
-    let mut watch = HealthWatch::new();
+/// polls it watches the child's health: the mutex is free while a probe runs. Answers the child's exit
+/// code, and whether this shell killed it as frozen.
+fn wait_for_exit(
+    shared: &Mutex<Shared>,
+    data_dir: &Path,
+    log_dir: &Path,
+    frozen_after: Duration,
+) -> (Option<i32>, bool) {
+    let mut watch = HealthWatch::new(frozen_after);
     loop {
         let pid = {
             let guard = lock(shared);
@@ -445,31 +524,46 @@ fn wait_for_exit(shared: &Mutex<Shared>, data_dir: &Path, log_dir: &Path) -> Opt
                 ChildHealth::Frozen => {
                     report(
                         log_dir,
-                        "the daemon stopped answering /health; killing it to start another",
+                        &format!(
+                            "the daemon stopped answering /health for {} s; killing it to start another",
+                            frozen_after.as_secs()
+                        ),
                     );
-                    release_child(shared, log_dir, true, KILL_WAIT)
+                    // Before the kill, so the next daemon never starts without it.
+                    if let Some(pid) = pid
+                        && let Err(error) = write_frozen_marker(data_dir, pid, frozen_after)
+                    {
+                        report(
+                            log_dir,
+                            &format!("could not write the freeze-kill marker: {error}"),
+                        );
+                    }
+                    (release_child(shared, log_dir, true, KILL_WAIT), true)
                 }
                 ChildHealth::Gone | ChildHealth::Fine => {
                     report(log_dir, "the daemon is gone; starting another");
-                    release_child(shared, log_dir, false, Duration::ZERO)
+                    (release_child(shared, log_dir, false, Duration::ZERO), false)
                 }
             };
         }
         {
             let mut guard = lock(shared);
-            let status = guard.child.as_mut()?.try_wait();
+            let Some(child) = guard.child.as_mut() else {
+                return (None, false);
+            };
+            let status = child.try_wait();
             match status {
                 Ok(Some(status)) => {
                     guard.child = None;
                     guard.stdin = None;
-                    return status.code();
+                    return (status.code(), false);
                 }
                 Ok(None) => {}
                 Err(error) => {
                     report(log_dir, &format!("lost track of the daemon: {error}"));
                     guard.child = None;
                     guard.stdin = None;
-                    return None;
+                    return (None, false);
                 }
             }
         }
@@ -549,6 +643,26 @@ mod tests {
         for _ in 0..100 {
             assert!(backoff.next_delay() <= BACKOFF_MAX);
         }
+    }
+
+    #[test]
+    fn each_freeze_kill_in_the_window_doubles_the_threshold_up_to_the_max_and_a_quiet_window_starts_over()
+     {
+        let start = Instant::now();
+        let mut freezes = FreezeKills::new();
+        let mut now = start;
+        let mut thresholds = vec![freezes.frozen_after(now).as_secs()];
+        for _ in 0..5 {
+            now += Duration::from_secs(60);
+            freezes.record(now);
+            thresholds.push(freezes.frozen_after(now).as_secs());
+        }
+        assert_eq!(thresholds, [30, 60, 120, 240, 480, 480]);
+        // Ten quiet minutes after the last kill, the next daemon gets the base again.
+        let quiet = now + FREEZE_WINDOW;
+        assert_eq!(freezes.frozen_after(quiet), FROZEN_AFTER);
+        freezes.record(quiet);
+        assert_eq!(freezes.frozen_after(quiet), Duration::from_secs(60));
     }
 
     #[test]

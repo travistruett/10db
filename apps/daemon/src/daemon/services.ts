@@ -182,7 +182,12 @@ import { taskSession } from '../chat';
 import { suitesOfTasks, type EvalLiveRuns, type EvalsAssessor, type EvalsService } from '../evals';
 import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
-import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
+import {
+  earlierMcpApproval,
+  requestMcpApproval,
+  withdrawStartHoldCard,
+  type InboxService,
+} from '../inbox';
 import type { SlackConnections } from '../stakeholders';
 import {
   createTurnFiles,
@@ -597,7 +602,12 @@ export function createServices(deps: {
       // A held task already has its run, and its batch and worktree if it has them: it only queues again.
       const held = latestWorkstreamOf(db, taskId);
       if (held?.state === WorkstreamState.Held) {
-        const workstream = deps.state.write((ctx) => resumeTask(ctx, taskId));
+        const workstream = deps.state.write((ctx) => {
+          const resumed = resumeTask(ctx, taskId);
+          // A run recovery held for stopping 10db while starting is the builder's to start again.
+          withdrawStartHoldCard(ctx, held);
+          return resumed;
+        });
         deps.scheduler.requestTick();
         return { kind: 'workstream', workstream };
       }

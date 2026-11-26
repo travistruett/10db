@@ -505,6 +505,7 @@ import {
   refusedTrustCheckouts,
 } from './git-refusal';
 import { acquireInstanceLock } from './instance-lock';
+import { takeFrozenKill } from './frozen-kill';
 import { devUiToken, removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
 import { createAnswerWriter } from './answer-writer-launch';
 import { createAreaNamer } from './area-namer';
@@ -2506,6 +2507,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   state.write((ctx) => {
     deleteAppSetting(ctx, CLEAN_SHUTDOWN_KEY);
   });
+  // Read only now, with the instance lock held, so a daemon that loses the lock never takes it.
+  const frozenKill = takeFrozenKill(opts.dataDir);
+  if (frozenKill !== null) {
+    logger.warn(
+      { killedPid: frozenKill.pid, at: frozenKill.at, frozenAfterMs: frozenKill.frozenAfterMs },
+      'the app killed the previous daemon as frozen; runs are not charged for the restart',
+    );
+  }
   await recoverOnStartup({
     state,
     inbox,
@@ -2516,6 +2525,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     maxRecoveryAttempts: limits.maxRecoveryAttempts,
     logger,
     cleanShutdown,
+    frozenKill: frozenKill !== null,
   });
   // An ended unattended run lists what it skipped while nobody watched, once; the sweep raises the
   // item of a run that ended before a crash, or that recovery just failed.
