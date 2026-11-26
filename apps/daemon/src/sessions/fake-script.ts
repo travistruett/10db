@@ -23,6 +23,12 @@ export const FakeStep = z.discriminatedUnion('do', [
    */
   z.object({ do: z.literal('edit'), path: z.string().min(1), text: z.string() }),
   z.object({ do: z.literal('mcp'), tool: z.string(), args: z.record(z.string(), Json) }),
+  /**
+   * Steps the Linear reporter's script runs once for each update its brief lists as owed, in order, with `$post`
+   * standing for that update's post id. A run owes as many updates as events came due together, so a script
+   * cannot name them one by one. The inner steps are read as steps when the session starts.
+   */
+  z.object({ do: z.literal('each_owed'), steps: z.array(z.record(z.string(), Json)) }),
   /** The agent writes a message: two text deltas, the text split at its middle, then the message. */
   z.object({ do: z.literal('say'), text: z.string().min(1) }),
   /** The agent shows its reasoning, in one delta. */

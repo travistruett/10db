@@ -124,8 +124,8 @@ import { settleSecondOpinionModel } from './decision-offer';
 import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
 import {
   createLinearImport,
+  answerReporterCard,
   createLinearReporter,
-  dismissReporterPosts,
   reporterConversations,
   reporterHooks,
   reporterSettings,
@@ -359,6 +359,7 @@ import {
   createBrowserHost,
   createBrowserLaunches,
   createPlaywrightCamera,
+  createSignInReporter,
   launchChromium,
   refusedCamera,
   MISSED_AFTER_MS,
@@ -1162,14 +1163,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onParkAnswer: parkAnswers,
     log: logger,
     onFlagAnswerInWrite: (ctx, item, answer) => {
-      dismissReporterPosts(ctx, item);
-      return applySkippedChoice(ctx, item, answer)
+      const retried = answerReporterCard(ctx, item, answer);
+      const after = applySkippedChoice(ctx, item, answer)
         ? () => {
             startFollowUps();
           }
         : chatWorkRef === null
           ? undefined
           : applyChatWorkAnswer(chatWorkRef, logger, ctx, item, answer);
+      if (retried === null) return after;
+      return () => {
+        after?.();
+        lateLinearReporter?.wake(retried);
+      };
     },
     onCheckAnswer: (ctx, item, answer) => {
       const signOffPage = startPageSignOff;
@@ -1683,6 +1689,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           state,
           inbox,
           logger: logger.child({ component: 'slack-pictures' }),
+          skipped: (taskId) => {
+            const outlook = pictures?.outlook(taskId);
+            return outlook?.kind === 'skipped' ? outlook.reason : null;
+          },
           channelOf: (projectId) => {
             const sharing = readSlackSharing(state.db, projectId);
             // The channel belongs to the workspace it was picked in; another binding now leaves it unused.
@@ -1790,8 +1800,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // Built after the moves, which tell it when a project moved.
   let accountLimits: AccountLimits | null = null;
-  // Built later; a move wakes it, so the project's updates held for a Linear sign-in go out on the new account.
-  let movedLinearReporter: Pick<LinearReporter, 'wake'> | null = null;
+  // Built later. A move wakes it, so the project's updates held for a Linear sign-in go out on the new account,
+  // and so does a Retry on its Inbox card, so the failed updates go out now.
+  let lateLinearReporter: Pick<LinearReporter, 'wake'> | null = null;
   const moveBack = createMoveBack({
     state,
     clock,
@@ -1814,7 +1825,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onMoved: (projectId) => {
       accountLimits?.forget(projectId);
       scheduler?.requestTick();
-      movedLinearReporter?.wake(projectId);
+      lateLinearReporter?.wake(projectId);
     },
   });
   accountLimits = createAccountLimits({
@@ -2717,6 +2728,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     devUi: opts.devUiOrigin ? { origin: opts.devUiOrigin, token: devUiToken(opts.dataDir) } : null,
     state,
     bus,
+    signInReporter: createSignInReporter({ state, inbox }),
     camera: pictureCamera,
     daemonPort: listening.promise,
     prepareBrowser,
@@ -2947,7 +2959,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // The Linear reporter: one short session of its own per task with updates owed, on the explore engine.
   const linearReporter = createLinearReporter({
-    fetch: outbound,
+    send: outbound,
     state,
     clock,
     log: logger.child({ component: 'linear-reporter' }),
@@ -2955,8 +2967,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     conversations: reporterConversations(state),
     signIns: linearSignIns,
     inbox,
+    picturesOutlook: (taskId) => pictures.outlook(taskId),
   });
-  movedLinearReporter = linearReporter;
+  lateLinearReporter = linearReporter;
   /** Each service's own next step once it works for a project. Linear: the project reports to it. */
   const whenConnectedWorks: Record<ConnectableService, (projectId: ProjectId) => void> = {
     linear: (projectId) => {
