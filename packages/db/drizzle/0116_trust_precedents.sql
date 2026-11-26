@@ -11,12 +11,14 @@ CREATE TABLE `trust_precedents` (
 	`last_used_at` text,
 	`conflicts` integer DEFAULT 0 NOT NULL,
 	`source_inbox_id` text,
+	`approved_at` text,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
 	`ended_at` text,
 	FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "trust_precedents_state" CHECK("trust_precedents"."state" IN ('active', 'paused', 'declined', 'revoked')),
-	CONSTRAINT "trust_precedents_scope" CHECK("trust_precedents"."scope" IN ('copy', 'project'))
+	CONSTRAINT "trust_precedents_scope" CHECK("trust_precedents"."scope" IN ('copy', 'project')),
+	CONSTRAINT "trust_precedents_approved" CHECK("trust_precedents"."state" <> 'active' OR "trust_precedents"."approved_at" IS NOT NULL)
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `trust_precedents_one_per_key` ON `trust_precedents` (`project_id`,`program_key`,`scope`);--> statement-breakpoint

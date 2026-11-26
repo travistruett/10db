@@ -41,7 +41,7 @@ export interface ShownPrecedent {
   readonly id: TrustPrecedentId;
   readonly kind: string;
   readonly examples: readonly string[];
-  /** The day it was approved. */
+  /** The day the builder last approved it (`approved_at`). */
   readonly approved: string;
   /** The committed text the call runs differs from what the builder approved. */
   readonly changedSince: boolean;
@@ -74,12 +74,13 @@ export function precedentFor(
   const row =
     (inCopy ? ofKey.find((p) => p.scope === PrecedentScope.Copy) : undefined) ??
     ofKey.find((p) => p.scope === PrecedentScope.Project);
-  if (row?.state !== PrecedentState.Active) return null;
+  // An active row always has `approved_at` (CHECK `trust_precedents_approved`).
+  if (row?.state !== PrecedentState.Active || row.approvedAt === null) return null;
   return {
     id: row.id,
     kind: row.kind,
     examples: row.examples,
-    approved: row.createdAt.slice(0, 10),
+    approved: row.approvedAt.slice(0, 10),
     changedSince: hash !== null && row.runsHash !== null && hash !== row.runsHash,
     hash,
   };
@@ -102,9 +103,11 @@ export function precedentLines(
       !rows.some((q) => q.scope === PrecedentScope.Copy && q.programKey === p.programKey),
   );
   const newestUse = (p: TrustPrecedentDto): string => p.lastUsedAt ?? '';
+  const approvedAt = (p: TrustPrecedentDto): string => p.approvedAt ?? '';
   return shown
     .toSorted(
-      (a, b) => newestUse(b).localeCompare(newestUse(a)) || b.createdAt.localeCompare(a.createdAt),
+      (a, b) =>
+        newestUse(b).localeCompare(newestUse(a)) || approvedAt(b).localeCompare(approvedAt(a)),
     )
     .slice(0, PRECEDENT_LINES_MAX)
     .map((p) => {

@@ -86,6 +86,12 @@
               }
             ]
           },
+          "approvedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "createdAt": {
             "type": "string"
           },
@@ -128,6 +134,7 @@
           "lastUsedAt",
           "conflicts",
           "sourceInboxId",
+          "approvedAt",
           "createdAt",
           "endedAt",
           "lastAllowed"

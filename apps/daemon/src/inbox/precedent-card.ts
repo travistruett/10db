@@ -222,7 +222,8 @@ export function raisePrecedentConflict(
     ctx.tx,
     projectId,
     row.programKey,
-    row.createdAt,
+    // Stops since it was last approved or kept; a paused row was active, so it has the date.
+    row.approvedAt ?? row.createdAt,
     CONFLICT_CALLS_SHOWN,
   );
   const limits = [...new Set(stops.map((s) => limitLabel(s.limit)))];

@@ -227,6 +227,8 @@ export const TrustPrecedentDto = z.object({
   lastUsedAt: z.string().nullable(),
   conflicts: z.number().int(),
   sourceInboxId: InboxItemId.nullable(),
+  /** When the builder last approved or kept it, the date the judge is shown; null for a kind only ever declined. */
+  approvedAt: z.string().nullable(),
   createdAt: z.string(),
   endedAt: z.string().nullable(),
 });

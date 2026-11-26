@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "81d7fc4c-0bfe-4653-a564-0c1504d3eb99",
+  "id": "373e3b15-cba0-4646-b8c4-a8121d4c0cbc",
   "prevId": "7ee782dd-c2f1-419c-9948-6a51cb25ab71",
   "tables": {
     "aa_models": {
@@ -10867,6 +10867,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -10925,6 +10932,10 @@
         "trust_precedents_scope": {
           "name": "trust_precedents_scope",
           "value": "\"trust_precedents\".\"scope\" IN ('copy', 'project')"
+        },
+        "trust_precedents_approved": {
+          "name": "trust_precedents_approved",
+          "value": "\"trust_precedents\".\"state\" <> 'active' OR \"trust_precedents\".\"approved_at\" IS NOT NULL"
         }
       }
     },

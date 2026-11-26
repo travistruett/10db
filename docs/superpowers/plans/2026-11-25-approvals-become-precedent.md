@@ -88,7 +88,9 @@ export const TrustPrecedentDto = z.object({
   examples: z.array(PrecedentExample).max(PRECEDENT_EXAMPLES_MAX),
   runsHash: z.string().nullable(), state: z.enum(PrecedentState),
   uses: z.number().int(), lastUsedAt: z.string().nullable(), conflicts: z.number().int(),
-  sourceInboxId: InboxItemId.nullable(), createdAt: z.string(), endedAt: z.string().nullable(),
+  sourceInboxId: InboxItemId.nullable(),
+  approvedAt: z.string().nullable(), // set on every move to active; null for a kind only ever declined
+  createdAt: z.string(), endedAt: z.string().nullable(),
 });
 export const PrecedentCandidateDto = z.object({
   programKey: z.string(), scope: z.enum(PrecedentScope), kind: z.string(),
@@ -151,7 +153,7 @@ export interface CallRuns { readonly runs: readonly RunText[]; readonly cut: boo
 export const PRECEDENT_LIMIT_CEILING = 0.5;
 export const PRECEDENT_CONFLICTS_MAX = 3;
 export const PRECEDENT_LINES_MAX = 30;
-export interface ShownPrecedent { readonly id: TrustPrecedentId; readonly kind: string; readonly examples: readonly string[]; readonly approved: string; readonly changedSince: boolean; readonly hash: string | null }
+export interface ShownPrecedent { readonly id: TrustPrecedentId; readonly kind: string; readonly examples: readonly string[]; readonly approved: string; readonly changedSince: boolean; readonly hash: string | null } // `approved` is `approvedAt`'s day
 /** The active row for the key: in a copy the `copy` row, else the `project` row; outside a copy the `project` row only. Null for a null key or `withheld`. */
 export function precedentFor(precedents: readonly TrustPrecedentDto[], key: string | null, inCopy: boolean, hash: string | null, withheld: boolean): ShownPrecedent | null;
 export function precedentLines(precedents: readonly TrustPrecedentDto[], inCopy: boolean): string[]; // for TrustPolicy.autoModePrecedents

@@ -15,14 +15,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore } from '../events';
 import { silentLogger } from '../log';
-import { precedentCandidates } from '../trust';
+import { precedentCandidates, precedentFor } from '../trust';
 import { precedentFoldKey, refreshPrecedentCard } from './precedent-card';
 import { createPrecedentService } from './precedent-service';
 
 let close: () => void;
 let store: Store;
+let clock: ManualClock;
 beforeEach(() => {
-  ({ store, close } = createTestStore());
+  clock = new ManualClock(new Date());
+  ({ store, close } = createTestStore(() => clock.now()));
 });
 afterEach(() => {
   close();
@@ -47,7 +49,6 @@ function setup() {
     );
   }
   const state = createStateStore(store, createEventBus());
-  const clock = new ManualClock(new Date());
   const service = createPrecedentService({
     state,
     clock,
@@ -162,11 +163,18 @@ describe('standing approvals proposed on one card', () => {
     });
     expect(listPrecedents(store.db, project.id)).toEqual(before);
 
-    // A declined kind is approved again from Settings.
+    // A declined kind is approved again from Settings, days later: the judge is shown that day.
     const declined = before.find((r) => r.state === 'declined');
     if (declined === undefined) throw new Error('the declined row exists');
+    expect(declined.approvedAt).toBeNull();
+    clock.advance(19 * 86_400_000);
     const approved = await service.patch(project.id, declined.id, { state: 'active' });
     expect(approved).toMatchObject({ id: declined.id, state: 'active', conflicts: 0 });
+    expect(approved.createdAt).toBe(declined.createdAt);
+    expect(approved.approvedAt).toBe(clock.now().toISOString());
+    expect(precedentFor([approved], approved.programKey, false, null, false)?.approved).toBe(
+      clock.now().toISOString().slice(0, 10),
+    );
     expect(listPrecedents(store.db, project.id).map((r) => r.state)).toEqual(['active', 'active']);
     expect(listTrustGrants(store.db, project.id)).toEqual([]);
   });

@@ -34,6 +34,7 @@ function toDto(row: PrecedentRow): TrustPrecedentDto {
     lastUsedAt: row.lastUsedAt,
     conflicts: row.conflicts,
     sourceInboxId: row.sourceInboxId,
+    approvedAt: row.approvedAt,
     createdAt: row.createdAt,
     endedAt: row.endedAt,
   };
@@ -52,7 +53,7 @@ export interface PrecedentInput {
 
 /**
  * Inserts the row, or moves the one the project, key and scope already have to `input.state` with its kind,
- * examples and hash; `active` sets conflicts to 0.
+ * examples and hash; `active` sets conflicts to 0 and `approved_at` to now.
  *
  * The kind and key are parsed first, so a bad one throws and stores nothing. The examples are fitted
  * (`fitPrecedentExamples`) and never refused on: they are skip summaries passed as they are, in the same write as
@@ -78,6 +79,7 @@ export function approvePrecedent(ctx: WriteContext, input: PrecedentInput): Trus
       lastUsedAt: null,
       conflicts: 0,
       sourceInboxId: input.sourceInboxId,
+      approvedAt: active ? ctx.now : null,
       createdAt: ctx.now,
       updatedAt: ctx.now,
       endedAt: active ? null : ctx.now,
@@ -94,7 +96,7 @@ export function approvePrecedent(ctx: WriteContext, input: PrecedentInput): Trus
         runsHash: input.runsHash,
         state: input.state,
         updatedAt: ctx.now,
-        ...(active ? { conflicts: 0, endedAt: null } : { endedAt: ctx.now }),
+        ...(active ? { conflicts: 0, endedAt: null, approvedAt: ctx.now } : { endedAt: ctx.now }),
         ...(input.sourceInboxId === null ? {} : { sourceInboxId: input.sourceInboxId }),
       },
     })
@@ -116,7 +118,8 @@ export function listPrecedents(db: DbReader, projectId: ProjectId): TrustPrecede
 
 /**
  * Changes one of the project's precedents; null when the project has none by that id. `active` resets the
- * conflicts and clears `ended_at`; `revoked` and `declined` set it; `paused` leaves it.
+ * conflicts, sets `approved_at` to now and clears `ended_at`; `revoked` and `declined` set `ended_at`;
+ * `paused` leaves it. Only `active` moves `approved_at`.
  */
 export function setPrecedent(
   ctx: WriteContext,
@@ -128,7 +131,7 @@ export function setPrecedent(
   const ending = (state: PrecedentState) => {
     switch (state) {
       case PrecedentState.Active:
-        return { conflicts: 0, endedAt: null };
+        return { conflicts: 0, endedAt: null, approvedAt: ctx.now };
       case PrecedentState.Revoked:
       case PrecedentState.Declined:
         return { endedAt: ctx.now };

@@ -2870,6 +2870,8 @@ export const trustPrecedents = sqliteTable(
     lastUsedAt: text('last_used_at'),
     conflicts: integer('conflicts').notNull().default(0),
     sourceInboxId: text('source_inbox_id').$type<InboxItemId>(),
+    /** When the builder last approved or kept it; null for a kind only ever declined. */
+    approvedAt: text('approved_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     endedAt: text('ended_at'),
@@ -2878,6 +2880,7 @@ export const trustPrecedents = sqliteTable(
     uniqueIndex('trust_precedents_one_per_key').on(t.projectId, t.programKey, t.scope),
     check('trust_precedents_state', sql`${t.state} IN ('active', 'paused', 'declined', 'revoked')`),
     check('trust_precedents_scope', sql`${t.scope} IN ('copy', 'project')`),
+    check('trust_precedents_approved', sql`${t.state} <> 'active' OR ${t.approvedAt} IS NOT NULL`),
   ],
 );
 
