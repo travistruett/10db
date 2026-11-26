@@ -26,8 +26,9 @@ Shares this Mac's daemon on the builder's tailnet through `tailscale serve`.
   (`blocked`); a start that fails for Tailscale or certificate reasons (`retry`) is tried again by the monitor, a held
   port is not, and the monitor only removes 10db's mapping while the listener is down. `set` refuses with
   `SharingRefusedError`, whose message is shown to the builder (task 10 maps it to 409).
-- The 60 s monitor publishes `sharing.changed` on every tick, including one that finds the CLI gone. The rail
-  waits for that event (or for Remote Access's 10 s poll, which fills the same query), so a removed CLI clears
+- While sharing is on, the 60 s monitor publishes `sharing.changed` whenever the status it reads changes (its state
+  or its steps), so a tick that finds the CLI gone publishes even when the state label stays `paused`. The rail
+  refetches only on that event, or on Remote Access's 10 s poll, which fills the same query; a removed CLI clears
   the rail's line within a minute.
 - `share-listener.ts` is the second `serve()` on `127.0.0.1:<port>` with its own `WebSocketServer({ noServer: true })`
   and the same app. Its fetch wrapper (and the main listener's in `start.ts`) marks the **env object in place**

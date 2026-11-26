@@ -223,4 +223,23 @@ describe('the sharing service', () => {
     });
     expect(service.status().steps).toEqual([]);
   });
+
+  it('publishes once when the CLI goes away while sharing is paused', async () => {
+    const service = make();
+    state.write((ctx) => {
+      setAppSetting(ctx, 'sharing.enabled', true);
+      setAppSetting(ctx, 'sharing.port', PORT);
+    });
+    // No certificate yet, so start leaves sharing Paused on the certificate step.
+    await service.start();
+    expect(service.status().state).toBe(SharingState.Paused);
+    const before = sharingStates.length;
+
+    cliPath = null;
+    clock.advance(60_000); // one monitor tick
+    await vi.waitFor(() => {
+      expect(sharingStates.slice(before)).toEqual([SharingState.Paused]);
+    });
+    expect(service.status().steps).toEqual([]);
+  });
 });
