@@ -316,6 +316,7 @@ beforeEach(async () => {
       // Reads the reporter at call time: a test swaps it for a new one over the same store.
       reporter: {
         reportPost: (id, input) => reporter.reportPost(id, input),
+        pickStatus: (id, input) => reporter.pickStatus(id, input),
         uploadPicture: (id, input) => reporter.uploadPicture(id, input),
       },
     }),
@@ -336,11 +337,21 @@ afterEach(async () => {
   closeStore();
 });
 
+<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
 const oweOne = (
   dedupeKey = 'run_started:1:0',
   event: LinearEventKind = LinearEventKind.RunStarted,
   dueInMs = 30_000,
 ): LinearPostId => {
+||||||| 06c94a09a
+const oweOne = (dedupeKey = 'run_started:1:0'): LinearPostId => {
+=======
+const oweOne = (
+  dedupeKey = 'run_started:1:0',
+  event: LinearEventKind = LinearEventKind.RunStarted,
+  detail: Record<string, string | null> = {},
+): LinearPostId => {
+>>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
   const row = store.write((ctx) =>
     enqueueLinearPost(ctx, {
       taskId: task.id,
@@ -348,8 +359,16 @@ const oweOne = (
       event,
       dedupeKey,
       attempt: 1,
+<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
       detail: {},
       dueAt: new Date(clock.now().getTime() + dueInMs).toISOString(),
+||||||| 06c94a09a
+      detail: {},
+      dueAt: new Date(clock.now().getTime() + 30_000).toISOString(),
+=======
+      detail,
+      dueAt: new Date(clock.now().getTime() + 30_000).toISOString(),
+>>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
     }),
   ).value;
   if (row === null) throw new Error('the row was not made');
@@ -373,6 +392,57 @@ describe('the Linear reporter', () => {
     expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(1);
     // A reporter's run never holds an update drain.
     expect(engine.busy()).toEqual([]);
+  });
+
+  it('picks a run start status from the team by type and position, lets only that be set, and records it', async () => {
+    const id = oweOne();
+    const status = (name: string, type: string, position: number) => ({ name, type, position });
+    const statuses = [
+      status('Backlog', 'backlog', 1),
+      status('In Progress', 'started', 3),
+      status('In Review', 'started', 4),
+      status('Done', 'completed', 5),
+    ];
+    const report = (statusSet: string) =>
+      ({
+        do: 'mcp',
+        tool: 'report_linear_post',
+        args: {
+          postIds: [id],
+          outcome: { state: 'recorded', commentIds: [], statusSet, attachmentUrl: null },
+        },
+      }) as const;
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'pick_linear_status',
+          args: { postId: id, current: statuses[0], statuses },
+        },
+        // The agent's own choice, not the pick: refused.
+        {
+          do: 'tool',
+          toolName: `${PREFIX}save_issue`,
+          input: { id: ISSUE, state: 'In Review' },
+        },
+        {
+          do: 'tool',
+          toolName: `${PREFIX}save_issue`,
+          input: { id: ISSUE, state: 'In Progress' },
+          result: '{}',
+        },
+        report('In Review'),
+        report('In Progress'),
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    expect(rows()[0]?.statusSet).toBe('In Progress');
+    const results = adapter.observations.filter((o) => o.kind === 'mcp_result');
+    expect(results.map((o) => o.detail['isError'])).toEqual([false, true, false]);
+    expect(String(results[0]?.detail['text'])).toContain('In Progress');
+    expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(1);
   });
 
   it('keeps a row whose session ended without recording pending, and runs it again at its backoff', async () => {
@@ -430,6 +500,60 @@ describe('the Linear reporter', () => {
       )
       .toBe(LinearPostState.Recorded);
     expect(card()).toBeUndefined();
+  });
+
+  it('withholds an update with nothing to report without a session, a hold or a card', async () => {
+    oweOne('pr_opened:1', LinearEventKind.PrOpened, { prUrl: null });
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Withheld);
+    expect(rows()[0]).toMatchObject({
+      withheldPattern: 'nothing to report',
+      tries: 0,
+      lastError: null,
+    });
+    expect(rows()[0]?.dismissedAt).not.toBeNull();
+    expect(adapter.shapeSessions).toHaveLength(0);
+    expect(
+      findOpenByFoldKey(store.db, project.id, linearReporterFoldKey(project.id)),
+    ).toBeUndefined();
+  });
+
+  it('spends a try on a run that made no Linear call after Linear answered in the conversation, and posts next time', async () => {
+    book[`Chat: ${SNAPSHOT_STARTER}`] = [
+      [
+        { do: 'tool', toolName: `${PREFIX}get_issue`, input: { id: ISSUE }, result: '{}' },
+        { do: 'say', text: `${SNAPSHOT_FIRST_LINE}\nAMP-1: Add search.` },
+        { do: 'turn_complete' },
+      ],
+    ];
+    await expect(reporter.snapshot(task.id)).resolves.toMatchObject({ kind: 'read' });
+    const id = oweOne();
+    // The posting turn right after the snapshot ends without a call, as the one on 2026-11-25 did.
+    book[KEY] = [[{ do: 'turn_complete' }], recordingScript(id)];
+    clock.advance(30_000);
+    await expect
+      .poll(
+        () => {
+          clock.advance(0);
+          return rows()[0]?.tries;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(1);
+    expect(rows()[0]?.state).toBe(LinearPostState.Pending);
+    expect(rows()[0]?.lastError).toContain('without calling Linear');
+    expect(rows()[0]?.lastError).not.toContain("isn't signed in");
+    // The account is not taken as signed out: the retry gets a session, and its write and report tools.
+    clock.advance(5 * 60_000);
+    await expect
+      .poll(
+        () => {
+          clock.advance(0);
+          return rows()[0]?.state;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(LinearPostState.Recorded);
   });
 
   it('does not take the account as signed out when a run that made no Linear call left nothing to hold', async () => {

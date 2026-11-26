@@ -44,6 +44,10 @@ export const EventType = {
   PassPreviewMended: 'pass.preview_mended',
   WorkstreamCreated: 'workstream.created',
   WorkstreamChanged: 'workstream.changed',
+  /** A run changed an eval suite's definition file (`EvalDefinitionChangedData`). */
+  EvalDefinitionChanged: 'eval.definition_changed',
+  /** A live eval run started or ended (`EvalLiveRunChangedData`). */
+  EvalLiveRunChanged: 'eval.live_run_changed',
   /** What a queued run waits for changed (`data.wait`, a `QueueWait` or null); nothing was written to its row. */
   WorkstreamWaitChanged: 'workstream.wait_changed',
   SessionStarted: 'session.started',

@@ -17,8 +17,20 @@ function run(over: Partial<ReporterRun> = {}): ReporterRun {
     readOnly: false,
     linearPrefixes: [L],
     link,
+<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
     direct: false,
     comments: new Map(),
+||||||| 06c94a09a
+    prUrl: PR,
+    pictures: [],
+    withheld: new Set(),
+=======
+    prUrl: PR,
+    pictures: [],
+    withheld: new Set(),
+    noteSteers: false,
+    pickedStatuses: new Set(),
+>>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
     ...over,
   };
 }
@@ -95,6 +107,7 @@ describe('judgeReporterCall', () => {
       'deny',
     ],
     [
+<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
       'a comment when 10db writes them itself',
       { ...staged('hi'), direct: true },
       call(`${L}save_comment`, { issueId: 'iss-119', body: 'hi' }),
@@ -104,9 +117,35 @@ describe('judgeReporterCall', () => {
     [
       'save_issue state',
       run(),
+||||||| 06c94a09a
+      'save_issue state',
+      run(),
+=======
+      'save_issue state 10db picked',
+      run({ pickedStatuses: new Set(['In Review']) }),
+>>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
       call(`${L}save_issue`, { id: 'iss-119', state: 'In Review' }),
       'deny',
     ],
+    [
+      'save_issue state 10db did not pick',
+      run({ pickedStatuses: new Set(['In Progress']) }),
+      call(`${L}save_issue`, { id: 'iss-119', state: 'In Review' }),
+      'deny',
+    ],
+    [
+      'save_issue state before any pick',
+      run(),
+      call(`${L}save_issue`, { id: 'iss-119', state: 'In Progress' }),
+      'deny',
+    ],
+    [
+      'save_issue state a steering note names',
+      run({ noteSteers: true }),
+      call(`${L}save_issue`, { id: 'iss-119', state: 'Ready for Release' }),
+      'allow',
+    ],
+    ['pick tool', run(), call('mcp__10db__pick_linear_status', {}), 'allow'],
     [
       'save_issue 10db link',
       run(),

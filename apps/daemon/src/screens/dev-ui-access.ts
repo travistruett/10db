@@ -103,6 +103,10 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/system': 'A system check runs commands on the machine.',
   '/github': 'A GitHub status check runs gh on the machine.',
   '/workstreams/:id/changes': "A lane's changes are read by running git in its copy.",
+  '/projects/:projectId/eval-markers':
+    "A task's suites are read from result files in the checkout, which a lane's pass may be writing.",
+  '/tasks/:taskId/eval-coverage':
+    "A task's suites are read from result files in the checkout, which a lane's pass may be writing.",
   '/workstreams/:id/watchpoint-hits':
     "A run's hunks and the agent's notes are text the lane wrote, which the preview's agent-editable code must not read.",
   '/workstreams/:id/skips':
@@ -129,6 +133,9 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/health': 'Open to every caller; it needs no token.',
   '/sharing': "Sharing's status names the tailnet name and the host's login, kept to the 10db app.",
   '/devices': 'The paired devices are kept to the 10db app.',
+  '/push/key': "The host's push key is for a paired phone's subscribe, not for a screen.",
+  '/app': "The phone app's page is served to the share listener's devices, not to a screen.",
+  '/app/*': "The phone app's files are served to the share listener's devices, not to a screen.",
   '/chats': "A chat is the builder's own words to an agent, kept to the 10db app.",
   '/chats/recent': "A chat is the builder's own words to an agent, kept to the 10db app.",
   '/chats/search': "A chat is the builder's own words to an agent, kept to the 10db app.",

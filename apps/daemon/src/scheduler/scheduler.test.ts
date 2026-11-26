@@ -685,7 +685,14 @@ describe('scheduler', () => {
     const waiting = add(dep.project, ['api'], [dep.task.id]);
     const waits = createQueueWaits({ state, clock });
     const s = scheduler(undefined, undefined, undefined, waits);
-    const sweep = createStallSweep({ state, inbox, waits, clock, logger: silentLogger });
+    const sweep = createStallSweep({
+      state,
+      inbox,
+      waits,
+      held: () => held,
+      clock,
+      logger: silentLogger,
+    });
     const rows = () => ({
       runs: store.db.select().from(schema.workstreams).all(),
       batches: store.db.select().from(schema.batches).all(),
@@ -723,6 +730,34 @@ describe('scheduler', () => {
     expect(listInbox(store.db, { states: ['OPEN'] }).filter((c) => c.id === stuck[0]?.id)).toEqual(
       [],
     );
+  });
+
+  it('flags a started run Stuck only for silence after the hold that kept it waiting, and after the daemon start', async () => {
+    queue();
+    const waits = createQueueWaits({ state, clock });
+    await scheduler(undefined, undefined, undefined, waits).tick();
+    const sweep = createStallSweep({
+      state,
+      inbox,
+      waits,
+      held: () => held,
+      clock,
+      logger: silentLogger,
+    });
+    const openStuck = () =>
+      listInbox(store.db, { states: ['OPEN'] }).filter((c) => c.title.startsWith('Stuck:'));
+    // The run sat STARTING for hours while the load guard held, and its session launched just now.
+    held = true;
+    clock.advance(3 * 60 * 60_000);
+    sweep.sweep();
+    held = false;
+    clock.advance(60_000);
+    sweep.sweep();
+    expect(openStuck()).toHaveLength(0);
+    // With a lane and no activity, it is flagged as before.
+    clock.advance(21 * 60_000);
+    sweep.sweep();
+    expect(openStuck()).toHaveLength(1);
   });
 
   it('leases with a fresh fence and renews the lease on the heartbeat', async () => {

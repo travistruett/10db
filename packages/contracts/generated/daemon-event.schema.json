@@ -34,6 +34,8 @@
         "pass.preview_mended",
         "workstream.created",
         "workstream.changed",
+        "eval.definition_changed",
+        "eval.live_run_changed",
         "workstream.wait_changed",
         "session.started",
         "session.activity",

@@ -1,6 +1,7 @@
 import {
   BatchState,
   ClaimKind,
+  CopyStep,
   Delivery,
   isTerminal,
   passHeldAreas,
@@ -32,6 +33,8 @@ import {
   acquireLease,
   claimRequestsForTask,
   copyHazardNames,
+  copyInProgressOf,
+  getLocalCopy,
   countLanes,
   dependencyWaits,
   findOpenPass,
@@ -429,6 +432,15 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     });
   }
 
+  /** Why a run's batch is not open: its copy waits for the copy in progress, or is being cut. */
+  function copyWait(batch: BatchDto | null): FoundWait {
+    const waiting =
+      batch !== null && getLocalCopy(db, batch.id)?.step === CopyStep.Queued
+        ? (copyInProgressOf(db, batch.projectId) ?? null)
+        : undefined;
+    return queueWait.copy(batch, waiting);
+  }
+
   /**
    * The wait of a queued run that can't end by itself, if it has one: a dependency that ended or
    * waits for this run, a batch that is over, or a claim a finished run still holds.
@@ -674,7 +686,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
             ws.id,
             batch !== null &&
               (batch.state !== BatchState.Open || batch.branch === null || batch.baseSha === null)
-              ? queueWait.copy(batch)
+              ? copyWait(batch)
               : queueWait.checkout("for its checkout's branch to be read"),
           );
           continue;
@@ -694,7 +706,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
           continue;
         }
         if (verdict !== LaunchVerdict.Launch) {
-          found(ws.id, queueWait.copy(batch));
+          found(ws.id, copyWait(batch));
           continue;
         }
         if (batch) {

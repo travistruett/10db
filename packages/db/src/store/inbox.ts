@@ -326,6 +326,30 @@ export function hasAnsweredByFoldKey(db: DbReader, projectId: ProjectId, foldKey
   return row !== undefined;
 }
 
+/**
+ * The cards of the project with this fold key that the builder answered, newest first, for a
+ * caller that reads what an answer covered.
+ */
+export function listAnsweredByFoldKey(
+  db: DbReader,
+  projectId: ProjectId,
+  foldKey: string,
+): InboxItemDto[] {
+  return db
+    .select()
+    .from(schema.inboxItems)
+    .where(
+      and(
+        eq(schema.inboxItems.projectId, projectId),
+        eq(schema.inboxItems.foldKey, foldKey),
+        inArray(schema.inboxItems.state, ANSWERED_STATES),
+      ),
+    )
+    .orderBy(desc(schema.inboxItems.createdAt), desc(schema.inboxItems.id))
+    .all()
+    .map((row) => toInboxItemDto(db, row));
+}
+
 export function updateInboxItem(
   ctx: WriteContext,
   id: InboxItemId,

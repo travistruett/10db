@@ -1,5 +1,13 @@
+<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
 import type { ExternalLink, LinearPostId } from '@10db/contracts';
 import { Provider } from '@10db/contracts';
+||||||| 06c94a09a
+import type { ExternalLink } from '@10db/contracts';
+import { Provider } from '@10db/contracts';
+=======
+import type { ExternalLink } from '@10db/contracts';
+import { Provider, ReporterToolName } from '@10db/contracts';
+>>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
 import type { GuardVerdict } from '../guard';
 import { mcpToolPrefix } from '../sessions';
 import { OUTBOUND_PATTERNS, SECRET_PATTERN_NAMES } from '../stakeholders';
@@ -7,7 +15,20 @@ import { OUTBOUND_PATTERNS, SECRET_PATTERN_NAMES } from '../stakeholders';
 /** The claude.ai connector's prefix, used whenever the connector list is unread. */
 const CONNECTOR_PREFIX = 'mcp__claude_ai_Linear__';
 
+<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
 const REPORT_TOOLS: ReadonlySet<string> = new Set(['mcp__10db__report_linear_post']);
+||||||| 06c94a09a
+const REPORT_TOOLS: ReadonlySet<string> = new Set(['mcp__10db__report_linear_post']);
+/** The upload tool, allowed only in a run that was offered pictures. */
+const UPLOAD_TOOL = 'mcp__10db__upload_linear_picture';
+=======
+const REPORT_TOOLS: ReadonlySet<string> = new Set([
+  `mcp__10db__${ReporterToolName.ReportLinearPost}`,
+  `mcp__10db__${ReporterToolName.PickLinearStatus}`,
+]);
+/** The upload tool, allowed only in a run that was offered pictures. */
+const UPLOAD_TOOL = 'mcp__10db__upload_linear_picture';
+>>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
 
 /** Linear tools that only read. `extract_images` is left out: it fetches URLs. */
 const LINEAR_READS: ReadonlySet<string> = new Set([
@@ -41,6 +62,7 @@ export interface ReporterRun {
   readonly readOnly: boolean;
   readonly linearPrefixes: readonly string[];
   readonly link: ExternalLink;
+<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
   /**
    * 10db writes the comments itself, through the account's Linear server: the agent calls no Linear write.
    * When false, the agent's `save_comment` carries the text 10db built.
@@ -48,6 +70,25 @@ export interface ReporterRun {
   readonly direct: boolean;
   /** Per owed update, the comment 10db built from the agent's body: the only comment text the run may write. */
   readonly comments: Map<LinearPostId, StagedComment>;
+||||||| 06c94a09a
+  /** The task's PR: the only URL a `10db` link may point at. */
+  readonly prUrl: string | null;
+  /** The pictures the brief offered this run; the only files it may upload. */
+  readonly pictures: readonly ReporterPicture[];
+  /** Pattern names refused this run. */
+  readonly withheld: Set<string>;
+=======
+  /** The task's PR: the only URL a `10db` link may point at. */
+  readonly prUrl: string | null;
+  /** The pictures the brief offered this run; the only files it may upload. */
+  readonly pictures: readonly ReporterPicture[];
+  /** Pattern names refused this run. */
+  readonly withheld: Set<string>;
+  /** The project's note steers status choices, so a status set is the agent's to choose, not 10db's pick. */
+  readonly noteSteers: boolean;
+  /** The statuses 10db picked this run (`pick_linear_status`): with no steering note, the only ones that may be set. */
+  readonly pickedStatuses: Set<string>;
+>>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
 }
 
 const allow = (): GuardVerdict => ({ decision: 'allow' });
@@ -102,6 +143,7 @@ function judgeWrite(
       `${tool} takes only ${allowed.join(', ')}; it was given ${extra.join(', ')} too. Send exactly the arguments report_linear_post returned.`,
     );
   switch (tool) {
+<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
     case 'save_comment': {
       if (run.direct)
         return refuse(
@@ -129,6 +171,45 @@ function judgeWrite(
           `the comment for ${built[0]?.[0] ?? 'this update'} was already written; do not write it again.`,
         );
       return { wrote: staged[0] };
+||||||| 06c94a09a
+    case 'save_issue': {
+      if (field(input, 'id') !== issueId) return 'wrong issue';
+      const state = field(input, 'state');
+      if (state !== undefined && typeof state !== 'string') return 'unlisted key';
+      if ('links' in input) {
+        const links = field(input, 'links');
+        const entry = Array.isArray(links) && links.length === 1 ? asRecord(links[0]) : null;
+        if (
+          entry === null ||
+          run.prUrl === null ||
+          field(entry, 'title') !== '10db' ||
+          field(entry, 'url') !== run.prUrl ||
+          Object.keys(entry).some((k) => k !== 'title' && k !== 'url')
+        )
+          return 'links';
+      }
+      return null;
+=======
+    case 'save_issue': {
+      if (field(input, 'id') !== issueId) return 'wrong issue';
+      const state = field(input, 'state');
+      if (state !== undefined && typeof state !== 'string') return 'unlisted key';
+      if (typeof state === 'string' && !run.noteSteers && !run.pickedStatuses.has(state))
+        return 'status not picked';
+      if ('links' in input) {
+        const links = field(input, 'links');
+        const entry = Array.isArray(links) && links.length === 1 ? asRecord(links[0]) : null;
+        if (
+          entry === null ||
+          run.prUrl === null ||
+          field(entry, 'title') !== '10db' ||
+          field(entry, 'url') !== run.prUrl ||
+          Object.keys(entry).some((k) => k !== 'title' && k !== 'url')
+        )
+          return 'links';
+      }
+      return null;
+>>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
     }
     default:
       return refuse(`${tool} is not a tool this run may call.`);
@@ -211,6 +292,29 @@ export function judgeReporterCall(
   return judged.wrote === undefined
     ? { verdict: allow() }
     : { verdict: allow(), wrote: judged.wrote };
+}
+
+/** The Linear tools a posting run's brief names: what an update reads and writes. */
+const POSTING_LINEAR_TOOLS: readonly string[] = [
+  'get_issue',
+  'list_comments',
+  'list_issue_statuses',
+  'save_comment',
+  'save_issue',
+];
+
+/**
+ * The full names of the tools a run needs, from the rule's own lists: a snapshot's reads, or a posting run's reads,
+ * writes and report tool, with the upload tools only when it was offered pictures. The brief names them so a
+ * session whose tools are deferred searches for them by name.
+ */
+export function runToolNames(run: Readonly<ReporterRun>): string[] {
+  const pictures = run.pictures.length > 0;
+  const linear = run.readOnly
+    ? [...SNAPSHOT_READS]
+    : [...POSTING_LINEAR_TOOLS, ...(pictures ? ['prepare_file_upload'] : [])];
+  const tenDb = run.readOnly ? [] : [...REPORT_TOOLS, ...(pictures ? [UPLOAD_TOOL] : [])];
+  return [...run.linearPrefixes.flatMap((prefix) => linear.map((tool) => prefix + tool)), ...tenDb];
 }
 
 /**

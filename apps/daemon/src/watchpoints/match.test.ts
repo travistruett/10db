@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   effectiveWatchpoints,
   isNoisyWatchpoint,
+  Watchpoint as WatchpointSchema,
   revisedWatchpoints,
   STARTER_REVISION,
   STARTER_WATCHPOINTS,
@@ -10,6 +11,10 @@ import {
   type Watchpoint,
   type WatchpointFileHit,
 } from '@10db/contracts';
+import { evalDefinitionSource } from './eval-definition-source';
+import { lineChecks } from './covers';
+import { runChecks } from './line-verdicts';
+import { watchpointHitsAfter } from './hits-after';
 import { matchWatchpoints } from './match';
 import { splitPatch } from './split-patch';
 
@@ -18,6 +23,7 @@ const watchpoint = (key: string, globs: string[], over: Partial<Watchpoint> = {}
   label: key,
   why: `why ${key}`,
   globs,
+  lines: [],
   guidance: `check ${key}`,
   loudness: WatchpointLoudness.Show,
   starter: null,
@@ -72,6 +78,104 @@ describe('matchWatchpoints', () => {
       guidance: 'check migrations',
       loudness: 'ask',
     });
+  });
+});
+
+describe('matchWatchpoints with line patterns', () => {
+  const patch = (path: string, body: string[]): string =>
+    [
+      `diff --git a/${path} b/${path}`,
+      `--- a/${path}`,
+      `+++ b/${path}`,
+      '@@ -1,3 +1,3 @@',
+      ...body,
+    ].join('\n') + '\n';
+  const lined = watchpoint('lined', ['src/**'], { lines: ['\\bfoo\\b'] });
+  const hitPaths = (files: WatchpointFileHit[], w: Watchpoint = lined) =>
+    matchWatchpoints(files, [w], runChecks(lineChecks(files, [w]))).flatMap((h) =>
+      h.files.map((f) => f.path),
+    );
+
+  it('hits on a matching added or removed line, in any case', () => {
+    expect(hitPaths([file('src/a.ts', { patch: patch('src/a.ts', ['+let FOO = 1;']) })])).toEqual([
+      'src/a.ts',
+    ]);
+    expect(hitPaths([file('src/b.ts', { patch: patch('src/b.ts', ['-call(foo)']) })])).toEqual([
+      'src/b.ts',
+    ]);
+  });
+
+  it('does not hit on a context line, a header, or a covered file with no matching line', () => {
+    expect(
+      hitPaths([file('src/c.ts', { patch: patch('src/c.ts', [' foo stays', '+bar']) })]),
+    ).toEqual([]);
+    expect(hitPaths([file('src/foo.ts', { patch: patch('src/foo.ts', ['+bar']) })])).toEqual([]);
+    expect(hitPaths([file('docs/a.md', { patch: patch('docs/a.md', ['+foo']) })])).toEqual([]);
+  });
+
+  it('hits Indexes on CREATE UNIQUE INDEX in a migration, and Model choice on a model id in code', () => {
+    const starter = (key: string): Watchpoint => {
+      const found = STARTER_WATCHPOINTS.find((w) => w.key === key);
+      if (found === undefined) throw new Error(`no ${key} starter`);
+      return found;
+    };
+    const sql = 'db/migrations/0002.sql';
+    expect(
+      hitPaths(
+        [file(sql, { patch: patch(sql, ['+CREATE UNIQUE INDEX ix_a ON t (a);']) })],
+        starter('indexes'),
+      ),
+    ).toEqual([sql]);
+    expect(
+      hitPaths(
+        [file('src/x.ts', { patch: patch('src/x.ts', ["+const m = 'claude-sonnet-5-5';"]) })],
+        starter('model-choice'),
+      ),
+    ).toEqual(['src/x.ts']);
+  });
+
+  it('counts a clipped file with no matching line for an ask watchpoint, and not for a show one', () => {
+    const cut = file('src/d.ts', { patch: patch('src/d.ts', ['+bar']), clipped: true });
+    const unread = file('src/e.ts', { patch: '', clipped: true });
+    const asking = { ...lined, loudness: WatchpointLoudness.Ask };
+    expect(hitPaths([cut, unread], asking)).toEqual(['src/d.ts', 'src/e.ts']);
+    expect(hitPaths([cut, unread])).toEqual([]);
+    expect(hitPaths([file('src/f.ts', { patch: patch('src/f.ts', ['+bar']) })], asking)).toEqual(
+      [],
+    );
+  });
+
+  it('reads CRLF lines to their end, and fails closed on a cut line or an unanswered pattern', () => {
+    const ends = watchpoint('ends', ['src/**'], { lines: ['foo$'] });
+    const crlf = file('src/g.ts', { patch: patch('src/g.ts', ['+let foo\r']) });
+    expect(hitPaths([crlf], ends)).toEqual(['src/g.ts']);
+    const asking = { ...lined, loudness: WatchpointLoudness.Ask };
+    const long = file('src/h.ts', { patch: patch('src/h.ts', [`+${'x'.repeat(2500)}`]) });
+    expect(hitPaths([long], asking)).toEqual(['src/h.ts']);
+    expect(hitPaths([long])).toEqual([]);
+    const plain = file('src/i.ts', { patch: patch('src/i.ts', ['+bar']) });
+    // No verdict at all, as when the worker timed out: ask counts the file, show does not.
+    expect(matchWatchpoints([plain], [asking]).length).toBe(1);
+    expect(matchWatchpoints([plain], [lined])).toEqual([]);
+  });
+
+  it('counts a binary or hidden file of an ask watchpoint, whose lines could not be read', () => {
+    const asking = { ...lined, loudness: WatchpointLoudness.Ask };
+    const hidden = (path: string, over: Partial<WatchpointFileHit>) =>
+      file(path, {
+        patch: `diff --git a/${path} b/${path}\nBinary files a/${path} and b/${path} differ\n`,
+        ...over,
+      });
+    const binary = hidden('src/b.bin', { added: null, removed: null });
+    expect(hitPaths([binary], asking)).toEqual(['src/b.bin']);
+    expect(hitPaths([binary])).toEqual([]);
+    expect(hitPaths([hidden('src/mode.sh', { added: 0, removed: 0 })], asking)).toEqual([]);
+  });
+
+  it('reads a stored watchpoint with no lines as having none', () => {
+    const stored: Record<string, unknown> = { ...watchpoint('old', ['a/**']) };
+    delete stored['lines'];
+    expect(WatchpointSchema.parse(stored).lines).toEqual([]);
   });
 });
 
@@ -216,5 +320,65 @@ describe('isNoisyWatchpoint', () => {
     expect(isNoisyWatchpoint({ cards: 4, waved: 4 })).toBe(false);
     expect(isNoisyWatchpoint({ cards: 6, waved: 5 })).toBe(true);
     expect(isNoisyWatchpoint({ cards: 5, waved: 3 })).toBe(false);
+  });
+});
+
+describe('evalDefinitionSource', () => {
+  it('shows a definition file no watchpoint covers under the evals watchpoint beside one it covers', () => {
+    const evals = watchpoint('evals', ['**/evals/**']);
+    const source = evalDefinitionSource(
+      new Map([
+        ['evals/gate.py', 'gate'],
+        ['tests/llm/cases.jsonl', 'cases'],
+      ]),
+    );
+    const hits = source([file('evals/gate.py'), file('tests/llm/cases.jsonl')], [evals], new Map());
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.files.map((f) => f.path)).toEqual(['evals/gate.py', 'tests/llm/cases.jsonl']);
+  });
+});
+
+describe('watchpointHitsAfter with line patterns', () => {
+  it('keeps an ask file the scan never reached when its own read then shows the line', async () => {
+    const patch = (path: string, body: string[]): string =>
+      [
+        `diff --git a/${path} b/${path}`,
+        'index 1..2 100644',
+        `--- a/${path}`,
+        `+++ b/${path}`,
+        '@@ -1 +1 @@',
+        ...body,
+      ].join('\n') + '\n';
+    const filler = Array.from(
+      { length: 280 },
+      (_, i) => `+-- harmless filler line number ${String(i)} ${'x'.repeat(48)}`,
+    );
+    const texts = new Map<string, string>();
+    for (let i = 0; i < 29; i++) {
+      const path = `db/f${String(i).padStart(2, '0')}.sql`;
+      texts.set(path, patch(path, filler));
+    }
+    texts.set('db/m.sql', patch('db/m.sql', ['+CREATE INDEX idx_users ON users (email);']));
+    const read = (only: readonly string[] | null, maxBytes: number) => {
+      const buffer = Buffer.from((only ?? []).map((p) => texts.get(p) ?? '').join(''), 'utf8');
+      return Promise.resolve({
+        diff: buffer.subarray(0, maxBytes).toString('utf8'),
+        truncated: buffer.length > maxBytes,
+        files: [...texts.keys()].map((path) => ({ path, added: 1, removed: 0 })),
+      });
+    };
+    const detail = await watchpointHitsAfter({
+      watchpoints: [
+        watchpoint('indexes', ['db/**'], {
+          loudness: WatchpointLoudness.Ask,
+          lines: ['create\\s+index'],
+        }),
+      ],
+      head: 'abc',
+      read,
+      readLines: (checks) => Promise.resolve(runChecks(checks)),
+    });
+    const paths = detail.hits.flatMap((h) => h.files.map((f) => f.path));
+    expect(paths).toContain('db/m.sql');
   });
 });

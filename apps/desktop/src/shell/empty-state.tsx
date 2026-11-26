@@ -1,4 +1,4 @@
-import { Button, Paper, Stack, Text, ThemeIcon, Title } from '@mantine/core';
+import { Button, Group, Paper, Stack, Text, ThemeIcon, Title } from '@mantine/core';
 import type { Icon } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 
@@ -6,6 +6,8 @@ import type { ReactNode } from 'react';
 export interface EmptyStateAction {
   readonly label: string;
   readonly icon?: Icon;
+  /** `filled` for the page's main step; the default is the quiet one. */
+  readonly emphasis?: 'filled' | 'quiet';
   readonly onClick: () => void;
 }
 
@@ -19,12 +21,15 @@ export function EmptyState({
   title,
   children,
   action,
+  extra,
 }: {
   readonly icon: Icon;
   readonly title: string;
   /** One line on why it is empty. */
   readonly children?: ReactNode;
   readonly action?: EmptyStateAction;
+  /** A second step beside the action, for a place with two ways to fill it. */
+  readonly extra?: ReactNode;
 }) {
   const ActionIcon = action?.icon;
   const left = ActionIcon === undefined ? undefined : <ActionIcon size={16} stroke={1.75} />;
@@ -46,10 +51,19 @@ export function EmptyState({
             {children}
           </Text>
         )}
-        {action === undefined ? null : (
-          <Button mt="xs" variant="light" leftSection={left} onClick={action.onClick}>
-            {action.label}
-          </Button>
+        {action === undefined && extra === undefined ? null : (
+          <Group mt="xs" gap="sm" justify="center">
+            {action === undefined ? null : (
+              <Button
+                variant={action.emphasis === 'filled' ? 'filled' : 'light'}
+                leftSection={left}
+                onClick={action.onClick}
+              >
+                {action.label}
+              </Button>
+            )}
+            {extra}
+          </Group>
         )}
       </Stack>
     </Paper>

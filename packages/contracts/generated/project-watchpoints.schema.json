@@ -29,6 +29,16 @@
               "minLength": 1
             }
           },
+          "lines": {
+            "default": [],
+            "maxItems": 16,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
           "guidance": {
             "type": "string",
             "maxLength": 2000

@@ -49,6 +49,7 @@ import { shapeKeys } from './shape-queries';
 import { linearPostKeys } from './linear-queries';
 import { designCheckKeys, screenKeys } from './screen-queries';
 import { skipKeys } from './skip-queries';
+import { evalMarkerKeys } from './evals-queries';
 import { watchpointKeys } from './watchpoint-queries';
 import { statusKeys } from './status-queries';
 import {
@@ -159,7 +160,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   claim: [...WORK, CANDIDATES],
   handoff: WORK,
   // A run's watchpoint reading is an evidence row, so its For You section follows it.
-  evidence: [...WORK, watchpointKeys.hits, watchpointKeys.allStats],
+  // A covered suite's marker is one too.
+  evidence: [...WORK, watchpointKeys.hits, watchpointKeys.allStats, evalMarkerKeys.all],
   // An account pause moves workstreams, which send their own events.
   account: [accountKeys.all, modelKeys.all],
   inbox: [
@@ -208,6 +210,8 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'task.screen_added': [screenKeys.all],
   // The reporter's update on a task's Linear issue was owed, recorded, withheld or failed.
   'linear_post.changed': [linearPostKeys.all],
+  // A live eval run started or ended: its suite's runs, and a covered task's "not run", read again.
+  'eval.live_run_changed': [evalsKeys.all, evalMarkerKeys.all],
   // A notice that asks nothing joined Activity, and its task's drawer lists it.
   'notice.posted': [activityKeys.all],
   // A turn began or ended: what streams is read again, so an item that finished leaves it, and what the turn
@@ -222,6 +226,16 @@ export function eventStreamUrl(conn: DaemonConnection, after: number, ticket: st
   url.searchParams.set('after', String(after));
   url.searchParams.set('ticket', ticket);
   return url.toString();
+}
+
+const eventListeners = new Set<(event: DaemonEvent) => void>();
+
+/** Hears every event the window's one stream receives (a dialog waiting on one thing), without a stream of its own. */
+export function subscribeToEvents(listener: (event: DaemonEvent) => void): () => void {
+  eventListeners.add(listener);
+  return () => {
+    eventListeners.delete(listener);
+  };
 }
 
 /**
@@ -289,6 +303,7 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       // One arrives per tool call: a pass lane's is written into its page, never refetched.
       if (event.type === EventType.SessionActivity) writePassActivity(queryClient, event);
       listener.current?.(event);
+      for (const heard of eventListeners) heard(event);
     }
 
     function retry(): void {

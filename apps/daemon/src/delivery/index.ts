@@ -24,6 +24,7 @@ export { reserveGitNaming } from './folder-wait';
 export { DEFAULT_DELIVERY_LIMITS, type DeliveryContext, type DeliveryLimits } from './context';
 export { createDeliveryJobs, jobKey, JobQueue, type DeliveryJobs } from './jobs';
 export { createBatchStarter, type BatchStarter } from './start';
+export { subscribeCopyQueue } from './copy-queue';
 export {
   newPageTasks,
   openPass,

@@ -146,6 +146,11 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
               {`+${String(row.globs.length - SHOWN_GLOBS)} more`}
             </Text>
           ) : null}
+          {row.lines.length > 0 ? (
+            <Text size="xs" c="dimmed">
+              {`+ ${String(row.lines.length)} line pattern${row.lines.length === 1 ? '' : 's'}`}
+            </Text>
+          ) : null}
         </Stack>
       ),
     },

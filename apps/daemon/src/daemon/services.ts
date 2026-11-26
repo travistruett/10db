@@ -8,6 +8,7 @@ import {
   RigorSource,
   powersDecisions,
   type AcceptanceFigures,
+  type EvalsDto,
   TaskKindSource,
   type Rigor,
   type TaskDto,
@@ -177,7 +178,7 @@ import { dropPendingPageLabels } from './page-label-guess';
 import { adoptGoal } from '../goals';
 import { classifyPath } from '../guard';
 import { taskSession } from '../chat';
-import type { EvalsService } from '../evals';
+import { suitesOfTasks, type EvalLiveRuns, type EvalsAssessor, type EvalsService } from '../evals';
 import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
@@ -412,6 +413,10 @@ export function createServices(deps: {
   readonly hazards: Pick<HazardAssessor, 'assess'>;
   /** Reads each project's committed eval results and keeps the manifest an agent recorded. */
   readonly evals: EvalsService;
+  /** Assesses each project's evals with a model, on add, on a commit to eval files, and on request. */
+  readonly evalsAssessor: Pick<EvalsAssessor, 'assess' | 'status'>;
+  /** Runs a suite's live arm when the builder presses Run. */
+  readonly evalLive: EvalLiveRuns;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
   /** Settings › Trust: the switches, the builder's plugins and each project's preview. */
@@ -516,6 +521,11 @@ export function createServices(deps: {
       'new tasks',
     );
   }
+  /** What was found of a project's evals, with where 10db's own assessment of them stands. */
+  async function readEvalsPage(projectId: ProjectId): Promise<EvalsDto> {
+    const read = await deps.evals.read(projectId, getProject(db, projectId).repoPath);
+    return { ...read, assessment: deps.evalsAssessor.status(projectId) };
+  }
   return {
     listProjects: () => listProjectViews(db),
     listArchivedProjects: () => listArchivedProjects(db),
@@ -527,6 +537,8 @@ export function createServices(deps: {
       deps.state.write((ctx) => {
         archiveProject(ctx, projectId);
       });
+      // A live eval is the builder's spend in this checkout: it ends with the project's work, its stop command run in the background.
+      void deps.evalLive.stopProject(projectId);
     },
     restoreProject(projectId) {
       deps.state.write((ctx) => {
@@ -982,14 +994,53 @@ export function createServices(deps: {
       getProject(db, projectId);
       return hazardAssessmentDto(db, projectId);
     },
-    evals(projectId) {
-      return deps.evals.read(projectId, getProject(db, projectId).repoPath);
+    evals: (projectId) => readEvalsPage(projectId),
+    async assessEvals(projectId) {
+      getProject(db, projectId);
+      await deps.evalsAssessor.assess(projectId);
+      return readEvalsPage(projectId);
     },
     evalModels(projectId) {
       return deps.evals.models(projectId, getProject(db, projectId).repoPath);
     },
+    async evalMarkers(projectId) {
+      const found = await suitesOfTasks(
+        db,
+        deps.evals,
+        getProject(db, projectId).repoPath,
+        listTasks(db, projectId),
+      );
+      return {
+        tasks: Object.fromEntries(
+          [...found].map(([taskId, suites]) => [
+            taskId,
+            suites.map((s) => ({ suiteKey: s.suiteKey, label: s.label, state: s.state })),
+          ]),
+        ),
+      };
+    },
+    async taskEvalCoverage(taskId) {
+      const task = getTask(db, taskId);
+      const found = await suitesOfTasks(db, deps.evals, getProject(db, task.projectId).repoPath, [
+        task,
+      ]);
+      return { suites: found.get(taskId) ?? [] };
+    },
     evalSuite(projectId, key, run) {
       return deps.evals.suite(projectId, getProject(db, projectId).repoPath, key, run);
+    },
+    evalLivePreview(projectId, suiteKey) {
+      return deps.evalLive.preview(projectId, suiteKey);
+    },
+    startEvalLive(projectId, suiteKey, previewHash) {
+      return deps.evalLive.start(projectId, suiteKey, previewHash);
+    },
+    stopEvalLive(projectId, runId) {
+      return deps.evalLive.stop(projectId, runId);
+    },
+    evalLiveRuns(projectId, suiteKey) {
+      getProject(db, projectId);
+      return deps.evalLive.list(projectId, suiteKey);
     },
     recordEvalManifest(projectId, manifest) {
       return deps.evals.record(projectId, getProject(db, projectId).repoPath, manifest);

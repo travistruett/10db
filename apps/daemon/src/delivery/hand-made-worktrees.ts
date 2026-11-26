@@ -1,9 +1,12 @@
 import { existsSync, statSync } from 'node:fs';
-import { Delivery, type ProjectDto } from '@10db/contracts';
+import { dirname } from 'node:path';
+import { Delivery, type ProjectDto, type ProjectId } from '@10db/contracts';
 import {
   getInboxItem,
   hasAnsweredByFoldKey,
   listActiveProjects,
+  listAnsweredByFoldKey,
+  listOpenByFoldKeyPrefix,
   listOpenFlagRows,
   type DbReader,
 } from '@10db/db';
@@ -17,7 +20,7 @@ import {
 import { githubRepoOf, PrState } from '../github';
 import type { InboxService } from '../inbox';
 import { looseWork } from './build-output';
-import { detailOf } from './cards';
+import { detailOf, WorktreeChoice } from './cards';
 import { haveCommit } from './branch-sweep';
 import { ghCall, post, raise, withdraw, type DeliveryContext } from './context';
 import {
@@ -131,16 +134,56 @@ export async function offerHandMadeFolders(
           raise(ctx.inbox, project.id, handMadeCards.spotlight(folder));
       }
       const merged = await mergedHandMadeWorktrees(ctx, project, signal);
-      if (merged.length === 0) continue;
-      const key = handMadeKey.merged(merged);
-      if (!hasAnsweredByFoldKey(ctx.state.db, project.id, key))
-        raise(ctx.inbox, project.id, handMadeCards.merged(labelOf(folders), merged));
+      // A look the daemon's stop cut short found only part of the set.
+      if (signal.aborted) return;
+      withdrawOtherMergedCards(ctx, project.id);
+      if (merged.length === 0) withdraw(ctx.state, ctx.inbox, project.id, [handMadeKey.merged]);
+      else if (!allKept(ctx, project.id, merged))
+        raise(ctx.inbox, project.id, handMadeCards.merged(mergedFolder(folders, merged), merged));
     } catch (error) {
       if (signal.aborted) return;
       if (ghDown(error)) throw error;
       ctx.logger.warn({ projectId: project.id, err: detailOf(error) }, 'hand-made folder not read');
     }
   }
+}
+
+/**
+ * The folder a merged card names: the one folder its worktrees are in, else the directory the
+ * hand-made folders share, so the title says one place however many folders hold them.
+ */
+function mergedFolder(folders: readonly string[], merged: readonly MergedHandMade[]): string {
+  const holding = folders.filter((folder) => merged.some((w) => surelyInside(w.path, folder)));
+  const [first] = holding.length > 0 ? holding : folders;
+  if (first === undefined) return '';
+  return holding.length > 1 ? dirname(first) : first;
+}
+
+/** Withdraws the project's open merged cards under another key: ones raised once per set of worktrees. */
+function withdrawOtherMergedCards(ctx: DeliveryContext, projectId: ProjectId): void {
+  const others = listOpenByFoldKeyPrefix(ctx.state.db, MERGED_KEY_PREFIX).filter(
+    (card) => card.projectId === projectId && card.foldKey !== handMadeKey.merged,
+  );
+  withdraw(
+    ctx.state,
+    ctx.inbox,
+    projectId,
+    others.map((card) => card.foldKey),
+  );
+}
+
+/** Whether the builder answered Keep on the worktrees `merged` lists, each on a card they kept. */
+function allKept(
+  ctx: DeliveryContext,
+  projectId: ProjectId,
+  merged: readonly MergedHandMade[],
+): boolean {
+  const kept = new Set(
+    listAnsweredByFoldKey(ctx.state.db, projectId, handMadeKey.merged)
+      .filter((card) => card.answer?.choice === WorktreeChoice.Keep)
+      .flatMap((card) => mergedCardPaths(card) ?? []),
+  );
+  return merged.every((w) => kept.has(w.path));
 }
 
 /** The reason a merged-worktrees card closes by itself. */

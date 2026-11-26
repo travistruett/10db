@@ -19,6 +19,7 @@ import {
   enqueueLinearPost,
   getBatch,
   getInboxItem,
+  getLocalCopy,
   getTask,
   getWorkstream,
   getWorkstreamRow,
@@ -70,12 +71,19 @@ export interface LinearEventRead {
       readonly ends: number;
     }[];
   };
-  /** The batch a `batch.updated` names, its workstreams and its pull request. */
+  /** The batch a `batch.updated` names, its workstreams, its pull request and where it landed. */
   readonly batch?: {
     readonly prUrl: string | null;
     readonly prState: string | null;
+<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
     /** The batch is a local copy and has shipped: its finished runs landed in the project. */
     readonly shippedLocalCopy: boolean;
+||||||| 06c94a09a
+=======
+    readonly baseBranch: string;
+    /** The commit a local copy promoted onto the base; null for a batch that is not one. */
+    readonly landedSha: string | null;
+>>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
     readonly workstreams: readonly { readonly id: WorkstreamId; readonly taskId: TaskId }[];
   };
 }
@@ -176,15 +184,44 @@ export function linearRowOf(event: DaemonEvent, read: LinearEventRead): LinearRo
       }));
     const merged =
       Array.isArray(changed) && changed.includes('pr') && batch.prState === PullRequestState.Merged;
+<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
     // The landing is the merge, the one comment of that phase. A pull request that is only opened is told in the
     // end's comment, which names it and what waits on it.
     if (!merged) return [];
+||||||| 06c94a09a
+    const shipped = data['to'] === BatchState.Shipped;
+    if (!merged && !shipped) return [];
+    const kind = merged ? LinearEventKind.PrMerged : LinearEventKind.PrOpened;
+    const prefix = merged ? 'pr_merged' : 'pr_opened';
+=======
+    const shipped = data['to'] === BatchState.Shipped;
+    if (!merged && !shipped) return [];
+    // A batch that shipped with no pull request landed on its base: there is no pull request to name.
+    const landed = !merged && batch.prUrl === null;
+    const kind = merged
+      ? LinearEventKind.PrMerged
+      : landed
+        ? LinearEventKind.Landed
+        : LinearEventKind.PrOpened;
+>>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
     return batch.workstreams.map((w) => ({
       taskId: w.taskId,
       workstreamId: w.id,
+<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
       event: LinearEventKind.PrMerged,
       dedupeKey: `pr_merged:${event.entityId}`,
       detail: { workstreamId: w.id, prUrl: batch.prUrl },
+||||||| 06c94a09a
+      event: kind,
+      dedupeKey: `${prefix}:${event.entityId}`,
+      detail: { workstreamId: w.id, prUrl: batch.prUrl },
+=======
+      event: kind,
+      dedupeKey: `${kind}:${event.entityId}`,
+      detail: landed
+        ? { workstreamId: w.id, baseBranch: batch.baseBranch, commit: batch.landedSha }
+        : { workstreamId: w.id, prUrl: batch.prUrl },
+>>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
     }));
   }
   return [];
@@ -255,11 +292,25 @@ function readFor(db: DbReader, event: DaemonEvent): LinearEventRead {
       batch: {
         prUrl: batch.prUrl,
         prState: batch.pr?.state ?? null,
+<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
         shippedLocalCopy,
         workstreams: listWorkstreams(db, { batchId })
           // Only a run that finished landed; a failed or cancelled one did not.
           .filter((w) => !shippedLocalCopy || w.state === WorkstreamState.Done)
           .map((w) => ({ id: w.id, taskId: w.taskId })),
+||||||| 06c94a09a
+        workstreams: listWorkstreams(db, { batchId }).map((w) => ({
+          id: w.id,
+          taskId: w.taskId,
+        })),
+=======
+        baseBranch: batch.baseBranch,
+        landedSha: getLocalCopy(db, batchId)?.candidate ?? null,
+        workstreams: listWorkstreams(db, { batchId }).map((w) => ({
+          id: w.id,
+          taskId: w.taskId,
+        })),
+>>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
       },
     };
   }
