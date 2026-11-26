@@ -151,6 +151,7 @@ export async function startLiveDaemon(
       TENDB_CATALOGUE_SNAPSHOT: join(DAEMON_DIR, 'test/fixtures/catalogue.json'),
       TENDB_JUDGE: 'off',
       TENDB_SLACK: 'off',
+      TENDB_TAILSCALE: 'off',
       TENDB_WORKTREE_ROOT: join(work.path, 'worktrees'),
       // The daemon stops when this pipe closes, which is how it learns this test died.
       TENDB_PARENT_STDIN: '1',

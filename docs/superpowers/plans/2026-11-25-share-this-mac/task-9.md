@@ -12,7 +12,7 @@ in the index. Build `ServeStatus` from the shapes in "Serve facts"; parse only `
 **Mapping rules (pure)**
 
 - `isTendbMapping`: `Web["<fqdn>:<port>"].Handlers` has exactly one handler, `/`, whose `Proxy` is exactly
-  `http://127.0.0.1:<port>`, and the port has no `AllowFunnel` and no `TCP` entry. A variant that needs no name
+  `http://127.0.0.1:<port>`, and the port's `TCP` entry is exactly `{ "HTTPS": true }` (see "Serve facts") with no `AllowFunnel` for `<fqdn>:<port>`. A variant that needs no name
   (`loopbackMappingOn(serve, port)`: any `Web` key ending `:<port>` with that same single handler) is used only to
   remove 10db's mapping while the name is unknown.
 - `mappingProblem` returns Funnel, TCP or elsewhere (with the target) in that order, or null.
