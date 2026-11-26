@@ -530,7 +530,7 @@ export type EvalLivePreviewDto = z.infer<typeof EvalLivePreviewDto>;
 export const RunEvalLiveBody = z.strictObject({ previewHash: z.string().min(1).max(128) });
 export type RunEvalLiveBody = z.infer<typeof RunEvalLiveBody>;
 
-/** `eval.live_run_changed`: a live run started or ended. */
+/** `eval.live_run_changed`: a live run started, was asked to stop, or ended. */
 export const EvalLiveRunChangedData = z.object({
   projectId: ProjectId,
   suiteKey: EvalSuiteKey,

@@ -357,7 +357,8 @@ function History({
               ? '; the work in your containers may still be running'
               : ''}
           </Text>
-          {r.state === EvalLiveRunState.Running && (r.stopping || stop.variables === r.id) ? (
+          {r.state === EvalLiveRunState.Running &&
+          (r.stopping || (!stop.isError && stop.variables === r.id)) ? (
             <Text size="xs" c="dimmed">
               Stopping
             </Text>
