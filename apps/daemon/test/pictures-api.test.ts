@@ -169,6 +169,10 @@ describe("a task's pictures over HTTP", () => {
   });
 });
 
+// Value: protects=the sign-in check masks secrets, runs only against the project's own address, and
+// raises one card per project that the next success withdraws; fails_when=a token reaches output or a
+// card, a foreign address is signed in to, or a failure raises a second card;
+// why_new=core: secrets and the one-card-per-project rule; no_claim=a real project's login works.
 describe("a project's sign-in check", () => {
   const signInCards = async () =>
     (await api().get('/inbox?state=OPEN', z.array(InboxItemDto))).filter((i) =>
