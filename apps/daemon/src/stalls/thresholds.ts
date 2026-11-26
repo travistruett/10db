@@ -15,8 +15,9 @@ export const STALL = {
 
 /**
  * The queued waits that never count toward a Stuck card by time: each already has its own card or
- * status line, or is the builder's own choice. A wait that can never end counts at once, whatever its
- * kind.
+ * status line, or is the builder's own choice. A claim or a dependency is a run waiting its turn behind
+ * live work, which the Board's Waiting line already shows; a holder that stops moving is caught by the
+ * active-idle rule on the holder itself. A wait that can never end counts at once, whatever its kind.
  */
 export const UNCOUNTED_WAITS: ReadonlySet<QueueWaitKind> = new Set([
   QueueWaitKind.Lane,
@@ -26,4 +27,6 @@ export const UNCOUNTED_WAITS: ReadonlySet<QueueWaitKind> = new Set([
   QueueWaitKind.Pass,
   QueueWaitKind.Parked,
   QueueWaitKind.Copy,
+  QueueWaitKind.Claim,
+  QueueWaitKind.Dependency,
 ]);

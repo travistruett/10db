@@ -3,7 +3,9 @@
 The watchdog (`decisions/2026-11-25-queue-waits-live-in-the-scheduler.md`).
 
 - `thresholds.ts` holds every threshold (`STALL`) and the queued waits that never count by time
-  (`UNCOUNTED_WAITS`). Change them there only.
+  (`UNCOUNTED_WAITS`, which includes a claim or dependency wait that can still end: waiting one's turn behind
+  live work is not stuck, `decisions/2026-11-26-a-run-waiting-its-turn-behind-live-work-is-not-stuck.md`).
+  Change them there only.
 - `rules.ts` is pure: `findStalls` reads the queued runs with their waits, the active runs, the open, shipping
   and cutting batches with the latest run of each of their tasks, and the `since` of each open card. A batch
   stall replaces its members' run stalls. Its test is the rule table.

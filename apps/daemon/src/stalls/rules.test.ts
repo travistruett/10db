@@ -47,6 +47,16 @@ describe('findStalls', () => {
       ['a folder at 14 minutes', { kind: QueueWaitKind.Folder, since: ago(14) }, false],
       ['a folder at 16 minutes', { kind: QueueWaitKind.Folder, since: ago(16) }, true],
       [
+        'a claim held by live work for an hour',
+        { kind: QueueWaitKind.Claim, since: ago(60) },
+        false,
+      ],
+      [
+        'a dependency still running for an hour',
+        { kind: QueueWaitKind.Dependency, since: ago(60) },
+        false,
+      ],
+      [
         'a cancelled dependency',
         { kind: QueueWaitKind.Dependency, endless: true, on: { taskId: dep, workstreamId: null } },
         true,
