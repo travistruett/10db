@@ -1,2 +1,4 @@
 # A fake token in a test that proves the sign-in check masks it in its output; not a secret.
 0f0c5de304b324c25b47d798a4614636e7cf18cf:apps/daemon/test/pictures-api.test.ts:generic-api-key:163
+# The same fake token as staged in a merge or commit, which a scan of staged changes sees without a commit.
+apps/daemon/test/pictures-api.test.ts:generic-api-key:188
