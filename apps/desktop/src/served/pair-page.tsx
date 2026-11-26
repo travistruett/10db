@@ -78,8 +78,11 @@ export function PairPage() {
         <Stack gap="md" maw={420} w="100%">
           <Title order={2}>Paired with {stage.host}</Title>
           <Text size="sm">
-            This phone can now answer what needs you. Install the app to open it from your home
-            screen.
+            You're set. When an agent needs a decision, this phone buzzes and you can answer it from
+            wherever you are, without walking back to your Mac.
+          </Text>
+          <Text size="sm" c="dimmed">
+            Install 10db to open it from your home screen in one tap.
           </Text>
           {installOffer === null ? null : (
             <Button

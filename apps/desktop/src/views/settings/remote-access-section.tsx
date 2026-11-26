@@ -9,6 +9,7 @@ import {
   Accordion,
   Anchor,
   Badge,
+  Box,
   Button,
   CopyButton,
   Group,
@@ -55,7 +56,7 @@ function ExternalLink({ href, children }: { readonly href: string; readonly chil
     <Anchor
       component="button"
       type="button"
-      size="inherit"
+      inherit
       onClick={() => {
         openWebLink(href).catch(() => undefined);
       }}
@@ -137,7 +138,12 @@ function StepRow({
 }) {
   return (
     <Group align="flex-start" wrap="nowrap" gap="sm" px="md" py="sm" data-step={step.step}>
-      <StepMark status={step.status} />
+      <Box
+        h="calc(var(--mantine-font-size-sm) * var(--mantine-line-height-sm))"
+        style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}
+      >
+        <StepMark status={step.status} />
+      </Box>
       <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
         <Text size="sm" fw={500}>
           {title}
@@ -149,7 +155,7 @@ function StepRow({
             </Text>
           ),
         )}
-        {children}
+        {children === undefined ? null : <Box mt="xs">{children}</Box>}
       </Stack>
     </Group>
   );
@@ -367,29 +373,24 @@ function Checklist({ status }: { readonly status: SharingStatusDto }) {
   const beforeShare = status.steps.filter((s) => s.step !== SharingStep.Shared);
   const allOk = beforeShare.every((s) => s.status === SharingStepStatus.Ok);
   return (
-    <Stack gap="md">
-      <SettingsCard title="Set up" action={status.enabled ? <StopSharing /> : null}>
-        {beforeShare.map((step) =>
-          step.step === SharingStep.Certificate ? (
-            <CertificateStep key={step.step} step={step} status={status} />
-          ) : (
-            <PlainStep key={step.step} step={step} status={status} />
-          ),
-        )}
-      </SettingsCard>
-      {shared === undefined ? null : (
-        <SettingsCard title="Share on your tailnet">
-          <Stack gap="xs" px="md" py="sm">
-            <PortControl status={status} action="Share" disabled={!allOk} />
-            {allOk ? null : (
-              <Text size="xs" c="dimmed">
-                Waits for the certificate.
-              </Text>
-            )}
-          </Stack>
-        </SettingsCard>
+    <SettingsCard title="Set up" action={status.enabled ? <StopSharing /> : null}>
+      {beforeShare.map((step) =>
+        step.step === SharingStep.Certificate ? (
+          <CertificateStep key={step.step} step={step} status={status} />
+        ) : (
+          <PlainStep key={step.step} step={step} status={status} />
+        ),
       )}
-    </Stack>
+      {shared === undefined ? null : (
+        <StepRow
+          step={shared}
+          title="Share on your tailnet"
+          lines={[allOk ? null : 'Waits for the certificate.', shared.error]}
+        >
+          <PortControl status={status} action="Share" disabled={!allOk} />
+        </StepRow>
+      )}
+    </SettingsCard>
   );
 }
 

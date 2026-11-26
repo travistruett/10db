@@ -117,9 +117,15 @@ function PairBody({ onClose }: { readonly onClose: () => void }) {
         <Loader size="sm" />
       ) : (
         <>
-          <Text size="sm" ta="center">
-            Scan this with your phone's camera, or open the link it holds and type the code.
-          </Text>
+          <Stack gap={4} align="center">
+            <Text size="sm" fw={500} ta="center">
+              Turn on Tailscale on your phone first.
+            </Text>
+            <Text size="sm" c="dimmed" ta="center">
+              The link only opens over your tailnet. Then scan this with your phone's camera, or
+              open the link it holds and type the code.
+            </Text>
+          </Stack>
           {picture === null ? null : (
             <Image
               src={picture}
