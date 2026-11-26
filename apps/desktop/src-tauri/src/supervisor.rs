@@ -43,6 +43,8 @@ const FROZEN_AFTER: Duration = Duration::from_secs(30);
 const KILL_WAIT: Duration = Duration::from_secs(5);
 /// How long one /health probe may take to connect, and again to answer.
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
+/// The daemon's liveness route, the same one its instance lock probes.
+const HEALTH_PATH: &str = "/health";
 /// What a healthy daemon's /health reply starts with.
 const HEALTH_OK: &[u8; 12] = b"HTTP/1.1 200";
 const LOCK_FILE: &str = "daemon.lock";
@@ -151,8 +153,9 @@ fn health_answers(port: u16) -> bool {
     {
         return false;
     }
-    let request =
-        format!("GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    let request = format!(
+        "GET {HEALTH_PATH} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    );
     if stream.write_all(request.as_bytes()).is_err() {
         return false;
     }

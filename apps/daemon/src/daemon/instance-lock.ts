@@ -132,7 +132,8 @@ async function settleHolder(
 ): Promise<void> {
   if (holder === process.pid) throw new AlreadyRunningError(holder);
   if (await gone(holder)) return;
-  // daemon.json exists only while the holder's server listens: without it there is nothing to probe.
+  // daemon.json is written once the holder's server listens and removed on a clean shutdown, so a
+  // crash leaves it behind. Without one naming the holder there is no port to probe.
   const info = runtimeInfo(dataDir);
   if (info?.pid !== holder) throw new AlreadyRunningError(holder);
 

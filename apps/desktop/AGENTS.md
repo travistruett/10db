@@ -49,9 +49,10 @@ tokens; the app still uses the main listener.
   holds `daemon.lock` and starts its own once that one is gone or silent on `/health` for 30 s; it never signals
   the holder, the new daemon's instance lock does. Its own daemon is asked for `/health` every 5 s once
   `daemon.json` names it, and one silent for 30 s is killed and replaced. `ps` that can't run counts as "not gone".
-  The loops have no scripted coverage: check them by hand (`kill -9`, `kill -STOP` the daemon) on a shell that
-  runs its own sidecar, the built or installed app. The dev window can't show them: it sets
-  `TENDB_EXTERNAL_DAEMON=1`, so it starts no supervisor and never restarts a daemon.
+  The loops have no scripted coverage. The check by hand (`kill -9`, then `kill -STOP`, the daemon of the built or
+  installed app, which runs its own sidecar) is the builder's or the coordinator's to run: an agent signals only a
+  daemon it started itself. The dev window can't show the loops: it sets `TENDB_EXTERNAL_DAEMON=1`, so it starts
+  no supervisor and never restarts a daemon.
 - `pnpm dev:window` (`scripts/dev-window.sh`, the `10db-dev-window` skill) does all of the below in one command on a
   worktree's own data, with a demo project, and stops it all when the window closes.
 - `pnpm --filter @10db/desktop dev:shell` runs the Tauri shell against the daemon and Vite server that
