@@ -83,6 +83,8 @@ export function startPicker(config: PickerConfig): void {
     target: Element | null;
   } | null = null;
   let noticeTimer = 0;
+  /** Crops the shell is taking: the picker's layer stays hidden until the last one is done. */
+  let shooting = 0;
 
   const ours = (node: EventTarget | null) => node === ui.host;
   const grabbable = (candidate: Element) => !ours(candidate) && isElementGrabbable(candidate);
@@ -211,8 +213,6 @@ export function startPicker(config: PickerConfig): void {
   }
 
   async function send(pick: Pick) {
-    // The crop is WebKit's picture of the page as painted: the note and the hover box are hidden first.
-    await nextFrame();
     const elements = await Promise.all(
       pick.elements.map((element) =>
         Promise.race([
@@ -240,7 +240,12 @@ export function startPicker(config: PickerConfig): void {
     };
     // Removed while its lookup ran: nothing goes.
     if (!picks.includes(pick)) return;
+    // The crop is WebKit's picture of the page as painted, so the picker's whole layer (badges, boxes,
+    // any note open by now) is hidden from the frame before it until the shell answers.
+    shooting += 1;
+    ui.host.style.visibility = 'hidden';
     try {
+      await nextFrame();
       page = (await channel.add(input)) ?? page;
       pick.added = true;
       // Removed while the shell took it: its chip goes too.
@@ -250,6 +255,9 @@ export function startPicker(config: PickerConfig): void {
       const index = picks.indexOf(pick);
       if (!pick.added && index >= 0) picks.splice(index, 1);
       say(refusalOf(error));
+    } finally {
+      shooting -= 1;
+      if (shooting === 0) ui.host.style.visibility = '';
     }
     render();
   }
