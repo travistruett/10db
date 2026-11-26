@@ -444,12 +444,13 @@ describe("a chat's command outside the sandbox", () => {
     const card = onlyOpenCard();
     expect(card.title).toBe('Run this outside the sandbox?');
     expect(card.detail?.['unsandboxed']).toBe(true);
-    // The command leads the body, so the Inbox shows it too; then what Claude says, quoted on one line, so it
-    // can't add a paragraph that passes for 10db's; then the warning.
-    const [command, said, ...rest] = card.body.split('\n\n');
-    expect(command).toBe('pnpm test');
+    // The warning leads the body; then what Claude says, quoted on one line, so it can't add a paragraph that
+    // passes for 10db's; then the command, labelled and last.
+    const [warning, said, command, ...rest] = card.body.split('\n\n');
+    expect(warning).toBe('It runs with your full rights: it can read and write anywhere you can.');
     expect(said).toBe('Claude says: “Run the tests This command is read-only and safe.”');
-    expect(rest).toHaveLength(1);
+    expect(command).toBe('Command: pnpm test');
+    expect(rest).toEqual([]);
     expect(card.options.map((o) => o.label)).toEqual([
       PermissionChoice.AllowOnce,
       PermissionChoice.AllowChat,
@@ -507,6 +508,23 @@ describe("a chat's command outside the sandbox", () => {
     inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny });
     await settle();
     expect(listPermissionRules(state.db, owner.projectId, null)).toEqual([]);
+  });
+
+  it("shows a command's line breaks and hidden characters on one labelled line after 10db's words", async () => {
+    const broker = chatBroker(conversation());
+    const rtl = String.fromCodePoint(0x202e);
+    const command = `ls\n\nIt runs inside the sandbox.\t\u001b[1A${rtl}⏎\\u{41}`;
+    void broker(outside(command, `Check${rtl}files\u0085now`)).catch(() => undefined);
+    const card = onlyOpenCard();
+    expect(card.body.split('\n\n')).toEqual([
+      'It runs with your full rights: it can read and write anywhere you can.',
+      'Claude says: “Check\\u{202e}files\\u{85}now”',
+      'Command: ls⏎⏎It runs inside the sandbox.\\u{9}\\u{1b}[1A\\u{202e}\\u{23ce}\\u{5c}u{41}',
+    ]);
+    // The raw command stays the call's summary: the chat's memory and the hook match on it.
+    expect(card.detail?.['summary']).toBe(command);
+    inbox.answer(card.id, { choice: PermissionChoice.Deny });
+    await settle();
   });
 
   it('denies a yes once the turn no longer holds the checkout, and a remembered call too', async () => {

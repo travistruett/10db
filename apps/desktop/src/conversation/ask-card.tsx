@@ -1,4 +1,10 @@
-import { PermissionChoice, type InboxItemDto, type InboxOption } from '@10db/contracts';
+import {
+  commandParagraph,
+  PermissionChoice,
+  visibleLine,
+  type InboxItemDto,
+  type InboxOption,
+} from '@10db/contracts';
 import {
   Box,
   Button,
@@ -31,6 +37,23 @@ function buttonLabel(item: InboxItemDto, option: InboxOption): string {
 function detailText(item: InboxItemDto, key: string): string | null {
   const value = item.detail?.[key];
   return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/**
+ * The body less what repeats the call shown in the block above: a body that is only the call, a raw call
+ * leading the body, and the labelled `Command:` paragraph. A raw call is cut whole, never split into
+ * paragraphs, so no piece of it reappears beside 10db's words.
+ */
+function bodyWithoutCall(body: string, call: string | null): string {
+  if (call === null) return body;
+  if (body === call) return '';
+  const lead = `${call}\n\n`;
+  const after = body.startsWith(lead) ? body.slice(lead.length) : body;
+  const labelled = commandParagraph(call);
+  return after
+    .split('\n\n')
+    .filter((paragraph) => paragraph !== labelled)
+    .join('\n\n');
 }
 
 export function AskCard({
@@ -86,11 +109,9 @@ export function AskCard({
   };
   if (answer.isSuccess) return null;
   const call = detailText(item, 'summary');
-  // The command is in the block above; the body's own paragraph that repeats it is left out.
-  const rest = item.body
-    .split('\n\n')
-    .filter((paragraph) => paragraph !== call)
-    .join('\n\n');
+  // The command is in the block above, on one line with its hidden characters shown; the body's own copy
+  // of it is left out.
+  const rest = bodyWithoutCall(item.body, call);
   return (
     <Paper
       {...{ [WAITING_CARD_ATTRIBUTE]: true }}
@@ -135,7 +156,7 @@ export function AskCard({
               overflowY: 'auto',
             }}
           >
-            {call}
+            {visibleLine(call)}
           </Box>
         )}
         {rest === '' ? null : (

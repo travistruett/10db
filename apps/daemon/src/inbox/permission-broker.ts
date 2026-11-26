@@ -23,6 +23,8 @@ import {
   type ShapeId,
   type WorkstreamId,
   DEPS_HAZARD,
+  commandParagraph,
+  visibleLine,
 } from '@10db/contracts';
 import { getInboxItem, listPermissionRules, updateInboxItem } from '@10db/db';
 import { z } from 'zod';
@@ -847,14 +849,20 @@ export function createPermissionBroker(
     if (runsOutsideSandbox(req.input)) {
       if (sandbox.unsandboxed === undefined)
         return { behavior: 'deny', message: OUTSIDE_NOT_AVAILABLE, by: DeniedBy.TenDb };
-      // What Claude says the command is for stays one quoted line: a paragraph of its own could pass for 10db's.
+      // What Claude says the command is for stays one quoted line with its hidden characters shown: a paragraph
+      // of its own, or a bidi or format character, could pass for 10db's words.
       const said = (stringField(req.input, 'description') ?? '').replace(/\s+/g, ' ').trim();
-      const why = said.length > SAID_MAX ? `${said.slice(0, SAID_MAX)}…` : said;
+      const why = visibleLine(said.length > SAID_MAX ? `${said.slice(0, SAID_MAX)}…` : said);
       return {
         summary: command,
         title: OUTSIDE_CARD_TITLE,
-        // The command first, as the Inbox shows only the body; then what Claude says it is for.
-        body: [command, why === '' ? '' : `Claude says: “${why}”`, OUTSIDE_CARD_WARNING]
+        // 10db's warning first, so it always shows; then what Claude says; then the command, labelled, on one
+        // line and last, so nothing it holds reads as 10db's.
+        body: [
+          OUTSIDE_CARD_WARNING,
+          why === '' ? '' : `Claude says: “${why}”`,
+          commandParagraph(command),
+        ]
           .filter((part) => part !== '')
           .join('\n\n'),
         chatOnce: true,
@@ -879,7 +887,7 @@ export function createPermissionBroker(
     ) {
       return {
         summary: command,
-        body: `${command}\n\n${LOOP_CARD_BODY}`,
+        body: [LOOP_CARD_BODY, commandParagraph(command)].join('\n\n'),
         onceOnly: true,
         kind: SkipKind.EndlessLoop,
       };
@@ -889,7 +897,7 @@ export function createPermissionBroker(
       return { behavior: 'allow' };
     const kind = hit !== null ? SkipKind.HazardCard : SkipKind.UnreadHazard;
     return hit?.name === DEPS_HAZARD && hit.words[0] === 'pnpm'
-      ? { summary: command, body: `${command}\n\n${PNPM_CARD_BODY}`, kind }
+      ? { summary: command, body: [PNPM_CARD_BODY, commandParagraph(command)].join('\n\n'), kind }
       : { summary: command, kind };
   }
 
