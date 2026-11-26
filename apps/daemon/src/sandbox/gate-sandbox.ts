@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readdirSync,
   realpathSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -14,7 +15,7 @@ import { dockerAccess, dockerEnvNames } from './docker-access';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
 import { isEqualOrUnder, pathsEqual } from './protected-reads';
-import { buildLaneProfile } from './profile';
+import { buildLaneProfile, SandboxProfileError } from './profile';
 import {
   laneRootsOf,
   projectAccess,
@@ -167,6 +168,26 @@ function realOr(path: string): string {
   }
 }
 
+/**
+ * The real path of a checkout-relative env file a run may read: it must exist, stay inside the
+ * checkout once links are followed, and be a regular file. Anything else is refused, so a link
+ * out of the checkout never opens what it leads to.
+ */
+function openableDotEnv(checkout: string, file: string): string {
+  const refuse = (problem: string): never => {
+    throw new SandboxProfileError('dotEnvReadable', `${file}: ${problem}`);
+  };
+  let real: string;
+  try {
+    real = realpathSync.native(join(checkout, file));
+  } catch {
+    return refuse('is not a file in the checkout');
+  }
+  if (!isEqualOrUnder(real, checkout)) return refuse('leads outside the checkout');
+  if (!statSync(real).isFile()) return refuse('is not a regular file');
+  return real;
+}
+
 /** One gate run under the sandbox: the process to spawn, and its own temp dir. */
 export interface GateRun {
   /** srt's host, which starts the network proxy and runs the command under the profile. */
@@ -300,9 +321,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           },
           input.copyId ?? null,
         );
-        const opened = (input.dotEnvReadable ?? [])
-          .map((file) => realOr(join(checkout, file)))
-          .filter((file) => isEqualOrUnder(file, checkout));
+        const opened = (input.dotEnvReadable ?? []).map((file) => openableDotEnv(checkout, file));
         const secrets = splitSecrets(
           checkout,
           access.checkoutSecrets.filter((file) => !opened.some((o) => pathsEqual(realOr(file), o))),
