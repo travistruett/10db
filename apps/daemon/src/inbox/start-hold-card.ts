@@ -7,7 +7,7 @@ import { flagCard, withdrawCard } from './service';
 const startHoldKey = (taskId: TaskId): string => `start-hold:${taskId}`;
 
 /** The run that was held, as the card needs it. */
-export interface StartHeldRun {
+interface StartHeldRun {
   readonly id: WorkstreamId;
   readonly taskId: TaskId;
   readonly projectId: ProjectId;
