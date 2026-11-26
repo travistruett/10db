@@ -52,7 +52,10 @@ class SessionDrafts {
   }
 
   set(key: string, draft: Draft): void {
-    if (draft === EMPTY_DRAFT || (draft.text === '' && draft.pictures.length === 0))
+    if (
+      draft === EMPTY_DRAFT ||
+      (draft.text === '' && draft.pictures.length === 0 && (draft.picks?.length ?? 0) === 0)
+    )
       this.drafts.delete(key);
     else this.drafts.set(key, draft);
     this.notify();

@@ -33,6 +33,7 @@ import {
   type TaskScreenDto,
   type TaskScreenId,
   type TaskScreensDto,
+  type PreviewSignInDto,
 } from '@10db/contracts';
 import {
   findPass,
@@ -234,6 +235,11 @@ export interface Pictures {
   shootNow(input: ShootNowInput): Promise<ShotsNow>;
   /** Draws a mock-up's HTML in the first viewport and theme of the project's matrix, cached by what it drew. */
   drawMockup(projectId: ProjectId, html: string): Promise<MockupDrawn>;
+  /**
+   * Pick on Page spec §2: makes sure the project's sign-in is kept for its Preview window, running the
+   * dev login when none is. The shell reads the kept cookies itself; this answers no credential.
+   */
+  signInForPreview(projectId: ProjectId): Promise<PreviewSignInDto>;
   /** The size of a kept picture's file by its hash; 0 when there is none. */
   bytesOf(sha256: string): number;
   screens(taskId: TaskId): TaskScreensDto;
@@ -1020,9 +1026,35 @@ export function startPictures(deps: PicturesDeps): Pictures {
     }
   }
 
+  async function signInForPreview(projectId: ProjectId): Promise<PreviewSignInDto> {
+    whileRunning();
+    const project = getProject(db, projectId);
+    if (project.appUrl === null) return { ok: false, problem: 'The project has no app address' };
+    const port = listenPort ?? (await deps.daemonPort);
+    if (shootableAddress(project.id, port) === null)
+      return { ok: false, problem: APP_URL_IS_DAEMON };
+    if (project.devLoginCommand === null) return { ok: true, signedIn: false };
+    if (readStorageState(deps.dataDir, project.id) !== null) return { ok: true, signedIn: true };
+    const abort = new AbortController();
+    nowRuns.add(abort);
+    try {
+      const state = await runSignIn(project, abort.signal);
+      if (state !== null) return { ok: true, signedIn: true };
+      return {
+        ok: false,
+        problem: abort.signal.aborted
+          ? 'the daemon is stopping'
+          : (signIns.get(project.id)?.problem ?? 'The dev login did not sign in'),
+      };
+    } finally {
+      nowRuns.delete(abort);
+    }
+  }
+
   return {
     shootNow,
     drawMockup,
+    signInForPreview,
     bytesOf(sha256) {
       try {
         return statSync(picturePath(deps.dataDir, sha256)).size;
