@@ -1,6 +1,6 @@
 import type { Watchpoint, WatchpointFileHit, WatchpointHit } from '@10db/contracts';
 import { classifyDefinitionChange, definitionHit } from '../evals';
-import { areaMatches } from '../guard';
+import { watchpointCovers } from './covers';
 import type { WatchpointHitSource } from './hits-after';
 
 /** The starter that watches evals; a definition file no watchpoint's globs cover is shown under it. */
@@ -12,7 +12,7 @@ const EVALS_WATCHPOINT_KEY = 'evals';
  * its patch did to the definition. Read on the file list alone (no patch yet) it answers which files to read.
  */
 export function evalDefinitionSource(suiteOf: ReadonlyMap<string, string>): WatchpointHitSource {
-  return (files, watchpoints): WatchpointHit[] => {
+  return (files, watchpoints, verdicts): WatchpointHit[] => {
     const defined = files.flatMap((file): WatchpointFileHit[] => {
       const suiteKey = suiteOf.get(file.path);
       if (suiteKey === undefined) return [];
@@ -21,24 +21,20 @@ export function evalDefinitionSource(suiteOf: ReadonlyMap<string, string>): Watc
     });
     if (defined.length === 0) return [];
     return watchpoints.flatMap((watchpoint): WatchpointHit[] => {
-      const covered = defined.filter((file) =>
-        watchpoint.globs.some((glob) => areaMatches(file.path, glob)),
-      );
+      const covered = defined.filter((file) => watchpointCovers(watchpoint, file, verdicts));
       // The Evals starter also takes the definition files no watchpoint covers.
       const own =
         watchpoint.key === EVALS_WATCHPOINT_KEY
           ? defined.filter(
               (file) =>
-                covers(watchpoint, file.path) || !watchpoints.some((w) => covers(w, file.path)),
+                watchpointCovers(watchpoint, file, verdicts) ||
+                !watchpoints.some((w) => watchpointCovers(w, file, verdicts)),
             )
           : covered;
       return own.length === 0 ? [] : [{ watchpoint: snapshot(watchpoint), files: own }];
     });
   };
 }
-
-const covers = (w: Watchpoint, path: string): boolean =>
-  w.globs.some((glob) => areaMatches(path, glob));
 
 function snapshot(w: Watchpoint): WatchpointHit['watchpoint'] {
   const { key, label, why, guidance, loudness } = w;
