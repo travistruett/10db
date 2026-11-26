@@ -10,6 +10,7 @@ import {
   DeniedBy,
   PermissionChoice,
   MCP_TOOL_GRANT_DETAIL,
+  UNSANDBOXED_DETAIL,
   QuestionCategory,
   Urgency,
   type InboxAnswer,
@@ -714,7 +715,7 @@ export function createPermissionBroker(
         ...(judged && !onceOnly ? { [GRANT_CALL_DETAIL]: grantCall } : {}),
         ...(grant === null ? {} : { [MCP_TOOL_GRANT_DETAIL]: grant }),
         ...editDetail(req, ask),
-        ...(chatOnce ? { unsandboxed: true } : {}),
+        ...(chatOnce ? { [UNSANDBOXED_DETAIL]: true } : {}),
         ...(req.escalated ? { [ESCALATED_KEY]: true } : {}),
         ...(noted?.limit == null ? {} : { [LIMIT_DETAIL]: noted.limit }),
         ...(noteNeeded ? { [NOTE_NEEDED_DETAIL]: true } : {}),
@@ -853,8 +854,9 @@ export function createPermissionBroker(
       return {
         summary: command,
         title: OUTSIDE_CARD_TITLE,
-        // The command first, as the Inbox shows only the body; then what Claude says it is for.
-        body: [command, why === '' ? '' : `Claude says: “${why}”`, OUTSIDE_CARD_WARNING]
+        // The command is the card's detail.summary, shown on its own in a code block; the body is only what
+        // Claude says and 10db's warning, so nothing in the command can pass for either.
+        body: [why === '' ? '' : `Claude says: “${why}”`, OUTSIDE_CARD_WARNING]
           .filter((part) => part !== '')
           .join('\n\n'),
         chatOnce: true,
