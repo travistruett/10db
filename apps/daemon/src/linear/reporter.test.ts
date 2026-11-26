@@ -337,21 +337,14 @@ afterEach(async () => {
   closeStore();
 });
 
-<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
 const oweOne = (
   dedupeKey = 'run_started:1:0',
   event: LinearEventKind = LinearEventKind.RunStarted,
-  dueInMs = 30_000,
+  {
+    detail = {},
+    dueInMs = 30_000,
+  }: { detail?: Record<string, string | null>; dueInMs?: number } = {},
 ): LinearPostId => {
-||||||| 06c94a09a
-const oweOne = (dedupeKey = 'run_started:1:0'): LinearPostId => {
-=======
-const oweOne = (
-  dedupeKey = 'run_started:1:0',
-  event: LinearEventKind = LinearEventKind.RunStarted,
-  detail: Record<string, string | null> = {},
-): LinearPostId => {
->>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
   const row = store.write((ctx) =>
     enqueueLinearPost(ctx, {
       taskId: task.id,
@@ -359,16 +352,8 @@ const oweOne = (
       event,
       dedupeKey,
       attempt: 1,
-<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
-      detail: {},
-      dueAt: new Date(clock.now().getTime() + dueInMs).toISOString(),
-||||||| 06c94a09a
-      detail: {},
-      dueAt: new Date(clock.now().getTime() + 30_000).toISOString(),
-=======
       detail,
-      dueAt: new Date(clock.now().getTime() + 30_000).toISOString(),
->>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
+      dueAt: new Date(clock.now().getTime() + dueInMs).toISOString(),
     }),
   ).value;
   if (row === null) throw new Error('the row was not made');
@@ -403,15 +388,6 @@ describe('the Linear reporter', () => {
       status('In Review', 'started', 4),
       status('Done', 'completed', 5),
     ];
-    const report = (statusSet: string) =>
-      ({
-        do: 'mcp',
-        tool: 'report_linear_post',
-        args: {
-          postIds: [id],
-          outcome: { state: 'recorded', commentIds: [], statusSet, attachmentUrl: null },
-        },
-      }) as const;
     book[KEY] = [
       [
         {
@@ -431,18 +407,19 @@ describe('the Linear reporter', () => {
           input: { id: ISSUE, state: 'In Progress' },
           result: '{}',
         },
-        report('In Review'),
-        report('In Progress'),
-        { do: 'turn_complete' },
+        ...recordingScript(id),
       ],
     ];
     clock.advance(30_000);
     await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    // The row records the status the run set, whichever of its two writes came first.
     expect(rows()[0]?.statusSet).toBe('In Progress');
+    expect(rows()[0]?.commentIds).toEqual(['comment-1']);
     const results = adapter.observations.filter((o) => o.kind === 'mcp_result');
-    expect(results.map((o) => o.detail['isError'])).toEqual([false, true, false]);
+    expect(results.map((o) => o.detail['isError'])).toEqual([false, false]);
     expect(String(results[0]?.detail['text'])).toContain('In Progress');
-    expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(1);
+    // The status 10db did not pick, and the comment by the team key.
+    expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(2);
   });
 
   it('keeps a row whose session ended without recording pending, and runs it again at its backoff', async () => {
@@ -503,7 +480,7 @@ describe('the Linear reporter', () => {
   });
 
   it('withholds an update with nothing to report without a session, a hold or a card', async () => {
-    oweOne('pr_opened:1', LinearEventKind.PrOpened, { prUrl: null });
+    oweOne('pr_opened:1', LinearEventKind.PrOpened, { detail: { prUrl: null } });
     clock.advance(30_000);
     await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Withheld);
     expect(rows()[0]).toMatchObject({
@@ -908,7 +885,7 @@ describe('the Linear reporter', () => {
 
   it('gives a new update the report delay even when an older row of the task is on a long backoff', () => {
     // AMP-134 got four comments in one second, 47 minutes late: new rows waited behind an older one's backoff.
-    oweOne('run_started:old:0', LinearEventKind.RunStarted, 2 * 60 * 60_000);
+    oweOne('run_started:old:0', LinearEventKind.RunStarted, { dueInMs: 2 * 60 * 60_000 });
     const ws = store.write((ctx) =>
       insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
     ).value;

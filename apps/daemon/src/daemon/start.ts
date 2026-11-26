@@ -2938,7 +2938,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // The Linear reporter: one short session of its own per task with updates owed, on the explore engine.
   const linearReporter = createLinearReporter({
-    fetch: outbound,
+    send: outbound,
     state,
     clock,
     log: logger.child({ component: 'linear-reporter' }),

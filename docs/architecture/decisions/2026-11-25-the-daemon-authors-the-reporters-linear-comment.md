@@ -27,10 +27,12 @@ The Linear reporter's agent writes only the words of a comment. `report_linear_p
   the same way and reopens nothing: the agent can't tell a refusal from a write Linear took without answering.
   So no comment exists without a row, and none is written twice; the cost is that an update whose write
   really failed this way is not retried.
-- **Nothing else from the agent.** Status moves, the PR link and picture uploads are no longer the reporter
-  agent's: its guard refuses `save_issue`, `prepare_file_upload` and `upload_linear_picture`. The daemon's own
-  status and landing work sets them. The agent-driven uploader (`reporter-pictures.ts`) was removed, and the
-  landing work starts from it in git history.
+- **Nothing else from the agent.** The PR link and picture uploads are no longer the reporter agent's: its
+  guard refuses `prepare_file_upload`, `upload_linear_picture` and a `save_issue` that carries `links`. The
+  agent-driven uploader was removed; the daemon uploads the pictures itself. The one other write the agent
+  keeps is the status, and 10db picks it: the agent hands `pick_linear_status` the issue's statuses, the guard
+  lets through one `save_issue` with only `id` and the `state` 10db answered, and 10db records that state on
+  the row (the agent no longer reports it).
 
 ## Why
 

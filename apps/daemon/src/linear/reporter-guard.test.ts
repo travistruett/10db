@@ -17,20 +17,10 @@ function run(over: Partial<ReporterRun> = {}): ReporterRun {
     readOnly: false,
     linearPrefixes: [L],
     link,
-<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
     direct: false,
     comments: new Map(),
-||||||| 06c94a09a
-    prUrl: PR,
-    pictures: [],
-    withheld: new Set(),
-=======
-    prUrl: PR,
-    pictures: [],
-    withheld: new Set(),
     noteSteers: false,
     pickedStatuses: new Set(),
->>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
     ...over,
   };
 }
@@ -107,25 +97,17 @@ describe('judgeReporterCall', () => {
       'deny',
     ],
     [
-<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
       'a comment when 10db writes them itself',
       { ...staged('hi'), direct: true },
       call(`${L}save_comment`, { issueId: 'iss-119', body: 'hi' }),
       'deny',
     ],
-    // Status, links and pictures are 10db's to set, so the agent's only Linear write is its comment.
+    // The agent's Linear writes are its comment and the status 10db picked; links and pictures are 10db's.
     [
-      'save_issue state',
-      run(),
-||||||| 06c94a09a
-      'save_issue state',
-      run(),
-=======
       'save_issue state 10db picked',
       run({ pickedStatuses: new Set(['In Review']) }),
->>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
       call(`${L}save_issue`, { id: 'iss-119', state: 'In Review' }),
-      'deny',
+      'allow',
     ],
     [
       'save_issue state 10db did not pick',

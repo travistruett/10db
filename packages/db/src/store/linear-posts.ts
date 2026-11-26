@@ -170,14 +170,8 @@ export function takeLinearPosts(
 export function recordLinearPosts(
   ctx: WriteContext,
   ids: readonly LinearPostId[],
-<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
   outcome: LinearPostOutcome,
-||||||| 06c94a09a
-  outcome: Exclude<ReportLinearPostInput['outcome'], { state: 'failed' }>,
-=======
-  outcome: Exclude<ReportLinearPostInput['outcome'], { state: 'failed' }>,
   opts: { readonly dismissed?: boolean } = {},
->>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
 ): void {
   const rows = pendingByIds(ctx, ids);
   if (rows.length === 0) return;
@@ -226,6 +220,25 @@ export function attachLinearCommentId(
   ctx.tx
     .update(schema.linearPosts)
     .set({ commentIds: [commentId] })
+    .where(eq(schema.linearPosts.id, id))
+    .run();
+  emitChanged(ctx, [row]);
+}
+
+/** Adds the status the run set to a recorded row that has none yet; any other row is left as it is. */
+export function attachLinearStatusSet(ctx: WriteContext, id: LinearPostId, status: string): void {
+  const row = ctx.tx
+    .select()
+    .from(schema.linearPosts)
+    .where(
+      and(eq(schema.linearPosts.id, id), eq(schema.linearPosts.state, LinearPostState.Recorded)),
+    )
+    .get();
+  if (row === undefined) return;
+  if (row.statusSet !== null) return;
+  ctx.tx
+    .update(schema.linearPosts)
+    .set({ statusSet: status })
     .where(eq(schema.linearPosts.id, id))
     .run();
   emitChanged(ctx, [row]);

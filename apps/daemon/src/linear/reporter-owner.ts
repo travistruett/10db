@@ -23,18 +23,12 @@ import type { LaneSandboxSpec } from '../sandbox';
 import type { YourSessionServer } from '../sessions';
 import { buildTrustPolicy, sessionDevAccess } from '../trust';
 import { readReporterFacts, reporterBrief } from './reporter-brief';
-<<<<<<< 993b84a5c294ac904a0ca035c516d9fa75b2a751
-import { linearToolPrefixes } from './reporter-guard';
+import { linearToolPrefixes, runToolNames } from './reporter-guard';
 import {
   authorizedLinearServer,
   createLinearCommentWriter,
   type LinearCommentWriter,
 } from './reporter-writer';
-||||||| 06c94a09a
-import { linearToolPrefixes } from './reporter-guard';
-=======
-import { linearToolPrefixes, runToolNames } from './reporter-guard';
->>>>>>> 46f6ea0b1729ad7601776f165fcbb2c5b358df38
 import { snapshotBrief } from './snapshot';
 import type { LinearReporter, LinearReporterRuns } from './reporter';
 
@@ -45,13 +39,16 @@ import type { LinearReporter, LinearReporterRuns } from './reporter';
 /** The share of the context window past which a session would continue fresh; a run never gets near it. */
 const FRESH_AT_CONTEXT_PCT = 70;
 
-/** The reporter's one tool of 10db's: it hands over words, and 10db does the rest. */
-const REPORTER_TOOLS: readonly string[] = [`mcp__10db__${ReporterToolName.ReportLinearPost}`];
+/** The reporter's tools of 10db's: one hands over words and 10db does the rest, the other picks the status. */
+const REPORTER_TOOLS: readonly string[] = [
+  `mcp__10db__${ReporterToolName.ReportLinearPost}`,
+  `mcp__10db__${ReporterToolName.PickLinearStatus}`,
+];
 
 const SYSTEM_PROMPT = [
   "You are 10db's Linear reporter. You keep one Linear issue up to date from the facts you are given.",
-  "You have Linear's read tools and one of 10db's: report_linear_post. Nothing else works.",
-  "You write the words of each comment and nothing more: hand its body to report_linear_post. 10db writes the comment to Linear. When 10db's answer gives you save_comment arguments, call Linear's save_comment with exactly those.",
+  "You have Linear's read tools and two of 10db's: report_linear_post and pick_linear_status. Nothing else works.",
+  "You write the words of each comment and nothing more: hand its body to report_linear_post. 10db writes the comment to Linear. When 10db's answer gives you save_comment arguments, call Linear's save_comment with exactly those. 10db picks the status: set only the one pick_linear_status answers.",
   'When your first message asks you to read the issue instead, you only read, and your reply is the answer.',
 ].join('\n');
 

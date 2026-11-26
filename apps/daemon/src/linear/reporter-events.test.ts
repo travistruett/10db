@@ -54,16 +54,13 @@ describe('linearRowOf', () => {
     expect(
       keys(event(EventType.StepChanged, { stepIndex: 1, role: 'plan', verdict: null }), wsRead(0)),
     ).toEqual([]);
-    const batch = (
-      prState: string | null,
-      prUrl: string | null = 'https://github.com/a/b/pull/1',
-    ): LinearEventRead => ({
+    const batch = (prState: string): LinearEventRead => ({
       batch: {
-        prUrl,
+        prUrl: 'https://github.com/a/b/pull/1',
         prState,
         shippedLocalCopy: false,
         baseBranch: 'build',
-        landedSha: prUrl === null ? 'abc123def4567890' : null,
+        landedSha: null,
         workstreams: [{ id: ws, taskId: task }],
       },
     });
@@ -76,31 +73,24 @@ describe('linearRowOf', () => {
     expect(linearRowOf(prChanged, batch('merged')).map((d) => [d.event, d.dedupeKey])).toEqual([
       [LinearEventKind.PrMerged, `pr_merged:${batchId}`],
     ]);
-    // A local copy has no pull request: its landing is the batch shipping, and its comment carries the pictures.
+    // A local copy has no pull request: its landing is the batch shipping, it says where it landed, and its
+    // comment carries the pictures.
     const shipped = event(EventType.BatchUpdated, { to: 'SHIPPED' }, batchId);
     const landed = linearRowOf(shipped, {
       batch: {
         prUrl: null,
         prState: null,
         shippedLocalCopy: true,
+        baseBranch: 'build',
+        landedSha: 'abc123def4567890',
         workstreams: [{ id: ws, taskId: task }],
       },
     });
-    expect(
-      landed.map((d) => [d.event, d.dedupeKey, d.detail['prUrl'], d.detail['localCopy']]),
-    ).toEqual([[LinearEventKind.PrMerged, `landed:${batchId}`, null, true]]);
-    const shipped = event(EventType.BatchUpdated, { to: 'SHIPPED' }, batchId);
-    expect(linearRowOf(shipped, batch('open')).map((d) => [d.event, d.dedupeKey])).toEqual([
-      [LinearEventKind.PrOpened, `pr_opened:${batchId}`],
-    ]);
-    // A landing with no pull request says where it landed, never that a pull request opened.
-    expect(
-      linearRowOf(shipped, batch(null, null)).map((d) => [d.event, d.dedupeKey, d.detail]),
-    ).toEqual([
+    expect(landed.map((d) => [d.event, d.dedupeKey, d.detail])).toEqual([
       [
         LinearEventKind.Landed,
         `landed:${batchId}`,
-        { workstreamId: ws, baseBranch: 'build', commit: 'abc123def4567890' },
+        { workstreamId: ws, baseBranch: 'build', commit: 'abc123def4567890', localCopy: true },
       ],
     ]);
   });

@@ -286,11 +286,13 @@ export const STILL_TAKING_TEXT =
 
 /** Whether an owed update waits for its task's pictures: it carries them, or the word on why it has none. */
 export const carriesPictures = (event: LinearEventKind): boolean =>
-  event === LinearEventKind.Ended || event === LinearEventKind.PrMerged;
+  event === LinearEventKind.Ended ||
+  event === LinearEventKind.PrMerged ||
+  event === LinearEventKind.Landed;
 
 /**
  * What an owed update adds to its comment, and the first picture's address to record on its row. Pictures go in
- * the `ended` comment, or in the `pr_merged` one when none showed before. What there is to say about missing
+ * the `ended` comment, or in the `pr_merged` or `landed` one when none showed before. What there is to say about missing
  * ones is said once: on the first `ended` comment, or, for a local copy (whose `ended` comment says they follow),
  * on its landing comment.
  */
