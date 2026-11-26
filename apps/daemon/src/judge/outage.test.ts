@@ -89,6 +89,7 @@ describe('a judge outage', () => {
     await judge.choose(request);
     expect(cards()).toMatchObject([{ state: InboxState.Open }]);
     expect(cards()[0]?.body).not.toContain('OpenRouter OpenRouter');
+    expect(cards()[0]?.body).toContain('Decisions run on OpenRouter, typesafe/jev-1.13.');
 
     status = 402;
     for (let i = 0; i < 6; i += 1) await judge.choose(request);
@@ -107,5 +108,29 @@ describe('a judge outage', () => {
     await judge.choose(request);
     expect(cards().map((c) => c.state)).toEqual([InboxState.Resolved, InboxState.Open]);
     expect(cards()[1]?.body).toContain('says the account has no credits');
+  });
+
+  it('raises nothing for a tail of failures among answers, and raises once nothing has answered for two minutes', async () => {
+    const judge = build();
+    for (let minute = 0; minute < 10; minute += 1) {
+      status = 200;
+      for (let i = 0; i < 6; i += 1) await judge.choose(request);
+      // A burst of slow answers under load: five in a row, but fewer than the answers around them.
+      status = 500;
+      for (let i = 0; i < 5; i += 1) await judge.choose(request);
+      clock.advance(60 * 1000);
+    }
+    expect(cards()).toHaveLength(0);
+
+    status = 200;
+    await judge.choose(request);
+    status = 500;
+    await judge.choose(request);
+    clock.advance(119 * 1000);
+    await judge.choose(request);
+    expect(cards()).toHaveLength(0);
+    clock.advance(1000);
+    await judge.choose(request);
+    expect(cards()).toMatchObject([{ state: InboxState.Open }]);
   });
 });

@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -245,6 +246,67 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
         rmSync(join(checkout, name), { recursive: true, force: true });
     }
   }, 60_000);
+
+  it('opens only the named env files for reading, never writing, and refuses a link out', async () => {
+    mkdirSync(join(checkout, 'sub'));
+    for (const name of ['.env', 'sub/.env.dev', 'sub/.env.local'])
+      writeFileSync(join(checkout, name), `SECRET=${token}\n`);
+    const outside = join(root, `outside-${token}.env`);
+    writeFileSync(outside, `SECRET=${token}\n`);
+    symlinkSync(outside, join(checkout, '.env.out'));
+    try {
+      const seen = await probe(
+        {
+          'read-env': 'cat .env',
+          'read-dev': 'cat sub/.env.dev',
+          'read-local': 'cat sub/.env.local',
+          append: 'echo x >> .env',
+          truncate: ': > .env',
+          remove: 'rm .env',
+          'truncate-dev': ': > sub/.env.dev',
+          'hard-link-write': 'ln .env hl && : > hl',
+          move: 'mv .env moved.env',
+          'move-folder': 'mv sub sub2',
+        },
+        {
+          dotEnvReadable: ['.env', 'sub/.env.dev'],
+          project: { repoPath: checkout, sandboxLoopback: false, sandboxDocker: true },
+        },
+      );
+      expect(seen).toEqual({
+        'read-env': 'ok',
+        'read-dev': 'ok',
+        'read-local': 'denied',
+        append: 'denied',
+        truncate: 'denied',
+        remove: 'denied',
+        'truncate-dev': 'denied',
+        'hard-link-write': 'denied',
+        move: 'denied',
+        'move-folder': 'denied',
+      });
+      expect(readFileSync(join(checkout, '.env'), 'utf8')).toBe(`SECRET=${token}\n`);
+      writeFileSync(join(checkout, 'notes.txt'), 'x');
+      const docker = { repoPath: checkout, sandboxLoopback: false, sandboxDocker: true };
+      for (const [name, project] of [
+        ['.env.out', docker],
+        ['missing.env', docker],
+        ['notes.txt', docker],
+        ['.env', undefined],
+      ] as const) {
+        const refused = await run('true', {
+          dotEnvReadable: [name],
+          ...(project === undefined ? {} : { project }),
+        });
+        expect(refused.exitCode).toBe(126);
+        expect(refused.tail).toContain(project === undefined ? 'Docker on' : `${name}: `);
+      }
+    } finally {
+      for (const name of ['.env', '.env.out', 'sub', 'sub2', 'hl', 'moved.env', 'notes.txt'])
+        rmSync(join(checkout, name), { recursive: true, force: true });
+      rmSync(outside, { force: true });
+    }
+  }, 120_000);
 
   it('passes a normal test command that reads the checkout and writes its own output', async () => {
     const result = await run('node --test check.test.mjs && test -f out.txt && git status --short');
