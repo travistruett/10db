@@ -1,9 +1,20 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+<<<<<<< 4d78c5591a609324457155597508b523860e06db
 import { mintId, TRUST_DEFAULTS, type TrustSurface } from '@10db/contracts';
+||||||| 6bf0103f0
+import { TRUST_DEFAULTS, type TrustSurface } from '@10db/contracts';
+=======
+import {
+  JUDGE_TIMEOUT_MS,
+  JUDGE_UNATTENDED_TIMEOUT_MS,
+  TRUST_DEFAULTS,
+  type TrustSurface,
+} from '@10db/contracts';
+>>>>>>> 5fe79f56284bce068e12332c78cb6b3bba102313
 import { createTestStore, listJudgeCalls, patchJudgeConfig, type Store } from '@10db/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createJudge } from '../judge';
@@ -294,10 +305,34 @@ describe('crossesLimit', () => {
           reject(new DOMException('aborted', 'AbortError'));
         });
       });
+    // A lane's first judge waits 12 s a try and tries once more before the floor.
     const pending = ask();
-    await Promise.resolve();
-    clock.advance(4_000);
-    expect(await pending).toMatchObject({ kind: 'floor', reason: 'timeout' });
+    await vi.waitFor(() => {
+      expect(seen).toHaveLength(1);
+    });
+    clock.advance(JUDGE_UNATTENDED_TIMEOUT_MS);
+    await vi.waitFor(() => {
+      expect(seen).toHaveLength(2);
+    });
+    clock.advance(JUDGE_UNATTENDED_TIMEOUT_MS);
+    expect(await pending).toMatchObject({
+      kind: 'floor',
+      reason: 'timeout',
+      detail: 'No answer within 12 s in 2 tries',
+    });
+
+    // A pass has the builder in it: one try at today's 4 s.
+    const attended = ask({}, 'pass');
+    await vi.waitFor(() => {
+      expect(seen).toHaveLength(3);
+    });
+    clock.advance(JUDGE_TIMEOUT_MS);
+    expect(await attended).toMatchObject({
+      kind: 'floor',
+      reason: 'timeout',
+      detail: 'No answer within 4 s',
+    });
+    expect(seen).toHaveLength(3);
   });
 
   it('the decision switched off is the floor', async () => {

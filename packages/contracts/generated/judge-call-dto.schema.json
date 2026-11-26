@@ -81,6 +81,11 @@
         "null"
       ]
     },
+    "attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
     "costUsd": {
       "type": [
         "number",
@@ -142,6 +147,7 @@
     "probabilities",
     "outcome",
     "latencyMs",
+    "attempts",
     "costUsd",
     "workstreamId",
     "taskId",

@@ -1,5 +1,6 @@
 import { posix } from 'node:path';
 import {
+  JudgeBudget,
   JudgeDecision,
   JudgeOutcome,
   type LimitName,
@@ -333,9 +334,10 @@ export async function crossesLimit(
       state,
       questions: questionsFor(state),
       read: logged,
+      // The first judge waits longer and tries again where nobody is watching; the second has its own budget.
       ...(decision === JudgeDecision.CrossesLimitSecond
         ? { timeoutMs: SECOND_OPINION_TIMEOUT_MS, secondary: true }
-        : {}),
+        : { budget: req.policy.attended ? JudgeBudget.Attended : JudgeBudget.Unattended }),
       ...(req.workstreamId === undefined ? {} : { workstreamId: req.workstreamId }),
       ...(req.taskId === undefined ? {} : { taskId: req.taskId }),
       ...(req.precedent === undefined ? {} : { precedentId: req.precedent.id }),

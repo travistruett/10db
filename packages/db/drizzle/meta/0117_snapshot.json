@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b00a8cd1-1d9f-4bb3-8d64-1c16be1e6456",
+  "id": "05864e80-4dff-460d-a9eb-a33980a24d34",
   "prevId": "2074284a-d682-4f97-a97f-e7396da5dfa3",
   "tables": {
     "aa_models": {
@@ -3096,6 +3096,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
         "cost_usd": {
           "name": "cost_usd",
           "type": "real",
@@ -3117,20 +3125,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "precedent_id": {
-          "name": "precedent_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "program_key": {
-          "name": "program_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -3146,15 +3140,6 @@
             "created_at"
           ],
           "isUnique": false
-        },
-        "judge_calls_precedent_idx": {
-          "name": "judge_calls_precedent_idx",
-          "columns": [
-            "precedent_id",
-            "created_at"
-          ],
-          "isUnique": false,
-          "where": "precedent_id IS NOT NULL"
         }
       },
       "foreignKeys": {},
@@ -9051,13 +9036,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "program_key": {
-          "name": "program_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -10934,168 +10912,6 @@
         "trust_grants_limit_name": {
           "name": "trust_grants_limit_name",
           "value": "\"trust_grants\".\"limit_name\" IS NULL OR \"trust_grants\".\"limit_name\" IN ('destroys_data', 'sends_data_out', 'reads_secrets', 'writes_live')"
-        }
-      }
-    },
-    "trust_precedents": {
-      "name": "trust_precedents",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "program_key": {
-          "name": "program_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "scope": {
-          "name": "scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "examples": {
-          "name": "examples",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
-        },
-        "runs_hash": {
-          "name": "runs_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "uses": {
-          "name": "uses",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "last_used_at": {
-          "name": "last_used_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "conflicts": {
-          "name": "conflicts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "source_inbox_id": {
-          "name": "source_inbox_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "approved_at": {
-          "name": "approved_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "ended_at": {
-          "name": "ended_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "trust_precedents_one_per_key": {
-          "name": "trust_precedents_one_per_key",
-          "columns": [
-            "project_id",
-            "program_key",
-            "scope"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "trust_precedents_project_id_projects_id_fk": {
-          "name": "trust_precedents_project_id_projects_id_fk",
-          "tableFrom": "trust_precedents",
-          "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "trust_precedents_state": {
-          "name": "trust_precedents_state",
-          "value": "\"trust_precedents\".\"state\" IN ('active', 'paused', 'declined', 'revoked')"
-        },
-        "trust_precedents_scope": {
-          "name": "trust_precedents_scope",
-          "value": "\"trust_precedents\".\"scope\" IN ('copy', 'project')"
-        },
-        "trust_precedents_approved": {
-          "name": "trust_precedents_approved",
-          "value": "\"trust_precedents\".\"state\" <> 'active' OR \"trust_precedents\".\"approved_at\" IS NOT NULL"
         }
       }
     },
