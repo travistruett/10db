@@ -55,6 +55,7 @@ import {
   type InstalledPlugin,
   type YourMcpPlan,
 } from '../session-setup';
+import type { PrecedentService } from '../inbox';
 import { projectLiveSystems, setProjectLiveSystems } from '../trust';
 import { accountJudges } from './account-judges';
 import type { ProjectMcpServers } from './connect-service';
@@ -70,6 +71,9 @@ export type TrustServices = Pick<
   | 'setLiveSystems'
   | 'trustGrants'
   | 'removeTrustGrant'
+  | 'precedents'
+  | 'answerPrecedents'
+  | 'patchPrecedent'
 >;
 
 /** Claude Code's installed plugins; a list it can't read lists none here, as a session loads none. */
@@ -130,6 +134,8 @@ export function createTrustServices(deps: {
   readonly log: { warn(fields: object, message: string): void };
   /** The login environment without billing switches, as sessions expand `${VAR}` in a server's entry from it. */
   readonly loginEnv: () => Readonly<Record<string, string>>;
+  /** Standing approvals: the project's list, the proposal card's answer, and a row's change. */
+  readonly precedents: Pick<PrecedentService, 'list' | 'answer' | 'patch'>;
 }): TrustServices & {
   /** The builder's servers as a session on the app-wide switches would plan them. */
   readonly appMcpPlan: () => YourMcpPlan;
@@ -391,5 +397,8 @@ export function createTrustServices(deps: {
       const removed = deps.state.write((ctx) => deleteTrustGrant(ctx, projectId, grantId));
       if (!removed) throw new NotFoundError('grant', grantId);
     },
+    precedents: (projectId) => deps.precedents.list(projectId),
+    answerPrecedents: (projectId, answer) => deps.precedents.answer(projectId, answer),
+    patchPrecedent: (projectId, id, change) => deps.precedents.patch(projectId, id, change),
   };
 }

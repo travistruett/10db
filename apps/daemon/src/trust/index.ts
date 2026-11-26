@@ -26,8 +26,14 @@ export {
   precedentFor,
   precedentLines,
   runsHash,
+  type PrecedentEvents,
   type ShownPrecedent,
 } from './precedents';
+export {
+  defaultPrecedentKind,
+  PRECEDENT_REFRESH_MS,
+  precedentCandidates,
+} from './precedent-candidates';
 export {
   parseRules,
   within,

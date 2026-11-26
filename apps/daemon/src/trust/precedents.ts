@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   PrecedentScope,
   PrecedentState,
+  type ProjectId,
   type TrustPrecedentDto,
   type TrustPrecedentId,
 } from '@10db/contracts';
@@ -21,6 +22,19 @@ export const PRECEDENT_LINES_MAX = 30;
 export const PRECEDENT_SHOWN_EXAMPLES_MAX = 3;
 /** The examples a line for Claude's auto mode quotes. */
 const LINE_EXAMPLES = 2;
+
+/**
+ * What a session tells the daemon about standing approvals as it works, so the cards and notices are raised
+ * without the judge importing the Inbox.
+ */
+export interface PrecedentEvents {
+  /** A third conflict with a limit paused the precedent. */
+  readonly paused: (projectId: ProjectId, id: TrustPrecedentId) => void;
+  /** A precedent was shown with changed text; the hash is the committed text's now. */
+  readonly changed: (projectId: ProjectId, id: TrustPrecedentId, hash: string) => void;
+  /** 10db's judge's doubt skip was recorded: the project's candidates may have changed. */
+  readonly doubtSkip: (projectId: ProjectId) => void;
+}
 
 /** The precedent a judge is shown for one call. */
 export interface ShownPrecedent {

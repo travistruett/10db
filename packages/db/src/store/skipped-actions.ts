@@ -223,6 +223,22 @@ export function listDoubtSkips(db: DbReader, projectId: ProjectId, since: string
     );
 }
 
+/** The ids among `ids` that the builder approved for a follow-up with Run these now, at any time. */
+export function approvedSkipIds(
+  db: DbReader,
+  ids: readonly SkippedActionId[],
+): Set<SkippedActionId> {
+  if (ids.length === 0) return new Set();
+  return new Set(
+    db
+      .select({ id: schema.skipApprovals.skippedActionId })
+      .from(schema.skipApprovals)
+      .where(inArray(schema.skipApprovals.skippedActionId, [...ids]))
+      .all()
+      .map((row) => row.id),
+  );
+}
+
 /**
  * Approves skips for a follow-up task. Every one must be its project's and approvable; otherwise
  * nothing is written and ConflictError says which.

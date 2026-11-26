@@ -52,6 +52,7 @@ import {
   type FigmaSignInsDto,
   type LinearSignInsDto,
   effectiveWatchpoints,
+  type PrecedentScope,
   type ProjectWatchpointsDto,
   type ProjectId,
 } from '@10db/contracts';
@@ -232,6 +233,7 @@ import type { JudgeApiServices } from './judge-services';
 import type { StakeholderApiServices } from './stakeholder-services';
 import type { KnowledgeApiServices } from './knowledge-services';
 import type { ServiceConnector } from './connect-service';
+import type { PrecedentService } from '../inbox';
 import type { TrustServices } from './trust-services';
 import type { ProjectTrustServices } from './project-trust-services';
 import { createPlaybookServices } from './playbook-services';
@@ -413,6 +415,8 @@ export function createServices(deps: {
   readonly pinCheckout: (repoPath: string) => void;
   /** Settings › Trust: the switches, the builder's plugins and each project's preview. */
   readonly trust: TrustServices & ProjectTrustServices;
+  /** Reads what a kind made routine by Run and Make Routine runs, once the answer has committed. */
+  readonly precedents: Pick<PrecedentService, 'settleHashes'>;
   /** Settings › Trust's MCP sign-ins. */
   readonly mcpSignIns: McpSignIns;
   readonly linearSignIns: { list(): Promise<LinearSignInsDto> };
@@ -845,10 +849,24 @@ export function createServices(deps: {
       getWorkstream(db, id);
       return listSkipsForWorkstream(db, id);
     },
-    runSkippedCalls(id) {
+    runSkippedCalls(id, makeRoutine = false) {
       getWorkstream(db, id);
-      const followUp = deps.state.write((ctx) => runSkippedCalls(ctx, id));
+      const madeRoutine: { programKey: string; scope: PrecedentScope }[] = [];
+      const followUp = deps.state.write((ctx) =>
+        runSkippedCalls(
+          ctx,
+          id,
+          makeRoutine
+            ? (kind) => {
+                madeRoutine.push(kind);
+              }
+            : undefined,
+        ),
+      );
       deps.startFollowUps();
+      // What each kind runs is read once the write has committed.
+      if (madeRoutine.length > 0)
+        void deps.precedents.settleHashes(followUp.projectId, madeRoutine);
       return followUp;
     },
     retryWorkstream(id, note) {

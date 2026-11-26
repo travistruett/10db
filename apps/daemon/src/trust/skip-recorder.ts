@@ -3,9 +3,9 @@ import {
   approvalOf,
   SKIP_SUMMARY_MAX,
   SkipKind,
+  SkipSource,
   type LimitName,
   type SessionId,
-  type SkipSource,
   type WorkstreamId,
 } from '@10db/contracts';
 import { recordSkip } from '@10db/db';
@@ -48,6 +48,11 @@ export function createSkipRecorder(
     readonly log: Logger;
     /** Whether a shell call's program can run under the lane's profile; absent, every program can. */
     readonly runnable?: (command: string) => boolean;
+    /**
+     * Told after 10db's judge's doubt skip (no limit, a program key) is written, so the project's standing
+     * approval candidates can be read again. Bookkeeping: it never fails the record.
+     */
+    readonly onDoubtSkip?: () => void;
   },
   run: { readonly workstreamId: WorkstreamId; readonly sessionId: SessionId | null },
 ): SkipRecorder {
@@ -91,6 +96,19 @@ export function createSkipRecorder(
         { toolName: skip.toolName, kind: skip.kind, source: skip.source },
         'skipped a call',
       );
+      if (
+        skip.source === SkipSource.TendbJudge &&
+        skip.kind === SkipKind.Classifier &&
+        skip.limit === null &&
+        skip.programKey !== undefined &&
+        skip.programKey !== null
+      ) {
+        try {
+          deps.onDoubtSkip?.();
+        } catch (error) {
+          deps.log.warn({ err: error }, 'the standing approval candidates were not refreshed');
+        }
+      }
       // A question was answered, not skipped: it never stops a turn.
       if (skip.kind === SkipKind.Question) return;
       // A skip no call id names is a call of its own, made now.

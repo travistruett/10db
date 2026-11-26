@@ -11,6 +11,8 @@ export { raiseGateHostCards } from './gate-host-card';
 export { hazardCardFoldKey, hazardRemovalCard, pendingHazardRemovals } from './hazard-card';
 export { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
 export { createRepoMcpServers } from './repo-mcp-servers';
+export { applyPrecedentConflictAnswer, PrecedentConflictChoice } from './precedent-card';
+export { createPrecedentService, type PrecedentService } from './precedent-service';
 export { createProjectMcpReader, flagMcpFailure } from './project-mcp-reader';
 export {
   carriesKinds,

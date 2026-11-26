@@ -101,6 +101,7 @@ import {
   startingJudge,
   stoppedBySkip,
   projectGrantLines,
+  type PrecedentEvents,
 } from '../trust';
 import {
   activeClaims,
@@ -503,6 +504,8 @@ export interface RunnerOptions {
   readonly clock: Clock;
   /** 10db's judge: asked whether it is ready as each session starts, and for each call it judges. */
   readonly judge: Judge;
+  /** Where a session reports standing approvals: a pause, changed text, a doubt skip; absent, none is raised. */
+  readonly precedents?: PrecedentEvents;
   readonly logger: Logger;
   /** Gives a repo MCP server that names an AWS profile that profile's short-lived credentials. */
   readonly exportAwsCredentials: AwsCredentialsExporter;
@@ -3531,6 +3534,13 @@ export function createRunner(opts: RunnerOptions): Runner {
             {
               state: opts.state,
               log: opts.logger,
+              ...(opts.precedents === undefined
+                ? {}
+                : {
+                    onDoubtSkip: () => {
+                      opts.precedents?.doubtSkip(project.id);
+                    },
+                  }),
               ...(laneSession === null
                 ? {}
                 : {
@@ -3700,12 +3710,14 @@ export function createRunner(opts: RunnerOptions): Runner {
               inCopy: sessionCopyId !== null,
               onPrecedentPaused: (precedentId) => {
                 opts.logger.info({ workstreamId: id, precedentId }, 'a precedent was paused');
+                opts.precedents?.paused(project.id, precedentId);
               },
               onPrecedentChanged: (precedentId, hash) => {
                 opts.logger.info(
                   { workstreamId: id, precedentId, hash },
                   'what a precedent runs has changed',
                 );
+                opts.precedents?.changed(project.id, precedentId, hash);
               },
               onFloor: (detail) => {
                 if (saidUnavailable) return;

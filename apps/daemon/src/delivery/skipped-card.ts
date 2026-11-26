@@ -4,7 +4,10 @@ import {
   InboxKind,
   InboxState,
   NotFoundError,
+  PrecedentScope,
+  PrecedentState,
   SkipKind,
+  SkipSource,
   SkippedActionId,
   TaskStatus,
   WORKSTREAM_FAILED_TITLE_PREFIX,
@@ -12,13 +15,17 @@ import {
   WorkstreamState,
   type InboxAnswer,
   type InboxItemDto,
+  type InboxItemId,
   type InboxOption,
+  type ProjectId,
   type SkippedActionDto,
   type TaskDto,
   Urgency,
 } from '@10db/contracts';
 import {
+  approvePrecedent,
   approveSkips,
+  isLocalCopy,
   getTask,
   getWorkstreamRow,
   insertSkipFollowUp,
@@ -40,7 +47,7 @@ import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { flagCard, rewordCard, BY_ANSWER, CardTier, type InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { LIMITS, writtenConfig } from '../trust';
+import { defaultPrecedentKind, LIMITS, writtenConfig } from '../trust';
 import { checkoutOf } from './checkout';
 import { followUpStart } from './follow-up-start';
 import { sourceStateOf } from './skip-follow-up';
@@ -57,9 +64,13 @@ const CONFIG_DETAIL = 'listsConfig';
 /** The answers the item offers; the card shows them as written. */
 export const SkippedChoice = {
   RunTheseNow: 'Run these now',
+  RunAndMakeRoutine: 'Run and Make Routine',
   Dismiss: 'Dismiss',
 } as const;
 export type SkippedChoice = (typeof SkippedChoice)[keyof typeof SkippedChoice];
+
+/** Told each kind of command Run and Make Routine made a standing approval, inside the answer's write. */
+export type MadeRoutine = (kind: { programKey: string; scope: PrecedentScope }) => void;
 
 export interface SkippedCardDeps {
   readonly state: StateStore;
@@ -162,6 +173,38 @@ function runOption(waits: boolean): InboxOption {
 }
 
 /**
+ * Whether every skip a follow-up would run is 10db's judge's doubt: no limit named and a program key. Only then is
+ * Run and Make Routine offered, since a kind is approved from its skips, and a skip that names a limit never makes
+ * one.
+ */
+function makesRoutine(skips: readonly SkippedActionDto[]): boolean {
+  return (
+    skips.length > 0 &&
+    skips.every(
+      (s) => s.source === SkipSource.TendbJudge && s.limit === null && s.programKey !== null,
+    )
+  );
+}
+
+/** The skips of a run a follow-up can run approved. */
+const approvableOf = (skips: readonly SkippedActionDto[]): SkippedActionDto[] =>
+  skips.filter((s) => s.kind !== SkipKind.Question && s.approval !== Approval.None);
+
+/** Run and Make Routine: Run these now, and a standing approval for the kind of each call it runs. */
+const ROUTINE_OPTION: InboxOption = {
+  label: SkippedChoice.RunAndMakeRoutine,
+  description:
+    'Run the calls above, approved, and treat each kind of command as routine in this project from now on',
+};
+
+/** The options that run a run's skips: Run these now, and Run and Make Routine where every skip allows it. */
+function runOptions(skips: readonly SkippedActionDto[], waits: boolean): InboxOption[] {
+  return approvableOf(skips).length === 0
+    ? []
+    : [runOption(waits), ...(makesRoutine(approvableOf(skips)) ? [ROUTINE_OPTION] : [])];
+}
+
+/**
  * The paths the run changed since `since` (its base when null), as the review step reads them, and
  * the commit they were read through; null when they can't be read.
  */
@@ -242,10 +285,15 @@ export async function raiseSkippedCard(
       rewordCard(ctx, failed.id, `${failed.body}\n\n${bodyOf(skips, written)}`, {
         // Closing itself adds to the card; the builder can still dismiss a notice they have read.
         options: [
-          ...failed.options.filter((o) => o.label !== DISMISS.label),
+          ...failed.options.filter(
+            (o) => o.label !== DISMISS.label && o.label !== ROUTINE_OPTION.label,
+          ),
           ...(skipIds.length === 0
             ? []
-            : [runOption(followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait')]),
+            : runOptions(
+                skips,
+                followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait',
+              )),
           DISMISS,
         ],
         detail: { ...failed.detail, [SKIPPED_DETAIL]: workstreamId, skipIds },
@@ -265,7 +313,10 @@ export async function raiseSkippedCard(
         skipIds.length === 0
           ? [DISMISS]
           : [
-              runOption(followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait'),
+              ...runOptions(
+                skips,
+                followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait',
+              ),
               DISMISS,
             ],
       recommendation: null,
@@ -360,24 +411,82 @@ export function applySkippedChoice(
   ctx: WriteContext,
   item: InboxItemDto,
   answer: InboxAnswer,
+  routine?: MadeRoutine,
 ): boolean {
-  if (item.kind !== InboxKind.Flag || answer.choice !== SkippedChoice.RunTheseNow) return false;
+  if (
+    item.kind !== InboxKind.Flag ||
+    (answer.choice !== SkippedChoice.RunTheseNow &&
+      answer.choice !== SkippedChoice.RunAndMakeRoutine)
+  )
+    return false;
   // The detail is the item's own JSON, written when it was raised.
   const detail = SkippedDetail.safeParse(item.detail);
   if (!detail.success) return false;
-  insertFollowUp(ctx, detail.data[SKIPPED_DETAIL], detail.data.skipIds);
+  insertFollowUp(
+    ctx,
+    detail.data[SKIPPED_DETAIL],
+    detail.data.skipIds,
+    answer.choice === SkippedChoice.RunAndMakeRoutine
+      ? { sourceInboxId: item.id, ...(routine === undefined ? {} : { told: routine }) }
+      : null,
+  );
   return true;
 }
 
 /**
  * Run These Now from the task's drawer, in the caller's write: the follow-up for every call the run
- * skipped that a follow-up can run approved, refused as the card's answer is.
+ * skipped that a follow-up can run approved, refused as the card's answer is. With `routine` it is Run and
+ * Make Routine, which also approves each call's kind and tells `routine` each one.
  */
-export function runSkippedCalls(ctx: WriteContext, source: WorkstreamId): TaskDto {
-  const ids = listSkipsForWorkstream(ctx.tx, source)
-    .filter((s) => s.kind !== SkipKind.Question && s.approval !== Approval.None)
-    .map((s) => s.id);
-  return insertFollowUp(ctx, source, ids);
+export function runSkippedCalls(
+  ctx: WriteContext,
+  source: WorkstreamId,
+  routine?: MadeRoutine,
+): TaskDto {
+  const ids = approvableOf(listSkipsForWorkstream(ctx.tx, source)).map((s) => s.id);
+  return insertFollowUp(
+    ctx,
+    source,
+    ids,
+    routine === undefined ? null : { sourceInboxId: null, told: routine },
+  );
+}
+
+/**
+ * Approves the kind of each skip, in the follow-up's write: an `active` row per program key, with the skips'
+ * summaries as its examples, which also brings back a declined or revoked kind. The kind is `copy` scoped only when
+ * every skip of the key ran in a copy. The hash of what it runs is read after the write commits.
+ */
+function makeKindsRoutine(
+  ctx: WriteContext,
+  projectId: ProjectId,
+  skips: readonly SkippedActionDto[],
+  sourceInboxId: InboxItemId | null,
+  told: MadeRoutine | undefined,
+): void {
+  const byKey = new Map<string, SkippedActionDto[]>();
+  for (const skip of skips) {
+    if (skip.programKey === null) continue;
+    byKey.set(skip.programKey, [...(byKey.get(skip.programKey) ?? []), skip]);
+  }
+  for (const [programKey, of] of byKey) {
+    const inCopy = of.every((s) => {
+      const batchId = getWorkstreamRow(ctx.tx, s.workstreamId).batchId;
+      return batchId !== null && isLocalCopy(ctx.tx, batchId);
+    });
+    const scope = inCopy ? PrecedentScope.Copy : PrecedentScope.Project;
+    approvePrecedent(ctx, {
+      projectId,
+      programKey,
+      scope,
+      kind: defaultPrecedentKind(programKey),
+      examples: of.map((s) => s.summary),
+      runsHash: null,
+      state: PrecedentState.Active,
+      sourceInboxId,
+    });
+    told?.({ programKey, scope });
+  }
 }
 
 /** The follow-up task, its approvals (exactly `ids`) and its follow-up row. */
@@ -385,6 +494,7 @@ function insertFollowUp(
   ctx: WriteContext,
   source: WorkstreamId,
   ids: readonly SkippedActionId[],
+  makeRoutine: { readonly sourceInboxId: InboxItemId | null; readonly told?: MadeRoutine } | null,
 ): TaskDto {
   if (ids.length === 0) throw new ConflictError('Nothing this item lists can be run approved');
   const row = getWorkstreamRow(ctx.tx, source);
@@ -402,6 +512,10 @@ function insertFollowUp(
     (s) => listed.has(s.id) && s.approval !== Approval.None,
   );
   if (approved.length === 0) throw new ConflictError('Nothing this item lists can be run approved');
+  if (makeRoutine !== null && !makesRoutine(approved))
+    throw new ConflictError(
+      'Run and Make Routine needs every call to be one 10db’s judge doubted, with no limit named.',
+    );
   const quoted =
     sourceTask.title.length > SOURCE_TITLE_MAX
       ? `${sourceTask.title.slice(0, SOURCE_TITLE_MAX)}…`
@@ -434,5 +548,7 @@ function insertFollowUp(
     sourceWorkstreamId: source,
     sourceBatchId: row.batchId,
   });
+  if (makeRoutine !== null)
+    makeKindsRoutine(ctx, row.projectId, approved, makeRoutine.sourceInboxId, makeRoutine.told);
   return task;
 }

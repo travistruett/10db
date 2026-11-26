@@ -94,6 +94,7 @@ import {
   projectLiveSystems,
   sessionDevAccess,
   startingJudge,
+  type PrecedentEvents,
 } from '../trust';
 import { digestText } from './brief';
 import {
@@ -261,6 +262,8 @@ export interface ChatHooksDeps {
   readonly webSearchOf: (account: AccountAgent, model: string) => boolean;
   /** 10db's judge, asked whether it is ready as each session starts; absent, a `tendb` chat is on the rules. */
   readonly judge?: Judge;
+  /** Where a chat's judge reports a standing approval it paused or found changed; absent, none is raised. */
+  readonly precedents?: Pick<PrecedentEvents, 'paused' | 'changed'>;
   readonly clock: Clock;
   /** The project's compose services at its committed base, for a session Docker is open to. */
   readonly composeServices: (
@@ -1001,9 +1004,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                     inCopy: false,
                     onPrecedentPaused: (precedentId) => {
                       log.info({ precedentId }, 'a precedent was paused');
+                      deps.precedents?.paused(project.id, precedentId);
                     },
                     onPrecedentChanged: (precedentId, hash) => {
                       log.info({ precedentId, hash }, 'what a precedent runs has changed');
+                      deps.precedents?.changed(project.id, precedentId, hash);
                     },
                     onFloor: (detail) => {
                       if (saidUnavailable) return;

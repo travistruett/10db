@@ -10,7 +10,19 @@ import {
   type TrustPrecedentId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, asc, count, desc, eq, gte, isNotNull, lt, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  lt,
+  notInArray,
+  type SQL,
+} from 'drizzle-orm';
 import { z } from 'zod';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
@@ -204,6 +216,64 @@ export function listUnclearLimitCalls(
               createdAt: row.createdAt,
             },
           ],
+    );
+}
+
+/** A call of a kind a precedent covers that a limit stopped while the same reading found the precedent applying. */
+export interface PrecedentStop {
+  /** The call's command, or its input as JSON; null when the logged state can't be read. */
+  readonly call: string | null;
+  /** The limit the call was stopped at (the row's answer). */
+  readonly limit: string;
+  readonly at: string;
+}
+
+/** Rows read before the precedent filter, so the few that matter are found among a busy key's calls. */
+const STOP_SCAN_MAX = 200;
+
+/**
+ * The project's calls of a program key since `since` that a limit stopped, newest first, up to `max`, among the
+ * rows that were asked whether a precedent applies: those a precedent's conflicts counted. A call is the
+ * project's through its run.
+ */
+export function listPrecedentStops(
+  db: DbReader,
+  projectId: ProjectId,
+  programKey: string,
+  since: string,
+  max: number,
+): PrecedentStop[] {
+  return db
+    .select({
+      state: schema.judgeCalls.state,
+      answer: schema.judgeCalls.answer,
+      probabilities: schema.judgeCalls.probabilities,
+      createdAt: schema.judgeCalls.createdAt,
+    })
+    .from(schema.judgeCalls)
+    .innerJoin(schema.workstreams, eq(schema.workstreams.id, schema.judgeCalls.workstreamId))
+    .where(
+      and(
+        eq(schema.workstreams.projectId, projectId),
+        inArray(schema.judgeCalls.decision, [
+          JudgeDecision.CrossesLimit,
+          JudgeDecision.CrossesLimitSecond,
+        ]),
+        eq(schema.judgeCalls.programKey, programKey),
+        isNotNull(schema.judgeCalls.answer),
+        notInArray(schema.judgeCalls.answer, ['allow', 'unsure']),
+        gte(schema.judgeCalls.createdAt, since),
+      ),
+    )
+    .orderBy(desc(schema.judgeCalls.createdAt), desc(schema.judgeCalls.id))
+    .limit(STOP_SCAN_MAX)
+    .all()
+    .filter((row) => row.probabilities !== null && 'precedent_applies' in row.probabilities)
+    .slice(0, max)
+    .flatMap((row) =>
+      row.answer === null
+        ? []
+        : [{ call: commandOfState(row.state), limit: row.answer, at: row.createdAt }],
     );
 }
 
