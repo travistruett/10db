@@ -70,7 +70,7 @@ function answeredLine(card: InboxItemDto): {
     case PermissionChoice.AllowProject:
       return { text: 'You allowed', call, tail: ' in the project', tone: 'allowed' };
     case PermissionChoice.AllowChat:
-      return { text: 'You allowed', call, tail: ' in this chat', tone: 'allowed' };
+      return { text: 'You allowed', call, tail: ' in this turn', tone: 'allowed' };
     case PermissionChoice.Deny:
       return {
         text: 'You said no to',
