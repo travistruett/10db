@@ -1,7 +1,14 @@
 import { posix } from 'node:path';
 import type { ProjectDto } from '@10db/contracts';
 import type { Git } from '../git';
-import { parseRules, within, withoutComments, type MakeRule, type ReadRepoFile } from '../trust';
+import {
+  parseRules,
+  within,
+  withoutComments,
+  withoutDirectives,
+  type MakeRule,
+  type ReadRepoFile,
+} from '../trust';
 
 /** The most of a Makefile or script read from the base to see whether a gate calls docker. */
 export const MAX_DOCKER_SCAN_BYTES = 256 * 1024;
@@ -89,7 +96,8 @@ export async function callsDocker(command: string, read: ReadRepoFile): Promise<
     if (rules === null || seen.has(key)) return false;
     seen.add(key);
     for (const rule of rules.get(target) ?? []) {
-      if (await scanText(rule.recipe, dir, depth)) return true;
+      // A directive line is make's test, not a command: `ifeq ($(RUNNER),docker)` runs nothing.
+      if (await scanText(withoutDirectives(rule.recipe), dir, depth)) return true;
       for (const needed of rule.prerequisites)
         if (await scanTarget(dir, needed, depth + 1)) return true;
     }
