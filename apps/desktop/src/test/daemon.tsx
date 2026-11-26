@@ -72,6 +72,9 @@ export function baseHandlers(
     http.get(daemonUrl('/health', base), () =>
       HttpResponse.json({ status: 'ok', protocolVersion: PROTOCOL_VERSION, startedAt: STARTED_AT }),
     ),
+    http.post(daemonUrl('/events/ticket', base), () =>
+      HttpResponse.json({ ticket: 'test-ticket', expiresAt: '2026-10-13T12:00:30.000Z' }),
+    ),
     http.get(daemonUrl('/events/head', base), () =>
       HttpResponse.json(EventsHead.parse({ seq: opts.headSeq ?? 0 })),
     ),

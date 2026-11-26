@@ -3344,12 +3344,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       steps: [],
     }),
   });
+  const streamTickets = createTickets({ clock });
   const app = createApp({
     commit: build?.commit ?? null,
     listenPort: () => listenPort,
     share: { allowlists: () => null, hostLogin: () => null },
     devices,
-    tickets: createTickets({ clock }),
+    tickets: streamTickets,
+    sockets: deviceSockets,
     skillVersion: agentSkill.shippedVersion(),
     devUiOrigin: opts.devUiOrigin ?? null,
     // Only when a dev UI is opted in; it reads and nothing else, and outlives a restart.

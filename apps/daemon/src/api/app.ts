@@ -162,6 +162,7 @@ import {
   SessionsSettingsPatch,
   CapacitySettingsDto,
   TicketScope,
+  EventTicketDto,
 } from '@10db/contracts';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -173,8 +174,9 @@ import { z } from 'zod';
 import type { ApiServices } from './services';
 import type { SelfUpdateServices, TaskRemovalServices } from './services';
 import { credentialMiddleware, type CredentialDeps } from './credential';
-import { Listener } from './listener';
-import { ticketScopeOf, type Principal } from './principal';
+import type { SocketRegistry, Tickets } from '../devices';
+import { Listener, listenerOf } from './listener';
+import { ticketScopeOf } from './principal';
 import type { ApiEnv } from './request-context';
 import {
   hostGuard,
@@ -221,8 +223,10 @@ export interface ApiDeps {
   };
   /** Device tokens, for the share listener. */
   readonly devices: CredentialDeps['devices'];
-  /** Stream tickets. */
-  readonly tickets: CredentialDeps['tickets'];
+  /** Stream tickets: the route issues them, the credential middleware spends them. */
+  readonly tickets: CredentialDeps['tickets'] & Pick<Tickets, 'issue'>;
+  /** Open stream sockets, so a revoked device or a stopped listener closes them. */
+  readonly sockets: SocketRegistry;
   readonly services: ApiServices;
   /** Removes tasks that haven't started; the route answers 501 without it. */
   readonly taskRemoval?: TaskRemovalServices;
@@ -2271,14 +2275,29 @@ export function createApp(deps: ApiDeps) {
       validator('json', (value): LanePermissionsDto => LanePermissionsDto.parse(value)),
       (c) => c.json(deps.services.setLanePermissions(c.req.valid('json').autoMode)),
     )
+    .post('/events/ticket', (c) => {
+      const scope = ticketScopeOf(c.var.principal);
+      if (scope === null) return c.json({ error: 'unauthorized' }, 401);
+      const principal = c.var.principal;
+      return c.json(
+        EventTicketDto.parse(
+          deps.tickets.issue({
+            scope,
+            deviceId: principal.kind === 'device' ? principal.deviceId : null,
+            listener: listenerOf(c.env),
+          }),
+        ),
+      );
+    })
     .get(
       STREAM_PATH,
-      deps.upgradeWebSocket((c) => {
+      deps.upgradeWebSocket((c: Context<ApiEnv>) => {
         const after = Cursor.parse(c.req.query('after'));
         // A token held by code an agent may edit gets a conversation's live words only where it is a
         // Plan's, as for its reads. A conversation's owner never changes, so each is looked up once.
-        // The upgrade helper's context is untyped; the credential middleware set this principal.
-        const full = ticketScopeOf(c.var['principal'] as Principal) === TicketScope.Full;
+        // The credential middleware spent the ticket and set its owner; the stream route always has one.
+        const owner = c.var.ticketOwner;
+        const full = owner?.scope === TicketScope.Full;
         const planOwned = new Map<ConversationId, boolean>();
         const mayHear = (frame: ConversationDeltaFrame): boolean => {
           if (full) return true;
@@ -2290,8 +2309,19 @@ export function createApp(deps: ApiDeps) {
           return owned;
         };
         let stop: (() => void) | null = null;
+        let unregister: (() => void) | null = null;
         return {
           onOpen(_event, ws) {
+            if (owner === null) {
+              ws.close(4401, 'unauthorized');
+              return;
+            }
+            // Registered before the check, so a revoke that lands between them still closes this socket.
+            unregister = deps.sockets.add(owner, ws);
+            if (owner.deviceId !== null && !deps.devices.isActive(owner.deviceId)) {
+              ws.close(4401, 'device revoked');
+              return;
+            }
             stop = streamEvents(
               after,
               deps.services,
@@ -2304,6 +2334,7 @@ export function createApp(deps: ApiDeps) {
             );
           },
           onClose() {
+            unregister?.();
             stop?.();
           },
         };

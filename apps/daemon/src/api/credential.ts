@@ -75,15 +75,6 @@ export function credentialMiddleware(deps: CredentialDeps): MiddlewareHandler<Ap
     if (route === RouteClass.Stream) {
       const ticket = c.req.query('ticket');
       if (ticket !== undefined && ticket !== '') return spendTicket(ticket, listener);
-      // The main listener's stream still takes the UI's or the dev UI's token in the query.
-      const token = c.req.query('token');
-      if (listener === Listener.Main && token !== undefined && token !== '') {
-        if (sameToken(token, deps.uiToken))
-          return ofTicket({ scope: TicketScope.Full, deviceId: null, listener });
-        if (deps.devUi !== undefined && sameToken(token, deps.devUi.token))
-          return ofTicket({ scope: TicketScope.DevUi, deviceId: null, listener });
-        return UNKNOWN;
-      }
     }
     const bearer = /^Bearer (.+)$/.exec(c.req.header('authorization') ?? '')?.[1];
     if (bearer === undefined) return NONE;

@@ -142,7 +142,11 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
 const PARAM = '[A-Za-z0-9_-]+';
 const allowed = DEV_UI_READS.map((route) => new RegExp(`^${route.replace(/:[A-Za-z]+/g, PARAM)}$`));
 
-/** Whether the dev UI's token may make this request: a GET of a route named as a read, nothing else. */
+/**
+ * Whether the dev UI's token may make this request: a GET of a route named as a read, and the one POST
+ * that asks for a stream ticket. A ticket only opens the stream this token already reads.
+ */
 export function devUiMayRead(method: string, path: string): boolean {
+  if (method === 'POST' && path === '/events/ticket') return true;
   return method === 'GET' && allowed.some((pattern) => pattern.test(path));
 }

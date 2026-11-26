@@ -7,6 +7,8 @@ import { createApp, MAX_BODY_BYTES } from './app';
 const TOKEN = 'ui-token-for-tests';
 const startedAt = new Date('2026-10-13T12:00:00.000Z');
 
+import type { Tickets } from '../devices';
+import type { CredentialDeps } from './credential';
 import { noSharing, stubServices } from '../../test/api-stub';
 
 // A helper that never upgrades: it answers 426 so a test can tell the route was reached.
@@ -16,9 +18,11 @@ function app(
   services = stubServices(),
   onUnexpectedError: (error: unknown) => void = () => undefined,
   skillVersion: string | null = null,
+  tickets: CredentialDeps['tickets'] & Pick<Tickets, 'issue'> = noSharing.tickets,
 ) {
   return createApp({
     ...noSharing,
+    tickets,
     skillVersion,
     onUnexpectedError,
     startedAt,
@@ -89,22 +93,27 @@ describe('API', () => {
     expect(await ok.text()).toBe('builder');
   });
 
-  it('takes the token from the query string on the event stream only', async () => {
+  it('opens the event stream by a ticket only, never by the token', async () => {
     expect((await app().request('/events/stream')).status).toBe(401);
     expect((await app().request('/events/stream', auth)).status).toBe(401);
-    expect((await app().request('/events/stream?token=wrong')).status).toBe(401);
-    expect((await app().request(`/events/stream?token=${TOKEN}`)).status).toBe(426);
+    expect((await app().request(`/events/stream?token=${TOKEN}`)).status).toBe(401);
+    expect((await app().request('/events/stream?ticket=wrong')).status).toBe(401);
     expect((await app().request(`/projects?token=${TOKEN}`)).status).toBe(401);
   });
 
   it('refuses an event-stream upgrade from a foreign origin', async () => {
     const upgrade = { Upgrade: 'websocket', Connection: 'Upgrade' };
-    const foreign = await app().request(`/events/stream?token=${TOKEN}`, {
+    const spendable = {
+      ...noSharing.tickets,
+      spend: () => ({ scope: 'full' as const, deviceId: null, listener: 'main' as const }),
+    };
+    const stream = () => app(stubServices(), undefined, null, spendable);
+    const foreign = await stream().request('/events/stream?ticket=t', {
       headers: { ...upgrade, Origin: 'https://evil.example' },
     });
     expect(foreign.status).toBe(403);
     // The stubbed upgrader answers 426, so reaching it proves the allowed origin got through.
-    const allowed = await app().request(`/events/stream?token=${TOKEN}`, {
+    const allowed = await stream().request('/events/stream?ticket=t', {
       headers: { ...upgrade, Origin: 'http://localhost:1420' },
     });
     expect(allowed.status).toBe(426);

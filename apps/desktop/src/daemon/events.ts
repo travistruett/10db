@@ -3,6 +3,7 @@ import {
   ConversationDeltaFrame,
   DaemonEvent,
   EventsHead,
+  EventTicketDto,
   EventType,
   TaskId,
   GithubLoginEndedData,
@@ -201,11 +202,12 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'conversation.state': [liveKeys.all, chatWorkKeys.all],
 };
 
-export function eventStreamUrl(conn: DaemonConnection, after: number): string {
+/** The stream's address: the cursor and a one-use ticket, never the token. */
+export function eventStreamUrl(conn: DaemonConnection, after: number, ticket: string): string {
   const url = new URL('/events/stream', conn.url);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('after', String(after));
-  url.searchParams.set('token', conn.token);
+  url.searchParams.set('ticket', ticket);
   return url.toString();
 }
 
@@ -303,8 +305,19 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
           return;
         }
       }
+      let ticket: string;
+      try {
+        // A ticket opens one socket and lapses in seconds; a failed request is a failed connect.
+        const issued = await client.events.ticket.$post(undefined, {
+          init: { signal: AbortSignal.timeout(HEAD_TIMEOUT_MS) },
+        });
+        ticket = (await readJson(issued, EventTicketDto)).ticket;
+      } catch {
+        retry();
+        return;
+      }
       if (stopped) return;
-      const ws = new WebSocket(eventStreamUrl(connection, after));
+      const ws = new WebSocket(eventStreamUrl(connection, after, ticket));
       socket = ws;
       ws.addEventListener('open', () => {
         attempt = 0;

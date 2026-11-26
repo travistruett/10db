@@ -311,5 +311,13 @@ export const noSharing = {
   listenPort: () => null,
   share: { allowlists: () => null, hostLogin: () => null },
   devices: { authenticate: () => null, isActive: () => false },
-  tickets: { spend: () => null },
+  tickets: {
+    spend: () => null,
+    issue: () => ({ ticket: 'stub', expiresAt: '2026-01-01T00:00:30.000Z' }),
+  },
+  sockets: {
+    add: () => () => undefined,
+    closeDevice: () => undefined,
+    closeListener: () => undefined,
+  },
 };

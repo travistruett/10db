@@ -14,6 +14,7 @@ import {
   createDeviceService,
   createPairingCodes,
   createSocketRegistry,
+  type SocketRegistry,
   createTickets,
   mintDeviceToken,
   type DeviceService,
@@ -44,6 +45,7 @@ let close: () => void;
 let lists: ListenerAllowlists | null;
 let devices: DeviceService;
 let tickets: Tickets;
+let sockets: SocketRegistry;
 let pair: () => { deviceId: DeviceId; token: string };
 let app: ReturnType<typeof createApp>;
 
@@ -56,7 +58,7 @@ beforeEach(() => {
   close = made.close;
   const state = createStateStore(made.store, createEventBus());
   const codes = createPairingCodes({ clock });
-  const sockets = createSocketRegistry();
+  sockets = createSocketRegistry();
   devices = createDeviceService({
     state,
     clock,
@@ -107,6 +109,7 @@ beforeEach(() => {
     share: { allowlists: () => lists, hostLogin: () => HOST_LOGIN },
     devices,
     tickets,
+    sockets,
   });
 });
 afterEach(() => {
