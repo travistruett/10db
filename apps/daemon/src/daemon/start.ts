@@ -412,6 +412,7 @@ import {
   type RunnerLimits,
   type StopPassLane,
   startTurnChecks,
+  subscribeLaneTakeOut,
   TURN_CHECK_TIMEOUT_MS,
   withTurnChecks,
 } from '../runner';
@@ -2766,6 +2767,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // started task's saved work goes once its work lands.
   const unsubscribePassSettles = subscribePassSettles(bus, delivery);
   const unsubscribeKeptWork = subscribeKeptWorkLanding(bus, delivery);
+  // A failed Your-folder run of a Commit Directly project takes its work out of the folder.
+  const unsubscribeLaneTakeOut = subscribeLaneTakeOut(bus, delivery);
   resumePassSettles(delivery);
   // A close a restart cut short goes on from its last step, once recovery has swept what the stopped
   // daemon left: its scratch gate's worktree and process are its own from here.
@@ -3666,6 +3669,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeSignOffWaits();
       unsubscribeMergedPasses();
       unsubscribeKeptWork();
+      unsubscribeLaneTakeOut();
       unsubscribePrWatch();
       await prWatch.stop();
       await Promise.all([replyWatches.stop(), timerWatch.stop()]);

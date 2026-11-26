@@ -749,14 +749,16 @@ export interface Git extends ChatGit {
     branch: string;
   }): Promise<{ sha: string; alreadyCommitted: boolean }>;
   /**
-   * Commits `paths` as the folder holds them on `branch`, which need not be checked out: the tree is
-   * the branch's tip (or `startAt`'s, when the branch is not there yet) with those paths taken from
-   * disk. HEAD, the folder's index and every other branch stay as they are, and the branch moves only
-   * if nothing moved it meanwhile. A rerun of `opId` answers the commit it made.
+   * Commits `paths` as the folder holds them on `branch`, which is not checked out: the tree is the
+   * branch's tip (or `startAt`'s, when the branch is not there yet) with those paths taken from disk.
+   * The folder must be on `checkedOut`, the branch its files belong to, or nothing is committed. HEAD,
+   * the folder's index and every other branch stay as they are, and the branch moves only if nothing
+   * moved it meanwhile. A rerun of `opId` answers the commit it made.
    */
   commitOnBranch(input: {
     repo: string;
     branch: string;
+    checkedOut: string;
     startAt: string;
     paths: readonly string[];
     message: string;
@@ -4006,6 +4008,7 @@ export function createGit(opts: GitOptions = {}): Git {
   async function commitOnBranch(input: {
     repo: string;
     branch: string;
+    checkedOut: string;
     startAt: string;
     paths: readonly string[];
     message: string;
@@ -4018,6 +4021,15 @@ export function createGit(opts: GitOptions = {}): Git {
       const ref = `refs/heads/${input.branch}`;
       if (await isSymbolic(c, ref))
         throw refusal(real, { kind: GitTrustFailure.Ref, ref, reason: 'symbolic' });
+      // The folder's files are the work only while it is on the branch they were made on.
+      const head = await currentBranch(c);
+      if (head !== input.checkedOut)
+        throw refusal(real, {
+          kind: GitTrustFailure.Branch,
+          expected: input.checkedOut,
+          found: head,
+          committed: false,
+        });
       const held = await revParse(c, `${ref}^{commit}`);
       const tip = held ?? (await revParse(c, `${input.startAt}^{commit}`));
       if (tip === null) throw new InvalidError(`${input.startAt} names no commit`);

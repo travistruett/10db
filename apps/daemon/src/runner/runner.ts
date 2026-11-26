@@ -230,6 +230,9 @@ import {
   fileFlakyTests,
   flakeNote,
   gateNote,
+  LANE_BRANCH_DETAIL,
+  laneBranchOf,
+  landLaneWork,
   MIGRATIONS_HAZARD,
   projectAtCheckout,
   rerunFlaky,
@@ -1368,14 +1371,43 @@ export function createRunner(opts: RunnerOptions): Runner {
   /** The task's failed card; `review` is the reviewer's rejection that ended the workstream, when one did. */
   function flagFailed(row: WorkstreamRow, reason: string, review?: ReviewCardDetail): void {
     const batch = batchCardFields(row);
+    // A run on a lane branch put nothing on the base: the card says where its work is.
+    const lane = laneBranchOf(db, row);
+    const body =
+      lane === null
+        ? reason
+        : `${reason}\n\nNothing reached ${lane.base}. The work is on branch ${lane.lane}; Retry puts it back in Your folder.`;
     opts.state.write((ctx) => {
       flagFailedRun(ctx, row, {
-        body: reason,
+        body,
         ...(batch ? { options: batch.options } : {}),
-        ...(batch || review
-          ? { detail: { ...batch?.detail, ...(review ? { [REVIEW_CARD_DETAIL]: review } : {}) } }
+        ...(batch || review || lane
+          ? {
+              detail: {
+                ...batch?.detail,
+                ...(review ? { [REVIEW_CARD_DETAIL]: review } : {}),
+                ...(lane ? { [LANE_BRANCH_DETAIL]: lane.lane } : {}),
+              },
+            }
           : {}),
       });
+    });
+  }
+
+  /**
+   * DONE for a run on a lane branch, whose checks have passed: its work lands on the base first, and
+   * a landing refused fails the run instead, with nothing on the base and the work on its branch.
+   * Called with the workstream VERIFYING; the landing is idempotent, so a crash between it and the
+   * write that marks the run done lands nothing twice.
+   */
+  async function landThenDone(id: WorkstreamId, fence: number | null, reason: string) {
+    const landing = await landLaneWork({ db, git: opts.git }, getWorkstreamRow(db, id));
+    if (landing.kind === 'refused') {
+      fail(id, fence, { kind: WorkstreamFailure.LandingRefused, reason: landing.reason });
+      return;
+    }
+    opts.state.write((ctx) => {
+      markDone(ctx, id, fence, getWorkstreamRow(ctx.tx, id), reason);
     });
   }
 
@@ -2139,11 +2171,17 @@ export function createRunner(opts: RunnerOptions): Runner {
         fence: ctl.fence,
         reason: 'steps complete',
       });
+      // A lane branch lands before the run is done, outside the write: it is git's work.
+      if (laneBranchOf(ctx.tx, row) !== null) return { outcome: 'land' as const, qaSkipped };
       markDone(ctx, id, ctl.fence, row, ending.reason(qaSkipped));
       return { outcome: 'stop' as const, qaSkipped };
     });
     if (ended.qaSkipped)
       opts.logger.info({ workstreamId: id }, 'skipping the QA step: only docs changed');
+    if (ended.outcome === 'land') {
+      await landThenDone(id, ctl.fence, ending.reason(ended.qaSkipped));
+      return 'stop';
+    }
     return ended.outcome;
   }
 
@@ -4916,9 +4954,15 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
   }
 
-  /** The run's own commits from `base` to the checkout's head, and the ranges of history they make up. */
+  /**
+   * The run's own commits from `base` to the checkout's head, and the ranges of history they make up.
+   * A run on a lane branch reads to the lane's tip, which the checkout's head does not carry.
+   */
   async function ownWork(row: WorkstreamRow, checkout: string, base: string) {
-    const head = await opts.git.head(checkout);
+    const lane = laneBranchOf(db, row);
+    const head =
+      (lane === null ? null : await opts.git.branchTip(checkout, lane.lane)) ??
+      (await opts.git.head(checkout));
     return { head, ...(await runCommits({ db, git: opts.git }, row, checkout, base, head)) };
   }
 
@@ -5505,7 +5549,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       // Shutdown stopped it: record nothing, and recovery runs the gate again.
       // An acceptance check a stop cut short is the same: stay Verifying, and the gate and the check run again.
       if (stopRequested(ctl) === 'shutdown' || acceptance === ACCEPTANCE_STOPPED) return;
-      opts.state.write((ctx) => {
+      const landing = opts.state.write((ctx): boolean => {
         insertEvidence(ctx, evidence);
         // Before the acceptance card, which names the suites the change touched.
         recordEvalCoverage(ctx, id, evalCoverage);
@@ -5527,7 +5571,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             evidence.commitShas,
           )
         )
-          return;
+          return false;
         recordWatchpointReading(ctx, row, watchpoints);
         const after = moveAfter(steps, current.stepIndex);
         countFinished(ctx, step);
@@ -5551,14 +5595,18 @@ export function createRunner(opts: RunnerOptions): Runner {
                 : `gate passed; review added: ${net.added}; next: ${next.role}`,
           });
           clearLease(ctx, id);
-          return;
+          return false;
         }
         if (steps.length > 0)
           patchWorkstream(ctx, id, ctl.fence, {
             steps: advanceSteps(steps, current.stepIndex, -1, entryFor(ctx, id)),
           });
+        // A lane branch lands before the run is done, outside the write: it is git's work.
+        if (laneBranchOf(ctx.tx, current) !== null) return true;
         markDone(ctx, id, ctl.fence, current, 'gate passed');
+        return false;
       });
+      if (landing) await landThenDone(id, ctl.fence, 'gate passed');
       return;
     }
     const attempt = row.attempt + 1;
@@ -6222,6 +6270,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         fence: null,
         reason: 'the builder approved the work',
       });
+      // A project with no gate commits on the base itself (`laneBranchOf`), so nothing lands here.
       markDone(ctx, id, null, row, 'the builder approved the work');
       return () => {
         opts.onLaneFreed();

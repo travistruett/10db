@@ -46,6 +46,7 @@ import {
   getAttachmentRevision,
   getProject,
   getTask,
+  getTaskKeptWork,
   getWorkstream,
   getWorkstreamRow,
   insertBatch,
@@ -123,6 +124,7 @@ import {
   setProjectTrustOverrides,
 } from '../permissions';
 import { readYourMcpConfig } from '../session-setup';
+import { putBackKeptWork } from '../pass';
 import {
   createLaneSandbox,
   EMPTY_SETUP,
@@ -3251,17 +3253,25 @@ describe('a step that ends with changes in its claims', () => {
         encoding: 'utf8',
       }).trim();
     const head = repoGit('rev-parse', 'HEAD');
+    const own = repoGit('rev-parse', `10db/lane/${workstream.id.slice(-8)}`);
 
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
-    // No second commit: the gate passed on the step's one commit, and the builder's edit stays theirs.
-    expect(repoGit('rev-parse', 'HEAD')).toBe(head);
-    expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[head]]);
+    // No second commit: the gate passed on the step's one commit, which lands on the base once, and
+    // the builder's edit stays theirs.
+    expect(repoGit('rev-parse', 'HEAD^')).toBe(head);
+    expect(repoGit('rev-parse', `10db/lane/${workstream.id.slice(-8)}`)).toBe(own);
+    expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[own]]);
     expect(repoGit('status', '--porcelain')).toBe('?? src/api/builder.txt');
   });
 
-  it("a retry after its committed step was blocked finishes on that commit, naming only the task's commits", async () => {
+  // Value: protects=a Commit Directly run's commits reach the base only once its checks pass, and a
+  // failed run's work leaves the base and Your folder for its own branch; fails_when=a blocked run's
+  // checkpoint commit lands on the base, or its files stay in the folder for the next lane's gate;
+  // why_new=escaped bug: two blocked Ampsio lanes left checkpoint commits on build, failing every later gate;
+  // no_claim=a take-out or landing a crash cut short.
+  it("a blocked run's commit never reaches the base: its work moves to its lane branch, and a retry lands it once", async () => {
     engine = await createTestEngine({
       Alpha: [
         [
@@ -3280,11 +3290,25 @@ describe('a step that ends with changes in its claims', () => {
         env: isolatedGitEnv(),
         encoding: 'utf8',
       }).trim();
-    const { workstream } = engine.addTask('Alpha');
+    const start = repoGit('rev-parse', 'HEAD');
+    const { task, workstream } = engine.addTask('Alpha');
+    const lane = `10db/lane/${workstream.id.slice(-8)}`;
     engine.launch(workstream.id);
     await engine.runner.idle();
+    await engine.jobs.idle();
     expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureKind: 'blocked' });
-    const own = repoGit('rev-parse', 'HEAD');
+    // The base never had the run's commit, and Your folder no longer holds its file.
+    expect(repoGit('rev-parse', 'HEAD')).toBe(start);
+    expect(existsSync(join(engine.repoPath, 'src/api/a.txt'))).toBe(false);
+    const own = repoGit('rev-parse', lane);
+    expect(repoGit('show', `${own}:src/api/a.txt`)).not.toBe('');
+    expect(getTaskKeptWork(engine.store.db, task.id)).toEqual({ keptSha: own, keptBaseSha: start });
+    // The failed card names where the work is.
+    expect(
+      listInbox(engine.store.db, { states: ['OPEN'] }).some((card) =>
+        card.body.includes(`The work is on branch ${lane}`),
+      ),
+    ).toBe(true);
     // The builder commits their own work on the shared branch before pressing Retry.
     writeFileSync(join(engine.repoPath, 'builder.txt'), 'theirs');
     repoGit('add', 'builder.txt');
@@ -3292,10 +3316,25 @@ describe('a step that ends with changes in its claims', () => {
     const builders = repoGit('rev-parse', 'HEAD');
 
     engine.retry(workstream.id);
+    // What the scheduler's kept-work gate does before the retried run launches.
+    await putBackKeptWork(
+      {
+        state: engine.state,
+        git: createGit(),
+        inbox: engine.inbox,
+        jobs: engine.jobs,
+        logger: silentLogger,
+        clock: engine.clock,
+      },
+      { repo: engine.repoPath, taskId: task.id },
+    );
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
-    expect(repoGit('rev-parse', 'HEAD')).toBe(builders);
+    // One commit lands on the base, on top of the builder's, once the gate passed.
+    expect(repoGit('rev-parse', 'HEAD^')).toBe(builders);
+    expect(repoGit('show', 'HEAD:src/api/a.txt')).toBe(repoGit('show', `${own}:src/api/a.txt`));
+    expect(repoGit('status', '--porcelain')).toBe('');
     expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[own]]);
   });
 
@@ -6480,8 +6519,14 @@ describe("a Light task's review safety net", () => {
     engine.adapter.signal('builder-committed');
     await engine.runner.idle();
 
-    const [first, builders, second] = repoGit('rev-list', '--reverse', 'HEAD~3..HEAD').split('\n');
-    expect(repoGit('log', '-1', '--format=%s', builders ?? '')).toBe('Builder migration');
+    // The task's two commits are on its lane branch; the base has the builder's, then the one landing.
+    const builders = repoGit('rev-parse', 'HEAD^');
+    expect(repoGit('log', '-1', '--format=%s', builders)).toBe('Builder migration');
+    const [first, second] = repoGit(
+      'rev-list',
+      '--reverse',
+      `${builders}..10db/lane/${workstream.id.slice(-8)}`,
+    ).split('\n');
     // The builder's migration forces no review of the task's work.
     expect(ws(workstream.id).state).toBe('DONE');
     expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement']);

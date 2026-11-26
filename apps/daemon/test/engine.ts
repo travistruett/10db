@@ -79,7 +79,13 @@ import {
   type StateStore,
 } from '../src/events';
 import { createLiveRegistry, type LiveRegistry } from '../src/conversation';
-import { applySkippedChoice, createDeliveryJobs, skipFollowUpStarter } from '../src/delivery';
+import {
+  applySkippedChoice,
+  createDeliveryJobs,
+  skipFollowUpStarter,
+  type DeliveryJobs,
+} from '../src/delivery';
+import { createFolderHold } from '../src/folder-hold';
 import { createGit, resolveGit } from '../src/git';
 import { resolveGh } from '../src/github';
 import { startSignOff } from '../src/pass';
@@ -122,6 +128,7 @@ import {
   DEFAULT_RUNNER_LIMITS,
   type Runner,
   type RunnerOptions,
+  subscribeLaneTakeOut,
 } from '../src/runner';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { createGateRunner } from '../src/verify';
@@ -186,6 +193,8 @@ export interface TestEngine {
   readonly sends: StakeholderSends;
   readonly replyWatches: ReplyWatches;
   readonly timerWatch: TimerWatch;
+  /** The delivery jobs, where a failed Your-folder run's take-out runs. */
+  readonly jobs: DeliveryJobs;
   readonly runner: Runner;
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
@@ -634,6 +643,14 @@ export async function createTestEngine(
     ...runnerOverrides,
   });
   runner = created;
+  // As start.ts wires it: a failed Your-folder run of a Commit Directly project leaves the folder.
+  const unsubscribeLaneTakeOut = subscribeLaneTakeOut(bus, {
+    state,
+    folderHold: createFolderHold({ state, bus }),
+    git,
+    jobs,
+    logger: silentLogger,
+  });
   const account = setup.account ? seedAccount(store, setup.account) : null;
   const secret = setup.secret;
   if (account && secret !== undefined) {
@@ -666,6 +683,7 @@ export async function createTestEngine(
     sends,
     replyWatches,
     timerWatch,
+    jobs,
     runner: created,
     adapter,
     clock,
@@ -740,6 +758,8 @@ export async function createTestEngine(
     async close() {
       moveBack.stop();
       await created.stopAll('shutdown');
+      unsubscribeLaneTakeOut();
+      await jobs.idle();
       server.close();
       close();
       repo.cleanup();

@@ -134,6 +134,7 @@ describe('commit', () => {
     const first = await git.commitOnBranch({
       repo: repo.path,
       branch: '10db/lane/a-123456',
+      checkedOut: 'main',
       startAt: 'main',
       paths: ['a.txt'],
       message: 'Add a',
@@ -143,6 +144,7 @@ describe('commit', () => {
     const second = await git.commitOnBranch({
       repo: repo.path,
       branch: '10db/lane/a-123456',
+      checkedOut: 'main',
       startAt: 'main',
       paths: ['a.txt'],
       message: 'Change a',
@@ -151,6 +153,7 @@ describe('commit', () => {
     const retry = await git.commitOnBranch({
       repo: repo.path,
       branch: '10db/lane/a-123456',
+      checkedOut: 'main',
       startAt: 'main',
       paths: ['a.txt'],
       message: 'Add a',
