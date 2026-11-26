@@ -52,7 +52,7 @@ export {
   type PassPullRequests,
 } from './pass-pr';
 export { createSlackPicturePost, type SlackPicturePost } from './slack-picture-post';
-export { createKeptWorkGate, subscribeKeptWorkLanding } from './kept-work-start';
+export { createKeptWorkGate, subscribeKeptWorkLanding, type KeptWorkGate } from './kept-work-start';
 export { answerPassMoveCard, resumePassSettles, subscribePassSettles } from './pass-settle';
 export { createFailedRestarts } from './restart';
 export { CopyJournalMissingError, copyIdForBatch } from './copy-id';

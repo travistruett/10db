@@ -2371,6 +2371,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger.info({ closed: closedNoticeCards }, 'closed open cards that are notices now');
   }
   const queueWaits = createQueueWaits({ state, clock });
+  // One gate for the scheduler and the take-out of a failed run's work, which holds the run's Retry.
+  const keptWork = createKeptWorkGate(delivery);
   const createdScheduler = createScheduler({
     state,
     folderHold,
@@ -2391,7 +2393,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     connecting: () => accountService.connecting(),
     // A run in Your folder of a local project waits for its task's saved work to go back (call 33).
-    keptWork: createKeptWorkGate(delivery),
+    keptWork,
     modelWait,
     clock,
     instanceId,
@@ -2788,7 +2790,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const unsubscribePassSettles = subscribePassSettles(bus, delivery);
   const unsubscribeKeptWork = subscribeKeptWorkLanding(bus, delivery);
   // A failed Your-folder run of a Commit Directly project takes its work out of the folder.
-  const unsubscribeLaneTakeOut = subscribeLaneTakeOut(bus, delivery);
+  const unsubscribeLaneTakeOut = subscribeLaneTakeOut(bus, delivery, keptWork);
   resumePassSettles(delivery);
   // A close a restart cut short goes on from its last step, once recovery has swept what the stopped
   // daemon left: its scratch gate's worktree and process are its own from here.

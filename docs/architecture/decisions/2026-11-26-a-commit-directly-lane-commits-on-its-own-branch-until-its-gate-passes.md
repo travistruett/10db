@@ -26,6 +26,11 @@ index, and it is refused while the folder is not on the run's base.
   - records the lane's tip as the task's kept work against the commit the lane started on, so the kept-work gate
     puts it back before a Retry or a new start launches.
     The failed card and a task notice name the branch.
+- **Retry and the take-out.** The kept-work gate holds a run from its failure until its take-out has ended, so a
+  Retry never launches on files the take-out is still moving, and each take-out makes the run's next start put
+  the work back again, however often it has failed. A take-out whose turn comes after the run was started again
+  does nothing: the files are still in the folder for the run. The hold is in memory; a restart drops it with
+  the take-out itself (see what this does not cover).
 - **No gate.** A project with no gate command commits on the base as before: there is no gate for a run's
   unfinished commits to fail, and the builder checks each run.
 

@@ -13,6 +13,7 @@ import {
   laneBranchOf,
   runCommits,
   type DeliveryContext,
+  type KeptWorkGate,
   type LaneBranch,
 } from '../delivery';
 import type { EventBus } from '../events';
@@ -31,42 +32,67 @@ const takeOutKey = (row: WorkstreamRow): string => `lane-take-out:${row.taskId}`
  * of its files goes back to the base's version, and the lane's tip becomes the task's kept work,
  * which a Retry or a new start puts back before its lane launches. The base never had any of it.
  */
-export function subscribeLaneTakeOut(bus: EventBus, ctx: TakeOutContext): () => void {
+export function subscribeLaneTakeOut(
+  bus: EventBus,
+  ctx: TakeOutContext,
+  gate: Pick<KeptWorkGate, 'takingOut'>,
+): () => void {
   const db = ctx.state.db;
   return bus.subscribe((event) => {
     if (event.type !== EventType.WorkstreamChanged) return;
     if (event.data['to'] !== WorkstreamState.Failed) return;
     const id = WorkstreamId.safeParse(event.entityId);
     if (!id.success) return;
-    const row = getWorkstreamRow(db, id.data);
-    const lane = laneBranchOf(db, row);
-    if (lane === null) return;
+    const failed = getWorkstreamRow(db, id.data);
+    if (laneBranchOf(db, failed) === null) return;
+    // From the failure until the work is out, a Retry of the run waits: it never launches on files
+    // this job is still moving, and its start then puts the work back.
+    const done = gate.takingOut(failed.id);
     ctx.jobs.run(
-      jobKey({ projectId: row.projectId, worktreePath: null }, JobQueue.Cut),
+      jobKey({ projectId: failed.projectId, worktreePath: null }, JobQueue.Cut),
       async (signal) => {
-        let token: symbol;
         try {
-          token = await ctx.folderHold.reserveGitWhenFree(
-            row.projectId,
-            'taking a failed run’s work out of Your folder',
-            { signal },
-          );
-        } catch {
-          return;
-        }
-        try {
-          await takeOut(ctx, row, lane);
-        } catch (error) {
-          ctx.logger.warn(
-            { workstreamId: row.id, err: error instanceof Error ? error.message : String(error) },
-            'a failed run’s work was not taken out of Your folder',
-          );
+          await takeOutWhenFree(ctx, failed, signal);
         } finally {
-          ctx.folderHold.releaseGit(token);
+          done();
         }
       },
     );
   });
+}
+
+/** Takes the failed run's work out once Your folder is free, if the run is still failed by then. */
+async function takeOutWhenFree(
+  ctx: TakeOutContext,
+  failed: WorkstreamRow,
+  signal: AbortSignal,
+): Promise<void> {
+  const db = ctx.state.db;
+  let token: symbol;
+  try {
+    token = await ctx.folderHold.reserveGitWhenFree(
+      failed.projectId,
+      'taking a failed run’s work out of Your folder',
+      { signal },
+    );
+  } catch {
+    return;
+  }
+  try {
+    // The job waited its turn. A run the builder started again meanwhile keeps its files: they are
+    // still in the folder for its session, and nothing was recorded as saved to put back.
+    const row = getWorkstreamRow(db, failed.id);
+    const lane = laneBranchOf(db, row);
+    if (row.state !== WorkstreamState.Failed || lane === null) return;
+    await takeOut(ctx, row, lane);
+  } catch (error) {
+    ctx.logger.warn(
+      { workstreamId: failed.id, err: error instanceof Error ? error.message : String(error) },
+      'a failed run’s work was not taken out of Your folder',
+    );
+  } finally {
+    ctx.folderHold.releaseGit(token);
+  }
 }
 
 async function takeOut(ctx: TakeOutContext, row: WorkstreamRow, lane: LaneBranch): Promise<void> {

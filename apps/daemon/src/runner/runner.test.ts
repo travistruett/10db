@@ -124,7 +124,6 @@ import {
   setProjectTrustOverrides,
 } from '../permissions';
 import { readYourMcpConfig } from '../session-setup';
-import { putBackKeptWork } from '../pass';
 import {
   createLaneSandbox,
   EMPTY_SETUP,
@@ -3282,6 +3281,13 @@ describe('a step that ends with changes in its claims', () => {
           { do: 'mcp', tool: 'report_blocked', args: { reason: 'The checks could not start.' } },
           turn,
         ],
+        [
+          write('src/api/b.txt'),
+          commit('op-retry-0002', ['src/api/b.txt']),
+          { do: 'tool', toolName: 'Bash', input: { command: 'curl -s https://example.com' } },
+          { do: 'mcp', tool: 'report_blocked', args: { reason: 'The checks could not start.' } },
+          turn,
+        ],
         [turn],
       ],
     });
@@ -3290,6 +3296,17 @@ describe('a step that ends with changes in its claims', () => {
         env: isolatedGitEnv(),
         encoding: 'utf8',
       }).trim();
+    const inFolder = (path: string): boolean => existsSync(join(engine.repoPath, path));
+    // A Retry as the scheduler starts it: the run launches once its kept-work gate lets it.
+    const retry = async (id: WorkstreamId): Promise<void> => {
+      engine.retry(id);
+      expect(engine.keptWork.ready(ws(id))).toBe(false);
+      await engine.jobs.idle();
+      expect(engine.keptWork.ready(ws(id))).toBe(true);
+      engine.launch(id);
+      await engine.runner.idle();
+      await engine.jobs.idle();
+    };
     const start = repoGit('rev-parse', 'HEAD');
     const { task, workstream } = engine.addTask('Alpha');
     const lane = `10db/lane/${workstream.id.slice(-8)}`;
@@ -3299,7 +3316,7 @@ describe('a step that ends with changes in its claims', () => {
     expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureKind: 'blocked' });
     // The base never had the run's commit, and Your folder no longer holds its file.
     expect(repoGit('rev-parse', 'HEAD')).toBe(start);
-    expect(existsSync(join(engine.repoPath, 'src/api/a.txt'))).toBe(false);
+    expect(inFolder('src/api/a.txt')).toBe(false);
     const own = repoGit('rev-parse', lane);
     expect(repoGit('show', `${own}:src/api/a.txt`)).not.toBe('');
     expect(getTaskKeptWork(engine.store.db, task.id)).toEqual({ keptSha: own, keptBaseSha: start });
@@ -3315,27 +3332,23 @@ describe('a step that ends with changes in its claims', () => {
     repoGit('commit', '-q', '-m', 'Builder work');
     const builders = repoGit('rev-parse', 'HEAD');
 
-    engine.retry(workstream.id);
-    // What the scheduler's kept-work gate does before the retried run launches.
-    await putBackKeptWork(
-      {
-        state: engine.state,
-        git: createGit(),
-        inbox: engine.inbox,
-        jobs: engine.jobs,
-        logger: silentLogger,
-        clock: engine.clock,
-      },
-      { repo: engine.repoPath, taskId: task.id },
-    );
-    engine.launch(workstream.id);
-    await engine.runner.idle();
+    // The retried run fails again: both its commits are on its branch, and neither file stays.
+    await retry(workstream.id);
+    expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureKind: 'blocked' });
+    expect(repoGit('rev-parse', 'HEAD')).toBe(builders);
+    expect([inFolder('src/api/a.txt'), inFolder('src/api/b.txt')]).toEqual([false, false]);
+    const second = repoGit('rev-parse', lane);
+    expect(repoGit('rev-parse', `${second}^`)).toBe(own);
+
+    // A second Retry starts on all of the run's work, so its gate checks what then lands.
+    await retry(workstream.id);
     expect(ws(workstream.id).state).toBe('DONE');
     // One commit lands on the base, on top of the builder's, once the gate passed.
     expect(repoGit('rev-parse', 'HEAD^')).toBe(builders);
     expect(repoGit('show', 'HEAD:src/api/a.txt')).toBe(repoGit('show', `${own}:src/api/a.txt`));
+    expect(repoGit('show', 'HEAD:src/api/b.txt')).toBe(repoGit('show', `${second}:src/api/b.txt`));
     expect(repoGit('status', '--porcelain')).toBe('');
-    expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[own]]);
+    expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[own, second]]);
   });
 
   // Value: protects=a task's failures show as one Inbox card that speaks for its newest run;

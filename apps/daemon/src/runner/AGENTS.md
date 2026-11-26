@@ -22,7 +22,8 @@
   landing fails it as `landing_refused`. `claimedChanges` counts a path the folder holds as the lane's tip does as
   committed, and such a run keeps its claims while it waits. When it fails, `lane-take-out.ts` commits what the
   folder holds of it onto the lane, puts its files back to the base's and records the lane as the task's kept work,
-  which the kept-work gate puts back before a Retry
+  which the kept-work gate puts back before every Retry; the gate holds the run until the take-out ends
+  (`takingOut`)
   (`decisions/2026-11-26-a-commit-directly-lane-commits-on-its-own-branch-until-its-gate-passes.md`).
 - Acceptance pass: how the runner checks criteria after the last gate, sends back through a resumable `fix`, and leaves the `acceptance` card is in `acceptance/AGENTS.md`.
 - A task has one failed card (`inbox/failed-card.ts`, fold key `failed:<taskId>`): `flagFailedRun`, which the runner and

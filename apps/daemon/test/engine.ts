@@ -82,13 +82,15 @@ import { createLiveRegistry, type LiveRegistry } from '../src/conversation';
 import {
   applySkippedChoice,
   createDeliveryJobs,
+  createKeptWorkGate,
   skipFollowUpStarter,
   type DeliveryJobs,
+  type KeptWorkGate,
 } from '../src/delivery';
 import { createFolderHold } from '../src/folder-hold';
 import { createGit, resolveGit } from '../src/git';
 import { resolveGh } from '../src/github';
-import { startSignOff } from '../src/pass';
+import { putBackKeptWork, startSignOff } from '../src/pass';
 import { createJudge, type Judge } from '../src/judge';
 import type { AnswerWriter } from '../src/stakeholders';
 import {
@@ -195,6 +197,8 @@ export interface TestEngine {
   readonly timerWatch: TimerWatch;
   /** The delivery jobs, where a failed Your-folder run's take-out runs. */
   readonly jobs: DeliveryJobs;
+  /** The scheduler's last check before a launch: a run's saved work is back in its checkout. */
+  readonly keptWork: KeptWorkGate;
   readonly runner: Runner;
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
@@ -644,13 +648,22 @@ export async function createTestEngine(
   });
   runner = created;
   // As start.ts wires it: a failed Your-folder run of a Commit Directly project leaves the folder.
-  const unsubscribeLaneTakeOut = subscribeLaneTakeOut(bus, {
+  // The scheduler's kept-work gate holds the run's Retry meanwhile, then puts the work back.
+  const folderHold = createFolderHold({ state, bus });
+  const keptWork = createKeptWorkGate({
     state,
-    folderHold: createFolderHold({ state, bus }),
-    git,
     jobs,
+    folderHold,
     logger: silentLogger,
+    onWorkQueued: () => undefined,
+    putBack: (input) =>
+      putBackKeptWork({ state, git, inbox, jobs, logger: silentLogger, clock }, input),
   });
+  const unsubscribeLaneTakeOut = subscribeLaneTakeOut(
+    bus,
+    { state, folderHold, git, jobs, logger: silentLogger },
+    keptWork,
+  );
   const account = setup.account ? seedAccount(store, setup.account) : null;
   const secret = setup.secret;
   if (account && secret !== undefined) {
@@ -684,6 +697,7 @@ export async function createTestEngine(
     replyWatches,
     timerWatch,
     jobs,
+    keptWork,
     runner: created,
     adapter,
     clock,
