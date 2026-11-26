@@ -184,7 +184,12 @@ function openableDotEnv(checkout: string, file: string): string {
     return refuse('is not a file in the checkout');
   }
   if (!isEqualOrUnder(real, checkout)) return refuse('leads outside the checkout');
-  if (!statSync(real).isFile()) return refuse('is not a regular file');
+  try {
+    if (!statSync(real).isFile()) return refuse('is not a regular file');
+  } catch (error) {
+    if (error instanceof SandboxProfileError) throw error;
+    return refuse('is not a file in the checkout');
+  }
   return real;
 }
 
@@ -322,6 +327,18 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           input.copyId ?? null,
         );
         const opened = (input.dotEnvReadable ?? []).map((file) => openableDotEnv(checkout, file));
+        if (opened.length > 0 && docker === null)
+          throw new SandboxProfileError(
+            'dotEnvReadable',
+            'env files open for reading only in a run with Docker on',
+          );
+        for (const [i, file] of opened.entries()) {
+          if (!access.checkoutSecrets.some((secret) => pathsEqual(realOr(secret), file)))
+            throw new SandboxProfileError(
+              'dotEnvReadable',
+              `${input.dotEnvReadable?.[i] ?? file}: is not a secret env file of the checkout`,
+            );
+        }
         const secrets = splitSecrets(
           checkout,
           access.checkoutSecrets.filter((file) => !opened.some((o) => pathsEqual(realOr(file), o))),
