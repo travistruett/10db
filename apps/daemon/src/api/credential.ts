@@ -3,6 +3,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import type { TicketOwner } from '../devices';
 import { AuthVerdict, Credential, RouteClass, authorize, routeClassOf } from './auth-matrix';
 import { Listener, listenerOf } from '../listeners';
+import { sameToken } from '../same-token';
 import type { Principal } from './principal';
 import type { ApiEnv } from './request-context';
 
@@ -18,14 +19,6 @@ export interface CredentialDeps {
 }
 
 const DEVICE_PREFIX = 'tdb_';
-
-/** Equal-length byte comparison that doesn't stop at the first difference. */
-function sameToken(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
 
 interface Presented {
   readonly credential: Credential;
