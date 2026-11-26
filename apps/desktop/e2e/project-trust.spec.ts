@@ -5,13 +5,7 @@ import { expect } from '@playwright/test';
 import { claudeIsInstalled } from './claude-is-installed';
 import { daemonUrl } from './daemon-url';
 import { test } from './routed-test';
-<<<<<<< f5a1f3eeadde7e091a5d7c8709bf0e472fbcd934
-import { E2E_DATA, E2E_DIR } from './paths';
-||||||| 99ce0a2ee
-import { E2E_DIR } from './paths';
-=======
-import { E2E_DIR, E2E_TOKEN } from './paths';
->>>>>>> 06c94a09ab75b9d640d687d10885f3707ed4d2a0
+import { E2E_DATA, E2E_DIR, E2E_TOKEN } from './paths';
 import { createProject } from './shape-project';
 
 /** A gate report as ampsio commits one: one model passes, the other misses a gate. */
