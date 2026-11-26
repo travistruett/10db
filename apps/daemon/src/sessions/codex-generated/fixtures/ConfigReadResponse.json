@@ -53,7 +53,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -132,7 +134,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -209,7 +213,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -288,7 +294,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -367,7 +375,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -452,7 +462,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -531,7 +543,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -610,7 +624,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -689,7 +705,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -768,7 +786,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -847,7 +867,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -926,7 +948,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -1005,7 +1029,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -1084,7 +1110,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -1163,7 +1191,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -1242,7 +1272,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -1321,7 +1353,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -1400,7 +1434,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -1479,7 +1515,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -1553,7 +1591,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -1632,7 +1672,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -1702,7 +1744,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -1781,7 +1825,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -1860,7 +1906,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -1939,7 +1987,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -2018,7 +2068,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -2095,7 +2147,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -2174,7 +2228,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -2253,7 +2309,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -2332,7 +2390,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -2404,7 +2464,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -2473,7 +2535,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -2536,7 +2600,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -2615,7 +2681,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -2694,7 +2762,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -2756,7 +2826,9 @@
       },
       "desktop": {},
       "developer_instructions": "x",
-      "forced_chatgpt_workspace_id": ["x"],
+      "forced_chatgpt_workspace_id": [
+        "x"
+      ],
       "forced_login_method": "chatgpt",
       "instructions": "x",
       "model": "x",
@@ -2773,7 +2845,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -2852,7 +2926,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -2931,7 +3007,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -3010,7 +3088,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -3089,7 +3169,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -3168,7 +3250,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -3247,7 +3331,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -3326,7 +3412,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -3405,7 +3493,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -3484,7 +3574,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -3563,7 +3655,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -3642,7 +3736,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -3721,7 +3817,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -3800,7 +3898,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -3879,7 +3979,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -3958,7 +4060,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -4037,7 +4141,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -4116,7 +4222,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -4195,7 +4303,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -4274,7 +4384,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -4353,7 +4465,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -4432,7 +4546,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -4511,7 +4627,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -4590,7 +4708,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -4669,7 +4789,9 @@
       "service_tier": null,
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -4827,7 +4949,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "medium",
           "location": {
             "city": "x",
@@ -4906,7 +5030,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "high",
           "location": {
             "city": "x",
@@ -4985,7 +5111,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": null,
           "location": {
             "city": "x",
@@ -5064,7 +5192,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": null,
@@ -5143,7 +5273,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -5222,7 +5354,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -5301,7 +5435,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -5380,7 +5516,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": null
         }
@@ -5592,7 +5730,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -5671,7 +5811,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -5750,7 +5892,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -5829,7 +5973,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -5908,7 +6054,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -5988,7 +6136,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -6067,7 +6217,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -6147,7 +6299,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -6227,7 +6381,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -6307,7 +6463,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -6386,7 +6544,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -6464,7 +6624,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -6543,7 +6705,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -6621,7 +6785,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",
@@ -6700,7 +6866,9 @@
       "service_tier": "x",
       "tools": {
         "web_search": {
-          "allowed_domains": ["x"],
+          "allowed_domains": [
+            "x"
+          ],
           "context_size": "low",
           "location": {
             "city": "x",

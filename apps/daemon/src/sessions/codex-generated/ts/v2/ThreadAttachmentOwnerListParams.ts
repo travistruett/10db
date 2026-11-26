@@ -5,13 +5,8 @@
 /**
  * Parameters for reverse lookup by attachment identity within this server's store.
  */
-export type ThreadAttachmentOwnerListParams = {
-  attachmentType: string;
-  identityKey: string;
-  /**
-   * Omitted or null returns all matches; false returns non-archived threads only.
-   */
-  archived?: boolean | null;
-  cursor?: string | null;
-  limit?: number | null;
-};
+export type ThreadAttachmentOwnerListParams = { attachmentType: string, identityKey: string,
+/**
+ * Omitted or null returns all matches; false returns non-archived threads only.
+ */
+archived?: boolean | null, cursor?: string | null, limit?: number | null, };

@@ -7,10 +7,8 @@
  *
  * This only changes persisted conversation history. It does not revert local file changes.
  */
-export type ThreadRevertParams = {
-  threadId: string;
-  /**
-   * Turn excluded from the replacement history, together with every later turn.
-   */
-  beforeTurnId: string;
-};
+export type ThreadRevertParams = { threadId: string,
+/**
+ * Turn excluded from the replacement history, together with every later turn.
+ */
+beforeTurnId: string, };

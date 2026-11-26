@@ -27,7 +27,12 @@
       "type": "string"
     }
   },
-  "required": ["codexHome", "platformFamily", "platformOs", "userAgent"],
+  "required": [
+    "codexHome",
+    "platformFamily",
+    "platformOs",
+    "userAgent"
+  ],
   "title": "InitializeResponse",
   "type": "object"
 }

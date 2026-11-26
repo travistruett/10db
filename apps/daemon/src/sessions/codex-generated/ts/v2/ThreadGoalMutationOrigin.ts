@@ -5,4 +5,4 @@
 /**
  * Distinguishes explicit user actions from automatic goal lifecycle mutations.
  */
-export type ThreadGoalMutationOrigin = 'user' | 'automatic';
+export type ThreadGoalMutationOrigin = "user" | "automatic";

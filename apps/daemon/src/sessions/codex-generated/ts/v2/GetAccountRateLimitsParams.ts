@@ -6,14 +6,13 @@
  * Usage-read capabilities of the requesting client, never inferred from its experiment arm.
  */
 export type GetAccountRateLimitsParams = {
-  /**
-   * The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users,
-   * allow the backend to record experiment exposure after ordinary usage is blocked.
-   */
-  supportsLunaReserve?: boolean;
-  /**
-   * Skip the separate reset-credit detail lookup for background usage polls. The usage
-   * response still includes the available count; omitted/false preserves detailed reads.
-   */
-  excludeResetCreditDetails?: boolean;
-};
+/**
+ * The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users,
+ * allow the backend to record experiment exposure after ordinary usage is blocked.
+ */
+supportsLunaReserve?: boolean,
+/**
+ * Skip the separate reset-credit detail lookup for background usage polls. The usage
+ * response still includes the available count; omitted/false preserves detailed reads.
+ */
+excludeResetCreditDetails?: boolean, };

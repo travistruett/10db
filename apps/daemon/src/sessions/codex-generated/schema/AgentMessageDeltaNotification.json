@@ -14,7 +14,12 @@
       "type": "string"
     }
   },
-  "required": ["delta", "itemId", "threadId", "turnId"],
+  "required": [
+    "delta",
+    "itemId",
+    "threadId",
+    "turnId"
+  ],
   "title": "AgentMessageDeltaNotification",
   "type": "object"
 }

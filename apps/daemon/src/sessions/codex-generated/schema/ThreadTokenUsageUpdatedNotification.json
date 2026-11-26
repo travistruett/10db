@@ -8,13 +8,19 @@
         },
         "modelContextWindow": {
           "format": "int64",
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "total": {
           "$ref": "#/definitions/TokenUsageBreakdown"
         }
       },
-      "required": ["last", "total"],
+      "required": [
+        "last",
+        "total"
+      ],
       "type": "object"
     },
     "TokenUsageBreakdown": {
@@ -66,7 +72,11 @@
       "type": "string"
     }
   },
-  "required": ["threadId", "tokenUsage", "turnId"],
+  "required": [
+    "threadId",
+    "tokenUsage",
+    "turnId"
+  ],
   "title": "ThreadTokenUsageUpdatedNotification",
   "type": "object"
 }

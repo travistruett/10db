@@ -4,7 +4,10 @@
     "CreditsSnapshot": {
       "properties": {
         "balance": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "hasCredits": {
           "type": "boolean"
@@ -13,7 +16,10 @@
           "type": "boolean"
         }
       },
-      "required": ["hasCredits", "unlimited"],
+      "required": [
+        "hasCredits",
+        "unlimited"
+      ],
       "type": "object"
     },
     "PlanType": {
@@ -74,14 +80,23 @@
           ]
         },
         "limitId": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "limitName": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "normalModelSlug": {
           "description": "Normal model whose display name and reasoning options describe this quota alias.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "planType": {
           "anyOf": [
@@ -125,7 +140,10 @@
         },
         "spendControlReached": {
           "description": "Backend-reported spend-control state. `None` is unavailable, not a sparse-update recovery.",
-          "type": ["boolean", "null"]
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -134,7 +152,10 @@
       "properties": {
         "resetsAt": {
           "format": "int64",
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "usedPercent": {
           "format": "int32",
@@ -142,10 +163,15 @@
         },
         "windowDurationMins": {
           "format": "int64",
-          "type": ["integer", "null"]
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
-      "required": ["usedPercent"],
+      "required": [
+        "usedPercent"
+      ],
       "type": "object"
     },
     "SpendControlLimitSnapshot": {
@@ -165,7 +191,12 @@
           "type": "string"
         }
       },
-      "required": ["limit", "remainingPercent", "resetsAt", "used"],
+      "required": [
+        "limit",
+        "remainingPercent",
+        "resetsAt",
+        "used"
+      ],
       "type": "object"
     }
   },
@@ -175,7 +206,9 @@
       "$ref": "#/definitions/RateLimitSnapshot"
     }
   },
-  "required": ["rateLimits"],
+  "required": [
+    "rateLimits"
+  ],
   "title": "AccountRateLimitsUpdatedNotification",
   "type": "object"
 }

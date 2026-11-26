@@ -5,4 +5,4 @@
 /**
  * An exclusive item position within the requested visible turn.
  */
-export type ThreadItemsListAnchor = { type: 'item'; itemId: string };
+export type ThreadItemsListAnchor = { "type": "item", itemId: string, };

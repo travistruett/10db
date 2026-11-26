@@ -18,7 +18,13 @@
       "type": "string"
     }
   },
-  "required": ["delta", "itemId", "summaryIndex", "threadId", "turnId"],
+  "required": [
+    "delta",
+    "itemId",
+    "summaryIndex",
+    "threadId",
+    "turnId"
+  ],
   "title": "ReasoningSummaryTextDeltaNotification",
   "type": "object"
 }

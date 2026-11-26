@@ -5,8 +5,4 @@
 /**
  * Parameters for deleting an attachment by its stable thread-local identity.
  */
-export type ThreadAttachmentRemoveParams = {
-  threadId: string;
-  attachmentType: string;
-  identityKey: string;
-};
+export type ThreadAttachmentRemoveParams = { threadId: string, attachmentType: string, identityKey: string, };
