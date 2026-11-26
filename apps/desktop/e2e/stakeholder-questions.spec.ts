@@ -244,6 +244,17 @@ test('a question Mark asked back reaches the Inbox, and the Board says the task 
   await expect(card).toHaveAttribute('data-state-color', 'yellow');
   await expectAccessible(page, 'board, waiting on someone, dark');
 
+  // Found while the run waits on the answer: nothing else moves it until then.
+  const runs = z
+    .array(z.object({ id: z.string(), taskTitle: z.string() }))
+    .parse(
+      await (
+        await request.get(`${daemonUrl}/workstreams`, { headers: auth, maxRetries: 2 })
+      ).json(),
+    );
+  const run = runs.find((w) => w.taskTitle === WAITING_TASK);
+  expect(run).toBeDefined();
+
   // Mark's question came back to the Inbox: the words are quoted, and with Slack off the reply box is disabled
   // and says why. Answering the card with an option resolves it and it leaves the list.
   await page.goto('/inbox?q=Which%20retry%20window');
@@ -258,18 +269,10 @@ test('a question Mark asked back reaches the Inbox, and the Board says the task 
   await page.getByRole('button', { name: 'Send Answer' }).click();
   await expect(page.getByRole('option', { name: /Which retry window/ })).toHaveCount(0);
 
-  // The run is a seeded one with no session behind it; cancel it so later specs see no stray lane.
-  const runs = z
-    .array(z.object({ id: z.string(), taskTitle: z.string() }))
-    .parse(
-      await (
-        await request.get(`${daemonUrl}/workstreams`, { headers: auth, maxRetries: 2 })
-      ).json(),
-    );
-  const run = runs.find((w) => w.taskTitle === WAITING_TASK);
-  expect(run).toBeDefined();
+  // The answer restarts the run with no fake script, so it may fail on its own within a second. Cancel
+  // it so later specs see no stray lane; a 409 means it already ended.
   const cancelled = await request.post(`${daemonUrl}/workstreams/${run?.id ?? ''}/cancel`, {
     headers: auth,
   });
-  expect(cancelled.ok()).toBe(true);
+  expect([200, 409]).toContain(cancelled.status());
 });
