@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "workstreamId": {
+      "type": "string",
+      "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "suiteKey": {
+      "type": "string",
+      "minLength": 1
+    },
+    "path": {
+      "type": "string"
+    },
+    "kinds": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "bar_lowered",
+          "cases_removed",
+          "golden_changed",
+          "grader_changed",
+          "model_judge_added",
+          "unclassified"
+        ]
+      }
+    }
+  },
+  "required": [
+    "projectId",
+    "workstreamId",
+    "suiteKey",
+    "path",
+    "kinds"
+  ]
+}

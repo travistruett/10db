@@ -3,12 +3,14 @@ import {
   BoardStatus,
   TaskStatus,
   type BatchDto,
+  type EvalMarkerDto,
   type TaskDto,
   type TaskId,
   type WorkstreamDto,
 } from '@10db/contracts';
 import { Box, Group, Paper, Stack, Text, Tooltip } from '@mantine/core';
 import { ciResult } from './ci-line';
+import { EvalMarkerLines } from './eval-marker';
 import { IndicatorRow, type Indicator } from './indicator-row';
 import type { StartNote } from './start-note';
 import { reviewSentBackLine, shippedAtLimitLine, taskState, type TaskState } from './task-state';
@@ -31,6 +33,8 @@ export interface TaskCardProps {
   readonly place?: number | undefined;
   /** The title of the goal the task belongs to, shown as a short badge; none under a Goal filter. */
   readonly goalTitle?: string | undefined;
+  /** The eval suites the task's change touched, with where each stands. */
+  readonly evalMarkers?: readonly EvalMarkerDto[] | undefined;
 }
 
 /**
@@ -163,6 +167,7 @@ export function TaskCard({
   startNote = null,
   place,
   goalTitle,
+  evalMarkers = [],
 }: TaskCardProps) {
   const state = startNote
     ? noteState(startNote)
@@ -242,6 +247,7 @@ export function TaskCard({
             </Tooltip>
           </Group>
         ) : null}
+        <EvalMarkerLines markers={evalMarkers} />
         <IndicatorRow indicators={indicators} />
         {/* The Inbox link and the tracker link are laid over this space by the board, outside the card's button. */}
         {startNote?.inbox || task.external != null ? <div style={{ height: 20 }} /> : null}
