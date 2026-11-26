@@ -32,6 +32,7 @@ interface Draft {
   readonly label: string;
   readonly why: string;
   readonly paths: string;
+  readonly lines: string;
   readonly guidance: string;
   readonly loudness: WatchpointLoudness;
   readonly home: WatchpointHome;
@@ -42,6 +43,7 @@ const EMPTY: Draft = {
   label: '',
   why: '',
   paths: '',
+  lines: '',
   guidance: '',
   loudness: WatchpointLoudness.Show,
   home: WatchpointHome.Everywhere,
@@ -53,6 +55,7 @@ function draftOf(row: EffectiveWatchpoint): Draft {
     label: row.label,
     why: row.why,
     paths: row.globs.join('\n'),
+    lines: row.lines.join('\n'),
     guidance: row.guidance,
     loudness: row.loudness,
     home: row.from === 'you' ? WatchpointHome.Everywhere : WatchpointHome.Project,
@@ -104,13 +107,20 @@ export function WatchpointDrawer({
       label: draft.label.trim(),
       why: draft.why.trim(),
       globs: lines(draft.paths),
+      lines: lines(draft.lines),
       guidance: draft.guidance.trim(),
       loudness: draft.loudness,
       starter: row === null ? null : plain(row).starter,
     });
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
-      setInvalid(`${String(issue?.path[0] ?? 'Watchpoint')}: ${issue?.message ?? 'is not valid'}`);
+      const field = String(issue?.path[0] ?? 'Watchpoint');
+      // A pattern that doesn't compile names the line, so the builder can find it.
+      const at = field === 'lines' && typeof issue?.path[1] === 'number' ? issue.path[1] : null;
+      const pattern = at === null ? '' : ` "${lines(draft.lines)[at] ?? ''}"`;
+      setInvalid(
+        `${field === 'lines' ? 'Lines' : field}${pattern}: ${issue?.message ?? 'is not valid'}`,
+      );
       return;
     }
     const next: WatchpointValue = parsed.data;
@@ -173,6 +183,19 @@ export function WatchpointDrawer({
           />
           <PathMeanings paths={lines(draft.paths)} />
         </Stack>
+        <Textarea
+          label="Lines"
+          aria-label="Watchpoint line patterns"
+          placeholder={'\\bcreate\\s+index\\b\n\\bclaude-[a-z0-9]+'}
+          description="Optional. Only files whose added or removed lines match one of these count. Case-insensitive."
+          autosize
+          minRows={2}
+          styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)' } }}
+          value={draft.lines}
+          onChange={(e) => {
+            change({ lines: e.currentTarget.value });
+          }}
+        />
         <Textarea
           label="What to check"
           aria-label="What to check"

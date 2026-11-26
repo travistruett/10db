@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   effectiveWatchpoints,
   isNoisyWatchpoint,
+  Watchpoint as WatchpointSchema,
   revisedWatchpoints,
   STARTER_REVISION,
   STARTER_WATCHPOINTS,
@@ -19,6 +20,7 @@ const watchpoint = (key: string, globs: string[], over: Partial<Watchpoint> = {}
   label: key,
   why: `why ${key}`,
   globs,
+  lines: [],
   guidance: `check ${key}`,
   loudness: WatchpointLoudness.Show,
   starter: null,
@@ -73,6 +75,64 @@ describe('matchWatchpoints', () => {
       guidance: 'check migrations',
       loudness: 'ask',
     });
+  });
+});
+
+describe('matchWatchpoints with line patterns', () => {
+  const patch = (path: string, body: string[]): string =>
+    [
+      `diff --git a/${path} b/${path}`,
+      `--- a/${path}`,
+      `+++ b/${path}`,
+      '@@ -1,3 +1,3 @@',
+      ...body,
+    ].join('\n') + '\n';
+  const lined = watchpoint('lined', ['src/**'], { lines: ['\\bfoo\\b'] });
+  const hitPaths = (files: WatchpointFileHit[], w: Watchpoint = lined) =>
+    matchWatchpoints(files, [w]).flatMap((h) => h.files.map((f) => f.path));
+
+  it('hits on a matching added or removed line, in any case', () => {
+    expect(hitPaths([file('src/a.ts', { patch: patch('src/a.ts', ['+let FOO = 1;']) })])).toEqual([
+      'src/a.ts',
+    ]);
+    expect(hitPaths([file('src/b.ts', { patch: patch('src/b.ts', ['-call(foo)']) })])).toEqual([
+      'src/b.ts',
+    ]);
+  });
+
+  it('does not hit on a context line, a header, or a covered file with no matching line', () => {
+    expect(
+      hitPaths([file('src/c.ts', { patch: patch('src/c.ts', [' foo stays', '+bar']) })]),
+    ).toEqual([]);
+    expect(hitPaths([file('src/foo.ts', { patch: patch('src/foo.ts', ['+bar']) })])).toEqual([]);
+    expect(hitPaths([file('docs/a.md', { patch: patch('docs/a.md', ['+foo']) })])).toEqual([]);
+  });
+
+  it('hits Indexes on CREATE UNIQUE INDEX in a migration, and Model choice on a model id in code', () => {
+    const starter = (key: string): Watchpoint => {
+      const found = STARTER_WATCHPOINTS.find((w) => w.key === key);
+      if (found === undefined) throw new Error(`no ${key} starter`);
+      return found;
+    };
+    const sql = 'db/migrations/0002.sql';
+    expect(
+      hitPaths(
+        [file(sql, { patch: patch(sql, ['+CREATE UNIQUE INDEX ix_a ON t (a);']) })],
+        starter('indexes'),
+      ),
+    ).toEqual([sql]);
+    expect(
+      hitPaths(
+        [file('src/x.ts', { patch: patch('src/x.ts', ["+const m = 'claude-sonnet-5-5';"]) })],
+        starter('model-choice'),
+      ),
+    ).toEqual(['src/x.ts']);
+  });
+
+  it('reads a stored watchpoint with no lines as having none', () => {
+    const stored: Record<string, unknown> = { ...watchpoint('old', ['a/**']) };
+    delete stored['lines'];
+    expect(WatchpointSchema.parse(stored).lines).toEqual([]);
   });
 });
 

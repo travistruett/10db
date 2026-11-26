@@ -6,8 +6,14 @@
   `readYourWatchpoints` and `readProjectWatchpoints` (`packages/db`). Loudness `show` and `ask` act; `hold` is not offered yet. Migrations and Contracts start at ask: `readYourWatchpoints` applies `revisedWatchpoints`, which moves a stored copy still equal to the starter as first shipped (and no edited one) to the starter's loudness.
 - `match.ts` is the pure rule table: `matchWatchpoints(files, watchpoints)` with `areaMatches`, so a dot folder matches.
   A file under two watchpoints is in both hits; the hit keeps a snapshot, never the globs.
+- A watchpoint's `lines` are case-insensitive regexes over the added and removed lines of the files its globs cover
+  (`changed-lines.ts`: no `---`/`+++` headers, no marker, each line cut at 2,000 characters). With `lines`, a covered
+  file counts only when one of them matches, judged on the text that was read. A watchpoint without `lines` matches as before.
+  `lineCandidates` (`match.ts`) names the files a line watchpoint's globs cover; `watchpointHitsAfter` reads their text
+  once, up to `WATCHPOINT_LINE_SCAN_BYTES` (512 KB), splits it at the per-file cap, matches on it and reuses those sections as
+  the matched files' hunks. A file past the scan budget has no text, so it is not a line hit (a miss costs a For You line on a show watchpoint).
 - `hits-after.ts` (`watchpointHitsAfter`) reads the whole change's file counts first (a zero-byte read), matches on
-  those, then reads only the matched files' text (`diffOfRanges` with `paths.only`) and splits it per file
+  those (and, for line watchpoints, on the scan above), then reads only the matched files' text (`diffOfRanges` with `paths.only`) and splits it per file
   (`split-patch.ts`, which reads git's headers; diffs here are read without renames). It matches on the
   file list, never on the capped patch, so a watchpoint file past any cap is still a hit; one whose text was cut is kept
   with `clipped: true`. It throws when git can't be read: the runner turns that into a row with `skipped`.
