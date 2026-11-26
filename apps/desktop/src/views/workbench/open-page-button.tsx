@@ -1,8 +1,12 @@
-import { ActionIcon, Anchor, Button, Group, Menu, Stack, Text } from '@mantine/core';
-import { IconChevronDown, IconExternalLink } from '@tabler/icons-react';
+import { ActionIcon, Alert, Button, Group, Menu, Stack, Text } from '@mantine/core';
+import { IconAlertTriangle, IconChevronDown, IconExternalLink } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { SettingsSectionKey } from '../settings/sections';
-import type { OpenPageControl } from './open-page';
+import {
+  OpenFailure,
+  type OpenPageControl,
+  type OpenPageRefusal as OpenPageRefusalInfo,
+} from './open-page';
 
 const MARK_UP = 'Mark Up Page';
 
@@ -90,23 +94,50 @@ export function OpenPageIcon({
   );
 }
 
-/** Why the page could not be opened, with a link to Settings › App Preview, where the app address is set. */
-export function OpenPageRefusal({ refusal }: { readonly refusal: string }) {
+/** Why the page could not be opened, and the one thing that can fix it. */
+export function OpenPageRefusal({ refusal }: { readonly refusal: OpenPageRefusalInfo }) {
+  const retry = (
+    <Button size="compact-xs" variant="light" color="red" onClick={() => void refusal.retry()}>
+      Try Again
+    </Button>
+  );
   return (
-    <Text size="xs" c="red">
-      {refusal}{' '}
-      <Anchor
-        size="xs"
-        renderRoot={(props) => (
-          <Link
-            {...props}
-            to="/settings/$section"
-            params={{ section: SettingsSectionKey.PagesAndPictures }}
-          />
+    <Alert
+      variant="light"
+      color="red"
+      radius="md"
+      p="xs"
+      w="100%"
+      icon={<IconAlertTriangle size={16} stroke={1.5} />}
+      title={refusal.title}
+      withCloseButton
+      closeButtonLabel="Dismiss"
+      onClose={refusal.dismiss}
+    >
+      <Stack gap={6} align="flex-start">
+        <Text size="xs">{refusal.reason}</Text>
+        {refusal.failure === OpenFailure.Setup ? (
+          <Group gap="xs">
+            <Button
+              size="compact-xs"
+              variant="light"
+              color="red"
+              renderRoot={(props) => (
+                <Link
+                  {...props}
+                  to="/settings/$section"
+                  params={{ section: SettingsSectionKey.PagesAndPictures }}
+                />
+              )}
+            >
+              Open Settings › App Preview
+            </Button>
+            {retry}
+          </Group>
+        ) : (
+          retry
         )}
-      >
-        Settings › App Preview
-      </Anchor>
-    </Text>
+      </Stack>
+    </Alert>
   );
 }

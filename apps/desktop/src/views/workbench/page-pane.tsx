@@ -238,7 +238,7 @@ export function PagePane(props: PagePaneProps) {
               </Group>
             ) : null}
             {open.refusal === null ? null : (
-              <Group px="md" pb={4}>
+              <Group px="md" pb="xs">
                 <OpenPageRefusal refusal={open.refusal} />
               </Group>
             )}

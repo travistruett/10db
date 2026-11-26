@@ -8,7 +8,6 @@ import type { Plugin } from 'vite';
 
 const ID = 'virtual:picker-source';
 const RESOLVED = `\0${ID}`;
-const HERE = fileURLToPath(new URL('.', import.meta.url));
 
 export function pickerSource(): Plugin {
   return {
@@ -16,11 +15,13 @@ export function pickerSource(): Plugin {
     resolveId: (id) => (id === ID ? RESOLVED : null),
     async load(id) {
       if (id !== RESOLVED) return null;
-      // Loaded here, not at the top: a config read under jsdom (a test of the window's policy) can't load it.
+      // Loaded here, not at the top: a config read under jsdom (a test of the window's policy) can't load it,
+      // nor read its own folder, which isn't a file URL there.
       const { build } = await import('esbuild');
+      const here = fileURLToPath(new URL('.', import.meta.url));
       const result = await build({
-        absWorkingDir: HERE,
-        entryPoints: [resolve(HERE, 'src/picker/main.ts')],
+        absWorkingDir: here,
+        entryPoints: [resolve(here, 'src/picker/main.ts')],
         bundle: true,
         format: 'iife',
         target: 'safari18',
@@ -32,7 +33,7 @@ export function pickerSource(): Plugin {
       // Absolute: in dev Vite resolves each watched file as an import of this module, and a path relative
       // to esbuild's folder doesn't resolve from a virtual module.
       for (const input of Object.keys(result.metafile.inputs))
-        this.addWatchFile(resolve(HERE, input));
+        this.addWatchFile(resolve(here, input));
       const code = result.outputFiles[0]?.text ?? '';
       return `export default ${JSON.stringify(code)};`;
     },
