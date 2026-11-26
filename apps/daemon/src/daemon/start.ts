@@ -3427,10 +3427,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   };
   const deviceSockets = createSocketRegistry();
+  const sharingLog = logger.child({ component: 'sharing' });
   const sharing = createSharingService({
     state,
     clock,
-    log: logger.child({ component: 'sharing' }),
+    log: sharingLog,
     cli: opts.tailscaleOff ? () => null : () => opts.tailscaleCli ?? findTailscaleCli(existsSync),
     run: createTailscaleRun,
     listen: (sharePort) =>
@@ -3438,7 +3439,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         fetch: (req, env) => app.fetch(req, env),
         port: sharePort,
         sockets: deviceSockets,
-        holderOf: lsofHolderOf,
+        // An unreadable holder is logged and shown as "another process": the port is still held, so the share
+        // stays blocked rather than turning into a retry or a non-refusal error.
+        holderOf: (port) =>
+          lsofHolderOf(port).catch((error: unknown) => {
+            sharingLog.warn(
+              { error: String(error) },
+              'sharing: could not read the port holder from lsof',
+            );
+            return null;
+          }),
       }),
     sockets: deviceSockets,
     mainPort: () => listenPort ?? opts.port,

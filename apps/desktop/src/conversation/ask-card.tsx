@@ -1,4 +1,9 @@
-import { PermissionChoice, type InboxItemDto, type InboxOption } from '@10db/contracts';
+import {
+  commandParagraph,
+  PermissionChoice,
+  type InboxItemDto,
+  type InboxOption,
+} from '@10db/contracts';
 import { Button, Divider, Group, Kbd, Paper, Stack, Text, TextInput, Tooltip } from '@mantine/core';
 import { IconShieldHalf } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
@@ -21,6 +26,20 @@ function buttonLabel(item: InboxItemDto, option: InboxOption): string {
 function detailText(item: InboxItemDto, key: string): string | null {
   const value = item.detail?.[key];
   return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/**
+ * The body less what repeats the call shown in its own block: a body that is only the call, a raw call
+ * leading the body, and the labelled `Command:` paragraph ending it. Each is cut whole, never split into
+ * paragraphs, so no piece of a call with blank lines reappears beside 10db's words.
+ */
+function bodyWithoutCall(body: string, call: string | null): string {
+  if (call === null) return body;
+  if (body === call) return '';
+  const lead = `${call}\n\n`;
+  const after = body.startsWith(lead) ? body.slice(lead.length) : body;
+  const labelled = `\n\n${commandParagraph(call)}`;
+  return after.endsWith(labelled) ? after.slice(0, -labelled.length) : after;
 }
 
 export function AskCard({
@@ -76,16 +95,8 @@ export function AskCard({
   };
   if (answer.isSuccess) return null;
   const call = detailText(item, 'summary');
-  // The command is in its own block; a body that opens with it drops that copy whole. Split into paragraphs
-  // instead, a command with blank lines would leave its pieces among 10db's text.
-  const rest =
-    call === null
-      ? item.body
-      : item.body === call
-        ? ''
-        : item.body.startsWith(`${call}\n\n`)
-          ? item.body.slice(call.length + 2)
-          : item.body;
+  // The command is in its own block, with its hidden characters shown; the body's own copy of it is left out.
+  const rest = bodyWithoutCall(item.body, call);
   return (
     <Paper
       {...{ [WAITING_CARD_ATTRIBUTE]: true }}

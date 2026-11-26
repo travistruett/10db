@@ -1,5 +1,5 @@
 import type { ProjectId, ShapeId } from '@10db/contracts';
-import { createTestStore, getAppSetting, listInbox, seedProject } from '@10db/db';
+import { createTestStore, getAppSetting, listInbox, seedProject, setAppSetting } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -14,6 +14,7 @@ import {
   type SelfUpdate,
   type StageResult,
 } from './self-update';
+import { DRAIN_HOLD_CAP_MS, SELF_UPDATE_INSTALLED_AT_KEY, UPDATE_WINDOW_MS } from './update-window';
 
 const RUNNING = 'a'.repeat(40);
 const NEW = 'b'.repeat(40);
@@ -266,6 +267,73 @@ describe('a drain past its limit', () => {
     world.gates = [];
     expect(await update.tick()).toBe('applying');
     expect(world.calls).toContain('apply');
+  });
+});
+
+describe('merges of one window install together', () => {
+  /** The last install finished `agoMs` ago. */
+  function installedAgo(agoMs: number): void {
+    state.write((ctx) => {
+      setAppSetting(ctx, SELF_UPDATE_INSTALLED_AT_KEY, clock.now().getTime() - agoMs);
+    });
+  }
+  const lines = () => statusService.current().lines.map((line) => line.line);
+
+  it('installs at once when nothing runs, and records the install so the next window counts from it', async () => {
+    installedAgo(60_000);
+    expect(await make().tick()).toBe('applying');
+
+    state.write((ctx) => {
+      setAppSetting(ctx, SELF_UPDATE_APPLYING_KEY, { head: RUNNING, commit: RUNNING });
+    });
+    make().settle();
+    expect(getAppSetting(state.db, SELF_UPDATE_INSTALLED_AT_KEY)).toBe(clock.now().getTime());
+  });
+
+  it('holds nothing before the window ends, says until when, and drains once it has', async () => {
+    installedAgo(10 * 60_000);
+    world.busy = 2;
+    const update = make();
+    expect(await update.tick()).toBe('busy');
+    // The builder's own wait limit has long run out, but the window has not.
+    clock.advance(WAIT_LIMIT_MS + 5 * 60_000);
+    expect(await update.tick()).toBe('busy');
+    expect(world.calls).not.toContain('drain');
+    expect(lines().join('\n')).toContain('waits for a quiet moment until');
+
+    clock.advance(UPDATE_WINDOW_MS);
+    expect(await update.tick()).toBe('draining');
+    expect(world.calls).toContain('drain');
+    clock.advance(STATUS_HYSTERESIS_MS);
+    expect(lines().join('\n')).not.toContain('quiet moment');
+
+    world.busy = 0;
+    expect(await update.tick()).toBe('applying');
+  });
+
+  it('releases a drain held up by a gate at its cap, and drains again a window later', async () => {
+    world.busy = 2;
+    world.gates = [{ label: 'batch “Add billing”' }];
+    const update = make();
+    await update.tick();
+    clock.advance(WAIT_LIMIT_MS);
+    expect(await update.tick()).toBe('draining');
+    clock.advance(DRAIN_HOLD_CAP_MS - 60_000);
+    expect(await update.tick()).toBe('draining');
+
+    clock.advance(60_000);
+    expect(await update.tick()).toBe('busy');
+    expect(world.calls).toContain('undrain');
+    expect(world.drainedSince).toBeNull();
+    expect(world.calls).not.toContain('apply');
+
+    clock.advance(UPDATE_WINDOW_MS - 60_000);
+    expect(await update.tick()).toBe('busy');
+    clock.advance(60_000);
+    expect(await update.tick()).toBe('draining');
+
+    world.busy = 0;
+    expect(await update.tick()).toBe('applying');
   });
 });
 
