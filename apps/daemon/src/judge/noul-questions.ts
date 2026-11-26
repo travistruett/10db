@@ -22,7 +22,7 @@ export interface NoulAnswers {
   readonly costUsd: number | null;
 }
 
-/** A model that is not a System One model reports its own probabilities; enough room for one number per question. */
+/** A chat model reports its own probabilities; enough room for one number per question. */
 export const NOULS_MAX_TOKENS = 1000;
 
 export const NOULS_SYSTEM =
