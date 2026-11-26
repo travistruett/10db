@@ -77,11 +77,7 @@ describe('the skipped-calls item of a run', () => {
     world.store.write((ctx) => {
       setTaskStatus(ctx, task.id, TaskStatus.Done);
     });
-    // A done task still has the calls nobody ran.
-    expect(closeFinishedSkippedCards(world.store.db, inbox)).toBe(0);
-    world.store.write((ctx) => {
-      setTaskStatus(ctx, task.id, TaskStatus.Cancelled);
-    });
+    // A done task's calls nobody ran are in its drawer, which offers Run These Now.
     expect(closeFinishedSkippedCards(world.store.db, inbox)).toBe(1);
     expect(listInbox(world.store.db, { states: [InboxState.Open] })).toEqual([]);
   });

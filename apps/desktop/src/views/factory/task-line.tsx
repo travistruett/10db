@@ -1,6 +1,7 @@
 import { WorkstreamState, type WorkstreamDto } from '@10db/contracts';
-import { Box, Text, UnstyledButton } from '@mantine/core';
+import { Box, UnstyledButton } from '@mantine/core';
 import type { ReactNode } from 'react';
+import { ClippedText } from './clipped-text';
 import classes from './factory-overview.module.css';
 import { ModelBadge, StepProgress, stepLabel } from './stacked-bar';
 import { StatusDot } from './status-dot';
@@ -53,7 +54,8 @@ export type LineTone = (typeof LineTone)[keyof typeof LineTone];
 
 /**
  * One task inside a project, on the card's shared columns: its mark, title, step segments, state (the step
- * in words while it runs), model and when. The line opens the task; the mark sits outside that button, so a
+ * in words while it runs), model and when. A line with no step under way has no segments or model, so its
+ * state takes their columns. The line opens the task; the mark sits outside that button, so a
  * failure's hover card is its own target. Actions, where a line has them, sit after the columns.
  */
 export function TaskLine({
@@ -93,22 +95,23 @@ export function TaskLine({
       <div className={classes['cols']} data-compact={compact || undefined}>
         <span className={classes['lineMark']}>{mark}</span>
         <UnstyledButton className={classes['lineOpen']} onClick={onOpen}>
-          <span className={`${classes['lineTitle'] ?? ''} ${classes['clip'] ?? ''}`}>{title}</span>
-          <span className={classes['lineProgress']}>
-            {running === undefined || step === undefined ? null : <StepProgress run={running} />}
-          </span>
-          <Text
-            component="span"
-            size="xs"
+          <ClippedText text={title} className={classes['lineTitle']} />
+          {running === undefined || step === undefined ? null : (
+            <span className={classes['lineProgress']}>
+              <StepProgress run={running} />
+            </span>
+          )}
+          <ClippedText
+            text={running === undefined ? detail : (stepLabel(running) ?? detail)}
             c={tone === LineTone.You ? 'yellow' : 'dimmed'}
-            truncate
             className={classes['lineState']}
-          >
-            {running === undefined ? detail : (stepLabel(running) ?? detail)}
-          </Text>
-          <span className={classes['lineModel']}>
-            {step === undefined ? null : <ModelBadge model={step.model} />}
-          </span>
+            wide={step === undefined}
+          />
+          {step === undefined ? null : (
+            <span className={classes['lineModel']}>
+              <ModelBadge model={step.model} />
+            </span>
+          )}
           <span className={classes['when']}>{when}</span>
         </UnstyledButton>
       </div>

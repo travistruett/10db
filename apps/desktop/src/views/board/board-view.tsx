@@ -73,7 +73,7 @@ import { holdOption, isHeld } from './task-hold';
 import { isSpent } from './task-spent';
 import { CancelRunModal } from './cancel-run-modal';
 import { useUnsavedGuard } from '../../shell/unsaved-guard';
-import { columnNameOf, TaskDrawer } from './task-drawer';
+import { ProjectTaskDrawer } from './project-task-drawer';
 import { useBoardActions } from './use-board-actions';
 import { useLinkedTask } from './use-linked-task';
 import { boardRun } from './pass-page';
@@ -209,9 +209,6 @@ function BoardColumns({
     return boardRun(task, ws, batchOf(ws));
   };
   const openTask = layout.flatMap((c) => c.tasks).find((t) => t.id === openId);
-  const { workstream: openWorkstream, batch: openBatch } = openTask
-    ? runOf(openTask)
-    : { workstream: undefined, batch: undefined };
   // A CI fix batch finds the root that holds the pull request's required checks among all of them.
   // The CI line names a fix by its task's title (CI-decides spec §5), so a fix batch carries that.
   const allBatches = withFixTaskTitles([...batchById.values()], workstreams);
@@ -219,12 +216,8 @@ function BoardColumns({
   const pullRequests = project.delivery === Delivery.PullRequest;
   const landingOf = (task: TaskDto, batch: BatchDto | undefined): string | undefined =>
     pullRequests ? landingLine(task, batch, project.baseBranch) : undefined;
-  const humanColumns = new Map(
-    layout.flatMap((c) => (c.key.kind === 'human' ? [[c.key.id, c.label] as const] : [])),
-  );
   const allTasks = new Map(layout.flatMap((c) => c.tasks).map((t) => [t.id, t] as const));
   const places = queuePlaces(workstreams, batchById);
-  const openPlace = openWorkstream ? places.get(openWorkstream.id) : undefined;
   // What the card says about a Start: asked and on its way, or refused and why.
   const noteOf = (task: TaskDto) => {
     const { workstream: ws, batch } = runOf(task);
@@ -460,26 +453,14 @@ function BoardColumns({
         />
       </BoardScroll>
       {openTask ? (
-        <TaskDrawer
+        <ProjectTaskDrawer
           key={openTask.id}
-          task={openTask}
-          columnName={columnNameOf(openTask, humanColumns)}
-          peers={peers}
-          {...(openWorkstream ? { workstream: openWorkstream } : {})}
-          {...(openBatch ? { batch: openBatch } : {})}
-          batches={allBatches}
-          workstreams={workstreams}
-          {...(openPlace !== undefined ? { place: openPlace } : {})}
-          placementEditable={pullRequests || project.localCopies}
-          gateCommand={project.gateCommand}
-          accountId={project.accountId}
-          areaNames={project.areas.map((area) => area.name)}
-          {...(pullRequests ? { pullRequestBase: project.baseBranch } : {})}
+          project={project}
+          taskId={openTask.id}
           onStart={() => {
             actions.apply({ kind: 'start', taskId: openTask.id }, openTask);
           }}
           onCancelRun={setCancelling}
-          offersPlanSession
           onOpenWorkbench={() => {
             void navigate({ to: '/workbench' });
           }}

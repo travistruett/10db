@@ -106,6 +106,11 @@ import { BY_ANSWER, CardTier } from '../inbox';
 
 const WATCH_BATCH_MS = 500;
 /**
+ * How long a write outside every claim to a path that can't change what runs waits before it is carded:
+ * most such writes are committed, claimed or left by a run that ends within it, and so settle by themselves.
+ */
+const STRAY_WAIT_MS = 3 * 60_000;
+/**
  * How long past a pass turn's end, beyond the batch window, a write outside every claim may still be
  * that turn's: erring toward naming the lane, since its shell's writes are not seen by the hook.
  */
@@ -221,10 +226,13 @@ export function createWatcher(deps: {
   readonly clock: Clock;
   readonly watch?: WatchFn;
   readonly batchMs?: number;
+  /** How long an ordinary write outside every claim waits before it is carded; `STRAY_WAIT_MS` unless given. */
+  readonly strayWaitMs?: number;
 }): Watcher {
   const db = deps.state.db;
   const watch = deps.watch ?? systemWatch;
   const batchMs = deps.batchMs ?? WATCH_BATCH_MS;
+  const strayWaitMs = deps.strayWaitMs ?? STRAY_WAIT_MS;
   // Keyed by the checkout's path. `batchId` is set for a batch's worktree, null for a project's own checkout.
   const watched = new Map<
     string,
@@ -236,6 +244,15 @@ export function createWatcher(deps: {
     }
   >();
   const pending = new Map<string, Set<string>>();
+  // Ordinary writes outside every claim not carded yet, by checkout and path: when each was first seen
+  // and the lanes the card would name. Each is looked at again once it has waited `strayWaitMs`.
+  interface HeldStray {
+    readonly seenAt: number;
+    readonly candidates: readonly WorkstreamId[];
+  }
+  const heldStrays = new Map<string, Map<string, HeldStray>>();
+  // Each checkout's one timer that reads its held strays again when the first of them is due.
+  const strayTimers = new Map<string, Timer>();
   // Each checkout's config files (`.git/config`, a worktree's `config.worktree`): the text as the builder
   // last decided it (`baseline`), and the text its open card showed (`carded`), so a change is told from
   // what git itself writes and a repeat write to a carded config still names the keys of the first.
@@ -265,6 +282,9 @@ export function createWatcher(deps: {
     watched.get(root)?.handle.close();
     watched.delete(root);
     pending.delete(root);
+    heldStrays.delete(root);
+    strayTimers.get(root)?.cancel();
+    strayTimers.delete(root);
     seenConfigs.delete(root);
   }
 
@@ -1149,6 +1169,11 @@ export function createWatcher(deps: {
       const id = WorkstreamId.safeParse(c);
       if (id.success) named.add(id.data);
     }
+    return anyCouldOwn(item.projectId, named);
+  }
+
+  /** Whether any of `named`, or any of the project's workstreams when it names none, is unfinished. */
+  function anyCouldOwn(projectId: ProjectId, named: ReadonlySet<WorkstreamId>): boolean {
     const lanes =
       named.size > 0
         ? [...named].flatMap((id) => {
@@ -1158,13 +1183,84 @@ export function createWatcher(deps: {
               return [];
             }
           })
-        : listWorkstreams(db, { projectId: item.projectId });
+        : listWorkstreams(db, { projectId });
     // A failed run of a task still open can be retried, so it could still own the write.
     return lanes.some(
       (lane) =>
         !isTerminal(lane.state) ||
         (lane.state === WorkstreamState.Failed && taskIsOpen(lane.taskId)),
     );
+  }
+
+  /**
+   * The strays among `rels` to card now: a path that can change what runs, a path whose card is open,
+   * and an ordinary path that has waited `strayWaitMs` since it was first seen and that a workstream
+   * could still own (else `resolveSettledStrays` would close its card at once). Every other ordinary
+   * path waits, and is looked at again when its wait is over. A path of the batch that is no stray now
+   * stops waiting.
+   */
+  function dueStrays(
+    project: ProjectDto,
+    site: Site,
+    batchRels: readonly string[],
+    rels: readonly string[],
+    candidates: readonly WorkstreamId[],
+  ): string[] {
+    const now = deps.clock.now().getTime();
+    const held = heldStrays.get(site.root) ?? new Map<string, HeldStray>();
+    heldStrays.set(site.root, held);
+    const strays = new Set(rels);
+    for (const rel of batchRels) if (!strays.has(rel)) held.delete(rel);
+    const due: string[] = [];
+    for (const rel of rels) {
+      if (
+        isSensitivePath(rel) ||
+        findOpenByFoldKey(db, project.id, strayFoldKey(site.scope, rel)) !== undefined
+      ) {
+        held.delete(rel);
+        due.push(rel);
+        continue;
+      }
+      const seen = held.get(rel) ?? { seenAt: now, candidates };
+      if (now - seen.seenAt < strayWaitMs) {
+        held.set(rel, seen);
+        continue;
+      }
+      held.delete(rel);
+      if (anyCouldOwn(project.id, new Set(seen.candidates))) due.push(rel);
+    }
+    recheckStrays(site.root);
+    return due;
+  }
+
+  /**
+   * Sets the checkout's timer for its first held stray to come due, replacing any set before. When it
+   * fires, every held path is read again, and the timer is set afresh for what still waits, whatever
+   * that batch did: a path the clock says is not due yet is read again when it is. One already due
+   * waited out a batch that failed, and is read again after another wait.
+   */
+  function recheckStrays(root: string): void {
+    strayTimers.get(root)?.cancel();
+    strayTimers.delete(root);
+    const held = heldStrays.get(root);
+    if (stopped || held === undefined || held.size === 0) return;
+    const now = deps.clock.now().getTime();
+    const first = Math.min(...[...held.values()].map((h) => h.seenAt + strayWaitMs));
+    const timer = deps.clock.setTimeout(
+      () => {
+        strayTimers.delete(root);
+        const still = heldStrays.get(root);
+        if (stopped || still === undefined) return;
+        const set = pending.get(root) ?? new Set<string>();
+        for (const rel of still.keys()) set.add(rel);
+        pending.set(root, set);
+        void flush().then(() => {
+          recheckStrays(root);
+        });
+      },
+      Math.max(first > now ? first - now : strayWaitMs, batchMs),
+    );
+    strayTimers.set(root, timer);
   }
 
   /**
@@ -1309,6 +1405,9 @@ export function createWatcher(deps: {
       entry.root,
       withoutBookkeeping(projectId, entry.root, allPaths),
     );
+    // A held path that is bookkeeping or 10db's own write now is no stray to wait on.
+    const kept = new Set(paths);
+    for (const rel of allPaths) if (!kept.has(rel)) heldStrays.get(entry.root)?.delete(rel);
     if (paths.length === 0) return;
     // Only what git still sees as changed now. This drops ignored files and directories. It also drops files
     // already committed through 10db's claim-checked commit, whose claims may have been released since the write.
@@ -1385,7 +1484,13 @@ export function createWatcher(deps: {
     raise(
       project,
       site,
-      [...outside].filter((rel) => !allowed.has(rel)),
+      dueStrays(
+        project,
+        site,
+        paths,
+        [...outside].filter((rel) => !allowed.has(rel)),
+        raisedFor,
+      ),
       raisedFor,
       null,
       inPass?.working,
@@ -1572,6 +1677,8 @@ export function createWatcher(deps: {
         }),
       );
       const flagged = undecided.filter((rel) => !stillOthers.has(rel));
+      // The step's end cards what still waits: every change in the checkout was looked at just now.
+      heldStrays.delete(root);
       return raise(
         project,
         siteOf(project, batchId, root),
@@ -1606,6 +1713,8 @@ export function createWatcher(deps: {
       unsubscribe();
       timer?.cancel();
       timer = null;
+      for (const strayTimer of strayTimers.values()) strayTimer.cancel();
+      strayTimers.clear();
       for (const root of [...watched.keys()]) unwatch(root);
     },
   };

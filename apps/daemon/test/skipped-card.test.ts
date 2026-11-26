@@ -63,10 +63,13 @@ async function ended(steps: FakeStep[]): Promise<WorkstreamId> {
 }
 
 describe('Skipped while you were away', () => {
-  it('a run with two skips raises one item with both', async () => {
+  // A finished task's skips alone raise no item (its drawer lists them); config it wrote still does.
+  it('a finished run with two skips and config it wrote raises one item with all of them', async () => {
     const id = await ended([
       bash('curl -s https://a.example'),
       bash('curl -s https://b.example'),
+      write('.mcp.json'),
+      commit('op-skipped-003', ['.mcp.json']),
       ...finish('op-skipped-001'),
     ]);
     expect(getWorkstream(engine.store.db, id).state).toBe('DONE');
@@ -80,13 +83,16 @@ describe('Skipped while you were away', () => {
         '10db skipped 2 calls this task would have needed you for:',
         "- curl -s https://a.example (This call needs a person's approval on this account, and nobody is watching this task.)",
         "- curl -s https://b.example (This call needs a person's approval on this account, and nobody is watching this task.)",
+        '',
+        'Config this task wrote, which runs only after you approve it:',
+        '- .mcp.json',
       ].join('\n'),
     );
     expect(item?.options.map((o) => o.label)).toEqual(['Run these now', 'Dismiss']);
   });
 
-  it('a run with none, no questions and no config raises none', async () => {
-    const id = await ended(finish('op-skipped-002'));
+  it('a finished run with skips but no config raises none', async () => {
+    const id = await ended([bash('curl -s https://a.example'), ...finish('op-skipped-002')]);
     await raiseSkippedCard(deps(), id);
     expect(items()).toEqual([]);
   });

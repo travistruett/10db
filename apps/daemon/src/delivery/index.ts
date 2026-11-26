@@ -97,6 +97,7 @@ export {
   applySkippedChoice,
   closeFinishedSkippedCards,
   raiseSkippedCard,
+  runSkippedCalls,
   SKIPPED_DETAIL,
   SkippedChoice,
   sweepUnlistedRuns,

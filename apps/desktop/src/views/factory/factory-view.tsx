@@ -26,7 +26,7 @@ export type FactoryMode = (typeof FactoryMode)[keyof typeof FactoryMode];
  */
 export function FactoryView() {
   const { projects, project: railProject } = useSelectedProject();
-  const { goal: linkedGoalId, project: filter, view } = useSearch({ from: '/factory' });
+  const { goal: linkedGoalId, project: filter, view, task } = useSearch({ from: '/factory' });
   const navigate = useNavigate({ from: '/factory' });
   const all = projects.data ?? [];
   const shown = filter === undefined ? all : all.filter((p) => p.id === filter);
@@ -55,6 +55,7 @@ export function FactoryView() {
         meta={<BenchmarkSyncNote />}
         actions={
           <Group gap="xs" wrap="nowrap">
+            <AdmissionNote />
             <UpdateDrainNote />
             <ActivityButton project={filter ?? null} />
             <SegmentedControl
@@ -90,7 +91,6 @@ export function FactoryView() {
           </Group>
         }
       />
-      <AdmissionNote />
       {projects.isError ? (
         <Alert color="red" title="Couldn't load the projects">
           {projects.error.message}
@@ -99,7 +99,12 @@ export function FactoryView() {
       {mode === FactoryMode.Metrics ? (
         <Metrics shown={shown} />
       ) : (
-        <FactoryOverview projects={all} filter={filter ?? null} linkedGoalId={linkedGoalId} />
+        <FactoryOverview
+          projects={all}
+          filter={filter ?? null}
+          linkedGoalId={linkedGoalId}
+          openTaskId={task}
+        />
       )}
     </Stack>
   );

@@ -488,6 +488,9 @@ describe('protectedReads', () => {
         '/h/.agents',
         '/h/Library/Keychains',
         '/usr/bin/security',
+        '/Library/Tailscale',
+        '/var/run/tailscaled.socket',
+        '/private/var/run/tailscaled.socket',
       ]);
     const relative = protectedReads({ home: '/h', dataDir: 'data', configDirs: ['cfg'] });
     expect.soft(relative, 'relative data dir').toContain(resolve('data'));

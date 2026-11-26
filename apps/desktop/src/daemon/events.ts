@@ -25,6 +25,7 @@ import { cardTypesKeys } from './card-types-queries';
 import { humanTouchKeys } from './human-touch-queries';
 import { acceptanceFiguresKeys } from './acceptance-queries';
 import { rigorFiguresKeys } from './rigor-figures-queries';
+import { evalsKeys } from './evals-queries';
 import { HAZARD_ASSESSMENT_KEY } from './hazard-queries';
 import { KINDS_KEY } from './kind-queries';
 import { modelKeys } from './model-queries';
@@ -77,6 +78,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
     queryKeys.projects,
     CANDIDATES,
     HAZARD_ASSESSMENT_KEY,
+    // A recorded eval manifest is the project's.
+    evalsKeys.all,
     folderKeys.all,
     chatWorkKeys.all,
   ],

@@ -21,6 +21,8 @@ export const CardResolvesWhen = z.discriminatedUnion('event', [
   z.object({ event: z.literal('update_installed'), commit: z.string().min(1) }),
   /** A batch that waits on, or failed over, the wrong checkout branch: stale once the checkout is on the batch's branch. */
   z.object({ event: z.literal('branch_ready'), batchId: BatchId }),
+  /** A Stuck card: stale once the stall sweep no longer finds the stall `key` names. */
+  z.object({ event: z.literal('stall_cleared'), key: z.string().min(1) }),
   /**
    * A repo MCP config card: stale once the config's content hash differs from `hash`, the one the card
    * was raised on.

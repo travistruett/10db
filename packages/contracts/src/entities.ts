@@ -46,6 +46,7 @@ import {
   WorkstreamState,
 } from './states';
 import { DEFAULT_PROJECT_LANDING, ProjectLanding, TaskLanding } from './landing';
+import { QueueWait } from './queue-wait';
 import { StakeholderSendDto } from './slack';
 import { WorkstreamStep } from './steps';
 
@@ -1130,6 +1131,11 @@ export const WorkstreamDto = z.object({
   runNextAt: Timestamp.nullable(),
   /** What the run is waiting for or held by besides the builder, such as another task's hazard claim. */
   notice: Notice.nullable().default(null),
+  /**
+   * What a queued run waits for, as the scheduler's last tick found it; null for a run that is not
+   * queued, or one no tick has passed over since the daemon started.
+   */
+  wait: QueueWait.nullable().default(null),
   /**
    * Who the task's question is out with, and since when: set only while its card has a sent send that has
    * not come back, so the line never contradicts the Inbox's Open tab. The builder's own wait is not this.
