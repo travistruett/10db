@@ -1,12 +1,15 @@
 //! Keeps the daemon sidecar running: spawn it, wait, restart with backoff, stop it on quit.
 
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
+use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use crate::connection::read_runtime_info;
 
 /// The first restart delay after a crash; each further crash doubles it.
 pub const BACKOFF_BASE: Duration = Duration::from_millis(500);
@@ -27,6 +30,17 @@ pub const EXIT_REFUSED_CONFIG: i32 = 4;
 /// for several sessions; killing earlier would orphan `claude` children and leave `daemon.json` behind.
 const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
+/// How often the daemon that holds the data directory is looked at while this shell waits for it.
+const HOLDER_POLL: Duration = Duration::from_secs(1);
+/// How long that holder may go without a /health answer before this shell starts its own daemon,
+/// whose instance lock then decides whether the holder is replaced.
+const HOLDER_SILENCE: Duration = Duration::from_secs(30);
+/// How long one /health probe may take to connect, and again to answer.
+const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
+/// What a healthy daemon's /health reply starts with.
+const HEALTH_OK: &[u8; 12] = b"HTTP/1.1 200";
+const LOCK_FILE: &str = "daemon.lock";
+const LOGS_DIR: &str = "logs";
 const SIDECAR_LOG: &str = "sidecar.log";
 /// Development and test settings of the daemon; a value in the shell's own environment must not
 /// reach the packaged daemon (a fixed UI token, scripted sessions, a live-Claude, live-Codex or live-browser test
@@ -75,6 +89,8 @@ impl Backoff {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitPolicy {
     Restart,
+    /// Another daemon holds the data directory: watch it, and start again once it is gone or silent.
+    WaitForHolder,
     Stop,
 }
 
@@ -85,11 +101,97 @@ pub const fn exit_policy(code: Option<i32>, quitting: bool) -> ExitPolicy {
         return ExitPolicy::Stop;
     }
     match code {
-        Some(0 | EXIT_ALREADY_RUNNING | EXIT_SCHEMA_MISMATCH | EXIT_REFUSED_CONFIG) => {
-            ExitPolicy::Stop
-        }
+        Some(0 | EXIT_SCHEMA_MISMATCH | EXIT_REFUSED_CONFIG) => ExitPolicy::Stop,
+        Some(EXIT_ALREADY_RUNNING) => ExitPolicy::WaitForHolder,
         _ => ExitPolicy::Restart,
     }
+}
+
+/// Whether a `ps` state column says the process holds nothing any more: a zombie (`Z` first) or one
+/// that is exiting (`E`). An empty column is no answer, so it is not gone.
+#[must_use]
+pub fn stat_means_gone(stat: &str) -> bool {
+    stat.starts_with('Z') || stat.contains('E')
+}
+
+/// True only on proof that `pid` no longer runs: `ps` printed a zombie or exiting state, or exited
+/// 1 with no row (no such process). A `ps` that could not run, died or printed nothing says nothing.
+fn process_gone(pid: u32) -> bool {
+    let Ok(output) = Command::new("/bin/ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stat = stdout.split_whitespace().next().unwrap_or_default();
+    match output.status.code() {
+        Some(0) => stat_means_gone(stat),
+        Some(1) => stat.is_empty(),
+        _ => false,
+    }
+}
+
+/// Whether the daemon on loopback `port` answers `GET /health` with a 200 in time.
+fn health_answers(port: u16) -> bool {
+    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, HEALTH_TIMEOUT) else {
+        return false;
+    };
+    if stream.set_read_timeout(Some(HEALTH_TIMEOUT)).is_err()
+        || stream.set_write_timeout(Some(HEALTH_TIMEOUT)).is_err()
+    {
+        return false;
+    }
+    let request =
+        format!("GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+    let mut status = [0_u8; HEALTH_OK.len()];
+    stream.read_exact(&mut status).is_ok() && &status == HEALTH_OK
+}
+
+/// The pid in `daemon.lock`, or `None` when the file is absent or holds no pid.
+fn lock_holder(data_dir: &Path) -> Option<u32> {
+    let text = fs::read_to_string(data_dir.join(LOCK_FILE)).ok()?;
+    text.trim().parse().ok().filter(|pid| *pid > 0)
+}
+
+/// Blocks while another daemon holds the data directory and is healthy. Returns when a daemon of
+/// this shell's own may be tried: the lock is free, its holder is gone, the holder has not answered
+/// /health as the daemon `daemon.json` names for `HOLDER_SILENCE`, or the shell is quitting. It
+/// never signals the holder; the new daemon's instance lock decides whether to replace it.
+fn wait_for_holder(shared: &Mutex<Shared>, data_dir: &Path, log_dir: &Path) {
+    report(
+        log_dir,
+        "another daemon holds the data directory; watching it",
+    );
+    let mut last_answer = Instant::now();
+    loop {
+        thread::sleep(HOLDER_POLL);
+        if lock(shared).quitting {
+            return;
+        }
+        let Some(holder) = lock_holder(data_dir) else {
+            break;
+        };
+        if process_gone(holder) {
+            break;
+        }
+        if let Some((pid, port)) = read_runtime_info(data_dir)
+            && pid == holder
+            && health_answers(port)
+        {
+            last_answer = Instant::now();
+        }
+        if last_answer.elapsed() >= HOLDER_SILENCE {
+            break;
+        }
+    }
+    report(log_dir, "the other daemon is gone or silent; starting one");
 }
 
 #[derive(Debug, Default)]
@@ -116,13 +218,15 @@ pub struct Supervisor {
 
 impl Supervisor {
     /// Starts the daemon from `<resource_dir>/daemon/daemon.mjs` with the bundled Node binary,
-    /// appending its output to `<log_dir>/sidecar.log`.
+    /// appending its output to `<data_dir>/logs/sidecar.log`. `data_dir` is the daemon's data
+    /// directory, where its `daemon.lock` and `daemon.json` are read.
     #[must_use]
-    pub fn start(resource_dir: PathBuf, log_dir: PathBuf) -> Self {
+    pub fn start(resource_dir: PathBuf, data_dir: PathBuf) -> Self {
         let shared = Arc::new(Mutex::new(Shared::default()));
         let worker = Arc::clone(&shared);
+        let log_dir = data_dir.join(LOGS_DIR);
         let worker_log_dir = log_dir.clone();
-        thread::spawn(move || run_loop(&worker, &resource_dir, &worker_log_dir));
+        thread::spawn(move || run_loop(&worker, &resource_dir, &data_dir, &worker_log_dir));
         Self { shared, log_dir }
     }
 
@@ -169,7 +273,7 @@ impl Supervisor {
     }
 }
 
-fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, log_dir: &Path) {
+fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, data_dir: &Path, log_dir: &Path) {
     let mut backoff = Backoff::new(BACKOFF_BASE, BACKOFF_MAX);
     loop {
         {
@@ -199,8 +303,15 @@ fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, log_dir: &Path) {
                 }
             }
         };
-        if exit_policy(code, lock(shared).quitting) == ExitPolicy::Stop {
-            return;
+        let quitting = lock(shared).quitting;
+        match exit_policy(code, quitting) {
+            ExitPolicy::Stop => return,
+            ExitPolicy::WaitForHolder => {
+                // The wait is the delay: no backoff on top of it.
+                wait_for_holder(shared, data_dir, log_dir);
+                continue;
+            }
+            ExitPolicy::Restart => {}
         }
         if started.elapsed() >= HEALTHY_UPTIME {
             backoff.reset();
@@ -324,9 +435,13 @@ mod tests {
         assert_eq!(exit_policy(None, false), ExitPolicy::Restart);
         // A clean shutdown is not.
         assert_eq!(exit_policy(Some(0), false), ExitPolicy::Stop);
-        // Another daemon owns the data directory: connect to it instead of looping.
+        // Another daemon owns the data directory: watch it, and start again once it is gone.
         assert_eq!(
             exit_policy(Some(EXIT_ALREADY_RUNNING), false),
+            ExitPolicy::WaitForHolder
+        );
+        assert_eq!(
+            exit_policy(Some(EXIT_ALREADY_RUNNING), true),
             ExitPolicy::Stop
         );
         // The database needs the builder: a restart would meet the same migrations.
@@ -342,6 +457,16 @@ mod tests {
         // Quitting wins over everything.
         assert_eq!(exit_policy(Some(1), true), ExitPolicy::Stop);
         assert_eq!(exit_policy(None, true), ExitPolicy::Stop);
+    }
+
+    #[test]
+    fn a_zombie_or_exiting_state_means_gone_and_an_unreadable_one_does_not() {
+        for stat in ["Z", "Z+", "SsE", "E"] {
+            assert!(stat_means_gone(stat), "{stat} is gone");
+        }
+        for stat in ["Ss", "R+", "T", ""] {
+            assert!(!stat_means_gone(stat), "{stat:?} is not gone");
+        }
     }
 
     #[test]

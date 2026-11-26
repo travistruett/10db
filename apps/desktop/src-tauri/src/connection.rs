@@ -92,6 +92,15 @@ pub fn read_connection(dir: &Path) -> Result<DaemonConnection, ConnectionError> 
     })
 }
 
+/// The pid and port in `dir`'s `daemon.json`, or `None` when the file is absent or doesn't parse.
+/// The file exists only while that daemon's server listens.
+#[must_use]
+pub fn read_runtime_info(dir: &Path) -> Option<(u32, u16)> {
+    let text = fs::read_to_string(dir.join("daemon.json")).ok()?;
+    let info: RuntimeInfo = serde_json::from_str(&text).ok()?;
+    Some((info.pid, info.port))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
