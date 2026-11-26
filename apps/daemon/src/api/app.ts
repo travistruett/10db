@@ -163,6 +163,9 @@ import {
   CapacitySettingsDto,
   TicketScope,
   EventTicketDto,
+  PairRequest,
+  PutSharingBody,
+  DeviceId,
 } from '@10db/contracts';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -173,6 +176,8 @@ import type { UpgradeWebSocket } from 'hono/ws';
 import { z } from 'zod';
 import type { ApiServices } from './services';
 import type { SelfUpdateServices, TaskRemovalServices } from './services';
+import { PairingRefusedError, SharingNotReadyError, type DeviceService } from '../devices';
+import { SharingRefusedError, type SharingService } from '../sharing';
 import { credentialMiddleware, type CredentialDeps } from './credential';
 import type { SocketRegistry, Tickets } from '../devices';
 import { Listener, listenerOf } from './listener';
@@ -227,6 +232,8 @@ export interface ApiDeps {
   readonly tickets: CredentialDeps['tickets'] & Pick<Tickets, 'issue'>;
   /** Open stream sockets, so a revoked device or a stopped listener closes them. */
   readonly sockets: SocketRegistry;
+  /** The sharing and device-management services behind their routes; the routes answer 501 without it. */
+  readonly remote?: { readonly sharing: SharingService; readonly devices: DeviceService };
   readonly services: ApiServices;
   /** Removes tasks that haven't started; the route answers 501 without it. */
   readonly taskRemoval?: TaskRemovalServices;
@@ -1214,6 +1221,47 @@ export function createApp(deps: ApiDeps) {
           : c.json({ error: 'not_found', message: 'No screen is waiting for that answer' }, 404);
       },
     )
+    // Sharing this Mac and the devices paired to it. The credential middleware decides who may call them.
+    .get('/sharing', (c) =>
+      deps.remote
+        ? c.json(deps.remote.sharing.status())
+        : c.json({ error: 'not_implemented' }, 501),
+    )
+    .put(
+      '/sharing',
+      validator('json', (value) => PutSharingBody.parse(value)),
+      async (c) =>
+        deps.remote
+          ? c.json(await deps.remote.sharing.set(c.req.valid('json')))
+          : c.json({ error: 'not_implemented' }, 501),
+    )
+    .post('/sharing/certificate', async (c) =>
+      deps.remote
+        ? c.json(await deps.remote.sharing.requestCertificate())
+        : c.json({ error: 'not_implemented' }, 501),
+    )
+    .get('/devices', (c) =>
+      deps.remote ? c.json(deps.remote.devices.list()) : c.json({ error: 'not_implemented' }, 501),
+    )
+    .post('/devices/pairing-code', (c) =>
+      deps.remote
+        ? c.json(deps.remote.devices.pairingCode())
+        : c.json({ error: 'not_implemented' }, 501),
+    )
+    .post(
+      '/devices/pair',
+      validator('json', (value) => PairRequest.parse(value)),
+      (c) =>
+        deps.remote
+          ? c.json(deps.remote.devices.pair(c.req.valid('json')))
+          : c.json({ error: 'not_implemented' }, 501),
+    )
+    .delete('/devices/:deviceId', (c) => {
+      if (!deps.remote) return c.json({ error: 'not_implemented' }, 501);
+      return deps.remote.devices.revoke(DeviceId.parse(c.req.param('deviceId')))
+        ? c.body(null, 204)
+        : c.json({ error: 'not_found', message: 'No such device' }, 404);
+    })
     // A kept screenshot, for the transcript row that names it.
     .get('/shapes/:shapeId/screens/:name', (c) => {
       const image = deps.screens?.image(ShapeId.parse(c.req.param('shapeId')), c.req.param('name'));
@@ -2357,6 +2405,15 @@ export function createApp(deps: ApiDeps) {
     }
     if (error instanceof DomainError) {
       return c.json({ error: error.code, message: error.message }, STATUS[error.code]);
+    }
+    if (error instanceof SharingRefusedError)
+      return c.json({ error: 'refused', message: error.message }, 409);
+    if (error instanceof SharingNotReadyError)
+      return c.json({ error: 'not_ready', message: error.message }, 409);
+    if (error instanceof PairingRefusedError) {
+      return error.rateLimited
+        ? c.json({ error: 'rate_limited' }, 429)
+        : c.json({ error: 'unauthorized' }, 401);
     }
     // `c.req.json()` throws a SyntaxError for a body that is not JSON.
     if (error instanceof SyntaxError)

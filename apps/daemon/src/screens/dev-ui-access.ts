@@ -122,6 +122,8 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/trust':
     "Trust's preview runs git in every checkout and lists the builder's home.",
   '/health': 'Open to every caller; it needs no token.',
+  '/sharing': "Sharing's status names the tailnet name and the host's login, kept to the 10db app.",
+  '/devices': 'The paired devices are kept to the 10db app.',
   '/chats': "A chat is the builder's own words to an agent, kept to the 10db app.",
   '/chats/recent': "A chat is the builder's own words to an agent, kept to the 10db app.",
   '/chats/search': "A chat is the builder's own words to an agent, kept to the 10db app.",

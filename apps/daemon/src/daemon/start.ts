@@ -1,6 +1,6 @@
 import { applyAcceptanceAnswer } from '../acceptance';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,8 +35,6 @@ import {
   type ProjectId,
   type ShapeId,
   type SystemCheckDto,
-  SHARE_PORT_DEFAULT,
-  SharingState,
 } from '@10db/contracts';
 import {
   addStockHazardCommands,
@@ -94,7 +92,7 @@ import {
   createUsageReports,
   type AccountLimits,
 } from '../accounts';
-import { createApp, type SelfUpdateServices } from '../api';
+import { createApp, Listener, type SelfUpdateServices } from '../api';
 import {
   createBenchmarkSync,
   createOpenRouterSync,
@@ -167,6 +165,13 @@ import {
   createSocketRegistry,
   createTickets,
 } from '../devices';
+import {
+  createSharingService,
+  createTailscaleRun,
+  findTailscaleCli,
+  lsofHolderOf,
+  startShareListener,
+} from '../sharing';
 import {
   allCheckouts,
   createBaseUpdates,
@@ -3326,29 +3331,35 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   };
   const deviceSockets = createSocketRegistry();
+  const sharing = createSharingService({
+    state,
+    clock,
+    log: logger.child({ component: 'sharing' }),
+    cli: opts.tailscaleOff ? () => null : () => findTailscaleCli(existsSync),
+    run: createTailscaleRun,
+    listen: (sharePort) =>
+      startShareListener({
+        fetch: (req, env) => app.fetch(req, env),
+        port: sharePort,
+        sockets: deviceSockets,
+        holderOf: lsofHolderOf,
+      }),
+    sockets: deviceSockets,
+    mainPort: () => listenPort ?? opts.port,
+  });
   const devices = createDeviceService({
     state,
     clock,
     codes: createPairingCodes({ clock }),
     sockets: deviceSockets,
-    sharing: () => ({
-      state: SharingState.Off,
-      enabled: false,
-      port: SHARE_PORT_DEFAULT,
-      fqdn: null,
-      login: null,
-      certificateRequested: false,
-      certificateExists: false,
-      url: null,
-      portHolder: null,
-      steps: [],
-    }),
+    sharing: () => sharing.status(),
   });
   const streamTickets = createTickets({ clock });
   const app = createApp({
     commit: build?.commit ?? null,
     listenPort: () => listenPort,
-    share: { allowlists: () => null, hostLogin: () => null },
+    share: { allowlists: () => sharing.allowlists(), hostLogin: () => sharing.hostLogin() },
+    remote: { sharing, devices },
     devices,
     tickets: streamTickets,
     sockets: deviceSockets,
@@ -3461,7 +3472,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const wss = new WebSocketServer({ noServer: true });
   const server = serve({
-    fetch: app.fetch,
+    // The env is marked in place: the server reads back what the upgrade helper writes on this very object.
+    fetch: (req, env) => app.fetch(req, Object.assign(env, { listener: Listener.Main })),
     hostname: '127.0.0.1',
     port: opts.port,
     // ws declares `options.noServer?: boolean`, which WebSocketServerLike rejects under
@@ -3534,10 +3546,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       logger.error({ err: error }, 'the first self-update check failed');
     });
   }
+  // After the main listener is up and recovery has run. It never throws, and a slow Tailscale CLI must not hold startup.
+  void sharing.start();
   logger.info({ port, dataDir: opts.dataDir }, 'daemon started');
 
   async function shutdown(): Promise<void> {
     try {
+      // First, so a shutdown killed part-way has already unshared.
+      await sharing.stop();
       // First: a check that is holding the scheduler back would otherwise start it again while the
       // rest of this shutdown runs. Its flags are set at the call; what it settles on is a stage
       // under way, killed with the gh it started, which is awaited beside the delivery jobs.

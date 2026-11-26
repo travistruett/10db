@@ -9,4 +9,5 @@ export type {
   TaskRemovalServices,
   TaskStarted,
 } from './services';
-export { Listener, listenerOf, type ApiBindings } from './listener';
+export { Listener, type ApiBindings } from './listener';
+export type { ListenerAllowlists } from './request-guards';
