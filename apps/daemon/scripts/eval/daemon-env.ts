@@ -65,6 +65,7 @@ export function evalDaemonEnv(input: {
     // Task text and diffs would go to OpenRouter on the builder's key.
     TENDB_JUDGE: 'off',
     TENDB_SLACK: 'off',
+    TENDB_TAILSCALE: 'off',
     // The daemon shuts down when this pipe closes, so it never outlives the runner.
     TENDB_PARENT_STDIN: '1',
     TENDB_LANE_TRANSCRIPT_DAYS: String(EVAL_TRANSCRIPT_DAYS),

@@ -9,7 +9,7 @@ import {
   type SharingStatusDto,
   DomainError,
 } from '@10db/contracts';
-import { getAppSetting, setAppSetting } from '@10db/db';
+import { deleteAppSetting, getAppSetting, setAppSetting } from '@10db/db';
 import { z } from 'zod';
 import { Listener, type ListenerAllowlists } from '../listeners';
 import type { Clock, Timer } from '../clock';
@@ -46,7 +46,6 @@ export interface SharingService {
   stop(): Promise<void>;
 }
 
-/** Share was refused; the message says why and is shown to the builder. */
 /** A Share, Stop or certificate request 10db refuses; the API answers it as a 409 with its sentence. */
 export class SharingRefusedError extends DomainError {
   override readonly name: string = 'SharingRefusedError';
@@ -62,6 +61,8 @@ class ServeUnreadableError extends Error {
 const KEY_ENABLED = 'sharing.enabled';
 const KEY_PORT = 'sharing.port';
 const KEY_CERTIFICATE_FOR = 'sharing.certificateFor';
+/** The port whose mapping a failed unserve left behind; start and the monitor retry it. */
+const KEY_UNSERVE_OWED = 'sharing.unserveOwed';
 
 const MONITOR_MS = 60_000;
 const STALE_MS = 10_000;
@@ -134,6 +135,10 @@ export function createSharingService(deps: {
   function readPort(): number {
     const parsed = PortSetting.safeParse(getAppSetting(deps.state.db, KEY_PORT));
     return parsed.success ? parsed.data : SHARE_PORT_DEFAULT;
+  }
+  function readUnserveOwed(): number | null {
+    const parsed = PortSetting.safeParse(getAppSetting(deps.state.db, KEY_UNSERVE_OWED));
+    return parsed.success ? parsed.data : null;
   }
   function readCertificateFor(): string | null {
     const parsed = HashSetting.safeParse(getAppSetting(deps.state.db, KEY_CERTIFICATE_FOR));
@@ -302,31 +307,50 @@ export function createSharingService(deps: {
     refreshedAt = deps.clock.now().getTime();
   }
 
-  /** Removes 10db's own mapping, and only that. Never throws. */
-  async function removeOwnMapping(port: number): Promise<void> {
+  /**
+   * Removes 10db's own mapping, and only that. Never throws. True when none of 10db's is left, false when it
+   * could not be read or removed.
+   */
+  async function removeOwnMapping(port: number): Promise<boolean> {
     const cli = deps.cli();
-    if (cli === null) return;
+    if (cli === null) return false;
     try {
       const status = await readServe(cli);
       const fqdn = self?.fqdn ?? null;
       const own =
         fqdn !== null ? isTendbMapping(status, fqdn, port) : loopbackMappingOn(status, port);
-      if (!own) return;
+      if (!own) return true;
       const result = await deps.run(cli)(unserveArgs(port), SERVE_TIMEOUT_MS);
       if (result.code !== 0 || result.timedOut) {
         deps.log.warn(
           { timedOut: result.timedOut, stderr: result.stderr.slice(-300) },
           'sharing: could not remove the mapping',
         );
-      } else {
-        serve = await readServe(cli).catch(() => null);
+        return false;
       }
+      serve = await readServe(cli).catch(() => null);
+      return true;
     } catch (error) {
       deps.log.warn(
         { error: String(error) },
         'sharing: could not read serve to remove the mapping',
       );
+      return false;
     }
+  }
+
+  function writeUnserveOwed(port: number | null): void {
+    deps.state.write((ctx) => {
+      if (port === null) deleteAppSetting(ctx, KEY_UNSERVE_OWED);
+      else setAppSetting(ctx, KEY_UNSERVE_OWED, port);
+    });
+  }
+
+  /** Retries a removal an earlier Stop could not finish, enabled or not. */
+  async function settleOwed(): Promise<void> {
+    const owed = readUnserveOwed();
+    if (owed === null) return;
+    if (await removeOwnMapping(owed)) writeUnserveOwed(null);
   }
 
   async function closeListener(): Promise<void> {
@@ -343,9 +367,10 @@ export function createSharingService(deps: {
   }
 
   /** Unserve first, then the sockets, then the listener, so a later process on the port gets no traffic. */
-  async function unshare(port: number): Promise<void> {
-    await removeOwnMapping(port);
+  async function unshare(port: number): Promise<boolean> {
+    const settled = await removeOwnMapping(port);
     await closeListener();
+    return settled;
   }
 
   function stopMonitor(): void {
@@ -362,7 +387,7 @@ export function createSharingService(deps: {
           deps.log.warn({ error: String(error) }, 'sharing: monitor tick failed');
         })
         .finally(() => {
-          if (!closed && readEnabled()) scheduleMonitor();
+          if (!closed && (readEnabled() || readUnserveOwed() !== null)) scheduleMonitor();
         });
     }, MONITOR_MS);
   }
@@ -396,6 +421,7 @@ export function createSharingService(deps: {
       }
       if (!certificateExists(fqdn)) {
         pause('Waiting for the certificate of this Mac’s tailnet name', 'retry');
+        await removeOwnMapping(port);
         return;
       }
       const opened = await deps.listen(port);
@@ -409,9 +435,9 @@ export function createSharingService(deps: {
       listenerFqdn = fqdn;
       portHolder = null;
       if (!isTendbMapping(status, fqdn, port)) {
-        const result = await deps.run(cli)(serveArgs(port), SERVE_TIMEOUT_MS);
-        if (result.code !== 0 || result.timedOut) {
-          pause(result.timedOut ? 'tailscale serve timed out' : result.stderr.slice(-300), 'retry');
+        const failure = await applyMapping(cli, port);
+        if (failure !== null) {
+          pause(failure, 'retry');
           return;
         }
         await readServe(cli);
@@ -423,8 +449,24 @@ export function createSharingService(deps: {
     }
   }
 
+  /** The step that stops Share before the listener and mapping: Installed through Certificate. */
+  function failingPrerequisite(): { step: string; error: string | null } | undefined {
+    return compute().steps.find((step, index) => index < 5 && step.status !== SharingStepStatus.Ok);
+  }
+
+  /** Runs `serve --bg`; the CLI's complaint, or null. */
+  async function applyMapping(cli: string, port: number): Promise<string | null> {
+    const result = await deps.run(cli)(serveArgs(port), SERVE_TIMEOUT_MS);
+    if (result.code !== 0 || result.timedOut) {
+      return result.timedOut ? 'tailscale serve timed out' : result.stderr.slice(-300);
+    }
+    return null;
+  }
+
   async function monitorTick(): Promise<void> {
-    if (closed || !readEnabled()) return;
+    if (closed) return;
+    await settleOwed();
+    if (!readEnabled()) return;
     const port = readPort();
     await refresh();
     if (listener === null) {
@@ -452,27 +494,36 @@ export function createSharingService(deps: {
     if (problem !== null) {
       await closeListener();
       pause(describeProblem(problem, fqdn ?? '', port), 'blocked');
+    } else if (
+      fqdn !== null &&
+      !isTendbMapping(status, fqdn, port) &&
+      failingPrerequisite() === undefined
+    ) {
+      const failure = await applyMapping(cli, port);
+      if (failure !== null) pause(failure, 'retry');
+      else pausedReason = null;
+      await readServe(cli).catch(() => null);
     }
     publish();
   }
 
   async function stopSharing(port: number): Promise<void> {
     stopMonitor();
-    await unshare(port);
+    const settled = await unshare(port);
     deps.state.write((ctx) => {
       setAppSetting(ctx, KEY_ENABLED, false);
+      if (!settled) setAppSetting(ctx, KEY_UNSERVE_OWED, port);
     });
     pausedReason = null;
     portHolder = null;
+    if (!settled) scheduleMonitor();
   }
 
   async function share(port: number): Promise<void> {
     await refresh();
     const cli = deps.cli();
     if (cli === null) throw new SharingRefusedError('Tailscale is not installed');
-    const failing = compute().steps.find(
-      (step, index) => index < 5 && step.status !== SharingStepStatus.Ok,
-    );
+    const failing = failingPrerequisite();
     if (failing !== undefined) {
       throw new SharingRefusedError(
         failing.error ?? `Finish the ${failing.step} step before sharing`,
@@ -496,16 +547,15 @@ export function createSharingService(deps: {
     listenerFqdn = fqdn;
     portHolder = null;
     try {
-      const result = await deps.run(cli)(serveArgs(port), SERVE_TIMEOUT_MS);
-      if (result.code !== 0 || result.timedOut) {
+      const failure = await applyMapping(cli, port);
+      if (failure !== null) {
         await unshare(port);
-        throw new SharingRefusedError(
-          result.timedOut ? 'tailscale serve timed out' : result.stderr.slice(-300),
-        );
+        throw new SharingRefusedError(failure);
       }
       deps.state.write((ctx) => {
         setAppSetting(ctx, KEY_ENABLED, true);
         setAppSetting(ctx, KEY_PORT, port);
+        deleteAppSetting(ctx, KEY_UNSERVE_OWED);
       });
     } catch (error) {
       await closeListener();
@@ -546,7 +596,17 @@ export function createSharingService(deps: {
         const port = body.port ?? readPort();
         const refusal = shareRefusal(port, deps.mainPort());
         if (refusal !== null) throw new SharingRefusedError(refusal);
-        if (readEnabled() && port === readPort() && listener !== null) return compute();
+        if (readEnabled() && port === readPort()) {
+          // Share on a shared port restores what is missing; it never clears `enabled`.
+          if (listener !== null) await monitorTick();
+          else await startSharing();
+          scheduleMonitor();
+          publish(true);
+          if (compute().state !== SharingState.Ready && pausedReason !== null) {
+            throw new SharingRefusedError(pausedReason);
+          }
+          return compute();
+        }
         if (readEnabled() || listener !== null) await stopSharing(readPort());
         try {
           await share(port);
@@ -585,6 +645,8 @@ export function createSharingService(deps: {
     hostLogin: () => self?.login ?? null,
     start() {
       return enqueue(async () => {
+        await settleOwed();
+        if (readUnserveOwed() !== null) scheduleMonitor();
         if (!readEnabled()) return;
         await startSharing();
         scheduleMonitor();
@@ -597,7 +659,11 @@ export function createSharingService(deps: {
       return enqueue(async () => {
         closed = true;
         stopMonitor();
-        await unshare(readPort());
+        // A daemon that never shared leaves the mapping alone: it may be another daemon's.
+        const owed = readUnserveOwed();
+        if (listener === null && !readEnabled() && owed === null) return;
+        const port = owed ?? readPort();
+        if (!(await unshare(port)) && owed === null) writeUnserveOwed(port);
       }).catch((error: unknown) => {
         deps.log.warn({ error: String(error) }, 'sharing: stop failed');
       });

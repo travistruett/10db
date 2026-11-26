@@ -52,6 +52,7 @@ describe('the bundled daemon', () => {
         TENDB_CATALOGUE: 'off',
         // It never messages a real person.
         TENDB_SLACK: 'off',
+        TENDB_TAILSCALE: 'off',
         // It still builds its model profiles, from the fixture catalogue.
         TENDB_CATALOGUE_SNAPSHOT: resolve(import.meta.dirname, 'fixtures/catalogue.json'),
       },

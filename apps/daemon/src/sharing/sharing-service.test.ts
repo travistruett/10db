@@ -36,6 +36,7 @@ let order: string[];
 let calls: string[];
 let serveJson: unknown;
 let listenCalls: number;
+let failUnserve: boolean;
 
 /** A Tailscale that answers status, tracks serve mappings and records every call. */
 const run: TailscaleRun = (args) => {
@@ -49,6 +50,9 @@ const run: TailscaleRun = (args) => {
   }
   if (args[0] === 'serve' && args[2] === 'off') {
     order.push('unserve');
+    if (failUnserve) {
+      return Promise.resolve({ code: 1, stdout: '', stderr: 'boom', timedOut: false });
+    }
     serveJson = {};
     return Promise.resolve(ok());
   }
@@ -98,6 +102,7 @@ beforeEach(() => {
   calls = [];
   serveJson = {};
   listenCalls = 0;
+  failUnserve = false;
 });
 afterEach(() => {
   closeStore();
@@ -144,5 +149,36 @@ describe('the sharing service', () => {
     expect(listenCalls).toBe(0);
     expect(service.status().state).toBe('paused');
     expect(order).not.toContain('unserve');
+  });
+
+  it('leaves the CLI alone when this daemon never shared', async () => {
+    const service = make();
+    await service.stop();
+    expect(calls).toEqual([]);
+  });
+
+  it('retries an unserve that failed on Stop at the next start', async () => {
+    const first = make();
+    await first.requestCertificate();
+    await first.set({ enabled: true, port: PORT });
+    failUnserve = true;
+    await first.set({ enabled: false });
+    expect(serveJson).toEqual(TENDB_SERVE);
+    failUnserve = false;
+    await first.stop();
+
+    await make().start();
+    expect(serveJson).toEqual({});
+  });
+
+  it('restores a lost mapping when Share is pressed again', async () => {
+    const service = make();
+    await service.requestCertificate();
+    await service.set({ enabled: true, port: PORT });
+    serveJson = {};
+    const again = await service.set({ enabled: true, port: PORT });
+    expect(again.state).toBe('ready');
+    expect(serveJson).toEqual(TENDB_SERVE);
+    expect(listenCalls).toBe(1);
   });
 });

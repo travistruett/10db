@@ -88,7 +88,7 @@ export function mappingProblem(
 
 /** A sentence saying why Share refuses the port, or null. */
 export function shareRefusal(port: number, mainPort: number): string | null {
-  if ((FUNNEL_PORTS as readonly number[]).includes(port)) {
+  if (FUNNEL_PORTS.some((funnel) => funnel === port)) {
     return `Port ${String(port)} is one of Tailscale Funnel's ports (443 also holds your own serve config). Pick another.`;
   }
   if (port < 1024)
