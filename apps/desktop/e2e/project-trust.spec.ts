@@ -142,4 +142,18 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   const drawer = page.getByRole('dialog', { name: 'Suite' });
   await expect(drawer).toContainText('Gates');
   await expect(drawer).toContainText('$0.92');
+  await page.keyboard.press('Escape');
+  await expect(drawer).toHaveCount(0);
+
+  // By Model: each model's suites read off the same report, and two side by side with the cost difference.
+  await page.getByRole('tab', { name: 'By Model' }).click();
+  const modelB = page.getByRole('table', { name: 'Models' }).getByRole('row', { name: /model-b/u });
+  await expect(modelB).toContainText('0 of 1');
+  await expect(modelB).toContainText('ingest.mapping');
+  await page.getByRole('combobox', { name: 'Compare with' }).click();
+  await page.getByRole('option', { name: 'acme/model-b' }).click();
+  const compare = page.getByRole('table', { name: 'Compare models' });
+  await expect(compare).toContainText('passed');
+  await expect(compare).toContainText('failed complete');
+  await expect(page.getByText('1 suite differs, at +19% cost')).toBeVisible();
 });

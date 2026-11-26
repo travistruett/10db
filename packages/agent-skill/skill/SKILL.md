@@ -217,13 +217,24 @@ never a file in the repo.
    - The code each suite covers, as globs that match tracked files.
    - The LLM work with no eval, where the model call is (`path` or `path:line`), and the repo's own words for why
      it has none.
+   - How the repo marks one unit of LLM work: a decorator or base class of its task registry (`@register_task`),
+     a workflow spec, or failing those an SDK call. That becomes a call pattern, which 10db `git grep`s at every
+     HEAD, so a new task with no eval shows the commit it lands, with no new assessment.
 3. **Never run a live eval.** Designing an eval doesn't grant paid calls. Read results; run nothing.
 4. **Write the manifest JSON** in the scratchpad: `{ "suites": [{ key, label?, bar?, definitionPaths, coveredPaths,
-freeCommand?, liveCommand? }], "gaps": [{ label, where, why }] }`. A suite `key` is a result file's task (as
-   `evals <projectId>` shows it) or a new key for a suite with no results yet.
+freeCommand?, liveCommand? }], "gaps": [{ label, where, why }], "callPatterns": [{ label, regex, globs }] }`. A
+   suite `key` is a result file's task (as `evals <projectId>` shows it) or a new key for a suite with no results
+   yet. A `regex` is what `git grep -E` reads (POSIX extended: `[0-9]`, `[[:space:]]`, no `\d`, `\b` or `(?:`);
+   `globs` are git pathspec globs, one per extension (`**/*.py`; no `{a,b}`). At most 20 patterns. With none,
+   10db searches for the model SDKs' own calls, which in most repos are plumbing, not units of work.
 5. **Apply** with `evals <projectId> <file>`. It refuses, and keeps nothing, when a `definitionPaths` entry is not a
    tracked file or a `coveredPaths` glob matches no tracked file; fix those and rerun until it refuses nothing.
-6. **Report** the suites linked, the gaps and the evidence for each, in a few lines.
+6. **Check each call pattern's count** in the output against the registry's own count (the tasks it registers).
+   Far more means the pattern is too broad and fills No Eval with noise; tighten it and apply again. A gap the
+   pattern finds outside every `coveredPaths` is listed as `found`, so name it under `gaps` only to add the
+   repo's words for why.
+7. **Report** the suites linked, the gaps, each call pattern with its count, and the evidence for each, in a few
+   lines.
 
 ## Errors
 

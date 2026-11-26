@@ -1,4 +1,10 @@
-import type { EvalGapDto, EvalsDto, ProjectViewDto } from '@10db/contracts';
+import type {
+  EvalCallSiteCountDto,
+  EvalDriftDto,
+  EvalGapDto,
+  EvalsDto,
+  ProjectViewDto,
+} from '@10db/contracts';
 import { Button, Code, Container, Group, Paper, Stack, Tabs, Text } from '@mantine/core';
 import { useClipboard } from '@mantine/hooks';
 import { IconCopy, IconFlask, IconListCheck } from '@tabler/icons-react';
@@ -13,13 +19,14 @@ import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
 import { TitleRow } from '../../shell/title-row';
 import { useSelectedProject } from '../../shell/selected-project';
+import { ByModel } from './by-model';
 import { SuiteDrawer } from './suite-drawer';
 import { SuiteTable } from './suite-table';
 
-const EvalsTab = { Suites: 'suites', Gaps: 'gaps' } as const;
+const EvalsTab = { Suites: 'suites', Models: 'models', Gaps: 'gaps' } as const;
 type EvalsTab = (typeof EvalsTab)[keyof typeof EvalsTab];
 const isEvalsTab = (value: string | null): value is EvalsTab =>
-  value === EvalsTab.Suites || value === EvalsTab.Gaps;
+  value === EvalsTab.Suites || value === EvalsTab.Models || value === EvalsTab.Gaps;
 
 /** How many unlinked eval files show before the rest fold away. */
 const UNLINKED_SHOWN = 6;
@@ -96,10 +103,85 @@ function NotAssessed({ project }: { readonly project: ProjectViewDto }) {
   );
 }
 
-function Unlinked({ paths }: { readonly paths: readonly string[] }) {
+/** A count and its noun, singular for one. */
+const counted = (n: number, one: string, many: string): string =>
+  `${String(n)} ${n === 1 ? one : many}`;
+
+/** What changed since the assessment's commit that the manifest misses, and the ask that brings it up to date. */
+function SinceAssessment({
+  drift,
+  project,
+}: {
+  readonly drift: EvalDriftDto;
+  readonly project: ProjectViewDto;
+}) {
+  const parts = [
+    ...(drift.newEvalFiles.length > 0
+      ? [
+          counted(
+            drift.newEvalFiles.length,
+            'new eval file no suite links',
+            'new eval files no suite links',
+          ),
+        ]
+      : []),
+    ...(drift.newGaps.length > 0
+      ? [counted(drift.newGaps.length, 'new LLM call with no eval', 'new LLM calls with no eval')]
+      : []),
+    ...(drift.missingPaths.length > 0
+      ? [counted(drift.missingPaths.length, 'path it names is gone', 'paths it names are gone')]
+      : []),
+  ];
+  return (
+    <Paper withBorder radius="md" px="md" py="sm" bg="var(--mantine-color-body)">
+      <Stack gap={8}>
+        <Group justify="space-between" wrap="nowrap" gap="md">
+          <Text size="sm">
+            <Text span fw={600} c="var(--mantine-color-bright)">
+              {`Since the assessment at ${drift.since.slice(0, 7)}:`}
+            </Text>{' '}
+            {`${parts.join(' · ')}.`}
+          </Text>
+          <CopyAskButton project={project} />
+        </Group>
+        <PathList
+          paths={[
+            ...drift.newEvalFiles,
+            ...drift.newGaps.map((g) => g.where),
+            ...drift.missingPaths,
+          ]}
+        />
+      </Stack>
+    </Paper>
+  );
+}
+
+/** Paths as code, folded past six. */
+function PathList({ paths }: { readonly paths: readonly string[] }) {
   const [all, setAll] = useState(false);
-  if (paths.length === 0) return null;
   const shown = all ? paths : paths.slice(0, UNLINKED_SHOWN);
+  return (
+    <Group gap={6}>
+      {shown.map((path) => (
+        <Code key={path}>{path}</Code>
+      ))}
+      {paths.length > UNLINKED_SHOWN ? (
+        <Button
+          size="compact-xs"
+          variant="subtle"
+          onClick={() => {
+            setAll(!all);
+          }}
+        >
+          {all ? 'Show Fewer' : `${String(paths.length - UNLINKED_SHOWN)} More`}
+        </Button>
+      ) : null}
+    </Group>
+  );
+}
+
+function Unlinked({ paths }: { readonly paths: readonly string[] }) {
+  if (paths.length === 0) return null;
   return (
     <Stack gap={6}>
       <Text size="sm" fw={600} c="var(--mantine-color-bright)">
@@ -108,31 +190,28 @@ function Unlinked({ paths }: { readonly paths: readonly string[] }) {
       <Text size="xs" c="dimmed">
         Found by name; the assessment says which suite each defines.
       </Text>
-      <Group gap={6}>
-        {shown.map((path) => (
-          <Code key={path}>{path}</Code>
-        ))}
-        {paths.length > UNLINKED_SHOWN ? (
-          <Button
-            size="compact-xs"
-            variant="subtle"
-            onClick={() => {
-              setAll(!all);
-            }}
-          >
-            {all ? 'Show Fewer' : `${String(paths.length - UNLINKED_SHOWN)} More`}
-          </Button>
-        ) : null}
-      </Group>
+      <PathList paths={paths} />
     </Stack>
   );
 }
 
+/** What each call pattern found at HEAD, so a pattern that is too broad shows. */
+function callSitesText(counts: readonly EvalCallSiteCountDto[]): string {
+  return counts
+    .map(
+      (c) =>
+        `${c.label} ${c.count === null ? 'refused by git' : `${String(c.count)}${c.capped ? '+' : ''}`}`,
+    )
+    .join(' · ');
+}
+
 function Gaps({
   gaps,
+  callSites,
   project,
 }: {
   readonly gaps: readonly EvalGapDto[] | null;
+  readonly callSites: readonly EvalCallSiteCountDto[];
   readonly project: ProjectViewDto;
 }) {
   const copyAsk = useCopyAsk(project);
@@ -149,37 +228,55 @@ function Gaps({
       </EmptyState>
     );
   return (
-    <RaisedPanel>
-      <DataTable<EvalGapDto>
-        aria-label="LLM work with no eval"
-        records={[...gaps]}
-        idAccessor={(gap) => `${gap.where}|${gap.label}`}
-        backgroundColor="transparent"
-        verticalSpacing="sm"
-        horizontalSpacing="md"
-        columns={[
-          {
-            accessor: 'label',
-            title: 'LLM Work',
-            render: (gap) => (
-              <Text size="sm" fw={500} c="var(--mantine-color-bright)">
-                {gap.label}
-              </Text>
-            ),
-          },
-          { accessor: 'where', title: 'Where', render: (gap) => <Code>{gap.where}</Code> },
-          {
-            accessor: 'why',
-            title: 'Why It Counts',
-            render: (gap) => (
-              <Text size="sm" c="dimmed">
-                {gap.why}
-              </Text>
-            ),
-          },
-        ]}
-      />
-    </RaisedPanel>
+    <Stack gap={6}>
+      {callSites.length === 0 ? null : (
+        <Text size="xs" c="dimmed">
+          {`Sites found at HEAD by call pattern: ${callSitesText(callSites)}`}
+        </Text>
+      )}
+      <RaisedPanel>
+        <DataTable<EvalGapDto>
+          aria-label="LLM work with no eval"
+          records={[...gaps]}
+          idAccessor={(gap) => `${gap.where}|${gap.label}`}
+          backgroundColor="transparent"
+          verticalSpacing="sm"
+          horizontalSpacing="md"
+          columns={[
+            {
+              accessor: 'label',
+              title: 'LLM Work',
+              render: (gap) => (
+                <Text size="sm" fw={500} c="var(--mantine-color-bright)">
+                  {gap.label}
+                </Text>
+              ),
+            },
+            {
+              accessor: 'where',
+              title: 'Where',
+              render: (gap) => (
+                <Stack gap={2} align="flex-start">
+                  <Code>{gap.where}</Code>
+                  <Text size="xs" c="dimmed">
+                    {gap.source === 'found' ? 'found at HEAD' : 'assessed'}
+                  </Text>
+                </Stack>
+              ),
+            },
+            {
+              accessor: 'why',
+              title: 'Why It Counts',
+              render: (gap) => (
+                <Text size="sm" c="dimmed">
+                  {gap.why}
+                </Text>
+              ),
+            },
+          ]}
+        />
+      </RaisedPanel>
+    </Stack>
   );
 }
 
@@ -202,6 +299,7 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
           >
             <Tabs.List>
               <Tabs.Tab value={EvalsTab.Suites}>Suites</Tabs.Tab>
+              <Tabs.Tab value={EvalsTab.Models}>By Model</Tabs.Tab>
               <Tabs.Tab
                 value={EvalsTab.Gaps}
                 rightSection={
@@ -238,6 +336,7 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
       {tab === EvalsTab.Suites ? (
         <Stack gap="md">
           {data.assessedAt === null ? <NotAssessed project={project} /> : null}
+          {data.drift === null ? null : <SinceAssessment drift={data.drift} project={project} />}
           {data.suites.length === 0 && data.unlinked.length === 0 ? (
             <EmptyState icon={IconFlask} title="No evals found" action={copyAsk}>
               No eval files at HEAD and no results in the checkout. An agent's assessment can still
@@ -254,8 +353,10 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
           )}
           <Unlinked paths={data.unlinked} />
         </Stack>
+      ) : tab === EvalsTab.Models ? (
+        <ByModel projectId={project.id} />
       ) : (
-        <Gaps gaps={data.gaps} project={project} />
+        <Gaps gaps={data.gaps} callSites={data.callSites} project={project} />
       )}
       <SuiteDrawer
         projectId={project.id}

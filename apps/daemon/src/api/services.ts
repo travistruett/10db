@@ -87,6 +87,7 @@ import type {
   FoundHostDto,
   EvalManifest,
   EvalManifestResult,
+  EvalModelsDto,
   EvalsDto,
   EvalSuiteDetailDto,
   HazardAssessmentDto,
@@ -925,6 +926,8 @@ export interface ApiServices extends PlanRecordServices {
   scanNetworkHosts(projectId: ProjectId): Promise<FoundHostDto[]>;
   /** The project's eval files at HEAD and result files from its checkout, with the recorded manifest laid over them; nothing is run. */
   evals(projectId: ProjectId): Promise<EvalsDto>;
+  /** Every model the project's results graded, with its newest result per suite; nothing is run. */
+  evalModels(projectId: ProjectId): Promise<EvalModelsDto>;
   /** One suite's drawer; throws NotFoundError for an unknown suite, or a run that is not one of its results. */
   evalSuite(
     projectId: ProjectId,

@@ -953,6 +953,9 @@ export function createServices(deps: {
     evals(projectId) {
       return deps.evals.read(projectId, getProject(db, projectId).repoPath);
     },
+    evalModels(projectId) {
+      return deps.evals.models(projectId, getProject(db, projectId).repoPath);
+    },
     evalSuite(projectId, key, run) {
       return deps.evals.suite(projectId, getProject(db, projectId).repoPath, key, run);
     },
