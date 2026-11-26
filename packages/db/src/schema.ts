@@ -26,6 +26,9 @@ import type {
   ClaimId,
   ClaimKind,
   DecisionId,
+  DeviceId,
+  DevicePlatform,
+  PushSubscriptionId,
   DesignCheckId,
   DesignCheckPurpose,
   DesignCheckShot,
@@ -2824,3 +2827,30 @@ export const trustGrants = sqliteTable(
     ),
   ],
 );
+
+/** A phone or other device paired to share this Mac; the row stays after a revoke so its history reads. */
+export const devices = sqliteTable('devices', {
+  id: text('id').$type<DeviceId>().primaryKey(),
+  label: text('label').notNull(),
+  platform: text('platform').$type<DevicePlatform>().notNull(),
+  /** Lower-case hex SHA-256 of the token's secret; the secret itself is never stored. */
+  tokenHash: text('token_hash').notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+  lastUsedAt: text('last_used_at'),
+  revokedAt: text('revoked_at'),
+});
+
+/** A Web Push subscription of a device; deleted with the device and when it is revoked. */
+export const pushSubscriptions = sqliteTable('push_subscriptions', {
+  id: text('id').$type<PushSubscriptionId>().primaryKey(),
+  deviceId: text('device_id')
+    .$type<DeviceId>()
+    .notNull()
+    .references(() => devices.id, { onDelete: 'cascade' }),
+  endpoint: text('endpoint').notNull().unique(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});

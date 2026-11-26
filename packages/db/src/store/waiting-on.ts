@@ -1,11 +1,12 @@
 import {
+  InboxKind,
   InboxState,
   SendState,
   type InboxItemId,
   type ProjectId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNull, notInArray } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader } from './store';
 
@@ -80,7 +81,13 @@ export function waitingOnWorkstream(
   const open = db
     .select({ id: schema.inboxItems.id, targets: schema.inboxItems.targets })
     .from(schema.inboxItems)
-    .where(eq(schema.inboxItems.state, InboxState.Open))
+    .where(
+      and(
+        eq(schema.inboxItems.state, InboxState.Open),
+        // Cards the run never waits on are not the builder's answer to give.
+        notInArray(schema.inboxItems.kind, [InboxKind.Acceptance, InboxKind.Watchpoint]),
+      ),
+    )
     .all();
   const builderCard = open.some(
     (card) => !sentIds.has(card.id) && card.targets.some((t) => t.workstreamId === workstreamId),

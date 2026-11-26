@@ -1,7 +1,8 @@
 # apps/desktop
 
 The 10db window: React 19 + Mantine 9 UI built by Vite, inside a Tauri 2 shell (`src-tauri/`).
-The UI never touches the database; it talks to the daemon over loopback HTTP and WebSocket.
+The UI never touches the database; it talks to the daemon over loopback HTTP and WebSocket. The daemon's share listener, behind `tailscale serve`, is for other devices'
+tokens; the app still uses the main listener.
 
 - Daemon calls go through `src/daemon/client.ts` (Hono typed client over `AppType`). Never
   hand-write a fetch to the daemon. Parse every response with its `@10db/contracts` schema via `readJson`.

@@ -16,6 +16,9 @@ export interface CameraReach {
 /** The methods a read of the daemon may use: a read, its HEAD, and the CORS preflight before it. */
 const DAEMON_READS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+/** The daemon's route that issues a stream ticket. */
+const TICKET_PATH = '/events/ticket';
+
 /** The port a URL reaches: its own, else its scheme's default. */
 function portOf(url: URL): string {
   if (url.port !== '') return url.port;
@@ -68,7 +71,10 @@ export function proxyAllows(
   const url = parse(request.target);
   if (url?.username !== '' || url.password !== '') return false;
   if (url.origin === app.origin) return true;
-  return DAEMON_READS.has(method) && url.origin === daemonOrigin(reach);
+  if (url.origin !== daemonOrigin(reach)) return false;
+  // The one write: asking for a stream ticket, which only opens the stream the dev UI's token already reads.
+  if (method === 'POST' && url.pathname === TICKET_PATH) return true;
+  return DAEMON_READS.has(method);
 }
 
 /** The daemon's origin when the shot may read it, else null. */

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { NOISY_MIN_RAISED, NOISY_SHARE } from './inbox-card-types';
 import { AreaName, DEFAULT_HAZARDS, DEPS_HAZARD, PathPattern } from './entities';
 import { WatchpointLoudness } from './watchpoint-hit';
 
@@ -120,7 +121,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     globs: hazardGlobs('migrations'),
     guidance:
       'Check that the migration can run on existing data, that it is safe to apply while the old code still runs, and that nothing depends on a rollback.',
-    loudness: WatchpointLoudness.Show,
+    loudness: WatchpointLoudness.Ask,
     starter: 'migrations',
   },
   {
@@ -130,7 +131,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     globs: ['**/contracts/**', '**/*.proto', '**/openapi*.{yaml,json}', '**/schema.graphql'],
     guidance:
       'Check that every change is additive, that nothing is removed or narrowed, and that callers are updated.',
-    loudness: WatchpointLoudness.Show,
+    loudness: WatchpointLoudness.Ask,
     starter: 'contracts',
   },
   {
@@ -173,3 +174,92 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     starter: 'dependencies',
   },
 ];
+
+/**
+ * The starters' revision now. A list saved before revisions existed counts as revision 1; every save stamps the
+ * current one, so a revision is applied to a list once and a builder's later choice is never undone by it.
+ */
+export const STARTER_REVISION = 2;
+
+/**
+ * The starters as first shipped, at show, for those whose loudness later changed. A builder's copy that still equals
+ * the old version field for field takes the starter's new loudness; an edited copy is left as the builder made it.
+ * The old versions are literals: a later edit to a starter must not stop the upgrade.
+ */
+export const STARTER_WATCHPOINT_REVISIONS: readonly {
+  readonly since: number;
+  readonly was: Watchpoint;
+}[] = [
+  {
+    since: 2,
+    was: {
+      key: 'migrations',
+      label: 'Migrations',
+      why: "A revert can't undo a migration that ran.",
+      globs: [
+        '**/migrations/**',
+        '**/drizzle/**',
+        '**/alembic/versions/**',
+        '**/db/migrate/**',
+        '**/prisma/migrations/**',
+      ],
+      guidance:
+        'Check that the migration can run on existing data, that it is safe to apply while the old code still runs, and that nothing depends on a rollback.',
+      loudness: WatchpointLoudness.Show,
+      starter: 'migrations',
+    },
+  },
+  {
+    since: 2,
+    was: {
+      key: 'contracts',
+      label: 'Contracts and API',
+      why: 'Other code and other people depend on these shapes, and a break reaches them late.',
+      globs: ['**/contracts/**', '**/*.proto', '**/openapi*.{yaml,json}', '**/schema.graphql'],
+      guidance:
+        'Check that every change is additive, that nothing is removed or narrowed, and that callers are updated.',
+      loudness: WatchpointLoudness.Show,
+      starter: 'contracts',
+    },
+  },
+];
+
+const sameWatchpoint = (a: Watchpoint, b: Watchpoint): boolean =>
+  a.key === b.key &&
+  a.label === b.label &&
+  a.why === b.why &&
+  a.guidance === b.guidance &&
+  a.loudness === b.loudness &&
+  a.starter === b.starter &&
+  a.globs.length === b.globs.length &&
+  a.globs.every((g, i) => g === b.globs[i]);
+
+/**
+ * The stored list with each unedited copy of a starter moved to the starter's current loudness, for the revisions
+ * newer than the one the list was saved at (1 when it carries none).
+ */
+export function revisedWatchpoints(stored: readonly Watchpoint[], savedAt = 1): Watchpoint[] {
+  return stored.map((entry) => {
+    const revision = STARTER_WATCHPOINT_REVISIONS.find(
+      (r) => r.since > savedAt && sameWatchpoint(r.was, entry),
+    );
+    if (revision === undefined) return entry;
+    const now = STARTER_WATCHPOINTS.find((w) => w.key === entry.key);
+    return now === undefined ? entry : { ...entry, loudness: now.loudness };
+  });
+}
+
+/** One watchpoint's last 30 days: tasks it hit, Look cards that named it, and those waved through. */
+export const WatchpointStatsDto = z.object({
+  key: z.string(),
+  tasks: z.int().nonnegative(),
+  cards: z.int().nonnegative(),
+  waved: z.int().nonnegative(),
+  noisy: z.boolean(),
+});
+export type WatchpointStatsDto = z.infer<typeof WatchpointStatsDto>;
+
+/** Whether a watchpoint's cards were mostly waved through: at least the noisy minimum, at least the noisy share. */
+export function isNoisyWatchpoint(counts: { cards: number; waved: number }): boolean {
+  return counts.cards >= NOISY_MIN_RAISED && counts.waved / counts.cards >= NOISY_SHARE;
+}

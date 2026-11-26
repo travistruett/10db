@@ -58,6 +58,8 @@ export default defineConfig({
         TENDB_JUDGE: 'off',
         // No question may reach a real person from a throwaway daemon.
         TENDB_SLACK: 'off',
+        // No test may find, or change, the builder's own Tailscale from a throwaway daemon.
+        TENDB_TAILSCALE: 'off',
         // The container has little free disk; the test daemon must not hold lanes for it.
         TENDB_DISK: 'off',
         TENDB_DATA_DIR: E2E_DATA,

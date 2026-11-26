@@ -11,6 +11,8 @@ import { IntegrationsSection } from './integrations-section';
 import { AppearanceSection } from './appearance-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { LanePermissionsSection } from './lane-permissions-section';
+import { DevicesSection } from './devices-section';
+import { RemoteAccessSection } from './remote-access-section';
 import { PeopleSection } from './people/people-section';
 import { ProjectSharing } from './sharing-section';
 import { PlannedRemainder } from './planned-section';
@@ -162,6 +164,21 @@ export function SectionBody({
         <>
           {heading}
           <PeopleSection />
+        </>
+      );
+    case SettingsSectionKey.RemoteAccess:
+      return (
+        <>
+          {heading}
+          <RemoteAccessSection />
+        </>
+      );
+    case SettingsSectionKey.Devices:
+      return (
+        <>
+          {heading}
+          <DevicesSection />
+          <PlannedRemainder section={section} />
         </>
       );
     case SettingsSectionKey.ProjectTrust:

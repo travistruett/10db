@@ -86,6 +86,7 @@ import type {
   FolderInspectResult,
   FoundHostDto,
   EvalManifest,
+  NewEvalBody,
   EvalManifestResult,
   EvalModelsDto,
   EvalsDto,
@@ -128,6 +129,7 @@ import type {
   ProjectWatchpointsDto,
   ProjectWatchpoints,
   WatchpointHitsDto,
+  WatchpointStatsDto,
   YourWatchpoints,
   KeepAwakeStatus,
   LanePermissionsDto,
@@ -839,6 +841,8 @@ export interface ApiServices extends PlanRecordServices {
   setProjectWatchpoints(projectId: ProjectId, entries: ProjectWatchpoints): ProjectWatchpointsDto;
   /** The run's newest watchpoint reading with the agent's and reviewer's notes on each file. */
   watchpointHits(id: WorkstreamId): WatchpointHitsDto;
+  /** Each watchpoint's last 30 days in the project: tasks hit, cards raised and waved through. */
+  watchpointStats(projectId: ProjectId): WatchpointStatsDto[];
   /** Settings › Agent skill: the shipped skill's switch, installed copy and links. */
   agentSkill(): AgentSkillStatus;
   setAgentSkill(enabled: boolean): AgentSkillStatus;
@@ -936,6 +940,11 @@ export interface ApiServices extends PlanRecordServices {
   ): Promise<EvalSuiteDetailDto>;
   /** Records an eval manifest unless it names a path HEAD does not track; nothing is kept then. */
   recordEvalManifest(projectId: ProjectId, manifest: EvalManifest): Promise<EvalManifestResult>;
+  /**
+   * Files the task that drafts an eval for the request, a normal task in the areas its files fall in; the
+   * project's eval skill and suites are read at HEAD and nothing is run.
+   */
+  newEvalTask(projectId: ProjectId, request: NewEvalBody): Promise<TaskDto>;
   /** What 10db added to the project's hazards by itself and why, and how many removals wait on the builder. */
   getHazardAssessment(projectId: ProjectId): HazardAssessmentDto;
   /**
