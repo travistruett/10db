@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   effectiveWatchpoints,
+  isNoisyWatchpoint,
+  revisedWatchpoints,
+  STARTER_WATCHPOINTS,
   WatchpointFileStatus,
   WatchpointLoudness,
   type Watchpoint,
@@ -178,5 +181,30 @@ describe('splitPatch', () => {
     expect(splitPatch(diff, { fileBytes: 24 * 1024, diffCut: true }).get('mod.txt')?.clipped).toBe(
       false,
     );
+  });
+});
+
+describe('revisedWatchpoints', () => {
+  const s1Migrations = (over: Partial<Watchpoint> = {}): Watchpoint => {
+    const starter = STARTER_WATCHPOINTS.find((w) => w.key === 'migrations');
+    if (starter === undefined) throw new Error('no migrations starter');
+    return { ...starter, loudness: WatchpointLoudness.Show, ...over };
+  };
+
+  it('moves an unchanged S1 starter to ask and leaves an edited one, and every other watchpoint, alone', () => {
+    const edited = s1Migrations({ guidance: 'my own check' });
+    const other = watchpoint('mine', ['**/mine/**']);
+    const [unchanged, kept, untouched] = revisedWatchpoints([s1Migrations(), edited, other]);
+    expect(unchanged?.loudness).toBe(WatchpointLoudness.Ask);
+    expect(kept).toEqual(edited);
+    expect(untouched).toEqual(other);
+  });
+});
+
+describe('isNoisyWatchpoint', () => {
+  it('is noisy at 5 cards with at least 80% waved through, and not before', () => {
+    expect(isNoisyWatchpoint({ cards: 4, waved: 4 })).toBe(false);
+    expect(isNoisyWatchpoint({ cards: 6, waved: 5 })).toBe(true);
+    expect(isNoisyWatchpoint({ cards: 5, waved: 3 })).toBe(false);
   });
 });

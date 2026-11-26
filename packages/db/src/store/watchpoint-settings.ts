@@ -1,5 +1,6 @@
 import {
   ProjectWatchpoints,
+  revisedWatchpoints,
   STARTER_WATCHPOINTS,
   YourWatchpoints,
   type Watchpoint,
@@ -21,7 +22,7 @@ export function readYourWatchpoints(db: DbReader): Watchpoint[] {
   const stored = getAppSetting(db, YOUR_WATCHPOINTS_KEY);
   if (stored === undefined) return [...STARTER_WATCHPOINTS];
   const parsed = YourWatchpoints.safeParse(stored);
-  return parsed.success ? parsed.data : [];
+  return parsed.success ? revisedWatchpoints(parsed.data) : [];
 }
 
 export function writeYourWatchpoints(ctx: WriteContext, watchpoints: readonly Watchpoint[]): void {
