@@ -68,6 +68,11 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
 - Listen on `127.0.0.1` only. The share listener is a second `127.0.0.1` port behind `tailscale serve`, tailnet only;
   `api/auth-matrix.ts` says which credential each route takes on each listener
   (`decisions/2026-11-25-a-shared-mac-answers-on-its-tailnet-address.md`).
+- `api/app-static.ts` serves the phone's app (`apps/desktop/dist-app/`, built by `pnpm --filter @10db/desktop
+build:app`) for `GET /app/*` on the share listener: a file the build made, else `app.html` for an address with no
+  extension, with the CSP (no inline script, `connect-src` the request's own Host over `wss`). The bundle carries it
+  as `app/` beside `daemon.mjs` (`scripts/build.ts`); a run from source reads the desktop's `dist-app/`
+  (`resolveServedAppDir`). With no build the route answers 404.
 - Browser origins: only the Tauri webview's are built in. `TENDB_DEV_UI_ORIGIN` opts one loopback http origin in
   (`decisions/2026-10-29-dev-ui-over-the-factory.md`); a launcher of a daemon a browser UI talks to sets it.
 - `pnpm --filter @10db/daemon build [outDir]` bundles everything into `dist/daemon.mjs`, bundles srt's

@@ -8,6 +8,8 @@ export interface DaemonConnection {
   readonly token: string;
   /** A screen being drawn for a session (Shape spec §5.5): the client sends reads only. */
   readonly readOnly?: boolean;
+  /** The fetch every call of this connection goes through, when it is not the page's own (the phone's, which watches for a 401). */
+  readonly fetch?: typeof fetch;
 }
 
 export type ConnectionResolver = () => Promise<DaemonConnection>;
