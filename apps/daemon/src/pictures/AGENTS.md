@@ -109,6 +109,10 @@
   a command that fails logs a warning and the after comes at SHIPPED, in the shared app. A copy task keeps one
   after: a capture of one that has an after does nothing. `shootNow` takes the task's id (`check_design` passes
   it), shoots a copy task in its copy's app, and holds no preview for it. Befores stay on the shared app.
+- `PicturesDeps.ensureApp` (`app-start/`, `decisions/2026-11-26-10db-brings-the-dev-stack-up-before-a-picture-or-a-sign-in.md`)
+  runs before a capture's shots, before each dev login (a failed one sets the status line's sign-in problem) and
+  before `shootNow`'s `holdApp`; a stack that will not start skips the capture or sign-in, logs why, and leaves the
+  project's one Inbox card. Absent, nothing is checked.
 - `PicturesDeps.onAfterCapture` is told, for every After capture of a task outside a pass that was not stopped,
   which task it was (what the capture kept is already stored); the pictures module imports nothing of Slack or
   delivery, and `daemon/start.ts` hands the call to `delivery/slack-picture-post.ts`.

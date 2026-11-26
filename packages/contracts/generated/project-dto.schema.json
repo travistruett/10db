@@ -312,6 +312,12 @@
         "null"
       ]
     },
+    "appStartCommand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "screens": {
       "type": "object",
       "properties": {
@@ -417,6 +423,7 @@
     "appUrl",
     "devLoginCommand",
     "previewCommand",
+    "appStartCommand",
     "screens",
     "leftOutPages",
     "createdAt",

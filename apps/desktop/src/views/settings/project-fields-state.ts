@@ -71,6 +71,10 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
         : current.devLoginCommand,
     previewCommand:
       current.previewCommand === seed.previewCommand ? next.previewCommand : current.previewCommand,
+    appStartCommand:
+      current.appStartCommand === seed.appStartCommand
+        ? next.appStartCommand
+        : current.appStartCommand,
     screens:
       JSON.stringify(current.screens) === JSON.stringify(seed.screens)
         ? next.screens

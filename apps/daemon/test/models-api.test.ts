@@ -76,7 +76,7 @@ async function start(
           }),
         );
       // The test decision a switch of decisions' account asks.
-      if (url.endsWith('/systemone') || url.endsWith('/alpha/decisions'))
+      if (url.endsWith('/alpha/decisions'))
         return Promise.resolve(
           Response.json({
             model: 'typesafe/jev-1.13',

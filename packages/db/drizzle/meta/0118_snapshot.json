@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4aa64452-467e-402c-afc0-e38871bc62de",
+  "id": "cc6a9122-26c2-4eb9-8c05-e72659e1b0b5",
   "prevId": "05864e80-4dff-460d-a9eb-a33980a24d34",
   "tables": {
     "aa_models": {
@@ -6427,13 +6427,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "copy_app_command": {
-          "name": "copy_app_command",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "app_url": {
           "name": "app_url",
           "type": "text",
@@ -6450,6 +6443,13 @@
         },
         "preview_command": {
           "name": "preview_command",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "app_start_command": {
+          "name": "app_start_command",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

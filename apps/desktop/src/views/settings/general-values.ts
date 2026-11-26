@@ -94,6 +94,8 @@ export interface GeneralValues {
   readonly devLoginCommand: string;
   /** Serves the app while a pass is open; '' means none. */
   readonly previewCommand: string;
+  /** Brings the dev stack up when a picture or the dev login finds the app address down; '' means none. */
+  readonly appStartCommand: string;
   /** The viewports, an emptied number being '', and the themes each page's pictures are taken in. */
   readonly screens: ScreensValues;
 }
@@ -143,6 +145,7 @@ export function generalValues(project: ProjectDto): GeneralValues {
     appUrl: project.appUrl ?? '',
     devLoginCommand: project.devLoginCommand ?? '',
     previewCommand: project.previewCommand ?? '',
+    appStartCommand: project.appStartCommand ?? '',
     screens: project.screens,
   };
 }
@@ -300,6 +303,9 @@ export function checkGeneral(
   const preview = values.previewCommand.trim();
   const previewCommand = preview === '' ? null : preview;
   if (previewCommand !== project.previewCommand) patch.previewCommand = previewCommand;
+  const appStart = values.appStartCommand.trim();
+  const appStartCommand = appStart === '' ? null : appStart;
+  if (appStartCommand !== project.appStartCommand) patch.appStartCommand = appStartCommand;
   if ('matrix' in screens && !sameMatrix(screens.matrix, project.screens))
     patch.screens = screens.matrix;
   return { ok: true, patch: Object.keys(patch).length > 0 ? patch : null };

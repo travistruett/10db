@@ -16,6 +16,7 @@ export function ProjectPagesForm({ project }: { readonly project: ProjectDto }) 
   const fields = useProjectFields(project, [
     'appUrl',
     'previewCommand',
+    'appStartCommand',
     'devLoginCommand',
     'screens',
   ]);
@@ -52,6 +53,22 @@ export function ProjectPagesForm({ project }: { readonly project: ProjectDto }) 
             error={errors.previewCommand}
             onChange={(e) => {
               set({ previewCommand: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
+        <SettingRow
+          label="App Start Command"
+          description="Brings your dev stack up when nothing answers."
+          help="Run once, in your project's folder under the gate's sandbox with Docker allowed, when a picture or the dev login finds nothing answering at the app address, such as make up. It should return once the stack is started; 10db then waits for the address to answer. Docker Desktop is opened first when it is stopped. A start that fails leaves one Inbox card and is not run again for ten minutes."
+        >
+          <TextInput
+            aria-label="App Start Command"
+            placeholder="make up (optional)"
+            styles={MONO_INPUT}
+            value={values.appStartCommand}
+            error={errors.appStartCommand}
+            onChange={(e) => {
+              set({ appStartCommand: e.currentTarget.value });
             }}
           />
         </SettingRow>

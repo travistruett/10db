@@ -19,7 +19,6 @@ import { silentLogger } from '../log';
 import { createJudge, type JudgeCredential, type JudgeRequest } from './index';
 
 const KEY = 'router-test-key-0123';
-const SYSTEM_ONE_URL = 'https://openrouter.ai/api/v1/systemone';
 const DECISIONS_URL = 'https://openrouter.ai/api/alpha/decisions';
 const CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -125,8 +124,8 @@ afterEach(() => {
   close();
 });
 
-describe('judge.choose with a System One model', () => {
-  it('asks the systemone endpoint a named choice question and answers with the chosen probability', async () => {
+describe('judge.choose with a TypeSafe model', () => {
+  it('asks the decisions endpoint a named choice question and answers with the chosen probability', async () => {
     handler = () => {
       clock.advance(250);
       return json(systemOneBody({ review: 0.07, skip: 0.93 }));
@@ -145,7 +144,7 @@ describe('judge.choose with a System One model', () => {
       costUsd: 0.00003,
     });
     expect(seen).toHaveLength(1);
-    expect(seen[0]?.url).toBe(SYSTEM_ONE_URL);
+    expect(seen[0]?.url).toBe(DECISIONS_URL);
     expect(seen[0]?.headers['authorization']).toBe(`Bearer ${KEY}`);
     expect(seen[0]?.body).toEqual({
       model: 'typesafe/jev-1.13',
@@ -154,7 +153,7 @@ describe('judge.choose with a System One model', () => {
         decision: {
           type: 'choice',
           instructions: request.question,
-          criteria: { review: null, skip: null },
+          criteria: { review: 'review', skip: 'skip' },
         },
       },
     });
@@ -220,7 +219,7 @@ describe('judge.choose with another decision model', () => {
     usage: { input_tokens: 80, output_tokens: 1, cost: 0.000002 },
   });
 
-  it('asks the decisions endpoint the System One question and answers with the chosen probability', async () => {
+  it('asks the decisions endpoint the same question and answers with the chosen probability', async () => {
     handler = () =>
       json(decisionsBody({ choice: 'skip', probabilities: { review: 0.2, skip: 0.8 } }));
     expect(await build().choose(request)).toMatchObject({
@@ -260,7 +259,7 @@ describe('judge.choose with another decision model', () => {
   it.each([
     ['a decision model', 'liquid/d1', DECISIONS_URL],
     ['a model the list leaves out', 'anthropic/claude-haiku-5.5', CHAT_URL],
-    ['a TypeSafe model the list leaves out', 'typesafe/jev-2', SYSTEM_ONE_URL],
+    ['a TypeSafe model the list leaves out', 'typesafe/jev-2', DECISIONS_URL],
   ])('sends %s to its endpoint', async (_name, model, url) => {
     store.write((ctx) => patchJudgeConfig(ctx, { decisions: { shape_record: { model } } }));
     await build().choose(request);
@@ -277,6 +276,27 @@ describe('judge.choose with another decision model', () => {
     await build().choose(request);
     expect(seen.map((s) => s.url)).toEqual([DECISIONS_URL]);
   });
+
+  it.each([
+    ['a TypeSafe model', 'typesafe/jev-1.13', DECISIONS_URL],
+    ['any other model', 'liquid/d1', CHAT_URL],
+  ])(
+    'asks %s yes/no questions on its endpoint while the list is unread',
+    async (_name, model, url) => {
+      decisionModels = null;
+      store.write((ctx) => patchJudgeConfig(ctx, { decisions: { shape_record: { model } } }));
+      handler = () => json({});
+      await build().assess({
+        decision: 'shape_record',
+        state: { diff: '3 lines' },
+        questions: {
+          risky: { instructions: 'Is it risky?', criteria: { true: 'yes', false: 'no' } },
+        },
+        read: () => ({ answer: 'no', confidence: 1, outcome: 'acted' }),
+      });
+      expect(seen.map((s) => s.url)).toEqual([url]);
+    },
+  );
 });
 
 describe('judge.choose with a chat model', () => {
