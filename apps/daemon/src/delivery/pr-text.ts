@@ -122,23 +122,30 @@ export function prBody(input: {
   readonly watchpoints?: WatchpointHitsDto['hits'];
 }): string {
   // The markers are always written, so a task that ships into this pull request later has a place to fill.
-  const body = fillTemplate(input.template, [
+  const filled = fillTemplate(input.template, [
     { heading: 'What and why', text: whatAndWhy(input.tasks) },
-    { heading: FOR_YOU_HEADING, text: forYouSection(input.watchpoints ?? []) },
     { heading: 'How it was checked', text: howChecked(input.gate, input.ci, input.tasks) },
   ]);
+  const body = withForYou(filled, forYouSection(input.watchpoints ?? []));
   const budget = input.testBudget ?? [];
   const reasons = budget.length > 0 ? `\n\n${budget.join('\n')}` : '';
   return `${body}${reasons}\n\n---\n\nShipped by 10db, batch ${input.batch.id}\n`;
 }
 
 /** The pull request section for what the builder watches, and the markers a later task's ship replaces between. */
-const FOR_YOU_HEADING = 'For you';
+const FOR_YOU_HEADING = '## For you';
+const AFTER_FOR_YOU = '\n\n## How it was checked';
 const FOR_YOU_START = '<!-- 10db:for-you -->';
 const FOR_YOU_END = '<!-- /10db:for-you -->';
 
 /** A note's text with nothing that could close or open the markers' comments. */
 const plain = (text: string): string => text.replaceAll('<!--', '<!- -').replaceAll('-->', '- ->');
+
+/** The section placed before "How it was checked", or at the end when the body has no such section. */
+function withForYou(body: string, section: string): string {
+  const at = body.indexOf(AFTER_FOR_YOU);
+  return at < 0 ? `${body}\n\n${section}` : `${body.slice(0, at)}\n\n${section}${body.slice(at)}`;
+}
 
 /**
  * The "For you" section's text: each watchpoint, its loudness, its files with the agent's reason, and the
@@ -156,7 +163,7 @@ export function forYouSection(hits: WatchpointHitsDto['hits']): string {
       ]),
     ].join('\n'),
   );
-  return [FOR_YOU_START, ...blocks, FOR_YOU_END].join('\n\n');
+  return [FOR_YOU_START, FOR_YOU_HEADING, ...blocks, FOR_YOU_END].join('\n\n');
 }
 
 /**
