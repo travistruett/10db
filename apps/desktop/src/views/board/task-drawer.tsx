@@ -79,6 +79,7 @@ import { LinearTab } from './linear-tab';
 import { TaskPictures } from './task-pictures';
 import { TaskPlan } from './task-plan';
 import { TaskReport } from './task-report';
+import { TaskForYou } from './task-for-you';
 import { TaskSkips } from './task-skips';
 import { LandingField } from './landing-field';
 import { placementOpen } from './placement';
@@ -409,6 +410,7 @@ export function TaskDrawer({
           </Tabs.List>
           <Tabs.Panel value="overview" pt="lg">
             <Stack gap="xl">
+              <TaskForYou workstreamId={workstream?.id} />
               {task.acceptanceCriteria.length > 0 ? (
                 <Stack gap="xs">
                   <SectionLabel>What It Promises</SectionLabel>

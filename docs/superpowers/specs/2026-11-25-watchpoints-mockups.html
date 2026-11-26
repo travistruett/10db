@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watchpoints: mockups</title>
+<style>
+/* Selenized, exactly (docs/architecture/decisions/2026-10-28-selenized-exactly.md). */
+:root, [data-scheme="dark"] {
+  --bg0: #103c48; --bg1: #184956; --bg2: #2d5b69; --dim: #72898f; --fg0: #adbcbc; --fg1: #cad8d9;
+  --blue: #4695f7; --red: #fa5750; --yellow: #dbb32d; --green: #75b938; --orange: #ed8649; --cyan: #41c7b9;
+  --violet: #af88eb; --card-edge: rgba(0,0,0,.28); --card-shadow: 0 1px 2px rgba(0,0,0,.35);
+  --add: rgba(117,185,56,.14); --del: rgba(250,87,80,.13);
+}
+[data-scheme="light"] {
+  --bg0: #fbf3db; --bg1: #ece3cc; --bg2: #d5cdb6; --dim: #909995; --fg0: #53676d; --fg1: #3a4d53;
+  --blue: #0072d4; --red: #d2212d; --yellow: #ad8900; --green: #489100; --orange: #c25d1e; --cyan: #009c8f;
+  --violet: #8762c6; --card-edge: #d5cdb6; --card-shadow: 0 1px 2px rgba(0,0,0,.06);
+  --add: rgba(72,145,0,.12); --del: rgba(210,33,45,.10);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  background: #0b2b34; color: #cad8d9; padding: 24px 16px 64px; }
+body[data-page-scheme="light"] { background: #e3dac3; color: #3a4d53; }
+.page-head { max-width: 1320px; margin: 0 auto 20px; display: flex; gap: 12px; align-items: center; }
+.page-head h1 { font-size: 18px; margin: 0 auto 0 0; }
+.page-head button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid currentColor;
+  background: transparent; color: inherit; cursor: pointer; opacity: .8; }
+.page-head button[aria-pressed="true"] { opacity: 1; font-weight: 600; }
+section.frame-block { max-width: 1320px; margin: 0 auto 44px; }
+section.frame-block h2 { font-size: 15px; margin: 0 0 4px; }
+section.frame-block p.note { margin: 0 0 12px; opacity: .8; max-width: 980px; }
+
+.win { position: relative; border-radius: 12px; overflow: hidden; background: var(--bg1); color: var(--fg0);
+  box-shadow: 0 20px 50px rgba(0,0,0,.35); display: grid; font-size: 13px; width: 1280px; height: 800px;
+  grid-template-columns: 52px 220px 1fr; grid-template-rows: 44px 1fr; }
+.lights { position: absolute; left: 16px; top: 16px; display: flex; gap: 8px; z-index: 5; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.rail { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0 10px; background: var(--bg0); }
+.toprow-left { grid-column: 1 / 3; grid-row: 1; background: linear-gradient(to right, var(--bg0) 52px, transparent 52px); }
+.rail .item { width: 36px; height: 34px; border-radius: 8px; display: grid; place-items: center; color: var(--fg0); }
+.rail .item.on { background: var(--bg1); color: var(--fg1); }
+.rail .item svg { width: 18px; height: 18px; stroke-width: 1.6; }
+.rail .tile { width: 26px; height: 26px; border-radius: 6px; background: var(--blue); color: var(--bg0); font-size: 10px; font-weight: 700; display: grid; place-items: center; margin: 2px 0 4px; }
+.rail .sep { width: 24px; height: 1px; background: var(--bg2); margin: 6px 0; }
+.rail .grow { flex: 1; }
+.panel { grid-column: 2; grid-row: 2; padding: 0 8px 10px 4px; overflow: hidden; }
+.panel-head { height: 34px; padding: 0 6px; display: flex; align-items: center; font-weight: 600; color: var(--fg1); font-size: 14px; }
+.glabel { font-size: 11.5px; color: var(--dim); padding: 10px 8px 4px; font-weight: 600; }
+.prow { height: 28px; padding: 0 8px; border-radius: 8px; display: flex; align-items: center; color: var(--fg0); }
+.prow.on { background: var(--bg2); color: var(--fg1); font-weight: 500; }
+.titlerow { grid-column: 3; grid-row: 1; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 24px; }
+.titlerow b { color: var(--fg1); font-size: 14px; font-weight: 600; }
+.titlerow .kind { color: var(--dim); font-size: 12px; }
+.surface { grid-column: 3; grid-row: 2; margin: 0 8px 8px 0; background: var(--bg0); border-radius: 10px;
+  box-shadow: 0 0 0 1px var(--card-edge), var(--card-shadow); overflow: hidden; position: relative; }
+.content { height: 100%; overflow: hidden; padding: 22px 32px; }
+.col { max-width: 860px; margin: 0 auto; }
+h3 { margin: 0 0 4px; font-size: 16px; color: var(--fg1); }
+.lede { color: var(--fg0); margin: 0 0 16px; max-width: 700px; }
+.dim { color: var(--dim); } .small { font-size: 12px; }
+code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg1); padding: 1px 5px; border-radius: 4px; color: var(--fg1); }
+.btn { font: inherit; font-size: 12.5px; height: 28px; padding: 0 12px; border-radius: 8px; border: 0; background: var(--bg2); color: var(--fg1);
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn.primary { background: var(--blue); color: var(--bg0); font-weight: 600; }
+.btn.ghost { background: transparent; color: var(--blue); padding: 0 6px; }
+.toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.toolbar .sp { flex: 1; }
+
+/* The watchpoint table */
+.ftable { width: 100%; border-collapse: collapse; }
+.ftable th { text-align: left; font-size: 11.5px; color: var(--dim); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--bg2); }
+.ftable td { padding: 9px 10px; border-bottom: 1px solid var(--bg1); vertical-align: middle; }
+.ftable tr.grp td { padding: 16px 10px 6px; font-size: 11.5px; color: var(--dim); font-weight: 600; border-bottom: 0; }
+.ftable .name b { color: var(--fg1); font-weight: 600; display: block; }
+.ftable .name small { color: var(--dim); }
+.globs code { font-size: 11px; margin-right: 4px; }
+.loud { display: inline-flex; background: var(--bg1); border-radius: 8px; padding: 2px; }
+.loud span { font-size: 12px; padding: 3px 10px; border-radius: 6px; color: var(--dim); }
+.loud span.on { background: var(--bg2); color: var(--fg1); font-weight: 600; }
+.loud span.on.ask { color: var(--yellow); } .loud span.on.hold { color: var(--orange); }
+.loud span.off { opacity: .45; }
+.rate { font-size: 12px; color: var(--dim); white-space: nowrap; }
+.rate.noisy { color: var(--yellow); }
+.tag { font-size: 10px; font-weight: 700; letter-spacing: .03em; padding: 2px 6px; border-radius: 4px; background: var(--bg1); color: var(--dim); }
+.tag.over { color: var(--cyan); }
+.legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 0 0 18px; }
+.legend div { background: var(--bg1); border-radius: 8px; padding: 8px 12px; font-size: 12.5px; }
+.legend b { color: var(--fg1); display: block; margin-bottom: 2px; }
+
+/* Drawer */
+.scrim { position: absolute; inset: 0; background: rgba(0,0,0,.35); }
+.board-ghost { position: absolute; inset: 0; padding: 20px; display: flex; gap: 12px; }
+.board-ghost .c { width: 240px; background: var(--bg1); border-radius: 10px; }
+.drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 640px; background: var(--bg0); box-shadow: -10px 0 30px rgba(0,0,0,.35);
+  padding: 18px 24px; overflow: hidden; }
+.drawer h3 { font-size: 17px; }
+.tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--bg2); margin: 12px 0 14px; font-size: 13px; }
+.tabs span { padding: 6px 0; color: var(--dim); }
+.tabs span.on { color: var(--fg1); border-bottom: 2px solid var(--blue); font-weight: 600; }
+.tabs .count { font-size: 10px; background: var(--bg2); border-radius: 8px; padding: 0 5px; margin-left: 4px; }
+.slabel { font-size: 11.5px; color: var(--dim); font-weight: 600; margin: 14px 0 6px; display: flex; align-items: center; gap: 8px; }
+.slabel .yellow { color: var(--yellow); }
+.fold { background: var(--bg1); border-radius: 10px; margin-bottom: 8px; overflow: hidden; }
+.fold-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; }
+.fold-head b { color: var(--fg1); }
+.fold-head .chev { color: var(--dim); width: 12px; }
+.fold-head .sp { flex: 1; }
+.lvl { font-size: 9.5px; font-weight: 700; letter-spacing: .04em; padding: 2px 6px; border-radius: 4px; background: var(--bg0); }
+.lvl.show { color: var(--dim); } .lvl.ask { color: var(--yellow); } .lvl.hold { color: var(--orange); }
+.fold-body { padding: 0 12px 12px; }
+.why { font-size: 12.5px; margin: 0 0 8px; color: var(--fg0); }
+.fnote { display: grid; grid-template-columns: 74px 1fr; gap: 2px 10px; font-size: 12.5px; margin-bottom: 8px; }
+.fnote .who { color: var(--dim); font-size: 11.5px; font-weight: 600; padding-top: 1px; }
+.fnote .ok { color: var(--green); } .fnote .warn { color: var(--yellow); }
+.hunk { background: var(--bg0); border-radius: 8px; font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; margin-top: 6px; }
+.hunk .fname { padding: 5px 10px; color: var(--fg1); border-bottom: 1px solid var(--bg1); display: flex; gap: 8px; font-family: -apple-system, sans-serif; font-size: 12px; }
+.hunk .fname .sp { flex: 1; } .hunk .fname .dim { font-size: 11.5px; }
+.hunk .hh { padding: 2px 10px; color: var(--dim); }
+.hunk .l { padding: 0 10px; white-space: pre; color: var(--fg0); }
+.hunk .a { background: var(--add); color: var(--fg1); } .hunk .d { background: var(--del); }
+.fold.closed .fold-body { display: none; }
+
+/* Inbox */
+.mrow { padding: 8px 10px; border-radius: 8px; display: grid; grid-template-columns: auto 1fr auto; gap: 2px 8px; align-items: center; }
+.mrow.on { background: var(--bg2); }
+.mrow .k { font-size: 9.5px; font-weight: 700; letter-spacing: .04em; color: var(--yellow); }
+.mrow .k.q { color: var(--blue); } .mrow .k.g { color: var(--green); }
+.mrow .ttl { color: var(--fg1); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mrow .age { color: var(--dim); font-size: 11.5px; }
+.mrow .sub { grid-column: 2 / 4; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chips { display: flex; gap: 6px; align-items: center; color: var(--dim); font-size: 12px; margin-bottom: 4px; }
+.chip { font-size: 9.5px; font-weight: 700; letter-spacing: .04em; padding: 2px 6px; border-radius: 4px; background: var(--bg1); color: var(--yellow); }
+.actions { display: flex; gap: 8px; margin: 16px 0 0; align-items: center; }
+.actions .sp { flex: 1; }
+.notebox { background: var(--bg1); border-radius: 8px; padding: 8px 10px; color: var(--dim); height: 54px; margin-top: 10px; font-size: 12.5px; }
+
+/* PR body: GitHub's markdown, roughly */
+.gh { width: 920px; background: #0d1117; color: #e6edf3; border-radius: 10px; border: 1px solid #30363d; padding: 20px 28px;
+  font: 14px/1.5 -apple-system, "Segoe UI", sans-serif; }
+.gh h2 { font-size: 20px; border-bottom: 1px solid #30363d; padding-bottom: 6px; margin: 18px 0 10px; }
+.gh h3 { font-size: 16px; color: #e6edf3; margin: 14px 0 6px; }
+.gh p, .gh li { color: #e6edf3; } .gh ul { padding-left: 22px; margin: 6px 0; }
+.gh code { background: rgba(110,118,129,.4); color: #e6edf3; font-size: 12.5px; }
+.gh .muted { color: #9198a1; }
+.gh blockquote { margin: 6px 0; padding: 0 12px; border-left: 3px solid #3d444d; color: #9198a1; }
+.gh .alert { border-left: 3px solid #d29922; padding: 6px 12px; margin: 10px 0; }
+.gh .alert b { color: #d29922; }
+.gh .faded { opacity: .45; }
+</style>
+</head>
+<body data-page-scheme="dark">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13h3l3 3h4l3-3h3"/><path d="M4 6h16v12H4z"/></symbol>
+  <symbol id="i-factory" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10l5 3V10l5 3V6h4v15"/></symbol>
+  <symbol id="i-sessions" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21 14l-3-3h-7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v10"/><path d="M14 15v2a1 1 0 0 1-1 1H6l-3 3V11a1 1 0 0 1 1-1h2"/></symbol>
+  <symbol id="i-board" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 4v16M15 4v10"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6L17 7M7 17l-1.4 1.4"/></symbol>
+</defs></svg>
+
+<template id="rail">
+  <div class="rail">
+    <div class="item" data-k="inbox"><svg><use href="#i-inbox"/></svg></div>
+    <div class="item"><svg><use href="#i-factory"/></svg></div>
+    <div class="item"><svg><use href="#i-sessions"/></svg></div>
+    <div class="sep"></div>
+    <div class="tile">10</div>
+    <div class="item" data-k="board"><svg><use href="#i-board"/></svg></div>
+    <div class="grow"></div>
+    <div class="item" data-k="settings"><svg><use href="#i-settings"/></svg></div>
+  </div>
+</template>
+
+<div class="page-head">
+  <h1>Watchpoints: mockups</h1>
+  <button type="button" data-set-scheme="dark" aria-pressed="true">Dark</button>
+  <button type="button" data-set-scheme="light" aria-pressed="false">Light</button>
+</div>
+
+<!-- 1. Settings -->
+<section class="frame-block">
+  <h2>1. Settings › Watchpoints</h2>
+  <p class="note">A new project section under Planning, after Areas and Hazards. It lists your watchpoints that apply in every
+    project, then this project's own. Each row's loudness is one click. A project can override one of yours by key (the cyan
+    tag); the row then edits the override, and "Use yours" drops it. The hit rate is the last 30 days; a noisy watchpoint
+    (at least 5 asks, at least 80% answered "Looks right" without a note) turns yellow. Hold is greyed out until S5.</p>
+  <div class="win" data-scheme="dark">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="toprow-left"></div>
+    <div data-rail="settings"></div>
+    <div class="panel">
+      <div class="panel-head">Settings</div>
+      <div class="glabel">Project</div>
+      <div class="prow">General</div><div class="prow">App Preview</div><div class="prow">Sharing</div><div class="prow">Board Columns</div>
+      <div class="glabel">Planning</div>
+      <div class="prow">Planning</div><div class="prow">Areas and Hazards</div><div class="prow on">Watchpoints</div><div class="prow">Question Routing</div><div class="prow">Linear</div>
+      <div class="glabel">Agents</div>
+      <div class="prow">Playbook</div><div class="prow">Billing</div><div class="prow">Trust</div><div class="prow">Sandbox</div>
+    </div>
+    <div class="titlerow"><b>10db</b><span class="kind">Settings</span></div>
+    <div class="surface"><div class="content"><div class="col">
+      <h3>Watchpoints</h3>
+      <p class="lede">The kinds of change you want to judge yourself. When a task's diff touches one, the task shows you just those
+        changes, with the agent's reason and the reviewer's check against your guidance.</p>
+      <div class="legend">
+        <div><b>Show</b>In the task's For You section and the PR body. No Inbox item.</div>
+        <div><b>Ask</b>Also one Inbox item per task, however many watchpoints it hits. The run still finishes.</div>
+        <div><b>Hold</b>Also opens the PR without auto-merge; it merges when you say. <span class="dim">Coming later.</span></div>
+      </div>
+      <div class="toolbar">
+        <span class="sp"></span>
+        <button class="btn">Add from library ▾</button>
+        <button class="btn primary">New watchpoint</button>
+      </div>
+      <table class="ftable">
+        <thead><tr><th style="width:30%">Watchpoint</th><th>Matches</th><th style="width:184px">Loudness</th><th style="width:110px">Last 30 days</th></tr></thead>
+        <tbody>
+          <tr class="grp"><td colspan="4">Yours, in every project</td></tr>
+          <tr><td class="name"><b>Prompts</b><small>A prompt's wording changes what every run does.</small></td>
+            <td class="globs"><code>**/prompts/**</code><code>**/*prompt*.*</code></td>
+            <td><span class="loud"><span class="on">Show</span><span>Ask</span><span class="off">Hold</span></span></td>
+            <td class="rate">6 tasks</td></tr>
+          <tr><td class="name"><b>Agent instructions</b><small>These steer every agent in the repo.</small></td>
+            <td class="globs"><code>**/AGENTS.md</code><code>.claude/**</code><code>.codex/**</code></td>
+            <td><span class="loud"><span class="on">Show</span><span>Ask</span><span class="off">Hold</span></span></td>
+            <td class="rate">11 tasks</td></tr>
+          <tr><td class="name"><b>Evals</b><small>A lowered bar or a changed golden hides a regression.</small></td>
+            <td class="globs"><code>**/evals/**</code><code>**/*.eval.*</code></td>
+            <td><span class="loud"><span class="on">Show</span><span>Ask</span><span class="off">Hold</span></span></td>
+            <td class="rate">0 tasks</td></tr>
+          <tr class="grp"><td colspan="4">This project</td></tr>
+          <tr><td class="name"><b>Migrations</b><small>A revert can't undo a migration that ran.</small></td>
+            <td class="globs"><code>packages/db/drizzle/**</code></td>
+            <td><span class="loud"><span>Show</span><span class="on ask">Ask</span><span class="off">Hold</span></span></td>
+            <td class="rate">3 tasks</td></tr>
+          <tr><td class="name"><b>Contracts and API</b><small>Other code and old clients depend on these shapes.</small></td>
+            <td class="globs"><code>packages/contracts/src/**</code></td>
+            <td><span class="loud"><span>Show</span><span class="on ask">Ask</span><span class="off">Hold</span></span></td>
+            <td class="rate noisy">19 tasks · noisy</td></tr>
+          <tr><td class="name"><b>Prompts</b> <span class="tag over">OVERRIDES YOURS</span><small>Here the judge's prompts decide what runs unattended.</small></td>
+            <td class="globs"><code>apps/daemon/src/**/prompts.ts</code></td>
+            <td><span class="loud"><span>Show</span><span class="on ask">Ask</span><span class="off">Hold</span></span></td>
+            <td class="rate">4 tasks</td></tr>
+          <tr><td class="name"><b>Dependencies</b><small>A new package is code nobody here wrote.</small></td>
+            <td class="globs"><code>pnpm-lock.yaml</code><code>**/package.json</code></td>
+            <td><span class="loud"><span class="on">Show</span><span>Ask</span><span class="off">Hold</span></span></td>
+            <td class="rate">8 tasks</td></tr>
+        </tbody>
+      </table>
+      <p class="small dim" style="margin-top:14px">Agents can propose a change to a watchpoint; it reaches you as an Inbox item and
+        changes nothing until you accept it.</p>
+    </div></div></div>
+  </div>
+</section>
+
+<!-- 1b. Edit drawer -->
+<section class="frame-block">
+  <h2>1b. Editing a watchpoint</h2>
+  <p class="note">Clicking a row opens its drawer, as an area or hazard does. Guidance is what you want checked; the builder
+    and the reviewer both read it. "Applies to" moves a watchpoint between yours and this project's.</p>
+  <div class="win" data-scheme="dark" style="height:640px">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="toprow-left"></div>
+    <div data-rail="settings"></div>
+    <div class="panel"><div class="panel-head">Settings</div><div class="glabel">Planning</div><div class="prow">Areas and Hazards</div><div class="prow on">Watchpoints</div></div>
+    <div class="titlerow"><b>10db</b><span class="kind">Settings</span></div>
+    <div class="surface"><div class="scrim"></div>
+      <div class="drawer" style="width:560px">
+        <h3>Migrations</h3>
+        <p class="small dim" style="margin:0 0 14px">From the library. Its globs were narrowed to this repo.</p>
+        <div class="slabel">Name</div><div class="notebox" style="height:32px;color:var(--fg1)">Migrations</div>
+        <div class="slabel">Why it matters</div><div class="notebox" style="height:32px;color:var(--fg1)">A revert can't undo a migration that ran.</div>
+        <div class="slabel">Matches these paths</div><div class="notebox" style="height:32px;color:var(--fg1)"><code>packages/db/drizzle/**</code> <span class="dim">· 41 files match</span></div>
+        <div class="slabel">What to check</div>
+        <div class="notebox" style="height:72px;color:var(--fg1)">No table rewrite on a table with live rows. A dropped column was unread for a release first. The migration came from <code>drizzle-kit generate</code>, not by hand.</div>
+        <div class="slabel">Loudness</div>
+        <span class="loud"><span>Show</span><span class="on ask">Ask</span><span class="off">Hold</span></span>
+        <div class="slabel">Applies to</div>
+        <span class="loud"><span>Every project</span><span class="on">10db only</span></span>
+        <div class="actions"><button class="btn ghost" style="color:var(--red)">Remove</button><span class="sp"></span><button class="btn">Cancel</button><button class="btn primary">Save</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 2. Task drawer -->
+<section class="frame-block">
+  <h2>2. The task drawer: For You</h2>
+  <p class="note">The first section of a task's Overview when its diff hits a watchpoint. One fold per watchpoint, its loudness tag, and only
+    the matching hunks. Each file shows the agent's reason (from the build step) and the reviewer's check against your
+    guidance. Folds start open for ask and hold, closed for show. "Open the whole diff" opens the Changes view. The hunks are
+    kept when the run finishes, so a Done task still shows them after its worktree is gone.</p>
+  <div class="win" data-scheme="dark">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="toprow-left"></div>
+    <div data-rail="board"></div>
+    <div class="panel"><div class="panel-head">Board</div></div>
+    <div class="titlerow"><b>10db</b><span class="kind">Board</span></div>
+    <div class="surface">
+      <div class="board-ghost"><div class="c"></div><div class="c"></div><div class="c"></div><div class="c"></div></div>
+      <div class="scrim"></div>
+      <div class="drawer">
+        <div class="chips"><span class="chip" style="color:var(--green)">DONE</span><span>Standard · PR #871</span></div>
+        <h3>Tasks get a priority the Board sorts by</h3>
+        <div class="tabs"><span class="on">Overview</span><span>Reviews<span class="count">1</span></span><span>Edit</span></div>
+        <div class="slabel">For You <span class="dim" style="font-weight:400">· 2 watchpoints · 3 files</span><span style="flex:1"></span><a class="small" style="color:var(--blue);font-weight:400">Open the whole diff</a></div>
+
+        <div class="fold">
+          <div class="fold-head"><span class="chev">▾</span><b>Migrations</b><span class="lvl ask">ASK</span><span class="sp"></span><span class="small dim">1 file</span></div>
+          <div class="fold-body">
+            <p class="why dim">You asked: no table rewrite on a table with live rows; generated, not by hand.</p>
+            <div class="fnote"><span class="who">Agent</span><span>Adds <code>priority</code> with a default, so existing rows need no backfill; generated with <code>drizzle-kit generate</code>.</span></div>
+            <div class="fnote"><span class="who">Reviewer</span><span class="ok">✓ A constant default is an in-place ALTER in SQLite; no rewrite. Matches the generated snapshot.</span></div>
+            <div class="hunk">
+              <div class="fname"><span>packages/db/drizzle/0002_task_priority.sql</span><span class="sp"></span><span class="dim">+3</span></div>
+              <div class="hh">@@ -0,0 +1,3 @@</div>
+              <div class="l a">+ALTER TABLE `tasks` ADD `priority` integer DEFAULT 0 NOT NULL;</div>
+              <div class="l a">+--&gt; statement-breakpoint</div>
+              <div class="l a">+CREATE INDEX `tasks_priority_idx` ON `tasks` (`project_id`,`priority`);</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="fold">
+          <div class="fold-head"><span class="chev">▾</span><b>Contracts and API</b><span class="lvl ask">ASK</span><span class="sp"></span><span class="small dim">2 files</span></div>
+          <div class="fold-body">
+            <p class="why dim">You asked: no field removed or narrowed that a client reads; new fields optional.</p>
+            <div class="fnote"><span class="who">Agent</span><span><code>priority</code> is optional on create, so older clients still create tasks.</span></div>
+            <div class="fnote"><span class="who">Reviewer</span><span class="warn">⚠ <code>TaskDto.priority</code> is required in the response; the agent skill's CLI parses tasks strictly and rejects it until it updates. Filed as a follow-up.</span></div>
+            <div class="hunk">
+              <div class="fname"><span>packages/contracts/src/entities.ts</span><span class="sp"></span><span class="dim">+2</span></div>
+              <div class="hh">@@ -880,6 +880,8 @@ export const TaskDto = z.object({</div>
+              <div class="l">   state: TaskState,</div>
+              <div class="l">   areas: z.array(z.string()),</div>
+              <div class="l a">+  /** 0 is the default; the Board sorts each column by it, highest first. */</div>
+              <div class="l a">+  priority: TaskPriority,</div>
+              <div class="l"> });</div>
+            </div>
+            <div class="hunk">
+              <div class="fname"><span>packages/contracts/src/task-priority.ts</span><span class="dim">new</span><span class="sp"></span><span class="dim">+12</span></div>
+              <div class="hh">@@ -0,0 +1,12 @@ <span class="dim">· showing 1 of 12 lines</span> <a style="color:var(--blue)">show all</a></div>
+              <div class="l a">+export const TaskPriority = z.number().int().min(0).max(3);</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="fold closed">
+          <div class="fold-head"><span class="chev">▸</span><b>Agent instructions</b><span class="lvl show">SHOW</span><span class="sp"></span><span class="small dim">1 file</span></div>
+        </div>
+
+        <div class="slabel">What It Promises</div>
+        <p class="small" style="margin:0">Each task carries a priority from 0 to 3, and the Board sorts each column by it…</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 3. Inbox card -->
+<section class="frame-block">
+  <h2>3. The Ask card in the Inbox</h2>
+  <p class="note">One card per task, however many ask watchpoints it hit. It is written when the run moves on, so the task never waits
+    for it. "Looks right" closes it. "Send back with a note" files a follow-up task with your note, as the Acceptance card does.
+    For a watchpoint set to hold (later), a third button, Merge, turns on the PR's auto-merge.</p>
+  <div class="win" data-scheme="dark" style="height:700px; grid-template-columns: 52px 320px 1fr">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <div class="toprow-left" style="background:linear-gradient(to right, var(--bg0) 52px, transparent 52px)"></div>
+    <div data-rail="inbox"></div>
+    <div class="panel">
+      <div class="panel-head">Inbox</div>
+      <div class="mrow on"><span class="k">LOOK</span><span class="ttl">Tasks get a priority</span><span class="age">4m</span><span class="sub">Migrations, Contracts and API · 3 files</span></div>
+      <div class="mrow"><span class="k q">QUESTION</span><span class="ttl">Which Slack channel for alerts?</span><span class="age">1h</span><span class="sub">Route deploy notices</span></div>
+      <div class="mrow"><span class="k g">ACCEPT</span><span class="ttl">Board counts per project</span><span class="age">2h</span><span class="sub">1 criterion unclear</span></div>
+    </div>
+    <div class="titlerow"><b>Inbox</b></div>
+    <div class="surface"><div class="content"><div class="col" style="max-width:720px">
+      <div class="chips"><span class="chip">LOOK AT THESE CHANGES</span><span>10db · Standard · PR #871 · merged</span></div>
+      <h3>Tasks get a priority the Board sorts by</h3>
+      <p class="lede small">It touched two of your watchpoints set to ask. The run finished; this is for you to judge.</p>
+      <div class="fold">
+        <div class="fold-head"><span class="chev">▾</span><b>Migrations</b><span class="sp"></span><span class="small dim">1 file</span></div>
+        <div class="fold-body">
+          <div class="fnote"><span class="who">Agent</span><span>Adds <code>priority</code> with a default; generated.</span></div>
+          <div class="fnote"><span class="who">Reviewer</span><span class="ok">✓ Constant default, so no table rewrite.</span></div>
+          <div class="hunk"><div class="fname"><span>packages/db/drizzle/0002_task_priority.sql</span><span class="sp"></span><span class="dim">+3</span></div>
+            <div class="l a">+ALTER TABLE `tasks` ADD `priority` integer DEFAULT 0 NOT NULL;</div></div>
+        </div>
+      </div>
+      <div class="fold closed">
+        <div class="fold-head"><span class="chev">▸</span><b>Contracts and API</b><span class="small" style="color:var(--yellow)">reviewer flagged one</span><span class="sp"></span><span class="small dim">2 files</span></div>
+      </div>
+      <div class="notebox">Add a note (needed to send it back)…</div>
+      <div class="actions"><a class="small" style="color:var(--blue)">Open the task</a><span class="sp"></span><button class="btn">Send back with a note</button><button class="btn primary">Looks right</button></div>
+    </div></div></div>
+  </div>
+</section>
+
+<!-- 4. PR body -->
+<section class="frame-block">
+  <h2>4. The PR body</h2>
+  <p class="note">A "For you" section after "What and why": each watchpoint the PR's tasks hit, its loudness, its files, and the
+    reviewer's check. Show watchpoints are listed too, so the PR alone tells a reader what to look at. The faded block is the hold
+    banner a held PR adds later (S5).</p>
+  <div class="gh">
+    <h2>What and why</h2>
+    <p><b>Tasks get a priority the Board sorts by.</b> Each task carries a priority from 0 to 3, and the Board sorts each column by it.</p>
+    <h2>For you</h2>
+    <div class="alert faded"><b>Held for you.</b> Auto-merge is off until you merge it from 10db: it touches Migrations, set to hold.</div>
+    <h3>Migrations <span class="muted">· ask</span></h3>
+    <ul><li><code>packages/db/drizzle/0002_task_priority.sql</code>: adds <code>priority</code> with a default; generated.</li></ul>
+    <blockquote>Reviewer: ✓ A constant default, so no table rewrite.</blockquote>
+    <h3>Contracts and API <span class="muted">· ask</span></h3>
+    <ul><li><code>packages/contracts/src/entities.ts</code>: <code>priority</code> is optional on create.</li>
+      <li><code>packages/contracts/src/task-priority.ts</code> (new)</li></ul>
+    <blockquote>Reviewer: ⚠ <code>TaskDto.priority</code> is required in the response; the agent skill's strict parser rejects it.</blockquote>
+    <h3>Agent instructions <span class="muted">· show</span></h3>
+    <ul><li><code>apps/desktop/src/views/board/AGENTS.md</code></li></ul>
+    <h2>How it was checked</h2>
+    <p class="muted">make gate · CI …</p>
+  </div>
+</section>
+
+<script>
+document.querySelectorAll('[data-rail]').forEach((slot) => {
+  const node = document.getElementById('rail').content.cloneNode(true);
+  const on = node.querySelector(`[data-k="${slot.dataset.rail}"]`);
+  if (on) on.classList.add('on');
+  slot.replaceWith(node);
+});
+document.querySelectorAll('[data-set-scheme]').forEach((b) => b.addEventListener('click', () => {
+  const s = b.dataset.setScheme;
+  document.body.dataset.pageScheme = s;
+  document.querySelectorAll('.win').forEach((w) => { w.dataset.scheme = s; });
+  document.querySelectorAll('[data-set-scheme]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+}));
+</script>
+</body>
+</html>

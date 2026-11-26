@@ -93,6 +93,13 @@ export interface PromptInput {
    * what the change does that the task didn't ask for. Input to the reviewer, not a finding.
    */
   readonly acceptance?: string | null;
+  /**
+   * The watchpoints that overlap the task's areas, for a build step: what the builder reads themselves, and the
+   * instruction to give a reason per covered file in the commit's `watchpointNotes`.
+   */
+  readonly watchpoints?: string | null;
+  /** What a Review or QA step is told, every round, of the watchpoint files the change touched. */
+  readonly watchpointReview?: string | null;
   readonly revisedBy: {
     readonly role: StepRole;
     readonly personaName: string;
@@ -817,7 +824,10 @@ function failedStepsSection(output: string): string {
 }
 
 /** What the acceptance check sends a run back with: each criterion it read as not met, and why. */
-function acceptanceSendBack(evidence: EvidenceDto, tools: ToolAccess): string {
+function acceptanceSendBack(
+  evidence: Extract<EvidenceDto, { kind: typeof EvidenceKind.Acceptance }>,
+  tools: ToolAccess,
+): string {
   const notMet = (evidence.detail?.criteria ?? [])
     .filter((c) => c.verdict === AcceptanceVerdict.NotMet)
     .map((c) => `${c.criterion} (${c.note})`);
@@ -1084,6 +1094,9 @@ function stepSection(input: PromptInput): string[] {
     lines.push('', input.testValue);
   if (step.role === StepRole.Review && firstRound && input.acceptance)
     lines.push('', input.acceptance);
+  if (step.role === StepRole.Implement && input.watchpoints) lines.push('', input.watchpoints);
+  if ((step.role === StepRole.Review || step.role === StepRole.Qa) && input.watchpointReview)
+    lines.push('', input.watchpointReview);
   return lines;
 }
 

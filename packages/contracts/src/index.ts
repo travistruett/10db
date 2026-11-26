@@ -27,6 +27,8 @@ export * from './external';
 export * from './events';
 export * from './dev-ui-handoff';
 export * from './folder-hold';
+export * from './watchpoint-hit';
+export * from './watchpoints';
 export * from './folders';
 export * from './git-names';
 export * from './goals';
