@@ -1,85 +1,22 @@
 import {
   isWatchpointOff,
-  type EffectiveWatchpoint,
+  WatchpointLoudness,
   type ProjectWatchpointEntry,
   type Watchpoint,
-  type WatchpointLoudness,
 } from '@10db/contracts';
 
-/** Where a saved watchpoint lives: the builder's list, or this project's own. */
-export const WatchpointHome = { Everywhere: 'everywhere', Project: 'project' } as const;
-export type WatchpointHome = (typeof WatchpointHome)[keyof typeof WatchpointHome];
-
-/** The two lists a save sends: each is sent only when it changed. */
-export interface WatchpointLists {
-  readonly yours: readonly Watchpoint[];
-  readonly entries: readonly ProjectWatchpointEntry[];
-}
-
-const without = <T extends { readonly key: string }>(list: readonly T[], key: string): T[] =>
-  list.filter((item) => item.key !== key);
-
-const replaced = <T extends { readonly key: string }>(list: readonly T[], item: T): T[] =>
-  list.some((x) => x.key === item.key)
+/** A list with `item` in place of the one with its key, or added at the end. */
+export function withItem<T extends { readonly key: string }>(list: readonly T[], item: T): T[] {
+  return list.some((x) => x.key === item.key)
     ? list.map((x) => (x.key === item.key ? item : x))
     : [...list, item];
-
-/** The row as a plain watchpoint, without where it came from. */
-export function plain(row: EffectiveWatchpoint): Watchpoint {
-  return {
-    key: row.key,
-    label: row.label,
-    why: row.why,
-    globs: row.globs,
-    lines: row.lines,
-    guidance: row.guidance,
-    loudness: row.loudness,
-    starter: row.starter,
-  };
 }
 
-/**
- * A save of `draft` at `home`. At home Everywhere the builder's list takes it and the project drops its own
- * entry for the key; at Project the project's entry takes it, over the builder's when the key is theirs.
- */
-export function saved(
-  lists: WatchpointLists,
-  draft: Watchpoint,
-  home: WatchpointHome,
-): WatchpointLists {
-  if (home === WatchpointHome.Everywhere)
-    return { yours: replaced(lists.yours, draft), entries: without(lists.entries, draft.key) };
-  return { yours: lists.yours, entries: replaced(lists.entries, draft) };
-}
-
-/** A removal of the row: a builder's watchpoint leaves their list, a project's leaves the project's. */
-export function removed(lists: WatchpointLists, row: EffectiveWatchpoint): WatchpointLists {
-  if (row.from === 'you') return { yours: without(lists.yours, row.key), entries: lists.entries };
-  // An override is dropped and the builder's own comes back: "Use yours".
-  return { yours: lists.yours, entries: without(lists.entries, row.key) };
-}
-
-/** The row with another loudness, saved where it lives. */
-export function withLoudness(
-  lists: WatchpointLists,
-  row: EffectiveWatchpoint,
-  loudness: WatchpointLoudness,
-): WatchpointLists {
-  return saved(
-    lists,
-    { ...plain(row), loudness },
-    row.from === 'you' ? WatchpointHome.Everywhere : WatchpointHome.Project,
-  );
-}
-
-/** Turns the builder's watchpoint off in this project, or back on. */
-export function turnedOff(lists: WatchpointLists, key: string, off: boolean): WatchpointLists {
-  return {
-    yours: lists.yours,
-    entries: off
-      ? replaced(lists.entries, { key, off: true as const })
-      : without(lists.entries, key),
-  };
+export function withoutKey<T extends { readonly key: string }>(
+  list: readonly T[],
+  key: string,
+): T[] {
+  return list.filter((item) => item.key !== key);
 }
 
 /** A key for a new watchpoint from its name, kept apart from every key in use. */
@@ -95,13 +32,87 @@ export function keyFor(name: string, taken: ReadonlySet<string>): string {
   return key;
 }
 
-/** The project's own entries that are `off` ones, with the label of the watchpoint they turn off. */
-export function offEntries(
-  entries: readonly ProjectWatchpointEntry[],
+/** When It Matches for one of the builder's watchpoints in a project: follow it, set it here, or turn it off here. */
+export const ProjectChoice = {
+  Default: 'default',
+  Show: WatchpointLoudness.Show,
+  Ask: WatchpointLoudness.Ask,
+  Off: 'off',
+} as const;
+export type ProjectChoice = (typeof ProjectChoice)[keyof typeof ProjectChoice];
+
+/** One row of a project's page: one of the builder's watchpoints, or one of the project's own. */
+export interface ProjectRow {
+  readonly key: string;
+  /** What the row shows: the project's copy when it has one, else the builder's. */
+  readonly shown: Watchpoint;
+  /** The builder's watchpoint the row follows; null for the project's own. */
+  readonly yours: Watchpoint | null;
+  /** The project's entry under the key: a copy, an `off`, or none. */
+  readonly entry: ProjectWatchpointEntry | null;
+}
+
+/** The builder's watchpoints in their order, each as this project has it, then the project's own. */
+export function projectRows(
   yours: readonly Watchpoint[],
-): { readonly key: string; readonly label: string }[] {
-  return entries.filter(isWatchpointOff).map((e) => ({
-    key: e.key,
-    label: yours.find((w) => w.key === e.key)?.label ?? e.key,
-  }));
+  entries: readonly ProjectWatchpointEntry[],
+): ProjectRow[] {
+  const byKey = new Map(entries.map((entry) => [entry.key, entry]));
+  const known = new Set(yours.map((w) => w.key));
+  const followed = yours.map((watchpoint): ProjectRow => {
+    const entry = byKey.get(watchpoint.key) ?? null;
+    const shown = entry === null || isWatchpointOff(entry) ? watchpoint : entry;
+    return { key: watchpoint.key, shown, yours: watchpoint, entry };
+  });
+  const own = entries.flatMap((entry): ProjectRow[] =>
+    isWatchpointOff(entry) || known.has(entry.key)
+      ? []
+      : [{ key: entry.key, shown: entry, yours: null, entry }],
+  );
+  return [...followed, ...own];
+}
+
+/**
+ * The keys a project's page counts as taken: yours and the project's own. An `off` entry for a key no longer in
+ * your list hides nothing, so it takes no key, and a watchpoint saved under that key replaces it.
+ */
+export function keysInUse(
+  yours: readonly Watchpoint[],
+  entries: readonly ProjectWatchpointEntry[],
+): Set<string> {
+  const known = new Set(yours.map((w) => w.key));
+  return new Set([
+    ...known,
+    ...entries.filter((e) => !isWatchpointOff(e) || known.has(e.key)).map((e) => e.key),
+  ]);
+}
+
+/** Whether the project keeps its own copy of one of the builder's watchpoints. */
+export function isOverride(row: ProjectRow): boolean {
+  return row.yours !== null && row.entry !== null && !isWatchpointOff(row.entry);
+}
+
+export function isOffHere(row: ProjectRow): boolean {
+  return row.entry !== null && isWatchpointOff(row.entry);
+}
+
+/** The row's When It Matches: Default, Off, or the loudness of the project's copy. */
+export function choiceOf(row: ProjectRow): ProjectChoice | WatchpointLoudness {
+  if (row.entry === null) return ProjectChoice.Default;
+  if (isWatchpointOff(row.entry)) return ProjectChoice.Off;
+  return row.entry.loudness;
+}
+
+/**
+ * The project's entries after a When It Matches choice on one of the builder's: Default drops the project's
+ * entry, Off writes an `off`, and Show or Ask keeps a copy at that loudness (the project's own copy, if it has one).
+ */
+export function withChoice(
+  entries: readonly ProjectWatchpointEntry[],
+  row: ProjectRow,
+  choice: ProjectChoice,
+): ProjectWatchpointEntry[] {
+  if (choice === ProjectChoice.Default) return withoutKey(entries, row.key);
+  if (choice === ProjectChoice.Off) return withItem(entries, { key: row.key, off: true as const });
+  return withItem(entries, { ...row.shown, loudness: choice });
 }
