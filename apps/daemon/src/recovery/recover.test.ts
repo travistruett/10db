@@ -798,6 +798,7 @@ describe('recoverOnStartup for a project without a gate command', () => {
               workstreamId: id,
               projectId: project.id,
               taskTitle: seeded.task.title,
+              evalLines: [],
               baseHead: 'a'.repeat(40),
               head: 'b'.repeat(40),
               commits: ['b'.repeat(40)],

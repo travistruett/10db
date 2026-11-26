@@ -93,6 +93,7 @@ import {
   TakeOutRequest,
   PassPullRequestRequest,
 } from './pass-close';
+import { EvalDefinitionChangedData } from './eval-definition-change';
 import { AgentSkillInfo, AgentSkillInput, AgentSkillStatus } from './agent-skill';
 import {
   PassClosedData,
@@ -315,6 +316,7 @@ import {
 } from './system';
 import { AgentCapabilitiesDto } from './agent-capabilities';
 import { WatchpointHitsDto } from './watchpoint-hit';
+import { EvalMarkersDto, TaskEvalCoverageDto } from './eval-coverage';
 import { ProjectWatchpoints, ProjectWatchpointsDto, YourWatchpoints } from './watchpoints';
 import {
   InstalledPluginDto,
@@ -437,6 +439,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'inbox-item-dto': InboxItemDto,
   'system-check-dto': SystemCheckDto,
   'watchpoint-hits-dto': WatchpointHitsDto,
+  'eval-markers-dto': EvalMarkersDto,
+  'task-eval-coverage-dto': TaskEvalCoverageDto,
   'project-watchpoints-dto': ProjectWatchpointsDto,
   'your-watchpoints': YourWatchpoints,
   'project-watchpoints': ProjectWatchpoints,
@@ -677,6 +681,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-page-signed-off-data': PassPageSignedOffData,
   'pass-closed-data': PassClosedData,
   'pass-settled-data': PassSettledData,
+  'eval-definition-changed-data': EvalDefinitionChangedData,
   'pass-preview-broken-data': PassPreviewBrokenData,
   'pass-preview-mended-data': PassPreviewMendedData,
   ...mcpSchemas,

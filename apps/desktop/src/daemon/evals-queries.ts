@@ -1,5 +1,21 @@
-import { EvalModelsDto, EvalsDto, EvalSuiteDetailDto, type ProjectId } from '@10db/contracts';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import {
+  EvalMarkersDto,
+  EvalModelsDto,
+  EvalsDto,
+  EvalSuiteDetailDto,
+  TaskDto,
+  TaskEvalCoverageDto,
+  type NewEvalBody,
+  type ProjectId,
+  type TaskId,
+} from '@10db/contracts';
+import {
+  keepPreviousData,
+  skipToken,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { readJson } from './client';
 import { useDaemon } from './provider';
 
@@ -53,5 +69,58 @@ export function useEvalModels(projectId: ProjectId, enabled: boolean) {
         await client.projects[':projectId']['eval-models'].$get({ param: { projectId } }),
         EvalModelsDto,
       ),
+  });
+}
+
+/** Query keys of the covered-task markers; an evidence event for any run invalidates them. */
+export const evalMarkerKeys = {
+  all: ['eval-markers'],
+  project: (projectId: ProjectId) => ['eval-markers', projectId] as const,
+  task: (taskId: TaskId) => ['eval-markers', 'task', taskId] as const,
+} as const;
+
+/** The suites each of the project's tasks touched, with where each stands against the checkout's results. */
+export function useEvalMarkers(projectId: ProjectId) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: evalMarkerKeys.project(projectId),
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId']['eval-markers'].$get({ param: { projectId } }),
+        EvalMarkersDto,
+      ),
+  });
+}
+
+/** One task's touched suites with their results before and after it; nothing before the task has a run. */
+export function useTaskEvalCoverage(taskId: TaskId | undefined) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: taskId === undefined ? [...evalMarkerKeys.all, 'none'] : evalMarkerKeys.task(taskId),
+    queryFn:
+      taskId === undefined
+        ? skipToken
+        : async () =>
+            readJson(
+              await client.tasks[':taskId']['eval-coverage'].$get({ param: { taskId } }),
+              TaskEvalCoverageDto,
+            ),
+  });
+}
+
+/** Files the task that drafts an eval; the lane that takes it writes the cases and never runs them. */
+export function useNewEvalTask(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: NewEvalBody) =>
+      readJson(
+        await client.projects[':projectId'].evals.tasks.$post({
+          param: { projectId },
+          json: input,
+        }),
+        TaskDto,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
   });
 }

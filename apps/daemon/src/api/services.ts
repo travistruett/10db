@@ -86,8 +86,11 @@ import type {
   FolderInspectResult,
   FoundHostDto,
   EvalManifest,
+  NewEvalBody,
   EvalManifestResult,
+  EvalMarkersDto,
   EvalModelsDto,
+  TaskEvalCoverageDto,
   EvalsDto,
   EvalSuiteDetailDto,
   HazardAssessmentDto,
@@ -931,6 +934,10 @@ export interface ApiServices extends PlanRecordServices {
   evals(projectId: ProjectId): Promise<EvalsDto>;
   /** Every model the project's results graded, with its newest result per suite; nothing is run. */
   evalModels(projectId: ProjectId): Promise<EvalModelsDto>;
+  /** The suites each of the project's tasks touched, with their state against the checkout's results; nothing is run. */
+  evalMarkers(projectId: ProjectId): Promise<EvalMarkersDto>;
+  /** The suites a task's change touched, with their results before and after it. */
+  taskEvalCoverage(taskId: TaskId): Promise<TaskEvalCoverageDto>;
   /** One suite's drawer; throws NotFoundError for an unknown suite, or a run that is not one of its results. */
   evalSuite(
     projectId: ProjectId,
@@ -939,6 +946,11 @@ export interface ApiServices extends PlanRecordServices {
   ): Promise<EvalSuiteDetailDto>;
   /** Records an eval manifest unless it names a path HEAD does not track; nothing is kept then. */
   recordEvalManifest(projectId: ProjectId, manifest: EvalManifest): Promise<EvalManifestResult>;
+  /**
+   * Files the task that drafts an eval for the request, a normal task in the areas its files fall in; the
+   * project's eval skill and suites are read at HEAD and nothing is run.
+   */
+  newEvalTask(projectId: ProjectId, request: NewEvalBody): Promise<TaskDto>;
   /** What 10db added to the project's hazards by itself and why, and how many removals wait on the builder. */
   getHazardAssessment(projectId: ProjectId): HazardAssessmentDto;
   /**

@@ -87,6 +87,8 @@ import {
   PersonaInput,
   PersonaPatch,
   EvalManifest,
+  type NewEvalBody,
+  NewEvalRequest,
   EvalSuiteKey,
   EvalSuiteQuery,
   PersonInput,
@@ -1600,6 +1602,24 @@ export function createApp(deps: ApiDeps) {
         );
         return c.json(result, result.ok ? 200 : 400);
       },
+    )
+    .get('/projects/:projectId/eval-markers', async (c) =>
+      c.json(await deps.services.evalMarkers(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/tasks/:taskId/eval-coverage', async (c) =>
+      c.json(await deps.services.taskEvalCoverage(TaskId.parse(c.req.param('taskId')))),
+    )
+    .post(
+      '/projects/:projectId/evals/tasks',
+      validator('json', (value): NewEvalBody => NewEvalRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.newEvalTask(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+          201,
+        ),
     )
     .get(
       '/projects/:projectId/evals/:suiteKey',

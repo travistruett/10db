@@ -1,9 +1,12 @@
 import {
   NotFoundError,
   type EvalManifest,
+  type EvalCoverageSideDto,
+  type EvalCoverageState,
   type EvalManifestResult,
   type EvalModelsDto,
   type EvalsDto,
+  type NewEvalBody,
   type EvalSuiteDetailDto,
   type HazardDef,
   type ProjectId,
@@ -21,10 +24,26 @@ import {
   type CallSite,
   type FoundCallSites,
 } from './call-sites';
+import { coverageOf, sideOf } from './coverage';
 import { evalDrift } from './drift';
+import { evalTaskDraft, findEvalSkills, type EvalTaskDraft } from './new-eval-task';
 import { readEvalManifest, writeEvalManifest } from './manifest-store';
 import { buildModels } from './models';
 import { createEvalsCache, readEvals, type FoundEvals } from './read-results';
+
+/** A suite and the times a task's branch point and last commit were committed. */
+export interface CoverageQuery {
+  readonly key: string;
+  readonly baseAt: string | null;
+  readonly headAt: string | null;
+}
+
+/** A covered suite's results on either side of a task, as the checkout holds them now. */
+export interface CoverageStanding {
+  readonly state: EvalCoverageState;
+  readonly before: EvalCoverageSideDto | null;
+  readonly after: EvalCoverageSideDto | null;
+}
 
 export interface EvalsService {
   read(projectId: ProjectId, repoPath: string): Promise<EvalsDto>;
@@ -41,11 +60,18 @@ export interface EvalsService {
     repoPath: string,
     manifest: EvalManifest,
   ): Promise<EvalManifestResult>;
+  /** Where each queried suite stands against its task's times, in the checkout's results as read now. */
+  standing(repoPath: string, queries: readonly CoverageQuery[]): Promise<CoverageStanding[]>;
+  /** The task that drafts an eval for `request`: the project's eval skill and suites read at HEAD, never run. */
+  draftTask(projectId: ProjectId, repoPath: string, request: NewEvalBody): Promise<EvalTaskDraft>;
 }
 
 export interface EvalsDeps {
   readonly state: StateStore;
-  readonly git: Pick<Git, 'survey' | 'commitAt' | 'lastChangedAt' | 'grepAt' | 'filesAt'>;
+  readonly git: Pick<
+    Git,
+    'survey' | 'commitAt' | 'lastChangedAt' | 'grepAt' | 'filesAt' | 'surveyTexts'
+  >;
   readonly logger: Logger;
 }
 
@@ -231,6 +257,25 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
       if (result.kind === 'no_suite') throw new NotFoundError('Eval suite', key);
       if (result.kind === 'no_run') throw new NotFoundError('Eval run', run ?? '');
       return result.detail;
+    },
+    async standing(repoPath, queries) {
+      const read = await found(repoPath);
+      return queries.map((q) => {
+        const runs = read?.suites.find((s) => s.key === q.key)?.runs ?? [];
+        const { state, before, after } = coverageOf({ runs, baseAt: q.baseAt, headAt: q.headAt });
+        return {
+          state,
+          before: before === null ? null : sideOf(before),
+          after: after === null ? null : sideOf(after),
+        };
+      });
+    },
+    async draftTask(projectId, repoPath, request) {
+      const read = await found(repoPath);
+      const manifest = readEvalManifest(deps.state.db, projectId);
+      const suites = buildEvals(read, manifest).suites;
+      const skills = read === null ? [] : await findEvalSkills(deps.git, repoPath, read.tracked);
+      return evalTaskDraft(request, skills, suites);
     },
     async record(projectId, repoPath, manifest) {
       const read = await found(repoPath);
