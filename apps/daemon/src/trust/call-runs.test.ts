@@ -20,6 +20,13 @@ const MAKEFILE = [
   'd3:',
   '\techo d3',
   '',
+  't:',
+  'ifdef IN_COPY',
+  '\tsh x.sh',
+  'else',
+  '\t./sub/x',
+  'endif',
+  '',
 ].join('\n');
 const APP_MAKEFILE = [
   'api-client: schema',
@@ -112,6 +119,19 @@ describe('callRuns', () => {
         '',
         {
           runs: [step('client', [], '$(MAKE) -C app api-client'), apiClient, schema, gen],
+          cut: false,
+        },
+      ],
+      [
+        'a recipe inside ifdef … else … endif, a script on each branch',
+        'make t',
+        '',
+        {
+          runs: [
+            step('t', [], 'ifdef IN_COPY\nsh x.sh\nelse\n./sub/x\nendif'),
+            script('x.sh'),
+            script('sub/x'),
+          ],
           cut: false,
         },
       ],

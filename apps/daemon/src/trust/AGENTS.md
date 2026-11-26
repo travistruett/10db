@@ -25,7 +25,8 @@
 - `call.runs`: for a shell call the hook judge shows 10db's judge the committed text of what it runs
   (`call-runs.ts`, `callRuns`; `decisions/2026-11-25-the-judge-reads-the-committed-code-a-call-runs.md`): the rules of
   the make targets it names (`make [-C dir] target`, with their prerequisites, `$(MAKE)` calls and the scripts on their
-  recipe lines, and the variables the recipes use) and repository scripts named by a path or after an interpreter,
+  recipe lines, and the variables the recipes use; a recipe inside `ifdef … else … endif` keeps its directive lines, so
+  the judge reads both branches and the test between them, and the scripts on both are followed) and repository scripts named by a path or after an interpreter,
   whole. Files come through `HookJudgeContext.readCommitted` (`folders/committed-file.ts`): `origin/<base>`'s text only
   where the checkout holds the same bytes, so a script the lane changed or created is judged as before, without its
   text. Only the first command of a line is followed, past `cd`s that certainly move it (the line's text is
