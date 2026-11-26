@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   PicturesStatusDto,
   ScreensMatrix,
+  SignInCheckDto,
   TaskScreenAddedData,
   TaskScreenDto,
   TaskScreensDto,
@@ -652,6 +653,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'task-screen-added-data': TaskScreenAddedData,
   'screens-matrix': ScreensMatrix,
   'pictures-status-dto': PicturesStatusDto,
+  'sign-in-check-dto': SignInCheckDto,
   'pass-dto': PassDto,
   'pass-view-dto': PassViewDto,
   'pass-turn-dto': PassTurnDto,

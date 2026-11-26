@@ -12,6 +12,7 @@ import {
   REPORTER_TOOL_DESCRIPTIONS,
   ReporterToolInputs,
   ReporterToolName,
+  SaveDevLoginInput,
   ShapeToolInputs,
   ShapeToolName,
   type ConversationId,
@@ -34,6 +35,7 @@ import { CHAT_TOOL_DESCRIPTIONS } from './chat-tools';
 import { SHAPE_TOOL_DESCRIPTIONS } from './shape-tools';
 import { browserTools } from './browser-tools';
 import { checkDesignTool, offersDesignCheck } from './design-check-tool';
+import { offersSignInSetup, saveDevLoginTool } from './sign-in-setup-tool';
 import { ToolImages } from './tool-images';
 import { createToolHandlers, TOOL_DESCRIPTIONS, type McpDeps } from './tools';
 
@@ -88,6 +90,19 @@ function laneTools(
       description: check.description,
       schema: check.schema,
       run: (input) => check.run(CheckDesignInput.parse(input)),
+    });
+  }
+  // The task setting up its project's picture sign-in is offered the tool that saves a dev login.
+  if (deps.signInSetup !== undefined && offersSignInSetup(deps.state.db, workstreamId)) {
+    const save = saveDevLoginTool(
+      { db: deps.state.db, signInSetup: deps.signInSetup },
+      workstreamId,
+    );
+    tools.push({
+      name: save.name,
+      description: save.description,
+      schema: save.schema,
+      run: (input) => save.run(SaveDevLoginInput.parse(input)),
     });
   }
   // A lane with a sandbox is offered its own browser, held to the servers the lane started.

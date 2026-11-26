@@ -283,6 +283,17 @@
         }
       ]
     },
+    "copyAppCommand": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "appUrl": {
       "type": [
         "string",

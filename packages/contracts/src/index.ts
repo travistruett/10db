@@ -58,6 +58,7 @@ export * from './landing';
 export * from './local-copy';
 export * from './mcp-tools';
 export * from './design-check';
+export * from './sign-in-setup';
 export * from './mockup-document';
 export * from './model-profiles';
 export * from './page-areas';
