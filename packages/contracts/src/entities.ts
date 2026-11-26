@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AcceptanceDetail } from './acceptance';
+import { StoredWatchpointDetail } from './watchpoint-hit';
 import { USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN } from './accounts';
 import { AllowedCommands } from './allowed-commands';
 import { ModelSetting } from './catalogue';
@@ -1419,8 +1420,6 @@ export const NetworkHostInput = z.object({ host: z.string() });
 export type NetworkHostInput = z.infer<typeof NetworkHostInput>;
 
 const EvidenceBase = {
-  /** The acceptance check's reading; null on every other kind. */
-  detail: AcceptanceDetail.nullable(),
   id: EvidenceId,
   workstreamId: WorkstreamId,
   summary: z.string(),
@@ -1437,30 +1436,35 @@ export const EvidenceDto = z.discriminatedUnion('kind', [
   z.object({
     ...EvidenceBase,
     kind: z.literal(EvidenceKind.Gate),
+    detail: z.null(),
     command: z.string(),
     exitCode: z.int(),
   }),
   z.object({
     ...EvidenceBase,
     kind: z.literal(EvidenceKind.Agent),
+    detail: z.null(),
     command: z.string(),
     exitCode: z.int(),
   }),
   z.object({
     ...EvidenceBase,
     kind: z.literal(EvidenceKind.Builder),
+    detail: z.null(),
     command: z.null(),
     exitCode: z.null(),
   }),
   z.object({
     ...EvidenceBase,
     kind: z.literal(EvidenceKind.NoRevert),
+    detail: z.null(),
     command: z.null(),
     exitCode: z.null(),
   }),
   z.object({
     ...EvidenceBase,
     kind: z.literal(EvidenceKind.Browser),
+    detail: z.null(),
     command: z.null(),
     exitCode: z.null(),
     screenId: TaskScreenId,
@@ -1468,6 +1472,16 @@ export const EvidenceDto = z.discriminatedUnion('kind', [
   z.object({
     ...EvidenceBase,
     kind: z.literal(EvidenceKind.Acceptance),
+    /** The acceptance check's reading of each criterion. */
+    detail: AcceptanceDetail.nullable(),
+    command: z.null(),
+    exitCode: z.null(),
+  }),
+  z.object({
+    ...EvidenceBase,
+    kind: z.literal(EvidenceKind.Watchpoint),
+    /** The watchpoints the run's change hit, with their hunks. A detail that does not parse reads as unreadable. */
+    detail: StoredWatchpointDetail,
     command: z.null(),
     exitCode: z.null(),
   }),

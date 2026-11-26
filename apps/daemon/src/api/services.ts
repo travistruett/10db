@@ -124,6 +124,10 @@ import type {
   JudgeStatusDto,
   JudgeTestResultDto,
   KeepAwakeMode,
+  ProjectWatchpointsDto,
+  ProjectWatchpoints,
+  WatchpointHitsDto,
+  YourWatchpoints,
   KeepAwakeStatus,
   LanePermissionsDto,
   LiveSystemsDto,
@@ -824,6 +828,16 @@ export interface ApiServices extends PlanRecordServices {
   systemCheck(options: { readonly recheck: boolean }): Promise<SystemCheckDto>;
   keepAwake(): KeepAwakeStatus;
   setKeepAwake(mode: KeepAwakeMode): KeepAwakeStatus;
+  /** Settings › Watchpoints: the builder's own list, which starts as the starters. */
+  yourWatchpoints(): YourWatchpoints;
+  /** Replaces the builder's whole list. */
+  setYourWatchpoints(watchpoints: YourWatchpoints): YourWatchpoints;
+  /** The watchpoints that apply in the project, each tagged with where it came from. */
+  projectWatchpoints(projectId: ProjectId): ProjectWatchpointsDto;
+  /** Replaces the project's whole list of its own watchpoints, overrides and `off` entries. */
+  setProjectWatchpoints(projectId: ProjectId, entries: ProjectWatchpoints): ProjectWatchpointsDto;
+  /** The run's newest watchpoint reading with the agent's and reviewer's notes on each file. */
+  watchpointHits(id: WorkstreamId): WatchpointHitsDto;
   /** Settings › Agent skill: the shipped skill's switch, installed copy and links. */
   agentSkill(): AgentSkillStatus;
   setAgentSkill(enabled: boolean): AgentSkillStatus;

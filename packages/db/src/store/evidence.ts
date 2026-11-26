@@ -1,5 +1,6 @@
 import {
   type AcceptanceDetail,
+  type WatchpointDetail,
   EventType,
   EvidenceKind,
   mintId,
@@ -33,6 +34,12 @@ export type NewEvidence =
       readonly exitCode: null;
     })
   | (NewEvidenceBase & {
+      readonly kind: typeof EvidenceKind.Watchpoint;
+      readonly command: null;
+      readonly exitCode: null;
+      readonly detail: WatchpointDetail;
+    })
+  | (NewEvidenceBase & {
       readonly kind: typeof EvidenceKind.Acceptance;
       readonly command: null;
       readonly exitCode: null;
@@ -63,13 +70,12 @@ function parseRow(row: { readonly id: string }): EvidenceDto {
 }
 
 export function insertEvidence(ctx: WriteContext, input: NewEvidence): EvidenceDto {
-  const row: EvidenceDto = {
-    id: mintId('Evidence'),
-    ...input,
-    commitShas: [...input.commitShas],
-    detail: input.kind === EvidenceKind.Acceptance ? input.detail : null,
-    createdAt: ctx.now,
-  };
+  const stamp = { id: mintId('Evidence'), commitShas: [...input.commitShas], createdAt: ctx.now };
+  // Acceptance and Watchpoint rows keep the reading they carry; every other kind has none.
+  const row: EvidenceDto =
+    input.kind === EvidenceKind.Acceptance || input.kind === EvidenceKind.Watchpoint
+      ? { ...input, ...stamp }
+      : { ...input, ...stamp, detail: null };
   ctx.tx
     .insert(schema.evidence)
     .values({ ...row, screenId: input.kind === EvidenceKind.Browser ? input.screenId : null })

@@ -38,7 +38,13 @@
         "args": {
           "opId": "op-e2e-commit1",
           "paths": ["src/greeting/hello.txt"],
-          "message": "Add the greeting"
+          "message": "Add the greeting",
+          "watchpointNotes": [
+            {
+              "path": "src/greeting/hello.txt",
+              "note": "Adds the greeting file the gate looks for."
+            }
+          ]
         }
       },
       {
@@ -53,7 +59,13 @@
         "args": {
           "opId": "op-e2e-review1",
           "summary": "The greeting is written and committed.",
-          "verdict": "approve"
+          "verdict": "approve",
+          "watchpointNotes": [
+            {
+              "path": "src/greeting/hello.txt",
+              "note": "✓ A plain text file, as the gate expects."
+            }
+          ]
         }
       },
       {
