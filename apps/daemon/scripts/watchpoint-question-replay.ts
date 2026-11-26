@@ -275,7 +275,8 @@ for (const run of sample) {
     continue;
   }
   for (const candidate of found.asked) {
-    const yes = found.shadow.find((s) => s.key === candidate.key)?.yes ?? null;
+    const shadow = found.shadow.find((s) => s.key === candidate.key);
+    const yes = shadow?.yes ?? null;
     answers.push(yes);
     const diff = await questionDiff(found.read, candidate.paths).catch(() => null);
     emit(
@@ -286,7 +287,8 @@ for (const run of sample) {
         head: run.head,
         watchpoint: candidate.key,
         question: candidate.question,
-        asked: candidate.paths,
+        asked: shadow?.asked ?? [],
+        more: shadow?.more ?? candidate.paths.length,
         hunks: diff?.text ?? null,
         truncated: diff?.truncated ?? null,
         yes,

@@ -1741,6 +1741,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       readProjectWatchpoints(db, row.projectId),
     );
     if (watchpoints.length === 0) return null;
+    const earlier = newestWatchpointRow(listEvidence(db, id))?.detail;
     let detail: WatchpointDetail;
     try {
       const base = getWorkstreamRow(db, id).baseHead;
@@ -1760,11 +1761,16 @@ export function createRunner(opts: RunnerOptions): Runner {
         },
         read,
         // In shadow: the answers are kept on the reading and logged, and nothing reads them to act.
-        ask: (candidates) =>
-          askWatchpointQuestions({ judge: opts.judge, read }, candidates, {
+        ask: (candidates) => {
+          // The same head was asked already (a Review or QA step with no new commits): its answers stand.
+          const kept = earlier?.head === head ? (earlier.shadow ?? []) : [];
+          if (candidates.every((c) => kept.some((s) => s.key === c.key)))
+            return Promise.resolve(kept.filter((s) => candidates.some((c) => c.key === s.key)));
+          return askWatchpointQuestions({ judge: opts.judge, read }, candidates, {
             workstreamId: id,
             taskId: row.taskId,
-          }),
+          });
+        },
       });
     } catch (error) {
       opts.logger.warn(
@@ -1777,7 +1783,6 @@ export function createRunner(opts: RunnerOptions): Runner {
     // question's shadow answer. One with only shadow answers is written to keep them; it hits nothing.
     const holds = (d: WatchpointDetail): boolean =>
       d.hits.length > 0 || d.skipped !== null || (d.shadow?.length ?? 0) > 0;
-    const earlier = newestWatchpointRow(listEvidence(db, id))?.detail;
     return !holds(detail) && (earlier === undefined || !holds(earlier)) ? null : detail;
   }
 
@@ -1837,6 +1842,12 @@ export function createRunner(opts: RunnerOptions): Runner {
       detail,
     });
     const files = detail.hits.reduce((n, h) => n + h.files.length, 0);
+    const asked = detail.shadow?.length ?? 0;
+    // A reading with no hits says what it holds: the shadow questions, or nothing to show.
+    const quiet =
+      asked === 0
+        ? 'No watchpoint file changed.'
+        : `No watchpoint file changed; the judge was asked ${String(asked)} watchpoint question${asked === 1 ? '' : 's'}, in shadow.`;
     insertEvidence(ctx, {
       workstreamId: id,
       kind: EvidenceKind.Watchpoint,
@@ -1845,7 +1856,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       summary:
         detail.skipped !== null
           ? "Couldn't read this run's changes for the watchpoints."
-          : `${String(files)} file${files === 1 ? '' : 's'} under ${String(detail.hits.length)} watchpoint${detail.hits.length === 1 ? '' : 's'}.`,
+          : detail.hits.length === 0
+            ? quiet
+            : `${String(files)} file${files === 1 ? '' : 's'} under ${String(detail.hits.length)} watchpoint${detail.hits.length === 1 ? '' : 's'}.`,
       logPath: null,
       commitShas: [],
       detail,

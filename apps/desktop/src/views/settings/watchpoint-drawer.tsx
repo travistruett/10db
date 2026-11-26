@@ -1,8 +1,10 @@
 import {
+  JudgeDecision,
   MAX_WATCHPOINT_QUESTION_LENGTH,
   Watchpoint,
   WatchpointLinePattern,
   WatchpointLoudness,
+  type JudgeStatusDto,
   type Watchpoint as WatchpointValue,
 } from '@10db/contracts';
 import { Alert, Button, Group, Input, Stack, Text, Textarea, TextInput } from '@mantine/core';
@@ -33,6 +35,16 @@ const EMPTY: Draft = {
   guidance: '',
   loudness: WatchpointLoudness.Show,
 };
+
+/** Why a watchpoint's question isn't asked now, or null while it is. */
+function whyUnasked(judge: JudgeStatusDto | undefined): string | null {
+  if (judge === undefined) return null;
+  if (judge.off || !judge.config.enabled) return 'the judge is off';
+  if (judge.account?.secretSet !== true) return 'no account can answer decisions';
+  if (!judge.config.decisions[JudgeDecision.WatchpointQuestion].enabled)
+    return 'the Watchpoint Question decision is off';
+  return null;
+}
 
 function draftOf(watchpoint: WatchpointValue): Draft {
   return {
@@ -93,9 +105,7 @@ export function WatchpointDrawer({
     setInvalid(null);
     setDraft((d) => ({ ...d, ...next }));
   };
-  const judge = useJudgeStatus().data;
-  // The question is asked only on an account that can answer decisions.
-  const unasked = judge !== undefined && judge.account?.secretSet !== true;
+  const unasked = whyUnasked(useJudgeStatus().data);
   const badPattern = lines(draft.lines).find((p) => !WatchpointLinePattern.safeParse(p).success);
   const submit = () => {
     if (watchpoint !== null && !dirty) {
@@ -225,11 +235,11 @@ export function WatchpointDrawer({
               change({ question: e.currentTarget.value });
             }}
           />
-          {unasked ? (
+          {unasked === null ? null : (
             <Text size="xs" c="dimmed">
-              Judge questions aren&apos;t checked: no account can answer decisions.
+              {`Judge questions aren't checked: ${unasked}.`}
             </Text>
-          ) : null}
+          )}
         </Stack>
         <Textarea
           label="What to Check"

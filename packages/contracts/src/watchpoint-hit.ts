@@ -64,13 +64,16 @@ export const WatchpointHit = z.object({
 export type WatchpointHit = z.infer<typeof WatchpointHit>;
 
 /**
- * A watchpoint's question as the judge answered it in shadow: the files it was asked about (those its globs cover
- * and no line settled) and the probability of yes, null when no answer came. Nothing acts on it.
+ * A watchpoint's question as the judge answered it in shadow: the files whose hunks it read (of those its globs cover
+ * and no line settled), how many more it was not shown, and the probability of yes, null when no answer came.
+ * Nothing acts on it.
  */
 export const WatchpointShadow = z.object({
   key: z.string(),
   label: z.string(),
   asked: z.array(z.string()),
+  /** The files left open past what the judge could read. */
+  more: z.int().nonnegative().default(0),
   yes: z.number().min(0).max(1).nullable(),
 });
 export type WatchpointShadow = z.infer<typeof WatchpointShadow>;

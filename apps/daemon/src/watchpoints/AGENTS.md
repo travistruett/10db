@@ -16,13 +16,17 @@
   hits only through its globs plus lines, so one with no lines makes no rule hit (`watchpointCovers`). Its question
   candidates are the files its globs cover that no line matched (`questionCandidates`, pure, in `covers.ts` beside
   `lineChecks`). `watchpointHitsAfter` hands them to its `ask` once the rules are done, and keeps the answers as
-  `WatchpointDetail.shadow` (`{ key, label, asked, yes }`, optional, so an old row reads as none). `question.ts`
+  `WatchpointDetail.shadow` (`{ key, label, asked, more, yes }`, optional, so an old row reads as none). `question.ts`
   (`askWatchpointQuestions`) is the one place that asks: nothing when `judge.ready(watchpoint_question)` is false (off
-  by default) or there are no candidates, else one `judge.assess` per watchpoint with one `NoulQuestion`, the
-  candidates' hunks fenced as data and capped at `WATCHPOINT_QUESTION_DIFF_CAP` (each file's first hunks past it), a
-  20 s timeout, and the call logged as `JudgeOutcome.Shadow`. It never throws: no answer leaves `yes` null. The
-  runner keeps a reading that holds only shadow answers (no hits), and retires it like any other. Nothing on the task,
-  the card, the PR body, the forced review or the stats reads `shadow`: they read `hits` only.
+  by default) or there are no candidates, else one `judge.assess` per watchpoint with one `NoulQuestion`, marked
+  `secondary` (no outage card, no `lastFallback`), a 20 s timeout, and the call logged as `JudgeOutcome.Shadow`. The
+  watchpoint, the file names and their hunks go inside one fence; `questionDiff` keeps them within
+  `WATCHPOINT_QUESTION_DIFF_CAP` characters (each file's first hunks past it, at most 150 files), and `asked` names only
+  the files shown, `more` counting the rest. It never throws: no answer leaves `yes` null. The runner reuses the
+  newest reading's answers for the same head (a Review or QA step with no new commits), keeps a reading that holds
+  only shadow answers (no hits, its summary says how many questions were asked), and retires it like any other. A
+  question watchpoint with no lines is left out of the build brief. Nothing on the task, the card, the PR body, the
+  forced review or the stats reads `shadow`: they read `hits` only.
   `scripts/watchpoint-question-replay.ts` asks the questions over a project's Done runs for hand labelling.
 - `hits-after.ts` (`watchpointHitsAfter`) reads the whole change's file counts first (a zero-byte read), matches on
   those (and, for line watchpoints, on the scan above), then reads only the matched files' text (`diffOfRanges` with `paths.only`) and splits it per file
