@@ -105,10 +105,10 @@ describe.skipIf(!SEATBELT)("a builder's MCP server beside a lane (Seatbelt)", ()
     }
   }, 60_000);
 
-  afterAll(() => {
+  afterAll(async () => {
     server.stdin?.end();
     server.kill();
-    session.dispose();
+    await session.dispose();
     repo.cleanup();
     rmSync(root, { recursive: true, force: true });
     rmSync(canary, { force: true });

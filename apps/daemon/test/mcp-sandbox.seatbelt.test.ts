@@ -223,8 +223,8 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
     // It reads the toolchain and walks the checkout, which takes a while on a loaded machine.
   }, 60_000);
 
-  afterAll(() => {
-    session.dispose();
+  afterAll(async () => {
+    await session.dispose();
     web.close();
     repo.cleanup();
     rmSync(root, { recursive: true, force: true });

@@ -97,7 +97,7 @@ export interface TakeoverService {
   /** Runs `job` after the chat's earlier takeover calls (the chat's archive). */
   serialized<T>(chatId: ChatId, job: () => Promise<T>): Promise<T>;
   /** The chat is archived: its hold is released, waiters served and its files removed. */
-  ended(chatId: ChatId): void;
+  ended(chatId: ChatId): Promise<void>;
   /** At start: removes the files of every chat that isn't in the terminal (an open the daemon lost). */
   recover(): void;
   /** At shutdown: aborts what prepares or opens, and waits for the chains. */
@@ -191,26 +191,23 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
   /**
    * Removes everything of the chat's takeover: its sets' servers and the folder. One set that won't go is
    * logged and the rest still go, so the folder, which holds sealed headers, never stays for want of another.
-   * Never throws: its callers have already given the chat back.
+   * Never rejects: its callers have already given the chat back.
    */
-  function release(chat: ChatRow): void {
+  async function release(chat: ChatRow): Promise<void> {
     const sets = live.get(chat.id)?.sets ?? [];
     live.delete(chat.id);
-    try {
-      for (const set of sets) {
-        try {
-          set.remove();
-        } catch (error) {
-          deps.log.warn({ err: error, chatId: chat.id }, 'a takeover set was not removed');
-        }
-      }
-    } finally {
+    for (const set of sets) {
       try {
-        removeTakeoverFolder(deps.dataDir, chat.conversationId);
+        await set.remove();
       } catch (error) {
-        // The chat is already given back; a folder that stays is swept at the next start.
-        deps.log.warn({ err: error, chatId: chat.id }, 'the takeover folder was not removed');
+        deps.log.warn({ err: error, chatId: chat.id }, 'a takeover set was not removed');
       }
+    }
+    try {
+      removeTakeoverFolder(deps.dataDir, chat.conversationId);
+    } catch (error) {
+      // The chat is already given back; a folder that stays is swept at the next start.
+      deps.log.warn({ err: error, chatId: chat.id }, 'the takeover folder was not removed');
     }
   }
 
@@ -238,7 +235,7 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
     try {
       writeTakeoverRecord(folder, record);
     } catch (error) {
-      set.remove();
+      await set.remove();
       throw error;
     }
     return { set, record };
@@ -275,13 +272,13 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
         await enter().closed;
       }
     } catch (error) {
-      set?.remove();
+      await set?.remove();
       removeTakeoverFolder(deps.dataDir, chat.conversationId);
       throw error;
     }
     if (stateOf(chat) !== ConversationState.TakenOver) {
-      set.remove();
-      release(chat);
+      await set.remove();
+      await release(chat);
       throw new ConflictError('The chat changed while it opened');
     }
     live.set(chat.id, { sets: [set] });
@@ -307,12 +304,12 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
         folderHold.handBack(chat.projectId, chat.id, () => {
           engine.terminalFailed(chat.conversationId);
         });
-        release(chat);
+        await release(chat);
       } else {
-        set.remove();
         const sets = live.get(chat.id)?.sets;
         const at = sets?.indexOf(set) ?? -1;
         if (at >= 0) sets?.splice(at, 1);
+        await set.remove();
       }
       throw error instanceof UpstreamError
         ? error
@@ -382,8 +379,7 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
           return Promise.reject(error instanceof Error ? error : new Error(String(error)));
         }
         if (holds) deps.chats().watchFolder(conversationId);
-        release(chat);
-        return Promise.resolve();
+        return release(chat);
       });
     },
 
@@ -444,10 +440,10 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
 
     serialized: (chatId, job) => run(chatId, () => job()),
 
-    ended(chatId) {
+    async ended(chatId) {
       const chat = getChat(state.db, chatId);
       folderHold.handBack(chat.projectId, chatId, () => undefined);
-      release(chat);
+      await release(chat);
     },
 
     recover() {

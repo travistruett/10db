@@ -164,6 +164,7 @@ function isWhole(dir: string, version: string): boolean {
 function sweepLeftovers(skillsDir: string): void {
   for (const name of readdirSync(skillsDir)) {
     if (name.startsWith(LEFTOVER_PREFIX))
+      // eslint-disable-next-line no-restricted-syntax -- a copy of the shipped skill, a few files
       rmSync(join(skillsDir, name), { recursive: true, force: true });
   }
 }
@@ -185,6 +186,7 @@ function copySkill(home: string, shippedDir: string, version: string): void {
   cpSync(shippedDir, fresh, { recursive: true });
   if (kindOf(dest).kind !== 'missing') renameSync(dest, aside);
   renameSync(fresh, dest);
+  // eslint-disable-next-line no-restricted-syntax -- a copy of the shipped skill, a few files
   rmSync(aside, { recursive: true, force: true });
 }
 
@@ -225,6 +227,7 @@ export function uninstallAgentSkill(home: string): void {
         judged.dangling && found.kind === 'link' && found.text === installedSkillDir(home);
       if (judged.state === AgentSkillLinkState.Linked || oursDangling) rmSync(path);
     }
+    // eslint-disable-next-line no-restricted-syntax -- a copy of the shipped skill, a few files
     rmSync(installedSkillDir(home), { recursive: true, force: true });
     const skillsDir = dirname(installedSkillDir(home));
     if (kindOf(skillsDir).kind !== 'missing') sweepLeftovers(skillsDir);

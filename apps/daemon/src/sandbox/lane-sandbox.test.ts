@@ -158,7 +158,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       );
       expect(session.spec.disallowedTools.filter((rule) => rule.includes('.env'))).toHaveLength(2);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -179,7 +179,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(dirname(reads ?? '')).toBe(filesRoot);
       expect(existsSync(reads ?? '')).toBe(true);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
     expect(existsSync(reads ?? '')).toBe(false);
   });
@@ -192,7 +192,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         'pnpm-store-operation-locks',
       );
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -214,7 +214,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     try {
       expect(session.spec.settings.network.allowLocalBinding).toBe(binding);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -250,8 +250,8 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(off.spec.shellEnv['DOCKER_HOST']).toBeUndefined();
       expect(off.spec.settings.credentials.envVars.map((v) => v.name)).toContain('DOCKER_HOST');
     } finally {
-      on.dispose();
-      off.dispose();
+      await on.dispose();
+      await off.dispose();
     }
   });
 
@@ -286,7 +286,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(session.spec.shellEnv['DOCKER_HOST']).toBeUndefined();
       expect(session.spec.shellEnv['COMPOSE_PROJECT_NAME']).toBeUndefined();
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -326,8 +326,8 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       );
       expect(session.fileAccess.readList).toEqual([shared, join(home, '.10db')]);
     } finally {
-      session.dispose();
-      other.dispose();
+      await session.dispose();
+      await other.dispose();
     }
   });
 
@@ -361,11 +361,11 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         { projectId, entry: home },
       ]);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
     // The next session says it again.
     const next = await lanes.forSession(input({ rules }));
-    next.dispose();
+    await next.dispose();
     expect(warned.filter((w) => w.message.includes('read list'))).toHaveLength(4);
   });
 
@@ -386,7 +386,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(session.spec.settings.network.allowedDomains).toEqual([]);
       expect(session.fileAccess.readList).toEqual([]);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -426,7 +426,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           pinnedToolsRoot(dataDir),
         ]);
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     } finally {
       outside.cleanup();
@@ -470,7 +470,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         expect(allowWrite).not.toContain(wtB);
         expect(allowRead).toContain(commonDir);
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     } finally {
       outside.cleanup();
@@ -501,7 +501,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(denyWrite).toEqual([join(checkout, '.git'), pinnedToolsRoot(dataDir)]);
       expect(allowWrite).toContain(session.tmpDir);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -525,7 +525,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       // Claude Code opens the checkout for writing, and the folder lies inside it: the deny keeps it shut.
       expect(denyWrite).toContain(join(realpathSync(nestedData), 'tools'));
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -537,7 +537,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(denyWrite).toEqual([checkout, join(checkout, '.git'), pinnedToolsRoot(dataDir)]);
       expect(allowWrite).toEqual([session.tmpDir]);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -570,7 +570,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           pinnedToolsRoot(dataDir),
         ]);
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     } finally {
       elsewhere.cleanup();
@@ -591,7 +591,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(denyWrite).toContain(join(checkout, '.git'));
       expect(denyWrite).not.toContain(checkout);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -631,7 +631,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           pinnedToolsRoot(dataDir),
         ]);
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     } finally {
       separate.cleanup();
@@ -658,7 +658,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(session.spec.settings.filesystem.denyRead).toContain(env);
       expect(session.spec.askRules).toContain(`Edit(/${join(checkout, '.vscode')}/**)`);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -722,7 +722,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(session.commandEnv).not.toHaveProperty('PATH');
       expect(session.commandEnv).not.toHaveProperty('TMPDIR');
     } finally {
-      session.dispose();
+      await session.dispose();
     }
     expect(existsSync(join(session.tmpDir, 'cache'))).toBe(false);
   });
@@ -784,7 +784,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         'TENDB_COPY_ID',
       );
     } finally {
-      session.dispose();
+      await session.dispose();
       await gate.dispose();
       await bare.dispose();
     }
@@ -806,7 +806,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(allowRead.filter((path) => path.startsWith(join(home, '.config')))).toEqual([]);
       expect(denyRead).toContain(join(home, '.config/mise/age.txt'));
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -836,7 +836,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       );
       expect(allowWrite).toEqual([session.tmpDir]);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -848,7 +848,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(readAccess('/etc/mise/config.toml', session.fileAccess).access).toBe('protected');
       expect(existsSync(join(session.tmpDir, 'mise', 'system.toml'))).toBe(false);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -868,9 +868,9 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(untrusted.spec.settings.filesystem.allowRead).not.toContain(join(bin, 'tool'));
       expect(laneWritten.spec.settings.filesystem.allowRead).not.toContain(join(bin, 'tool'));
     } finally {
-      trusted.dispose();
-      untrusted.dispose();
-      laneWritten.dispose();
+      await trusted.dispose();
+      await untrusted.dispose();
+      await laneWritten.dispose();
     }
   });
 
@@ -884,8 +884,8 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         second.commandEnv['pnpm_config_store_dir'],
       );
     } finally {
-      first.dispose();
-      second.dispose();
+      await first.dispose();
+      await second.dispose();
     }
   });
 
@@ -899,7 +899,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(denied).not.toContain('CLAUDE_CODE_TMPDIR');
       expect(denied).not.toContain('GIT_CONFIG_GLOBAL');
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -910,7 +910,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         expect.arrayContaining(['EnterWorktree', 'CronCreate', 'ScheduleWakeup', 'RemoteTrigger']),
       );
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -935,7 +935,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         );
       }
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -953,7 +953,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         ]),
       );
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -971,7 +971,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         ]),
       );
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -992,7 +992,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       );
       expect(session.spec.settings.filesystem.denyRead).toContain(join(home, '.claude'));
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1014,7 +1014,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         expect.arrayContaining([dataDir, configDir]),
       );
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1059,7 +1059,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         session.spec.settings.filesystem.allowRead.filter((path) => isEqualOrUnder(path, dataDir)),
       ).toEqual([]);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1073,7 +1073,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         expect.arrayContaining([`Read(/${dataDir})`, `Read(/${dataDir}/**)`]),
       );
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1096,7 +1096,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         'outside-copy',
       );
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1107,7 +1107,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(readAccess('/usr/share/doc', session.fileAccess, true).access).toBe('allowed');
       expect(readAccess(join(home, 'notes.txt'), session.fileAccess).access).toBe('ask');
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1118,7 +1118,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(session.spec.settings.filesystem.denyRead).toContain(login);
       expect(session.spec.disallowedTools).toContain(`Read(/${login}/**)`);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1131,7 +1131,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(session.spec.settings.filesystem.denyRead).toContain(codexHome);
       expect(readAccess(join(codexHome, 'auth.json'), session.fileAccess).access).toBe('protected');
     } finally {
-      session.dispose();
+      await session.dispose();
     }
     // A ChatGPT lane's too, whose read list is the same profile's.
     mkdirSync(lanesRoot, { recursive: true });
@@ -1141,7 +1141,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     try {
       expect(codex.spec.settings.filesystem.denyRead).toContain(codexHome);
     } finally {
-      codex.dispose();
+      await codex.dispose();
     }
   });
 
@@ -1153,7 +1153,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       session.setProviderSession('prov-new');
       expect(seen.providerSessionId).toBe('prov-new');
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1200,7 +1200,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(listings.every((path) => /(\[[^\]]\]|\/\*)$/.test(path))).toBe(true);
       expect(allowWrite.filter((path) => /[*?[\]{}]/.test(path))).toEqual([]);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1220,7 +1220,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(file).toContain(`export xcrun_db='${join(session.tmpDir, 'xcrun_db')}'`);
       expect(file).toContain(`export XDG_CONFIG_HOME='${join(session.tmpDir, 'config')}'`);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1267,7 +1267,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         expect(allowWrite.some((path) => isEqualOrUnder(path, home))).toBe(false);
         expect(session.setup.loaded).toEqual({ skills: ['s'], plugins: ['p@m'] });
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     });
 
@@ -1290,7 +1290,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           { what: '.claude/skills/p/key.txt', why: 'a secrets file is never copied' },
         ]);
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     });
 
@@ -1302,7 +1302,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         expect(session.setup.loaded).toEqual({ skills: [], plugins: ['p@m'] });
         expect(session.setup.leftOut.map((item) => item.what)).toContain('~/.claude/skills/s');
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     });
 
@@ -1314,7 +1314,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         expect(session.spec.settings.filesystem.denyRead).toContain(secret);
         expect(session.spec.disallowedTools).toContain(`Read(/${secret})`);
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     });
 
@@ -1330,7 +1330,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         );
         expect(readAccess(file, session.fileAccess).access).toBe('protected');
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     });
 
@@ -1348,7 +1348,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         expect(settings).not.toContain(join(home, '.claude/skills'));
         expect(settings).not.toContain('10db-setup-');
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     });
 
@@ -1395,7 +1395,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         );
         expect(session.fileAccess.setupReads).toEqual(session.setup.reads);
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     });
 
@@ -1410,7 +1410,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         expect(readAccess(join(skill, 'SKILL.md'), session.fileAccess).access).toBe('allowed');
         expect(session.setup.secretFiles).toEqual([secret]);
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     });
 
@@ -1418,7 +1418,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       const session = await sandbox().forSession(input({ setup: setupInput() }));
       const setupDir = session.setup.reads[0] ?? '';
       expect(existsSync(setupDir)).toBe(true);
-      session.dispose();
+      await session.dispose();
       expect(existsSync(setupDir)).toBe(false);
     });
 
@@ -1428,7 +1428,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         expect(session.setup.reads).toEqual([]);
         expect(readdirSync(filesRoot).filter((name) => name.startsWith('10db-setup-'))).toEqual([]);
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     });
   });
@@ -1437,7 +1437,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     const session = await sandbox().forSession(input());
     const file = session.spec.env['CLAUDE_ENV_FILE'] ?? '';
     expect(existsSync(file)).toBe(true);
-    session.dispose();
+    await session.dispose();
     expect(existsSync(file)).toBe(false);
   });
 
@@ -1447,9 +1447,9 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     // A directory in the env file's place cannot be removed as a file.
     rmSync(file);
     mkdirSync(file);
-    expect(() => {
-      session.dispose();
-    }).toThrow(new SandboxTempDirError('Could not remove the lane env file'));
+    await expect(session.dispose()).rejects.toThrow(
+      new SandboxTempDirError('Could not remove the lane env file'),
+    );
     expect(existsSync(session.tmpDir)).toBe(false);
   });
 
@@ -1463,11 +1463,9 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
   it('removes the temp dir on dispose, and a second dispose does nothing', async () => {
     const session = await sandbox().forSession(input());
     writeFileSync(join(session.tmpDir, 'scratch'), 'x');
-    session.dispose();
+    await session.dispose();
     expect(existsSync(session.tmpDir)).toBe(false);
-    expect(() => {
-      session.dispose();
-    }).not.toThrow();
+    await expect(session.dispose()).resolves.toBeUndefined();
   });
 
   it.each(['.env[1]', '.env]x', '.env}x', '.env{x', '.env\\x', '.env*'])(
@@ -1500,7 +1498,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           expect.arrayContaining([upper, mixed]),
         );
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     },
   );
@@ -1545,7 +1543,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(judge.read('Grep', { path: checkout, pattern: 'SECRET' })).toBe('ok');
       expect(judge.read('LS', { path: checkout })).toBe('ok');
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1569,7 +1567,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         expect(judge.read('Read', { file_path: path }), path).not.toBe('ok');
       }
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1614,7 +1612,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(session.spec.disallowedTools).toContain(`Read(/${builtin})`);
       expect(readAccess(builtin, session.fileAccess).access).toBe('protected');
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1666,7 +1664,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       // `/private/etc/hosts` on macOS, `/etc/hosts` on Linux.
       expect(session.spec.settings.filesystem.denyRead).toContain(realpathSync('/etc/hosts'));
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1684,7 +1682,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         expect(session.spec.settings.filesystem.denyRead).toContain(outside);
         expect(session.spec.settings.filesystem.allowRead).toContain(checkout);
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     },
   );
@@ -1704,7 +1702,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         (session.fileAccess.secretFiles ?? []).filter((path) => isEqualOrUnder(path, checkout)),
       ).toEqual([]);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1715,8 +1713,8 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     try {
       expect(first.tmpDir).not.toBe(second.tmpDir);
     } finally {
-      first.dispose();
-      second.dispose();
+      await first.dispose();
+      await second.dispose();
     }
     expect(left()).toEqual([]);
   });
@@ -1746,7 +1744,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       );
       expect(writeAccess(join(session.tmpDir, 'scratch'), session.fileAccess).access).toBe('ok');
     } finally {
-      session.dispose();
+      await session.dispose();
     }
     expect(left()).toEqual([]);
   });
@@ -1782,10 +1780,10 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         );
         expect(readAccess(join(session.tmpDir, 'x'), other.fileAccess).access).toBe('protected');
       } finally {
-        other.dispose();
+        await other.dispose();
       }
     } finally {
-      session.dispose();
+      await session.dispose();
     }
     expect(readdirSync(lanes)).toEqual([]);
     expect(left()).toEqual([]);
@@ -1870,7 +1868,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       await session.endProcesses();
       expect(rows.map((r) => r.pid)).toEqual([100, 700, 710]);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1879,7 +1877,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
     await session.trackProcesses({ pid: 200, startedAt: T });
     tableFails = true;
     await expect(session.endProcesses()).rejects.toThrow('ps failed');
-    session.dispose();
+    await session.dispose();
     const kept = ledgers();
     expect(kept).toHaveLength(1);
     // Named for the daemon that kept it, so a later daemon knows whether its owner still runs.
@@ -1920,7 +1918,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
     } finally {
       tableFails = false;
       await session.endProcesses();
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -1930,7 +1928,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
     await session.trackProcesses({ pid: 200, startedAt: T });
     tableFails = true;
     await expect(session.endProcesses()).rejects.toThrow('ps failed');
-    session.dispose();
+    await session.dispose();
     expect(ledgers()).toHaveLength(1);
     // Half a minute on, the machine can be read again.
     tableFails = false;
@@ -1955,7 +1953,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       await running.trackProcesses({ pid: 250, startedAt: T });
       tableFails = true;
       await expect(ended.endProcesses()).rejects.toThrow('ps failed');
-      ended.dispose();
+      await ended.dispose();
       tableFails = false;
       clock.advance(30_000);
       await settle();
@@ -1963,7 +1961,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       expect(ledgers()).toHaveLength(1);
     } finally {
       await running.endProcesses();
-      running.dispose();
+      await running.dispose();
     }
   });
 
@@ -1974,14 +1972,14 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       await session.endProcesses();
       expect(rows.map((r) => r.pid)).toEqual([100]);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
   it('keeps a ledger in the files root while the session lives, and removes it with the rest', async () => {
     const session = await withProcesses().forSession(input());
     expect(ledgers()).toHaveLength(1);
-    session.dispose();
+    await session.dispose();
     expect(left()).toEqual([]);
   });
 
@@ -1995,7 +1993,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       };
       expect(ledger.members.map((m) => m.pid).sort()).toEqual([200, 300, 301]);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 
@@ -2005,7 +2003,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       await session.endProcesses();
       expect(rows).toHaveLength(4);
     } finally {
-      session.dispose();
+      await session.dispose();
     }
   });
 });

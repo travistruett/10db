@@ -38,7 +38,9 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   `tests/repo/src/benchmarks-off.test.ts` checks they do. A new launcher of a throwaway daemon sets it too.
 - Every outbound `fetch` is `outboundFetch` (`src/outbound/`, HTTP/1.1 only; ESLint refuses the global `fetch`
   elsewhere in `src`), and a worker thread kills a daemon whose main thread stalls for 15 s (`src/watchdog/`;
-  `TENDB_WATCHDOG=off` for a debugger). Each module's `AGENTS.md` has the rest.
+  `TENDB_WATCHDOG=off` for a debugger). So a tree a lane, a build or the builder's project can fill is removed
+  off the main thread (`rm` from `node:fs/promises`, `removeLaneTempDirAsync`); ESLint refuses a recursive
+  `rmSync` in `src`. Each module's `AGENTS.md` has the rest.
 - `TENDB_DISK=off` keeps a daemon from reading free disk, so a runner's or container's low disk never holds its
   lanes (`DaemonOptions.disk` is off unless given; the entry point gives it otherwise). The e2e web server sets it.
 - `slack/` is the only module that calls Slack: `createSlackClient` takes an injected `fetch`, token reader and

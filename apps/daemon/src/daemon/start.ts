@@ -2146,7 +2146,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     yourMcpServers: {},
     notes: [NO_SANDBOX_NOTE],
     tempDirs: [],
-    remove: () => undefined,
+    remove: () => Promise.resolve(),
   };
   const takeoverCodexHomes = codexHomes();
   let takeoverService: TakeoverService | null = null;

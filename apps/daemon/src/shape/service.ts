@@ -647,6 +647,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       } catch (error) {
         // The write rolled back; the files it had copied are not part of any conversation.
         if (made.id !== null)
+          // eslint-disable-next-line no-restricted-syntax -- the checked text files this call just stored
           rmSync(join(deps.filesDir, made.id), { recursive: true, force: true });
         throw error;
       }
