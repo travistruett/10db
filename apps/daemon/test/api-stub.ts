@@ -305,3 +305,11 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     ...overrides,
   };
 }
+
+/** The API's sharing deps for a test that never shares: no port, no lists, no devices, no tickets. */
+export const noSharing = {
+  listenPort: () => null,
+  share: { allowlists: () => null, hostLogin: () => null },
+  devices: { authenticate: () => null, isActive: () => false },
+  tickets: { spend: () => null },
+};

@@ -7,7 +7,7 @@ import { createApp, MAX_BODY_BYTES } from './app';
 const TOKEN = 'ui-token-for-tests';
 const startedAt = new Date('2026-10-13T12:00:00.000Z');
 
-import { stubServices } from '../../test/api-stub';
+import { noSharing, stubServices } from '../../test/api-stub';
 
 // A helper that never upgrades: it answers 426 so a test can tell the route was reached.
 const noUpgrade = defineWebSocketHelper(() => new Response(null, { status: 426 }));
@@ -18,6 +18,7 @@ function app(
   skillVersion: string | null = null,
 ) {
   return createApp({
+    ...noSharing,
     skillVersion,
     onUnexpectedError,
     startedAt,
@@ -45,6 +46,7 @@ describe('API', () => {
     const DEV_TOKEN = 'dev-ui-token-for-tests';
     const devApp = (devUiToken: string | null) =>
       createApp({
+        ...noSharing,
         startedAt,
         allowedOrigins: ['http://localhost:1420'],
         devUiOrigin: devUiToken === null ? null : 'http://localhost:1420',
