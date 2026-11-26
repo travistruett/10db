@@ -288,6 +288,12 @@
         "null"
       ]
     },
+    "copyAppCommand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "appUrl": {
       "type": [
         "string",
@@ -407,6 +413,7 @@
     "isolate",
     "localCopies",
     "copyTeardownCommand",
+    "copyAppCommand",
     "appUrl",
     "devLoginCommand",
     "previewCommand",
