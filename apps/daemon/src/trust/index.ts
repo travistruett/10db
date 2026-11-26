@@ -19,6 +19,7 @@ export {
   type LimitVerdict,
 } from './crosses-limit';
 export { callRuns, type CallRuns } from './call-runs';
+export { keyPackageFile, programKey } from './program-key';
 export {
   parseRules,
   within,

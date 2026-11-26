@@ -1,6 +1,14 @@
 import { posix } from 'node:path';
 import type { CommittedFile, CommittedReader } from '../folders';
-import { leadingWords, parseShell, redirectionSpan } from '../guard';
+import { redirectionSpan } from '../guard';
+import {
+  ASSIGNMENT_WORD,
+  INTERPRETERS,
+  leadingCommand,
+  MAKE_QUIET_OPTIONS,
+  MAKES,
+  repoPath,
+} from './leading-command';
 import { MAKEFILE_NAMES, parseRules, within, withoutComments, type MakeRule } from './make-rules';
 
 /** What a call runs, as committed on the base: a make target's rule, or a repository script whole. */
@@ -33,39 +41,6 @@ export const RUNS_MAX_SCRIPT_BYTES = 16 * 1024;
 /** The most characters of runs shown for one call, as the judge reads them. */
 export const RUNS_MAX_CHARS = 24_000;
 
-/** Programs that run the file named right after them. */
-const INTERPRETERS: ReadonlySet<string> = new Set([
-  'sh',
-  'bash',
-  'zsh',
-  'dash',
-  'python',
-  'python3',
-  'node',
-  'ruby',
-  'perl',
-]);
-const MAKES: ReadonlySet<string> = new Set(['make', 'gmake']);
-/** make's options that change neither which Makefile nor which targets it reads. */
-const MAKE_QUIET_OPTIONS: ReadonlySet<string> = new Set([
-  '-s',
-  '-n',
-  '-k',
-  '-B',
-  '-j',
-  '--silent',
-  '--dry-run',
-  '--no-print-directory',
-]);
-const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
-/**
- * A `cd` the walk follows, at the start of the text: `cd`, one bare word that is no option, and a separator the
- * next command waits on. After `;` or a newline the next command runs even when the `cd` failed, so the word must
- * be all the shell's `cd` gets: no quote, bracket, expansion or second argument.
- */
-const CD_THEN = /^[ \t]*cd[ \t]+([A-Za-z0-9_./@%+,:][A-Za-z0-9_./@%+,:-]*)[ \t]*(&&|;|\n)/;
-/** A here-document operator (`<<`, `<<-`), not a here-string (`<<<`). */
-const HERE_DOCUMENT = /(?<!<)<<(?!<)/;
 const INCLUDE = /^(-?include|sinclude)\s+(.*)$/;
 const VARIABLE_ASSIGNMENT =
   /^(?:(?:export|override)\s+)*([A-Za-z_][A-Za-z0-9_.-]*)\s*(?::::=|::=|:=|\?=|\+=|!=|=)/;
@@ -77,17 +52,6 @@ interface Makefile {
   readonly rules: Map<string, MakeRule[]>;
   /** Each variable's single-line assignments, as written. */
   readonly variables: Map<string, string[]>;
-}
-
-/** A path the call names, from the repository root: relative to `dir`, or absolute inside the checkout. */
-function repoPath(dir: string, word: string, checkout: string): string | null {
-  if (word.startsWith('/')) {
-    const relative = posix.relative(checkout, posix.normalize(word));
-    return relative === '' || relative.startsWith('..') || posix.isAbsolute(relative)
-      ? null
-      : relative;
-  }
-  return within(dir, word);
 }
 
 function variablesOf(text: string): Map<string, string[]> {
@@ -315,59 +279,16 @@ export async function callRuns(
    * the shell's functions and environment, so what comes after it is not followed.
    */
   async function walk(line: string, from: string, depth: number) {
-    const parsed = parseShell(line);
-    if (!parsed.certain) return;
-    let dir = from;
-    // The line's text not yet accounted for by a followed `cd`.
-    let rest = line;
-    for (const segment of parsed.segments) {
-      // A command whose words the parser dropped (`''`) still runs, and takes its separator with it.
-      if (segment.words.length === 0) return;
-      const lead = leadingWords(segment.words);
-      const offset = segment.words.length - lead.command.length;
-      const dynamic = segment.dynamicWords.slice(offset);
-      const [program = '', ...args] = lead.command;
-      // A substitution or here-document of the segment runs before its command. A here-document that never
-      // closes has no body the parser kept, so its operator among the words counts too.
-      if (
-        !segment.wordsCertain ||
-        lead.outOfOrder ||
-        segment.nested.length > 0 ||
-        segment.hereDocuments.length > 0 ||
-        segment.words.some((word) => HERE_DOCUMENT.test(word))
-      )
-        return;
-      if (program === 'cd') {
-        // A `cd` moves what follows only as a plain command of this shell that the next one waits on: not in a
-        // conditional's body, a group, a subshell, a pipeline or the background, and not where `||` runs the
-        // next. The line's own text decides, since the parser keeps no trace of a bracket or an empty word.
-        const plain = CD_THEN.exec(rest);
-        if (
-          plain === null ||
-          offset !== 0 ||
-          args.length !== 1 ||
-          args[0] !== plain[1] ||
-          segment.separator !== plain[2]
-        )
-          return;
-        const next = repoPath(dir, plain[1] ?? '', checkout);
-        if (next === null) return;
-        dir = next;
-        rest = rest.slice(plain[0].length);
-        continue;
-      }
-      // After a `cd`, the command followed is the text right after it.
-      if (rest !== line && !rest.trimStart().startsWith(segment.raw)) return;
-      if (lead.hiddenByRedirection || dynamic[0] === true) return;
-      if (MAKES.has(program)) await make(args, dynamic.slice(1), dir, depth);
-      else if (INTERPRETERS.has(program)) {
-        const [path] = args;
-        if (path !== undefined && !path.startsWith('-') && dynamic[1] !== true)
-          await script(repoPath(dir, path, checkout));
-      } else if (program.includes('/') && !ASSIGNMENT_WORD.test(program))
-        await script(repoPath(dir, program, checkout));
-      return;
-    }
+    const lead = leadingCommand(line, from, checkout);
+    if (lead === null) return;
+    const { program, args, dynamic, dir } = lead;
+    if (MAKES.has(program)) await make(args, dynamic.slice(1), dir, depth);
+    else if (INTERPRETERS.has(program)) {
+      const [path] = args;
+      if (path !== undefined && !path.startsWith('-') && dynamic[1] !== true)
+        await script(repoPath(dir, path, checkout));
+    } else if (program.includes('/') && !ASSIGNMENT_WORD.test(program))
+      await script(repoPath(dir, program, checkout));
   }
 
   await walk(command, start, 0);
