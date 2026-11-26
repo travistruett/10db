@@ -151,31 +151,33 @@ export function CardActions({
   };
   const busy = (sendBack?.pending ?? false) || (primary?.loading ?? false);
 
+  const noteField =
+    composer !== null || note === null ? null : (
+      <div className={classes['note']}>
+        <Textarea
+          ref={noteRef}
+          aria-label="Note"
+          placeholder="Add a note (optional)"
+          autosize
+          minRows={1}
+          maxRows={4}
+          value={note.value}
+          onChange={(e) => {
+            note.onChange(e.currentTarget.value);
+          }}
+          {...(note.onFocus === undefined ? {} : { onFocus: note.onFocus })}
+          onKeyDown={(event) => {
+            if (!isSend(event)) return;
+            event.preventDefault();
+            note.onSubmit();
+          }}
+        />
+      </div>
+    );
+
   const answers =
     composer === null ? (
       <>
-        {note === null ? null : (
-          <div style={{ flex: '1 1 14rem', minWidth: 0 }}>
-            <Textarea
-              ref={noteRef}
-              aria-label="Note"
-              placeholder="Add a note (optional)"
-              autosize
-              minRows={1}
-              maxRows={4}
-              value={note.value}
-              onChange={(e) => {
-                note.onChange(e.currentTarget.value);
-              }}
-              {...(note.onFocus === undefined ? {} : { onFocus: note.onFocus })}
-              onKeyDown={(event) => {
-                if (!isSend(event)) return;
-                event.preventDefault();
-                note.onSubmit();
-              }}
-            />
-          </div>
-        )}
         {extra}
         {sendBack === null ? null : (
           <Button
@@ -265,17 +267,22 @@ export function CardActions({
           {error}
         </Text>
       )}
-      <Group justify="space-between" align="flex-end" gap="sm">
-        <Group gap="sm">
-          {ways.map((node, place) => (
-            // Each card lists its ways in a fixed order, so a place names one.
-            <Fragment key={place}>{node}</Fragment>
-          ))}
-        </Group>
-        <Group justify="flex-end" align="flex-end" gap="sm" style={{ flex: '1 1 auto' }}>
-          {answers}
-        </Group>
-      </Group>
+      <div className={classes['fit']}>
+        <div className={classes['row']}>
+          {ways.length === 0 ? null : (
+            <Group gap="sm">
+              {ways.map((node, place) => (
+                // Each card lists its ways in a fixed order, so a place names one.
+                <Fragment key={place}>{node}</Fragment>
+              ))}
+            </Group>
+          )}
+          {noteField}
+          <Group gap="sm" justify="flex-end" className={classes['answers']}>
+            {answers}
+          </Group>
+        </div>
+      </div>
     </Stack>
   );
   if (framed) return <div style={{ marginTop: 'var(--mantine-spacing-sm)' }}>{bar}</div>;

@@ -15,3 +15,33 @@
 main:has(.bar) {
   scroll-padding-bottom: 72px;
 }
+
+/* The bar's row: on a wide bar its ways, the note and the answers share one line; on a narrow one the note
+   takes the first line whole and the ways and answers share the second. The bar's own width decides, so a
+   narrow window reads as a phone does. */
+.fit {
+  container-type: inline-size;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--mantine-spacing-sm);
+}
+
+.note {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.answers {
+  margin-left: auto;
+}
+
+@container (max-width: 36rem) {
+  .note {
+    order: -1;
+    flex-basis: 100%;
+  }
+}
