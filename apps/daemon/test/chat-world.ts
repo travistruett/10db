@@ -363,9 +363,10 @@ export function chatWorld(
               },
               notes: terminal.serverNotes,
               tempDirs: [join(dir.path, 'server-temp')],
-              remove: () => {
-                if (terminal.removeFails) throw new Error('could not remove a set');
-              },
+              remove: () =>
+                terminal.removeFails
+                  ? Promise.reject(new Error('could not remove a set'))
+                  : Promise.resolve(),
             };
           },
           onboard: () => Promise.resolve(),

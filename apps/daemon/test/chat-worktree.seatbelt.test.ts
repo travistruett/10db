@@ -71,9 +71,9 @@ describe.skipIf(!SEATBELT)('a session on its own branch (Seatbelt)', () => {
     atCheckout = await sandbox.forSession(input(project));
   }, 60_000);
 
-  afterAll(() => {
-    session.dispose();
-    atCheckout.dispose();
+  afterAll(async () => {
+    await session.dispose();
+    await atCheckout.dispose();
     main.cleanup();
     rmSync(root, { recursive: true, force: true });
   });

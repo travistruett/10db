@@ -9,6 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, posix, resolve, sep } from 'node:path';
@@ -1869,7 +1870,7 @@ export function createGit(opts: GitOptions = {}): Git {
       await git(c, tip === null ? ['read-tree', '--empty'] : ['read-tree', tip], { env });
       return await fn(env);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true });
     }
   }
 
@@ -3264,7 +3265,7 @@ export function createGit(opts: GitOptions = {}): Git {
         writeFileSync(file, readFileSync(oursAt));
         return 'merged';
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        await rm(dir, { recursive: true, force: true });
       }
     });
   }
@@ -4144,7 +4145,8 @@ export function createGit(opts: GitOptions = {}): Git {
           await git(main, ['worktree', 'remove', '--force', '--force', '--', target]).catch(
             () => undefined,
           );
-          rmSync(target, { recursive: true, force: true });
+          // A whole checkout of the project: the event loop never waits on its removal.
+          await rm(target, { recursive: true, force: true });
         }
         pins.delete(target);
         if (made !== null) await git(main, ['update-ref', '-d', ref, made]).catch(() => undefined);
@@ -4618,7 +4620,7 @@ export function createGit(opts: GitOptions = {}): Git {
         }
         return values;
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        await rm(dir, { recursive: true, force: true });
       }
     },
     async remoteUrl(repo, name) {

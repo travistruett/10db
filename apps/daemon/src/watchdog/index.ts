@@ -1,0 +1,1 @@
+export { startWatchdog } from './start';

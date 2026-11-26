@@ -1,4 +1,5 @@
 import { Agent } from 'undici';
+import { hostOf, trackInFlight } from './in-flight';
 
 // Node's fetch offers HTTP/2 by default, and an aborted HTTP/2 request can leave a stream that spins
 // the main thread forever or throws from a socket timer. This agent offers HTTP/1.1 only, so the
@@ -9,5 +10,13 @@ const dispatcher = new Agent({ allowH2: false }) as unknown as NonNullable<
   RequestInit['dispatcher']
 >;
 
-/** The daemon's `fetch` for every outbound call: HTTP/1.1 only. */
-export const outboundFetch: typeof fetch = (input, init) => fetch(input, { ...init, dispatcher });
+/** The daemon's `fetch` for every outbound call: HTTP/1.1 only, with the call's host counted as open. */
+export const outboundFetch: typeof fetch = async (input, init) => {
+  const host = hostOf(input);
+  const done = host === null ? null : trackInFlight(host);
+  try {
+    return await fetch(input, { ...init, dispatcher });
+  } finally {
+    done?.();
+  }
+};

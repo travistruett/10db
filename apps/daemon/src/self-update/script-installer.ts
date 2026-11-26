@@ -167,9 +167,11 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
    * (a killed script cleans up nothing), and the staged build unless it is kept.
    */
   const removeStageFiles = (keepBuild: boolean): void => {
+    /* eslint-disable no-restricted-syntax -- one build of 10db itself, the size of the installed app */
     rmSync(scratchDir, { recursive: true, force: true });
     rmSync(stageNextDir, { recursive: true, force: true });
     if (!keepBuild) rmSync(stageDir, { recursive: true, force: true });
+    /* eslint-enable no-restricted-syntax */
   };
   /** The same, where a throw would have nowhere to go but the event loop. */
   const tidy = (keepBuild: boolean): void => {
@@ -481,8 +483,10 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
       clear() {
         rmSync(applyStatus, { force: true });
         rmSync(stageStatus, { force: true });
+        /* eslint-disable no-restricted-syntax -- one build of 10db itself, the size of the installed app */
         rmSync(stageNextDir, { recursive: true, force: true });
         rmSync(stageDir, { recursive: true, force: true });
+        /* eslint-enable no-restricted-syntax */
       },
     },
   };

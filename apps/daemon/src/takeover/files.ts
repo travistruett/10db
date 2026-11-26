@@ -94,6 +94,9 @@ export function removeTakeoverFolder(dataDir: string, conversationId: Conversati
   const folder = takeoverFolderOf(root, conversationId);
   const kind = realDirectory(folder);
   if (kind === null) return;
+  // 10db puts a handful of small files per launch there, and no lane or build writes it: only the
+  // builder's own terminal agent can, and nothing asks it to.
+  // eslint-disable-next-line no-restricted-syntax -- see above
   if (kind) rmSync(folder, { recursive: true, force: true });
   else unlinkSync(folder);
 }

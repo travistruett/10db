@@ -59,6 +59,7 @@ import {
   type AdapterSource,
   type AgentAdapter,
 } from './sessions';
+import { startWatchdog } from './watchdog';
 
 // An unhandled error exits loudly; the supervisor restarts the daemon and recovery runs at startup.
 // A failed outbound connection is the exception: a background socket's error (an idle timeout, a
@@ -213,10 +214,17 @@ try {
     ...(sqliteBinding ? { sqliteBinding } : {}),
   });
   console.log(`10db daemon listening on ${daemon.url} (data: ${dataDir})`);
+  // Started once the daemon is up, so start-up's own long work (migrations) is never taken for a stall.
+  const logsDir = join(dataDir, 'logs');
+  const watchdog =
+    env.TENDB_WATCHDOG === 'off'
+      ? null
+      : startWatchdog({ logPath: join(logsDir, 'daemon.log'), sampleDir: logsDir });
   let stopping = false;
   const shutdown = (): void => {
     if (stopping) return;
     stopping = true;
+    watchdog?.stop();
     agents?.stop();
     void daemon.stop().then(() => {
       process.exit(0);

@@ -433,6 +433,7 @@ export function createSetupDir(
   const dir = join(filesRoot, `10db-setup-${randomBytes(6).toString('hex')}`);
   mkdirSync(dir, { mode: 0o700 });
   const remove = (): void => {
+    // eslint-disable-next-line no-restricted-syntax -- links and small copies 10db made, no lane writes it
     rmSync(dir, { recursive: true, force: true });
   };
   try {
@@ -461,6 +462,7 @@ export function createSetupDir(
           linked.push(skill.name);
         } catch (error) {
           // A half-made folder of links would still load: it goes with the skill.
+          // eslint-disable-next-line no-restricted-syntax -- the links this call made for one skill
           rmSync(join(yours, 'skills', skill.name), { recursive: true, force: true });
           changed(shown(skill.path, home), error);
         }
@@ -487,6 +489,7 @@ export function createSetupDir(
         const inPlugin = join(plugin.real, 'skills');
         skills = existsSync(inPlugin) && lstatSync(inPlugin).isDirectory() ? inPlugin : null;
       } catch (error) {
+        // eslint-disable-next-line no-restricted-syntax -- the links this call made for one plugin
         rmSync(wrapper, { recursive: true, force: true });
         changed(plugin.id, error);
         continue;

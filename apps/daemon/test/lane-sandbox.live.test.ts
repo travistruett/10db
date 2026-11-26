@@ -464,7 +464,7 @@ async function runLane(opts: {
     );
     return await driveSession({ lane, project, workstreamId: workstream.id, envFile });
   } finally {
-    laneSession?.dispose();
+    await laneSession?.dispose();
     test.close();
     await adapter.stop?.();
   }

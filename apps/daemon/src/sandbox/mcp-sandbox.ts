@@ -21,7 +21,13 @@ import {
   type SandboxRuntime,
 } from './srt-launch';
 import { srtSettings } from './srt-settings';
-import { createLaneTempDir, removeAll, removeLaneTempDir } from './temp-dir';
+import {
+  createLaneTempDir,
+  removeAll,
+  removeAllAsync,
+  removeLaneTempDir,
+  removeLaneTempDirAsync,
+} from './temp-dir';
 
 /**
  * What Claude Code runs for a repo stdio server. Claude Code merges its own environment, the
@@ -139,11 +145,12 @@ export interface McpSandboxes {
   /** Each built server's temp dir, which a startup sweep must leave alone while the session lives. */
   readonly tempDirs: readonly string[];
   /** Removes every server's temp dir and files. Run it once the lane process is gone. */
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 
 /**
- * One server's sandbox: its own temp dir, the only path it writes; the lanes' reads; the hosts its
+ * One server's sandbox: its own temp dir, the only path it writes, named in `tempDirs` for the caller
+ * to remove; the lanes' reads; the hosts its
  * approval names and no others, the project's included, and no loopback. Its env is the lane allowlist,
  * its approved variables and srt's proxy variables; the approved ones are sourced inside the sandbox
  * from a sealed file, so no approved value is on a command line. The
@@ -160,9 +167,6 @@ function sandboxOne(
   const { access, tmpRoot, filesRoot } = input;
   const tmpDir = createLaneTempDir(tmpRoot);
   tempDirs.push(tmpDir);
-  removals.push(() => {
-    removeLaneTempDir(tmpDir, tmpRoot);
-  });
   const commandEnv = withCopyId(
     {
       ...allowlisted(input.env),
@@ -279,9 +283,17 @@ function sandboxOne(
 export function sandboxMcpServers(input: McpSandboxInput): McpSandboxes {
   const entries = Object.entries(input.servers);
   if (entries.length === 0)
-    return { servers: {}, failures: [], tempDirs: [], dispose: () => undefined };
+    return { servers: {}, failures: [], tempDirs: [], dispose: () => Promise.resolve() };
   checkRuntime(input.runtime, input.access.writableRoots);
   const removals: (() => void)[] = [];
+  /** Every temp dir still to remove: the built servers', and one that stuck when its server failed. */
+  const temps: string[] = [];
+  /** For temp dirs no server has run in, so each holds only what this call wrote. */
+  const removeUnused = (dirs: readonly string[]): (() => void)[] =>
+    dirs.map((dir) => () => {
+      // eslint-disable-next-line no-restricted-syntax -- no server has run in it
+      removeLaneTempDir(dir, input.tmpRoot);
+    });
   try {
     const servers: Record<string, SandboxedMcpServer> = {};
     const failures: McpSandboxFailure[] = [];
@@ -293,12 +305,14 @@ export function sandboxMcpServers(input: McpSandboxInput): McpSandboxes {
         servers[name] = sandboxOne(name, server, input, own, ownTemps);
         removals.push(...own);
         tempDirs.push(...ownTemps);
+        temps.push(...ownTemps);
       } catch (error) {
         try {
-          removeAll(own);
+          removeAll([...removeUnused(ownTemps), ...own]);
         } catch {
           // Whatever stuck goes with the session's dispose.
           removals.push(...own);
+          temps.push(...ownTemps);
         }
         if (!(error instanceof SandboxProfileError)) throw error;
         failures.push({ name, message: `Its sandbox could not be built: ${error.message}` });
@@ -308,13 +322,16 @@ export function sandboxMcpServers(input: McpSandboxInput): McpSandboxes {
       servers,
       failures,
       tempDirs,
-      dispose: () => {
-        removeAll(removals);
-      },
+      // A server fills its temp dir with what it likes, so the event loop never waits on its removal.
+      dispose: () =>
+        removeAllAsync([
+          ...temps.map((dir) => () => removeLaneTempDirAsync(dir, input.tmpRoot)),
+          ...removals,
+        ]),
     };
   } catch (error) {
     try {
-      removeAll(removals);
+      removeAll([...removeUnused(temps), ...removals]);
     } catch {
       // The error that stopped the session is the one to report.
     }

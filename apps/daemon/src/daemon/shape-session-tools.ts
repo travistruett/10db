@@ -295,12 +295,10 @@ export function createTakeoverPreparer(
         yourMcpServers: yourServers(sandbox.yourMcpServers),
         notes,
         tempDirs: sandbox.tempDirs,
-        remove: () => {
-          sandbox.remove();
-        },
+        remove: () => sandbox.remove(),
       };
     } catch (error) {
-      sandbox.remove();
+      await sandbox.remove();
       throw error;
     }
   };
@@ -468,12 +466,12 @@ export function createShapePreparer(
           } catch (error) {
             logger.warn({ err: error, projectId: project.id }, 'a Plan session left processes');
           } finally {
-            sandboxed.dispose();
+            await sandboxed.dispose();
           }
         },
       };
     } catch (error) {
-      sandboxed.dispose();
+      await sandboxed.dispose();
       throw error;
     }
   };
@@ -610,7 +608,7 @@ export function createReporterPreparer(
             'a reporter session left processes',
           );
         } finally {
-          sandboxed?.dispose();
+          await sandboxed?.dispose();
         }
       },
     };

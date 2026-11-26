@@ -170,6 +170,7 @@ export function createLaneTempDir(
     }
     return real;
   } catch (error) {
+    // eslint-disable-next-line no-restricted-syntax -- the dir was made a moment ago and is empty
     rmSync(dir, { recursive: true, force: true });
     if (error instanceof SandboxTempDirError) throw error;
     throw new SandboxTempDirError('Could not prepare the lane temp directory');
@@ -185,6 +186,27 @@ export function removeAll(removals: readonly (() => void)[]): void {
   for (const remove of removals) {
     try {
       remove();
+    } catch (error) {
+      failures.push(
+        error instanceof Error ? error : new SandboxTempDirError('Could not remove a sandbox file'),
+      );
+    }
+  }
+  const [first] = failures;
+  if (first !== undefined) throw first;
+}
+
+/**
+ * `removeAll` where a removal may be a promise: each is waited for in turn, so a tree a lane filled
+ * is removed without the event loop waiting on it.
+ */
+export async function removeAllAsync(
+  removals: readonly (() => void | Promise<void>)[],
+): Promise<void> {
+  const failures: Error[] = [];
+  for (const remove of removals) {
+    try {
+      await remove();
     } catch (error) {
       failures.push(
         error instanceof Error ? error : new SandboxTempDirError('Could not remove a sandbox file'),
@@ -225,6 +247,10 @@ function checkLaneTempDir(dir: string, root: string): void {
  * directories it made unreadable or read-only, and a lane process may still be running and swap
  * a directory for a link mid-removal, so the daemon never walks the tree itself: `chmod -R` and
  * `rm -rf` walk it by directory descriptor and never follow a link.
+ *
+ * The event loop waits for as long as the tree takes, and the watchdog ends a daemon whose loop is
+ * quiet too long: this is for a dir nothing has run in, and for the sweep at start, before the
+ * watchdog runs. A dir a session or a server wrote goes through `removeLaneTempDirAsync`.
  */
 export function removeLaneTempDir(dir: string, root: string): void {
   checkLaneTempDir(dir, root);

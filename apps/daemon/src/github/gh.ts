@@ -349,6 +349,7 @@ export function createSystemGhExec(tools: GhTools): GhExec {
       }
       const cwd = mkdtempSync(join(tmpdir(), '10db-gh-'));
       const done = (): void => {
+        // eslint-disable-next-line no-restricted-syntax -- an empty directory gh ran in and wrote nothing to
         rmSync(cwd, { recursive: true, force: true });
       };
       const env = ghEnvironment(tools, call.env);
