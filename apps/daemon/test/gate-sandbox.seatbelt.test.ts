@@ -246,6 +246,47 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
     }
   }, 60_000);
 
+  it('opens only the named env files for reading, never writing, and refuses a link out', async () => {
+    mkdirSync(join(checkout, 'sub'));
+    for (const name of ['.env', 'sub/.env.dev', 'sub/.env.local'])
+      writeFileSync(join(checkout, name), `SECRET=${token}\n`);
+    const outside = join(root, `outside-${token}.env`);
+    writeFileSync(outside, `SECRET=${token}\n`);
+    symlinkSync(outside, join(checkout, '.env.out'));
+    try {
+      const seen = await probe(
+        {
+          'read-env': 'cat .env',
+          'read-dev': 'cat sub/.env.dev',
+          'read-local': 'cat sub/.env.local',
+          append: 'echo x >> .env',
+          truncate: ': > .env',
+          remove: 'rm .env',
+          'truncate-dev': ': > sub/.env.dev',
+        },
+        { dotEnvReadable: ['.env', 'sub/.env.dev'] },
+      );
+      expect(seen).toEqual({
+        'read-env': 'ok',
+        'read-dev': 'ok',
+        'read-local': 'denied',
+        append: 'denied',
+        truncate: 'denied',
+        remove: 'denied',
+        'truncate-dev': 'denied',
+      });
+      for (const name of ['.env.out', 'missing.env']) {
+        const refused = await run('true', { dotEnvReadable: [name] });
+        expect(refused.exitCode).toBe(126);
+        expect(refused.tail).toContain(`${name}: `);
+      }
+    } finally {
+      for (const name of ['.env', '.env.out', 'sub'])
+        rmSync(join(checkout, name), { recursive: true, force: true });
+      rmSync(outside, { force: true });
+    }
+  }, 120_000);
+
   it('passes a normal test command that reads the checkout and writes its own output', async () => {
     const result = await run('node --test check.test.mjs && test -f out.txt && git status --short');
     expect(result.exitCode, result.tail).toBe(0);
