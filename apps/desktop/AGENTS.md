@@ -43,6 +43,12 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
   title row's 44 px height (`trafficLightPosition`), and elements marked
   `data-tauri-drag-region` move the window. The native window's theme follows the app's color scheme
   (`setWindowTheme`), not the system's.
+- The supervisor (`src-tauri/src/supervisor.rs`, `decisions/2026-11-25-a-silent-daemon-is-killed-and-replaced.md`)
+  stops only on a clean exit, a schema mismatch (3) or a refused setting (4). On exit 2 it watches the daemon that
+  holds `daemon.lock` and starts its own once that one is gone or silent on `/health` for 30 s; it never signals
+  the holder, the new daemon's instance lock does. Its own daemon is asked for `/health` every 5 s once
+  `daemon.json` names it, and one silent for 30 s is killed and replaced. `ps` that can't run counts as "not gone".
+  The loops have no scripted coverage: check them by hand in the dev window (`kill -9`, `kill -STOP` the daemon).
 - `pnpm dev:window` (`scripts/dev-window.sh`, the `10db-dev-window` skill) does all of the below in one command on a
   worktree's own data, with a demo project, and stops it all when the window closes.
 - `pnpm --filter @10db/desktop dev:shell` runs the Tauri shell against the daemon and Vite server that
