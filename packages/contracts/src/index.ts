@@ -33,6 +33,7 @@ export * from './folders';
 export * from './git-names';
 export * from './goals';
 export * from './handoff';
+export * from './eval-definition-change';
 export * from './evals';
 export * from './hazard-assessment';
 export * from './human-touch';

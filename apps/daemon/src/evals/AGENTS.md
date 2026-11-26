@@ -44,6 +44,11 @@
 - By Model (`models.ts`, `GET /projects/:id/eval-models`, not under `/evals/` where `models` would be a suite key):
   each model's newest result per suite, its cost for one run of each (unknown if any is) and the median of its p50s.
   A result from a run whose fingerprint differs from the suite's newest run is `olderEval`. Compare is the UI's join.
+- Definition changes (`definition-change.ts`): `classifyDefinitionChange(path, patch)` reads one definition file's unified
+  patch by line patterns (bar lowered: a `minimum_rate`/`min_rate`/`threshold` number that went down; cases removed;
+  golden changed; grader changed; model judge added; else `unclassified`) and names the line each kind came from. It
+  is pure and calls no model, so it is the same on every provider. A manifest `bar` edit is an app setting, not a
+  patch line, and is not read. The watchpoints' eval source (`watchpoints/eval-definition-source.ts`) uses it.
 - New Eval (`new-eval-task.ts`, `POST /projects/:id/evals/tasks`, `NewEvalRequest`): files a normal task on the
   project's account, "Write the eval for <behavior>", through the ordinary task-create path (`createTask`). Its brief
   holds the six rationale sections (Decision, Evidence, Oracle, Coverage and bar, Models, Execution), the paths
