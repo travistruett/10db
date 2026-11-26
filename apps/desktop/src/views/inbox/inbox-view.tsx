@@ -1,5 +1,4 @@
 import { InboxListState } from '@10db/contracts';
-import { Group } from '@mantine/core';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { TitleRow } from '../../shell/title-row';
@@ -74,19 +73,12 @@ export function InboxView() {
       <TitleRow
         // The panel's head already says Inbox, so the content names the list it shows.
         title={STATE_TITLES[state]}
-        actions={
-          <Group gap="sm">
-            <InboxShortcuts
-              opened={helpOpen}
-              onOpen={() => {
-                setHelpOpen(true);
-              }}
-              onClose={() => {
-                setHelpOpen(false);
-              }}
-            />
-          </Group>
-        }
+      />
+      <InboxShortcuts
+        opened={helpOpen}
+        onClose={() => {
+          setHelpOpen(false);
+        }}
       />
       <InboxPanel
         state={state}
