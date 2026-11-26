@@ -1,6 +1,11 @@
 import { CopyId, TRUST_DEFAULTS, type TrustSurface } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { buildTrustPolicy, sessionDevAccess, type TrustPolicyInput } from './policy';
+import {
+  buildTrustPolicy,
+  devStackElsewhere,
+  sessionDevAccess,
+  type TrustPolicyInput,
+} from './policy';
 
 const input = (overrides: Partial<TrustPolicyInput> = {}): TrustPolicyInput => ({
   surface: 'lane',
@@ -172,6 +177,73 @@ describe('buildTrustPolicy', () => {
       .soft(buildTrustPolicy(input({ devAccess: open, copyId: null })).environment, 'no copy')
       .toEqual(outside);
     expect.soft(outside.some((l) => l.startsWith('Separate copy:'))).toBe(false);
+  });
+
+  it("a lane in its own worktree is told the dev containers hold the builder's folder, and to generate in a throwaway container", () => {
+    const app = {
+      files: ['docker-compose.yml'],
+      project: 'demo',
+      services: ['backend', 'db'],
+      containerNames: [],
+    };
+    const open = { docker: true, localhost: true, compose: app };
+    const worktree = (env: readonly string[]) =>
+      env.filter((l) => l.startsWith('Separate worktree:'));
+    const env = buildTrustPolicy(
+      input({ devAccess: open, builderFolder: '/Users/b/demo' }),
+    ).environment;
+    const line = worktree(env);
+    expect.soft(line, 'one worktree line').toHaveLength(1);
+    expect.soft(line[0], "the builder's folder, quoted").toContain('"/Users/b/demo"');
+    expect.soft(line[0], 'a generator there destroys data').toMatch(/Destroying Data/);
+    const routine = env.filter((l) => l.startsWith('Routine in them:'));
+    expect.soft(routine[0], 'a throwaway container').toMatch(/--network none/);
+    expect.soft(routine[0], 'read-only volumes').toMatch(/:ro/);
+    expect
+      .soft(
+        env.some((l) => l.startsWith('Still a limit on this Mac')),
+        'the shared-database limit stays',
+      )
+      .toBe(true);
+
+    const rows: [string, Partial<TrustPolicyInput>, boolean][] = [
+      ['a worktree', { devAccess: open, builderFolder: '/Users/b/demo' }, true],
+      ["the builder's folder", { devAccess: open, builderFolder: '/w/demo' }, false],
+      ['no folder', { devAccess: open }, false],
+      [
+        'Docker closed',
+        { devAccess: { ...open, docker: false }, builderFolder: '/Users/b/demo' },
+        false,
+      ],
+      [
+        'no compose',
+        { devAccess: { ...open, compose: null }, builderFolder: '/Users/b/demo' },
+        false,
+      ],
+    ];
+    for (const [name, over, want] of rows) {
+      const i = input(over);
+      expect.soft(worktree(buildTrustPolicy(i).environment).length, name).toBe(want ? 1 : 0);
+      expect.soft(devStackElsewhere(i), name).toBe(want);
+    }
+
+    const inCopy = buildTrustPolicy(
+      input({
+        devAccess: open,
+        builderFolder: '/Users/b/demo',
+        copyId: CopyId.parse('0123456789ab'),
+      }),
+    ).environment;
+    const copyLine = worktree(inCopy);
+    expect.soft(copyLine, 'one worktree line in a copy').toHaveLength(1);
+    expect.soft(copyLine[0], 'the copy id, quoted').toContain('"0123456789ab"');
+    expect.soft(copyLine[0], "the id's containers").toMatch(/copy's own/);
+    expect
+      .soft(
+        inCopy.filter((l) => l.startsWith('Separate copy:')),
+        'the copy line stays',
+      )
+      .toHaveLength(1);
   });
 
   it('a session has Docker and localhost as its sandbox opens them', () => {
