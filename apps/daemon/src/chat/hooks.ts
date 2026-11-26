@@ -813,6 +813,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
           claudeConnectors,
           devAccess: { ...open, compose: open.docker ? compose : null },
+          builderFolder: project.repoPath,
         });
       // A Claude Full access session is judged by Claude Code, which reads no policy: it is built only if read.
       const policy =
