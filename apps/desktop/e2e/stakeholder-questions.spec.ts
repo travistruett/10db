@@ -110,14 +110,15 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(page).toHaveURL(/\/settings\/integrations/);
   await expect(page.getByText('Off: 10db was started with TENDB_SLACK=off')).toBeVisible();
   await expect(page.getByText('Off: 10db was started with TENDB_BENCHMARKS=off')).toBeVisible();
-  // Settings › Remote Access: this daemon runs with Tailscale off, so it finds no CLI and the page says what
-  // it needs; Devices, with nothing paired, says so.
+  // Settings › Remote Access: this daemon runs the fake Tailscale CLI, so the page shows its checklist; Devices,
+  // with nothing paired, says so and offers pairing.
   await page.goto('/settings/remote-access');
-  await expect(page.getByRole('heading', { name: 'Remote Access needs Tailscale' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Get Tailscale ↗' })).toBeVisible();
+  await expect(page.getByText('Share on your tailnet')).toBeVisible();
   await page.goto('/settings/devices');
   await expect(page.getByText('No devices paired')).toBeVisible();
-  await expect(page.getByText('Pairing a phone arrives with the phone app.')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: /Pair a Device|Finish Remote Access first/ }),
+  ).toBeVisible();
   await page.goto('/settings/integrations');
   // Both workspaces are listed under the Off line, read-only: no menu on a row, no Add Workspace.
   const slackCard = page.getByRole('group', { name: 'Slack', exact: true });
