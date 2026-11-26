@@ -128,6 +128,43 @@ describe('commit', () => {
     expect(commitCount()).toBe(2);
   });
 
+  it('commits on a lane branch of its own, leaving the base, HEAD and the index where they were', async () => {
+    const base = rawGit('rev-parse', 'HEAD');
+    write('a.txt', 'a');
+    const first = await git.commitOnBranch({
+      repo: repo.path,
+      branch: '10db/lane/a-123456',
+      startAt: 'main',
+      paths: ['a.txt'],
+      message: 'Add a',
+      opId: 'op-lane-001',
+    });
+    write('a.txt', 'a again');
+    const second = await git.commitOnBranch({
+      repo: repo.path,
+      branch: '10db/lane/a-123456',
+      startAt: 'main',
+      paths: ['a.txt'],
+      message: 'Change a',
+      opId: 'op-lane-002',
+    });
+    const retry = await git.commitOnBranch({
+      repo: repo.path,
+      branch: '10db/lane/a-123456',
+      startAt: 'main',
+      paths: ['a.txt'],
+      message: 'Add a',
+      opId: 'op-lane-001',
+    });
+    expect(retry).toEqual({ sha: first.sha, alreadyCommitted: true });
+    expect(rawGit('rev-parse', 'main')).toBe(base);
+    expect(rawGit('symbolic-ref', 'HEAD')).toBe('refs/heads/main');
+    expect(rawGit('diff', '--cached', '--name-only')).toBe('');
+    expect(rawGit('rev-list', '--first-parent', `${base}..10db/lane/a-123456`)).toBe(
+      `${second.sha}\n${first.sha}`,
+    );
+  });
+
   describe("Claude Code's bookkeeping", () => {
     const nested = '.claude/hooks/.claude';
     const writeNested = () => {

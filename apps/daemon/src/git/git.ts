@@ -749,6 +749,20 @@ export interface Git extends ChatGit {
     branch: string;
   }): Promise<{ sha: string; alreadyCommitted: boolean }>;
   /**
+   * Commits `paths` as the folder holds them on `branch`, which need not be checked out: the tree is
+   * the branch's tip (or `startAt`'s, when the branch is not there yet) with those paths taken from
+   * disk. HEAD, the folder's index and every other branch stay as they are, and the branch moves only
+   * if nothing moved it meanwhile. A rerun of `opId` answers the commit it made.
+   */
+  commitOnBranch(input: {
+    repo: string;
+    branch: string;
+    startAt: string;
+    paths: readonly string[];
+    message: string;
+    opId: string;
+  }): Promise<{ sha: string; alreadyCommitted: boolean }>;
+  /**
    * Brings commit `from` into `branch`, which `repo` must have checked out, running nothing from the
    * repository: up to date when the branch holds it, a fast-forward when the branch has nothing of
    * its own, else a merge commit with the branch as first parent, made from `merge-tree`'s tree with
@@ -3989,6 +4003,63 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  async function commitOnBranch(input: {
+    repo: string;
+    branch: string;
+    startAt: string;
+    paths: readonly string[];
+    message: string;
+    opId: string;
+  }): Promise<{ sha: string; alreadyCommitted: boolean }> {
+    const named = checkPaths(input.repo, input.paths);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const { real } = c;
+      const ref = `refs/heads/${input.branch}`;
+      if (await isSymbolic(c, ref))
+        throw refusal(real, { kind: GitTrustFailure.Ref, ref, reason: 'symbolic' });
+      const held = await revParse(c, `${ref}^{commit}`);
+      const tip = held ?? (await revParse(c, `${input.startAt}^{commit}`));
+      if (tip === null) throw new InvalidError(`${input.startAt} names no commit`);
+      if (held !== null) {
+        const existing = await findCommitByOp(c, held, input.opId);
+        if (existing) return { sha: existing, alreadyCommitted: true };
+      }
+      const tree = await withPrivateIndex(c, tip, async (env) => {
+        const changed = await stage(c, env, named, tip);
+        const filtered = await filteredPaths(c, env, changed);
+        if (filtered.length > 0)
+          throw refusal(real, { kind: GitTrustFailure.Filter, paths: filtered });
+        return (await git(c, ['write-tree'], { env })).trim();
+      });
+      if (tree === (await revParse(c, `${tip}^{tree}`)))
+        throw new InvalidError(`Nothing to commit in ${named.join(', ')}`);
+      const sign = signing(c, await configEntries(c));
+      const sha = (
+        await git(c, ['commit-tree', ...sign.flags, tree, '-p', tip], {
+          input: withOpTrailer(input.message, input.opId),
+          config: sign.config,
+        })
+      ).trim();
+      try {
+        // Compare and swap: a branch made or moved meanwhile is refused.
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          `10db: ${input.opId}`,
+          ref,
+          sha,
+          held ?? '0'.repeat(sha.length),
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw refusal(real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
+      }
+      return { sha, alreadyCommitted: false };
+    });
+  }
+
   /**
    * A git dir about to be pinned that lies where a lane can write, or null when there is none: one in
    * any registered checkout or a lane temp root. A dir at or under a registered checkout's own `.git`
@@ -4955,6 +5026,7 @@ export function createGit(opts: GitOptions = {}): Git {
       return filters(await pinned(repo), rev);
     },
     commit,
+    commitOnBranch,
     mergeIntoBranch,
     promoteFastForward,
     classifyFolder,
