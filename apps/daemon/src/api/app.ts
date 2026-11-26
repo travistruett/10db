@@ -101,6 +101,9 @@ import {
   PreviewSignInDto,
   ProjectId,
   TrustGrantId,
+  TrustPrecedentId,
+  PrecedentAnswer,
+  PrecedentPatch,
   ProjectInput,
   ProjectPatch,
   PROTOCOL_VERSION,
@@ -687,6 +690,32 @@ export function createApp(deps: ApiDeps) {
       );
       return c.body(null, 204);
     })
+    .get('/projects/:projectId/precedents', async (c) =>
+      c.json(await deps.services.precedents(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post(
+      '/projects/:projectId/precedents/answer',
+      validator('json', (value): PrecedentAnswer => PrecedentAnswer.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.answerPrecedents(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .patch(
+      '/projects/:projectId/precedents/:precedentId',
+      validator('json', (value): PrecedentPatch => PrecedentPatch.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.patchPrecedent(
+            ProjectId.parse(c.req.param('projectId')),
+            TrustPrecedentId.parse(c.req.param('precedentId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
     .get('/projects/:projectId/one-way-paths', (c) =>
       c.json(deps.services.getOneWayPaths(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -2396,8 +2425,20 @@ export function createApp(deps: ApiDeps) {
     .get('/workstreams/:id/skips', (c) =>
       c.json(deps.services.listWorkstreamSkips(WorkstreamId.parse(c.req.param('id')))),
     )
-    .post('/workstreams/:id/skips/run', (c) =>
-      c.json(deps.services.runSkippedCalls(WorkstreamId.parse(c.req.param('id'))), 201),
+    .post(
+      '/workstreams/:id/skips/run',
+      // `?routine=true` is Run and Make Routine.
+      validator('query', (query): { routine: boolean } => ({
+        routine: z.enum(['true', 'false']).optional().parse(query['routine']) === 'true',
+      })),
+      (c) =>
+        c.json(
+          deps.services.runSkippedCalls(
+            WorkstreamId.parse(c.req.param('id')),
+            c.req.valid('query').routine,
+          ),
+          201,
+        ),
     )
     .get(
       '/inbox',

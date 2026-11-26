@@ -36,6 +36,7 @@ import {
   listFiles,
   listItemFiles,
   listItems,
+  listPrecedents,
   planIdOfChat,
   planOfConversation,
   touchChat,
@@ -88,10 +89,12 @@ import {
   floorNoticeText,
   floorWhy,
   judgeForCall,
+  precedentLines,
   projectGrantLines,
   projectLiveSystems,
   sessionDevAccess,
   startingJudge,
+  type PrecedentEvents,
 } from '../trust';
 import { digestText } from './brief';
 import {
@@ -264,6 +267,8 @@ export interface ChatHooksDeps {
   readonly webSearchOf: (account: AccountAgent, model: string) => boolean;
   /** 10db's judge, asked whether it is ready as each session starts; absent, a `tendb` chat is on the rules. */
   readonly judge?: Judge;
+  /** Where a chat's judge reports a standing approval it paused or found changed; absent, none is raised. */
+  readonly precedents?: Pick<PrecedentEvents, 'paused' | 'changed'>;
   readonly clock: Clock;
   /** The project's compose services at its committed base, for a session Docker is open to. */
   readonly composeServices: (
@@ -856,6 +861,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
           claudeConnectors,
           devAccess: { ...open, compose: open.docker ? compose : null },
+          // A chat never runs in a separate copy.
+          precedents: precedentLines(listPrecedents(state.db, project.id), false),
           builderFolder: project.repoPath,
         });
       // A Claude Full access session is judged by Claude Code, which reads no policy: it is built only if read.
@@ -1044,6 +1051,17 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                     readCommitted: deps.readCommitted(project, root),
                     skips: null,
                     limits: limitNotes,
+                    // Read on every call, so a Remove or a pause takes effect at once.
+                    precedents: () => listPrecedents(state.db, project.id),
+                    inCopy: false,
+                    onPrecedentPaused: (precedentId) => {
+                      log.info({ precedentId }, 'a precedent was paused');
+                      deps.precedents?.paused(project.id, precedentId);
+                    },
+                    onPrecedentChanged: (precedentId, hash) => {
+                      log.info({ precedentId, hash }, 'what a precedent runs has changed');
+                      deps.precedents?.changed(project.id, precedentId, hash);
+                    },
                     onFloor: (detail) => {
                       if (saidUnavailable) return;
                       saidUnavailable = true;

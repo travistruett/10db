@@ -1,10 +1,11 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { expect } from '@playwright/test';
 import { claudeIsInstalled } from './claude-is-installed';
 import { daemonUrl } from './daemon-url';
 import { test } from './routed-test';
-import { E2E_DIR, E2E_TOKEN } from './paths';
+import { E2E_DATA, E2E_DIR, E2E_TOKEN } from './paths';
 import { createProject } from './shape-project';
 
 /** A gate report as ampsio commits one: one model passes, the other misses a gate. */
@@ -130,6 +131,42 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await expect(tools).toContainText('short-lived credentials for profile acme-dev');
   await expect(tools).toContainText('Its env block replaces PATH');
   await tools.getByRole('button', { name: 'Cancel' }).click();
+
+  // Standing approvals: a kind the builder made routine is listed with its calls, Remove moves it to Not
+  // Routine, and Approve there makes it routine again. The e2e daemon has no Decisions account, which the page says.
+  const KIND = '`make t` with arguments like the examples';
+  execFileSync(
+    'pnpm',
+    [
+      'exec',
+      'tsx',
+      'scripts/seed-precedent.ts',
+      resolve(E2E_DATA, '10db.sqlite'),
+      JSON.stringify({
+        projectId,
+        programKey: 'make t',
+        kind: KIND,
+        examples: ['make t TESTS=a.test.ts'],
+      }),
+    ],
+    { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
+  );
+  await page.reload();
+  const main = page.getByRole('main');
+  await expect(main.getByText('Standing approvals need a Decisions account')).toBeVisible();
+  await expect(main.getByText(KIND, { exact: true })).toBeVisible();
+  await expect(main.getByText('make t TESTS=a.test.ts')).toBeVisible();
+  await expect(main.getByText('Everywhere in this project, copies included')).toBeVisible();
+  await expect(
+    main.getByText('A running Claude session in auto mode keeps this until it next starts.'),
+  ).toBeVisible();
+  await expect(main.getByText('Not Routine', { exact: true })).toHaveCount(0);
+  await main.getByRole('button', { name: `Remove ${KIND}` }).click();
+  await expect(main.getByText('Not Routine', { exact: true })).toBeVisible();
+  await expect(main.getByRole('button', { name: `Remove ${KIND}` })).toHaveCount(0);
+  await main.getByRole('button', { name: `Approve ${KIND}` }).click();
+  await expect(main.getByRole('button', { name: `Remove ${KIND}` })).toBeVisible();
+  await expect(main.getByText('Not Routine', { exact: true })).toHaveCount(0);
 
   // Evals: the local report is a suite, the failing model says which gate, nothing ran a model.
   await page.goto('/evals');

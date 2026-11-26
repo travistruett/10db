@@ -136,7 +136,7 @@ const FALLBACK_PREFIX = {
 
 /** The answer and the outcome together: "acted" means different things per decision. */
 export function outcomeText(
-  call: Pick<JudgeCallDto, 'decision' | 'outcome' | 'answer' | 'model'>,
+  call: Pick<JudgeCallDto, 'decision' | 'outcome' | 'answer' | 'model' | 'precedentId'>,
 ): string {
   if (call.decision === JudgeDecision.CrossesLimit) {
     const said = limitOutcomeText(call);
@@ -170,8 +170,11 @@ export function outcomeText(
 const AUTO_MODE_MODEL = 'claude-code-auto-mode';
 
 /** A limits call's outcome where it reads differently from the others; null where it doesn't. */
-function limitOutcomeText(call: Pick<JudgeCallDto, 'outcome' | 'answer' | 'model'>): string | null {
+function limitOutcomeText(
+  call: Pick<JudgeCallDto, 'outcome' | 'answer' | 'model' | 'precedentId'>,
+): string | null {
   if (call.model === AUTO_MODE_MODEL) return 'Auto mode stopped it';
+  if (call.precedentId !== null) return 'Allowed as routine';
   if (call.outcome === JudgeOutcome.BelowFloor)
     return 'Between yes and no; asked the second opinion';
   if (call.outcome === JudgeOutcome.Acted)

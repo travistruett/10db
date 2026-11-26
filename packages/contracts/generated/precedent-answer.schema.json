@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "kinds": {
+      "minItems": 1,
+      "maxItems": 50,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "programKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "copy",
+              "project"
+            ]
+          },
+          "choice": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "keep_skipping",
+              "report"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[^\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]+$"
+          }
+        },
+        "required": [
+          "programKey",
+          "scope",
+          "choice"
+        ]
+      }
+    }
+  },
+  "required": [
+    "kinds"
+  ]
+}

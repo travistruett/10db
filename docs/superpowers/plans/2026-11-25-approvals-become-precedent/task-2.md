@@ -4,7 +4,7 @@
 
 ## Files
 
-- `packages/contracts/src/ids.ts`: the `TrustPrecedent` id (`tpr`), with `TrustPrecedentId` exported as
+- `packages/contracts/src/ids.ts`: the `TrustPrecedent` id (`tpd`), with `TrustPrecedentId` exported as
   `TrustGrantId` is.
 - `packages/contracts/src/trust-policy.ts`: everything the index quotes under that path.
 - `packages/contracts/src/json-schema.ts`: the new DTOs, beside `trust-grant-dto`. Regenerate
@@ -17,7 +17,7 @@
   - `skippedActions.programKey`, nullable.
 - `packages/db/src/store/trust-precedents.ts` (new): `PrecedentInput` and the six functions the index quotes.
   `approvePrecedent` is an upsert on the unique index: an existing row in any state moves to `input.state` with
-  the new kind, examples and hash; to `active` it sets `conflicts` to 0 and clears `ended_at`. `setPrecedent` to
+  the new kind, examples and hash; to `active` it sets `conflicts` to 0, sets `approved_at` to now and clears `ended_at`. `setPrecedent` to
   `revoked` or `declined` sets `ended_at`. `lastAllowedByPrecedent` reads the call's command out of
   `judge_calls.state`. Mirror `trust-grants.ts` for shape and parsing.
 - `packages/db/src/store/judge-calls.ts` and `skipped-actions.ts`: write and read the new columns

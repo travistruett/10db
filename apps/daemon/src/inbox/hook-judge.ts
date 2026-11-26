@@ -1,12 +1,16 @@
 import {
   JudgeKind,
+  PrecedentState,
   SkipKind,
   SkipSource,
   type ProjectId,
   type TaskId,
   type TrustPolicy,
+  type TrustPrecedentDto,
+  type TrustPrecedentId,
   type WorkstreamId,
 } from '@10db/contracts';
+import { countPrecedentConflict, countPrecedentUse, setPrecedent } from '@10db/db';
 import { z } from 'zod';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
@@ -23,10 +27,17 @@ import {
   type CallRuns,
   type LimitVerdict,
   isGrantedCall,
+  keyPackageFile,
+  packageScriptLine,
+  PRECEDENT_CONFLICTS_MAX,
+  precedentFor,
+  programKey,
   projectGrantedCalls,
+  runsHash,
   skipMessage,
   type FastPathContext,
   type LimitAt,
+  type ShownPrecedent,
   type SkipRecorder,
 } from '../trust';
 
@@ -100,16 +111,25 @@ export interface HookJudgeContext {
   readonly limits: LimitNotes;
   /** Told each time 10db's judge can't answer, with what it said: the thread's notice and the log. */
   readonly onFloor: (detail: string) => void;
+  /** The project's precedents as they are now, in every state, read on each call so a Remove takes effect at once. */
+  readonly precedents: () => readonly TrustPrecedentDto[];
+  /** Whether the session runs in a separate copy, which is shown a `copy` precedent before the project's. */
+  readonly inCopy: boolean;
+  /** A precedent was paused by its third conflict with a limit. */
+  readonly onPrecedentPaused: (id: TrustPrecedentId) => void;
+  /** A precedent is shown with changed text; called once per precedent and hash in a session. */
+  readonly onPrecedentChanged: (id: TrustPrecedentId, hash: string) => void;
   readonly clock: Clock;
 }
 
 const FAST_PATH_SETTLED = 'A read, an edit or a read-only command that reaches no secret';
 const MODEL_SETTLED = "Allowed by 10db's judge";
+const PRECEDENT_SETTLED = "Allowed by 10db's judge as routine in this project";
 const RULE_SETTLED = "The builder's allow rule covers this call, so it runs, as in Claude Code.";
 const GRANT_SETTLED = 'The builder allowed this very call in this project.';
 
 const InputRecord = z.record(z.string(), z.unknown());
-const NO_RUNS: CallRuns = { runs: [], cut: false };
+const NO_RUNS: CallRuns = { runs: [], cut: false, differs: false };
 
 /**
  * The session judge for a call the guard left open, on 10db's judge: the fast path, then `crossesLimit`. An allow
@@ -132,7 +152,7 @@ export function createHookJudge(
   // the judges couldn't settle, or one a failed judge left to the rules.
   const remember = (key: string, verdict: LimitVerdict): void => {
     if (verdict.kind === 'floor' || (verdict.kind === 'limit' && verdict.at.limit === null)) return;
-    if (verdict.kind === 'allow' && verdict.by !== 'model') return;
+    if (verdict.kind === 'allow' && verdict.by === 'fast_path') return;
     settled.set(key, verdict);
     if (settled.size > SETTLED_CALLS_MAX) {
       const [oldest] = settled.keys();
@@ -152,9 +172,54 @@ export function createHookJudge(
       const checkout = ctx.fastPath.checkout;
       return await callRuns(command, req.cwd ?? checkout, checkout, ctx.readCommitted);
     } catch {
-      return NO_RUNS;
+      // Unreadable files are unverified, so no precedent is shown for the call.
+      return { ...NO_RUNS, differs: true };
     }
   };
+
+  // The package.json line a package runner's key runs, as committed: null with no such key. A file that is not the
+  // base's, or can't be read, withholds the precedent instead (`withheld`).
+  const packageScriptOf = async (
+    key: string | null,
+    cwd: string,
+  ): Promise<{ readonly line: string | null; readonly withheld: boolean }> => {
+    const checkout = ctx.fastPath.checkout;
+    const file = key === null ? null : keyPackageFile(key, checkout, cwd);
+    if (key === null || file === null) return { line: null, withheld: false };
+    try {
+      const read = ctx.readCommitted === null ? null : await ctx.readCommitted(file);
+      return read?.kind === 'same'
+        ? { line: packageScriptLine(read.text, key), withheld: false }
+        : { line: null, withheld: true };
+    } catch {
+      return { line: null, withheld: true };
+    }
+  };
+
+  // Each count is bookkeeping: a failed write must never fail the call it counts.
+  const countFresh = (verdict: LimitVerdict, shown: ShownPrecedent | null): void => {
+    if (shown === null) return;
+    try {
+      if (verdict.kind === 'allow' && verdict.by === 'precedent') {
+        deps.state.write((w) => {
+          countPrecedentUse(w, shown.id);
+        });
+        return;
+      }
+      if (verdict.kind !== 'limit' || verdict.precedentConflict !== true) return;
+      const paused = deps.state.write((w) => {
+        if (countPrecedentConflict(w, shown.id) < PRECEDENT_CONFLICTS_MAX) return false;
+        return setPrecedent(w, ctx.projectId, shown.id, { state: PrecedentState.Paused }) !== null;
+      });
+      if (paused) ctx.onPrecedentPaused(shown.id);
+    } catch (error) {
+      deps.logger.warn(
+        { err: error, precedentId: shown.id },
+        "a precedent's count was not written",
+      );
+    }
+  };
+  const changedNoticed = new Set<string>();
 
   const floor = (req: JudgedCallRequest, detail: string): GuardVerdict => {
     ctx.onFloor(detail);
@@ -180,6 +245,24 @@ export function createHookJudge(
     if (ctx.coveredByBuilderRule(req)) return { decision: 'allow', settled: RULE_SETTLED };
     const runs = await runsOf(req, input);
     const allow = ctx.allowLines();
+    // The key only picks which precedent is shown; no code path allows a call because it has one.
+    const cwd = req.cwd ?? ctx.fastPath.checkout;
+    const program = programKey(req.toolName, input, ctx.fastPath.checkout, cwd);
+    const script = await packageScriptOf(program, cwd);
+    const shown = precedentFor(
+      ctx.precedents(),
+      program,
+      ctx.inCopy,
+      runsHash(runs, script.line),
+      runs.differs || script.withheld,
+    );
+    if (shown?.changedSince === true && shown.hash !== null) {
+      const noticed = `${shown.id}:${shown.hash}`;
+      if (!changedNoticed.has(noticed)) {
+        changedNoticed.add(noticed);
+        ctx.onPrecedentChanged(shown.id, shown.hash);
+      }
+    }
     const key = JSON.stringify([
       callKey(req.toolName, input, ctx.fastPath.checkout),
       // An input that is not an object reads as `{}` above, so the raw input keeps such calls apart.
@@ -190,6 +273,8 @@ export function createHookJudge(
       ctx.builderNotes,
       // A verdict reached on a script's committed text is not one on the text the checkout holds after an edit.
       runs,
+      // Approving, pausing, editing or removing a precedent judges the call afresh.
+      shown,
     ]);
     const known = settled.get(key);
     const now = ctx.clock.now().getTime();
@@ -211,6 +296,8 @@ export function createHookJudge(
           allow,
           notes: ctx.builderNotes,
           runs,
+          ...(shown === null ? {} : { precedent: shown }),
+          programKey: program,
           secondOpinion: secondDownAt === null || now - secondDownAt >= FLOOR_BACKOFF_MS,
           ...(ctx.workstreamId === null ? {} : { workstreamId: ctx.workstreamId }),
           ...(ctx.taskId === null ? {} : { taskId: ctx.taskId }),
@@ -218,6 +305,8 @@ export function createHookJudge(
         },
       ));
     remember(key, verdict);
+    // Only a fresh verdict counts: one answered from memory is the same judged call, not another use.
+    if (known === undefined) countFresh(verdict, shown);
     if (verdict.kind === 'limit' && verdict.secondDown !== undefined)
       secondDownAt = ctx.clock.now().getTime();
     // Only a model's fresh answer says the judge is back; a remembered verdict says nothing of it.
@@ -226,7 +315,12 @@ export function createHookJudge(
       case 'allow':
         return {
           decision: 'allow',
-          settled: verdict.by === 'fast_path' ? FAST_PATH_SETTLED : MODEL_SETTLED,
+          settled:
+            verdict.by === 'fast_path'
+              ? FAST_PATH_SETTLED
+              : verdict.by === 'precedent'
+                ? PRECEDENT_SETTLED
+                : MODEL_SETTLED,
         };
       case 'floor':
         if (verdict.reason === 'timeout' || verdict.reason === 'error')
@@ -250,6 +344,7 @@ export function createHookJudge(
           limit: at.limit,
           reason: at.reason,
           source: SkipSource.TendbJudge,
+          programKey: program,
         });
         return {
           decision: 'deny',

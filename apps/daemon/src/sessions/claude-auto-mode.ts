@@ -27,13 +27,15 @@ const rule = (line: PolicyLine): string => `${line.label}: ${line.text}`;
 /**
  * A session's policy as auto mode's rules. Where a person is in the session a limit is a soft deny,
  * which their go-ahead for the exact action clears; where none is, a hard deny. The coordination lines
- * are hard everywhere: no go-ahead changes who runs the gate or commits.
+ * are hard everywhere: no go-ahead changes who runs the gate or commits. The builder's standing approvals follow
+ * the environment as context lines: an `allow` line is an exception to a soft deny, which a precedent must never
+ * be, so this is the only place `autoModePrecedents` is read.
  */
 export function renderClaudeAutoMode(policy: TrustPolicy): ClaudeAutoModeSettings {
   const limits = policy.limits.map(rule);
   const coordination = policy.coordination.map(rule);
   return ClaudeAutoModeSettings.parse({
-    environment: [DEFAULTS, ...policy.environment],
+    environment: [DEFAULTS, ...policy.environment, ...policy.autoModePrecedents],
     allow: [DEFAULTS, ...policy.allow],
     soft_deny: policy.attended ? [DEFAULTS, ...limits] : [DEFAULTS],
     hard_deny: policy.attended

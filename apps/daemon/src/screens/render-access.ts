@@ -119,6 +119,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/hazard-assessment': 'No screen draws a setting.',
   '/projects/:projectId/small-proposal-limit': 'No screen draws a setting.',
   '/projects/:projectId/routing-rules': 'No screen draws a setting.',
+  '/projects/:projectId/precedents': 'No screen draws a setting.',
   '/projects/:projectId/candidates': 'No screen draws what Run next would pick.',
   '/passes/:passId': 'Only the UI Workbench draws a pass, and it is not a screen.',
   '/passes': 'Only the UI Workbench draws a pass, and it is not a screen.',

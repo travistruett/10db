@@ -142,6 +142,11 @@ import type {
   LiveSystemsDto,
   TrustGrantDto,
   TrustGrantId,
+  TrustPrecedentDto,
+  TrustPrecedentId,
+  PrecedentAnswer,
+  PrecedentPatch,
+  ProjectPrecedentsDto,
   ProjectTrustDto,
   TrustOverrides,
   TrustSettingsDto,
@@ -721,8 +726,12 @@ export interface ApiServices extends PlanRecordServices {
   taskSession(taskId: TaskId): TaskSessionDto;
   /** What the run skipped and the questions it was answered at once, oldest first. */
   listWorkstreamSkips(id: WorkstreamId): SkippedActionDto[];
-  /** Run These Now from the task's drawer: the follow-up task that runs what the run skipped, approved. */
-  runSkippedCalls(id: WorkstreamId): TaskDto;
+  /**
+   * Run These Now from the task's drawer: the follow-up task that runs what the run skipped, approved. With
+   * `makeRoutine` (Run and Make Routine) each call's kind also becomes a standing approval; a ConflictError when a
+   * skip is not 10db's judge's doubt with no limit named.
+   */
+  runSkippedCalls(id: WorkstreamId, makeRoutine?: boolean): TaskDto;
   /** Every card in these states (all of them for null), most urgent and then oldest first. */
   listInbox(filter: { readonly states: readonly InboxState[] | null }): InboxItemDto[];
   /** One page of open, waiting or resolved cards, filtered and sorted; `total` counts every match. */
@@ -909,6 +918,19 @@ export interface ApiServices extends PlanRecordServices {
   trustGrants(projectId: ProjectId): TrustGrantDto[];
   /** Removes one of the project's grants; throws NotFoundError when the project has none by that id. */
   removeTrustGrant(projectId: ProjectId, grantId: TrustGrantId): void;
+  /** The project's standing approvals in every state, with the last calls each allowed, and the kinds on offer; throws NotFoundError. */
+  precedents(projectId: ProjectId): Promise<ProjectPrecedentsDto>;
+  /**
+   * Answers the proposal card: each kind approved, kept skipping or reported, written with the card's rewording in
+   * one write. A kind that has a row is left as it is; one no longer offered is a ConflictError.
+   */
+  answerPrecedents(projectId: ProjectId, answer: PrecedentAnswer): Promise<ProjectPrecedentsDto>;
+  /** Approves a standing approval again (`active`), removes it (`revoked`), rewords its kind or keeps its changed text; throws NotFoundError. */
+  patchPrecedent(
+    projectId: ProjectId,
+    id: TrustPrecedentId,
+    change: PrecedentPatch,
+  ): Promise<TrustPrecedentDto>;
   /** The newest event seq (0 when there are none). */
   eventsHead(): number;
   /** Each server in the project's `.mcp.json` and its verdict; raises an approval card for each one with none. */

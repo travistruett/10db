@@ -73,6 +73,7 @@ const ID_SCHEMAS = {
   SkipListing: idSchema(['skl'], 'SkipListingId'),
   RunHost: idSchema(['rhs'], 'RunHostId'),
   TrustGrant: idSchema(['tgr'], 'TrustGrantId'),
+  TrustPrecedent: idSchema(['tpd'], 'TrustPrecedentId'),
   Device: idSchema(['dev'], 'DeviceId'),
   PushSubscription: idSchema(['psh'], 'PushSubscriptionId'),
   EvalLiveRun: idSchema(['elr'], 'EvalLiveRunId'),
@@ -134,6 +135,7 @@ const ID_PREFIX = {
   SkipListing: 'skl',
   RunHost: 'rhs',
   TrustGrant: 'tgr',
+  TrustPrecedent: 'tpd',
   Device: 'dev',
   PushSubscription: 'psh',
   EvalLiveRun: 'elr',
@@ -271,6 +273,8 @@ export const RunHostId = ID_SCHEMAS.RunHost;
 export type RunHostId = IdOf<'RunHost'>;
 export const TrustGrantId = ID_SCHEMAS.TrustGrant;
 export type TrustGrantId = IdOf<'TrustGrant'>;
+export const TrustPrecedentId = ID_SCHEMAS.TrustPrecedent;
+export type TrustPrecedentId = IdOf<'TrustPrecedent'>;
 export const DeviceId = ID_SCHEMAS.Device;
 export type DeviceId = IdOf<'Device'>;
 export const PushSubscriptionId = ID_SCHEMAS.PushSubscription;
