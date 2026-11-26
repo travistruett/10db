@@ -440,39 +440,37 @@ export function createApp(deps: ApiDeps) {
   base.use('*', hostGuard(guards));
   base.use('*', originGuard(guards));
   base.use('*', remoteMark(guards));
-  base
-    .use(
-      '*',
-      credentialMiddleware({
-        uiToken: deps.token,
-        ...(deps.devUi ? { devUi: deps.devUi } : {}),
-        ...(deps.screens ? { screens: deps.screens } : {}),
-        devices: deps.devices,
-        tickets: deps.tickets,
-      }),
-    )
-    // A token held by code an agent may edit reads only what its allowance names.
-    .use('*', async (c, next) => {
-      const principal = c.var.principal;
-      if (OPEN_PATHS.has(c.req.path)) return next();
-      // The dev UI's token: the page is code a pass's agents may be editing, so it only reads.
-      if (principal.kind === 'dev_ui')
-        return deps.devUi?.mayRead(c.req.method, c.req.path) === true &&
-          shapeOwnedOrNone(c.req.path)
-          ? next()
-          : c.json(
-              { error: 'forbidden', message: 'The dev UI reads only: act in the 10db app' },
-              403,
-            );
-      // A render token (Shape spec §5.5) belongs to one screen being drawn: it reads what a screen
-      // shows and nothing else, so no write, no digest and no command can be reached with it.
-      if (principal.kind === 'render')
-        return deps.screens?.mayRead(c.req.method, c.req.path) === true &&
-          shapeOwnedOrNone(c.req.path)
-          ? next()
-          : c.json({ error: 'forbidden', message: 'A screen is drawn read-only' }, 403);
-      return next();
-    });
+  base.use(
+    '*',
+    credentialMiddleware({
+      uiToken: deps.token,
+      ...(deps.devUi ? { devUi: deps.devUi } : {}),
+      ...(deps.screens ? { screens: deps.screens } : {}),
+      devices: deps.devices,
+      tickets: deps.tickets,
+    }),
+  );
+  // A token held by code an agent may edit reads only what its allowance names.
+  base.use('*', async (c, next) => {
+    const principal = c.var.principal;
+    if (OPEN_PATHS.has(c.req.path)) return next();
+    // The dev UI's token: the page is code a pass's agents may be editing, so it only reads.
+    if (principal.kind === 'dev_ui')
+      return deps.devUi?.mayRead(c.req.method, c.req.path) === true && shapeOwnedOrNone(c.req.path)
+        ? next()
+        : c.json(
+            { error: 'forbidden', message: 'The dev UI reads only: act in the 10db app' },
+            403,
+          );
+    // A render token (Shape spec §5.5) belongs to one screen being drawn: it reads what a screen
+    // shows and nothing else, so no write, no digest and no command can be reached with it.
+    if (principal.kind === 'render')
+      return deps.screens?.mayRead(c.req.method, c.req.path) === true &&
+        shapeOwnedOrNone(c.req.path)
+        ? next()
+        : c.json({ error: 'forbidden', message: 'A screen is drawn read-only' }, 403);
+    return next();
+  });
   base.use('*', async (c, next) => {
     const shipped = deps.skillVersion ?? null;
     const presented = c.req.header(SKILL_VERSION_HEADER);
