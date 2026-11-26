@@ -27,21 +27,31 @@ type Hit = WatchpointHitsDto['hits'][number];
 const count = (n: number, one: string, many: string): string =>
   `${String(n)} ${n === 1 ? one : many}`;
 
+/** The reviewer's ✓ reads green and its ⚠ yellow. */
+function checkTone(note: string): 'green' | 'yellow' | undefined {
+  if (note.startsWith('✓')) return 'green';
+  return note.startsWith('⚠') ? 'yellow' : undefined;
+}
+
 function Note({
   who,
   children,
-  warn = false,
+  tone,
 }: {
   readonly who: string;
   readonly children: string;
-  readonly warn?: boolean;
+  readonly tone?: 'green' | 'yellow' | undefined;
 }) {
   return (
     <Group gap={6} align="baseline" wrap="nowrap">
       <Text size="xs" fw={600} c="dimmed" w={64} style={{ flexShrink: 0 }}>
         {who}
       </Text>
-      <Text size="sm" {...(warn ? { c: 'yellow' } : {})} style={{ overflowWrap: 'anywhere' }}>
+      <Text
+        size="sm"
+        {...(tone === undefined ? {} : { c: tone })}
+        style={{ overflowWrap: 'anywhere' }}
+      >
         {children}
       </Text>
     </Group>
@@ -66,7 +76,7 @@ function FileHunks({ file }: { readonly file: WatchpointFileView }) {
       </Group>
       {file.agentNote === null ? null : <Note who="Agent">{file.agentNote}</Note>}
       {file.reviewerNote === null ? null : (
-        <Note who="Reviewer" warn={file.reviewerNote.startsWith('⚠')}>
+        <Note who="Reviewer" tone={checkTone(file.reviewerNote)}>
           {file.reviewerNote}
         </Note>
       )}

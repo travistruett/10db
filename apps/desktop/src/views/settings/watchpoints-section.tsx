@@ -1,5 +1,11 @@
-import type { EffectiveWatchpoint, ProjectDto, WatchpointLoudness } from '@10db/contracts';
-import { Alert, Anchor, Box, Button, Group, Loader, Stack, Text } from '@mantine/core';
+import {
+  STARTER_WATCHPOINTS,
+  type EffectiveWatchpoint,
+  type ProjectDto,
+  type WatchpointLoudness,
+} from '@10db/contracts';
+import { Alert, Anchor, Box, Button, Group, Loader, Menu, Stack, Text } from '@mantine/core';
+import { IconChevronDown } from '@tabler/icons-react';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
 import {
@@ -22,6 +28,8 @@ import {
 } from './watchpoint-lists';
 import { LoudnessControl } from './watchpoint-loudness';
 
+/** Paths a row lists before "+N more"; the drawer has the rest. */
+const SHOWN_GLOBS = 3;
 const YOURS = 'Yours, in every project';
 const THIS_PROJECT = 'This project';
 
@@ -53,6 +61,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
     );
   const lists: WatchpointLists = { yours: yours.data, entries: here.data.entries };
   const rows = here.data.effective;
+  const missing = STARTER_WATCHPOINTS.filter((s) => !lists.yours.some((w) => w.key === s.key));
   const saving = setYours.isPending || setHere.isPending;
   /** Sends each list that changed; the builder's first, so a project entry never names a key that is not there yet. */
   const save = async (next: WatchpointLists, done: () => void) => {
@@ -86,6 +95,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
     {
       accessor: 'label',
       title: 'Watchpoint',
+      width: 320,
       render: (row) => (
         <Stack gap={2}>
           <Group gap={6} wrap="nowrap">
@@ -122,11 +132,16 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
       title: 'Matches',
       render: (row) => (
         <Stack gap={0}>
-          {row.globs.map((glob) => (
+          {row.globs.slice(0, SHOWN_GLOBS).map((glob) => (
             <Text key={glob} size="xs" ff="monospace" c="dimmed">
               {glob}
             </Text>
           ))}
+          {row.globs.length > SHOWN_GLOBS ? (
+            <Text size="xs" c="dimmed">
+              {`+${String(row.globs.length - SHOWN_GLOBS)} more`}
+            </Text>
+          ) : null}
         </Stack>
       ),
     },
@@ -183,13 +198,46 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
         title="Watchpoints"
         line="The kinds of change you want to judge yourself. A task whose changes touch one shows you just those changes, with the agent's reason and the reviewer's check."
         action={
-          <Button
-            onClick={() => {
-              request(null);
-            }}
-          >
-            New Watchpoint
-          </Button>
+          <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+            <Menu position="bottom-end">
+              <Menu.Target>
+                <Button
+                  variant="default"
+                  rightSection={<IconChevronDown size={14} aria-hidden />}
+                  style={{ flexShrink: 0 }}
+                >
+                  Add from Library
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                {missing.length === 0 ? (
+                  <Menu.Item disabled>All starters are in your list</Menu.Item>
+                ) : (
+                  missing.map((starter) => (
+                    <Menu.Item
+                      key={starter.key}
+                      onClick={() => {
+                        void save(
+                          { yours: [...lists.yours, starter], entries: lists.entries },
+                          () => undefined,
+                        );
+                      }}
+                    >
+                      {starter.label}
+                    </Menu.Item>
+                  ))
+                )}
+              </Menu.Dropdown>
+            </Menu>
+            <Button
+              style={{ flexShrink: 0 }}
+              onClick={() => {
+                request(null);
+              }}
+            >
+              New Watchpoint
+            </Button>
+          </Group>
         }
       />
       {groups.map((group, index) => (

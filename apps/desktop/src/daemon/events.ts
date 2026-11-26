@@ -132,8 +132,10 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES, rigorFiguresKeys.all],
   // Lanes changing can switch keep-awake on or off. A pass page's state is its run's, paused or resumed
   // by a usage limit with no pass event.
+  // A review step's result carries its watchpoint notes, so the open For You follows the run too.
   workstream: [
     ...WORK,
+    watchpointKeys.hits,
     queryKeys.keepAwake,
     CANDIDATES,
     humanTouchKeys.all,

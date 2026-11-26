@@ -1,5 +1,5 @@
 import { WatchpointLoudness } from '@10db/contracts';
-import { SegmentedControl, Tooltip, type MantineSpacing } from '@mantine/core';
+import { SegmentedControl, Tooltip, type MantineSize, type MantineSpacing } from '@mantine/core';
 
 /** Which loudness the app can act on so far: Ask and Hold are shown but not offered. */
 const WHY_OFF: Readonly<Partial<Record<WatchpointLoudness, string>>> = {
@@ -13,11 +13,13 @@ export function LoudnessControl({
   onChange,
   ariaLabel,
   mt,
+  size = 'xs',
 }: {
   readonly value: WatchpointLoudness;
   readonly onChange: (value: WatchpointLoudness) => void;
   readonly ariaLabel: string;
   readonly mt?: MantineSpacing;
+  readonly size?: MantineSize;
 }) {
   const item = (loudness: WatchpointLoudness, label: string) => {
     const why = WHY_OFF[loudness];
@@ -36,7 +38,7 @@ export function LoudnessControl({
   };
   return (
     <SegmentedControl
-      size="xs"
+      size={size}
       {...(mt === undefined ? {} : { mt })}
       aria-label={ariaLabel}
       data={[

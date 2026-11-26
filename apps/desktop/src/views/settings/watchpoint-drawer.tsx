@@ -115,7 +115,8 @@ export function WatchpointDrawer({
     }
     const next: WatchpointValue = parsed.data;
     const base = saved(lists, next, draft.home);
-    onSave(row?.from === 'you' ? turnedOff(base, next.key, draft.off) : base);
+    // Only a switch turned on writes an `off` entry; saved() already dropped the project's entry at Everywhere.
+    onSave(row?.from === 'you' && draft.off ? turnedOff(base, next.key, true) : base);
   };
   return (
     <SurfaceDrawer
@@ -183,9 +184,13 @@ export function WatchpointDrawer({
             change({ guidance: e.currentTarget.value });
           }}
         />
-        <Input.Wrapper label="Loudness">
+        <Input.Wrapper
+          label="Loudness"
+          description="Show puts it in the task's For You and the pull request. Ask and Hold come later."
+        >
           <LoudnessControl
             mt={6}
+            size="sm"
             ariaLabel="Watchpoint loudness"
             value={draft.loudness}
             onChange={(loudness) => {
@@ -203,6 +208,7 @@ export function WatchpointDrawer({
         >
           <SegmentedControl
             mt={6}
+            size="sm"
             aria-label="Watchpoint applies to"
             data={[
               { value: WatchpointHome.Everywhere, label: 'Every project' },
