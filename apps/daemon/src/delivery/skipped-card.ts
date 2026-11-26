@@ -288,36 +288,6 @@ export async function raiseSkippedCard(
           )
         : undefined;
     if (failed !== undefined) {
-<<<<<<< b3003c46b579f0b8b49cafaf87d7445072e14948
-      rewordCard(ctx, failed.id, `${failed.body}\n\n${bodyOf(skips, written)}`, {
-        // Closing itself adds to the card; the builder can still dismiss a notice they have read.
-        options: [
-          ...failed.options.filter(
-            (o) => o.label !== DISMISS.label && o.label !== ROUTINE_OPTION.label,
-          ),
-          ...(skipIds.length === 0
-            ? []
-            : runOptions(
-                skips,
-                followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait',
-              )),
-          DISMISS,
-        ],
-        detail: { ...failed.detail, [SKIPPED_DETAIL]: workstreamId, skipIds },
-      });
-||||||| ff4c17a6c
-      rewordCard(ctx, failed.id, `${failed.body}\n\n${bodyOf(skips, written)}`, {
-        // Closing itself adds to the card; the builder can still dismiss a notice they have read.
-        options: [
-          ...failed.options.filter((o) => o.label !== DISMISS.label),
-          ...(skipIds.length === 0
-            ? []
-            : [runOption(followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait')]),
-          DISMISS,
-        ],
-        detail: { ...failed.detail, [SKIPPED_DETAIL]: workstreamId, skipIds },
-      });
-=======
       rewordCard(
         ctx,
         failed.id,
@@ -325,16 +295,20 @@ export async function raiseSkippedCard(
         {
           // Closing itself adds to the card; the builder can still dismiss a notice they have read.
           options: [
-            ...failed.options.filter((o) => o.label !== DISMISS.label),
+            ...failed.options.filter(
+              (o) => o.label !== DISMISS.label && o.label !== ROUTINE_OPTION.label,
+            ),
             ...(skipIds.length === 0
               ? []
-              : [runOption(followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait')]),
+              : runOptions(
+                  skips,
+                  followUpStart(sourceStateOf(ctx.tx, workstreamId)).kind === 'wait',
+                )),
             DISMISS,
           ],
           detail: { ...failed.detail, [SKIPPED_DETAIL]: workstreamId, skipIds },
         },
       );
->>>>>>> 4edfb74ace0012666cd5740d83d575d05e00528a
       markListed(ctx, workstreamId, through, failed.id, configHead);
       return;
     }
