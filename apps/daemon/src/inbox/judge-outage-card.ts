@@ -47,6 +47,7 @@ export function createJudgeOutageCard(deps: {
         closesWhen: { by: 'withdrawn', when: 'the judge answers again (judge/outage)' },
         title: "10db's judge can't answer",
         body: [
+          `Decisions run on ${outage.provider === 'the provider' ? '' : `${outage.provider}, `}${outage.model}.`,
           `${outage.provider === 'the provider' ? 'The provider' : outage.provider} ${outage.cause}.`,
           'Until it does, the rules decide each case, so more actions are skipped than usually would be.',
           `To fix it: ${outage.fix}, or pick another account or model for Decisions in Settings › Decisions. This card closes itself once the judge answers.`,
