@@ -182,18 +182,6 @@ function reporterTools(deps: McpDeps, session: SessionRow): RegisteredTool[] | n
         ),
     },
     {
-      name: ReporterToolName.PickLinearStatus,
-      description: REPORTER_TOOL_DESCRIPTIONS[ReporterToolName.PickLinearStatus],
-      schema: ReporterToolInputs[ReporterToolName.PickLinearStatus],
-      run: (input) =>
-        Promise.resolve(
-          reporter.pickStatus(
-            sessionId,
-            ReporterToolInputs[ReporterToolName.PickLinearStatus].parse(input),
-          ),
-        ),
-    },
-    {
       name: ReporterToolName.UploadLinearPicture,
       description: REPORTER_TOOL_DESCRIPTIONS[ReporterToolName.UploadLinearPicture],
       schema: ReporterToolInputs[ReporterToolName.UploadLinearPicture],

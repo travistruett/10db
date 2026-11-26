@@ -201,7 +201,7 @@ const HAND_OVER_DIRECT = [
 ];
 const HAND_OVER_AGENT = [
   ...HAND_OVER,
-  "10db checks the body and returns the exact arguments for Linear's `save_comment`; call `save_comment` with those arguments unchanged, once. Any other `save_comment` is refused, and the refusal says why.",
+  '10db checks the body and answers `next`: the Linear calls to make, in order (its `save_comment`, then a `save_issue` when the update moves the status). Make each with those arguments unchanged, once. Any other `save_comment` is refused, and the refusal says why.',
   "End your last message with one line per update you handed over: `<post id>: <the comment id save_comment returned>`, or `<post id>: failed: <Linear's words>` when the write failed. 10db records the comment from that line, and never asks for it again.",
   `If Linear answers that you are not signed in, or asks you to sign in, write nothing more and end your last message with the line \`${SIGNED_OUT_LINE}\`. 10db holds the updates until the account signs in.`,
 ];
@@ -218,9 +218,7 @@ const RULES = [
   'A `landed` update says the work landed on the base branch at the commit its detail names, as `Landed on <baseBranch> at <first 12 characters of commit>`. It was committed directly, with no pull request: say nothing was opened or merged on GitHub, and name no pull request.',
   'Open findings and unverified checks are named in plain words wherever they apply.',
   "One comment per update, with real line breaks, never a typed `\\n`, and no footer (10db adds it). The status is set apart from the comment, and links and pictures are 10db's to set: do not write about doing them.",
-  "Read the statuses of the issue's own team (`list_issue_statuses` for the team `get_issue` shows), with their types and positions. Never move to an earlier position or a lower type.",
-  "If the issue's status changed since the last recorded row's status set, and it isn't what 10db set, comment only and set no status.",
-  "10db picks the status, not you. For each owed update that names a default status move, call `pick_linear_status` with the update's post id, the issue's current status and every status of its team, each as name, type and position from `get_issue` and `list_issue_statuses` (a status's place in the list when no position is shown). It answers the status name to set, or null. Set exactly that name with `save_issue` `state`, and nothing else in that call; the guard refuses any other. 10db records the status it set on the update's row. When 10db answers null, or the update names no move, set no status.",
+  "10db picks the status, not you. For each owed update that names a default status move, read the issue's status (`get_issue`) and every status of its own team (`list_issue_statuses` for the team `get_issue` shows), and give them to `report_linear_post` as `status`: `current`, the issue's status name, and `statuses`, each with its name and type, and its position only when Linear shows one. 10db refuses that update's `report_linear_post` without them. When 10db's answer lists a `save_issue` in `next`, make it with exactly those arguments; the guard refuses any other status. 10db records the status it set on the update's row.",
   "The builder's note, when it steers status, overrides these defaults: follow it, and the guard then accepts the status the note names.",
   'Set no completed-type status unless the project note says so.',
 ];

@@ -8,8 +8,8 @@ import {
 
 // Which Linear status an update moves its issue to, picked from the team's own statuses by type and
 // position, with the name only breaking a tie. Pure: it reads nothing, and it is the one place the
-// default moves are decided: the daemon answers the reporter's `pick_linear_status` with it, and the
-// reporter's guard lets only that status be set.
+// default moves are decided: `report_linear_post` answers the reporter the move it picks, and the reporter's
+// guard lets only that status be set.
 
 type TeamStatus = LinearTeamStatus;
 
@@ -46,7 +46,7 @@ export const STATUS_AIM_TEXT: Readonly<Record<StatusAim, string>> = {
     "the team's review-like started-type status: the started-type status positioned after the team's first started status (the earliest whose name says review when several qualify), only when it sits after the issue's current status; no move when the team has no such status",
 };
 
-const BEFORE_STARTED: ReadonlySet<LinearStatusType> = new Set([
+const BEFORE_STARTED: ReadonlySet<string> = new Set([
   LinearStatusType.Triage,
   LinearStatusType.Backlog,
   LinearStatusType.Unstarted,
@@ -55,30 +55,50 @@ const BEFORE_STARTED: ReadonlySet<LinearStatusType> = new Set([
 const REVIEW_NAME = /review/i;
 const PROGRESS_NAME = /progress/i;
 
-const byPosition = (a: TeamStatus, b: TeamStatus): number => a.position - b.position;
+const isStarted = (s: TeamStatus): boolean => s.type === LinearStatusType.Started;
+const sameStatus = (a: TeamStatus, b: TeamStatus): boolean => a.name === b.name;
+
+/** Whether `a` sits before `b`; null when either shows no position, so their order is unknown. */
+const sitsBefore = (a: TeamStatus, b: TeamStatus): boolean | null =>
+  a.position === undefined || b.position === undefined ? null : a.position < b.position;
+
+const byPosition = (a: TeamStatus, b: TeamStatus): number => (a.position ?? 0) - (b.position ?? 0);
+
+/** Every status shows its position. Linear's MCP server shows none, in no fixed order. */
+const positioned = (statuses: readonly TeamStatus[]): boolean =>
+  statuses.every((s) => s.position !== undefined);
 
 function firstStarted(statuses: readonly TeamStatus[]): TeamStatus | null {
-  const started = statuses.filter((s) => s.type === LinearStatusType.Started).sort(byPosition);
-  const first = started[0];
-  if (first === undefined) return null;
-  // Equal positions are a tie: the name that says progress wins.
+  const started = statuses.filter(isStarted);
+  if (started.length === 0) return null;
+  // The lowest position. Statuses that share it, or a list with no positions, are a tie the name breaks: the
+  // name that says progress wins, then one that doesn't say review.
+  const lowest = positioned(started) ? Math.min(...started.map((s) => s.position ?? 0)) : null;
+  const tied = lowest === null ? started : started.filter((s) => s.position === lowest);
   return (
-    started.filter((s) => s.position === first.position).find((s) => PROGRESS_NAME.test(s.name)) ??
-    first
+    tied.find((s) => PROGRESS_NAME.test(s.name)) ??
+    tied.find((s) => !REVIEW_NAME.test(s.name)) ??
+    tied[0] ??
+    null
   );
 }
 
 function reviewLike(current: TeamStatus, statuses: readonly TeamStatus[]): TeamStatus | null {
   const first = firstStarted(statuses);
   if (first === null) return null;
-  const candidates = statuses
-    .filter(
-      (s) => s.type === LinearStatusType.Started && s !== first && s.position > first.position,
-    )
+  const started = statuses.filter(isStarted);
+  const known = positioned(started);
+  const candidates = started
+    .filter((s) => !sameStatus(s, first) && (sitsBefore(first, s) ?? true))
     .sort(byPosition);
-  const target = candidates.find((s) => REVIEW_NAME.test(s.name)) ?? candidates[0] ?? null;
+  // With no positions only the name can say which status a review sits in.
+  const target =
+    candidates.find((s) => REVIEW_NAME.test(s.name)) ?? (known ? candidates[0] : undefined);
+  if (target === undefined) return null;
   // The review status is the team's, not the issue's: an issue already at or past it stays where it is.
-  return target !== null && target.position > current.position ? target : null;
+  if (BEFORE_STARTED.has(current.type)) return target;
+  if (!isStarted(current) || sameStatus(current, target)) return null;
+  return sameStatus(current, first) || sitsBefore(current, target) === true ? target : null;
 }
 
 /** The status name 10db last set on the issue: the newest recorded row that set one, or null when none did. */
@@ -96,8 +116,9 @@ export function lastStatusSet(
 
 /**
  * The status an update moves the issue to, or null to leave it. Never earlier in position or type than
- * the issue's current status, never a completed or canceled type, and nothing when the builder moved the
- * issue since 10db's last set (`lastSet` is the name 10db last set, null when it never has).
+ * the issue's current status, never to or from a completed, canceled or any other type past started, and
+ * nothing when the builder moved the issue since 10db's last set (`lastSet` is the name 10db last set, null when
+ * it never has). A status with no position sits in an unknown order, so only its type and name place it.
  */
 export function pickStatusMove(input: {
   readonly event: LinearEventKind;
@@ -112,11 +133,8 @@ export function pickStatusMove(input: {
       if (!BEFORE_STARTED.has(current.type)) return null;
       return firstStarted(statuses);
     }
-    case StatusAim.ReviewLike: {
-      if (current.type === LinearStatusType.Completed || current.type === LinearStatusType.Canceled)
-        return null;
+    case StatusAim.ReviewLike:
       return reviewLike(current, statuses);
-    }
     case null:
       return null;
   }

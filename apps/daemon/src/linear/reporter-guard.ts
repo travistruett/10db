@@ -9,7 +9,6 @@ const CONNECTOR_PREFIX = 'mcp__claude_ai_Linear__';
 
 const REPORT_TOOLS: ReadonlySet<string> = new Set([
   `mcp__10db__${ReporterToolName.ReportLinearPost}`,
-  `mcp__10db__${ReporterToolName.PickLinearStatus}`,
 ]);
 
 /** Linear tools that only read. `extract_images` is left out: it fetches URLs. */
@@ -54,7 +53,7 @@ export interface ReporterRun {
   readonly comments: Map<LinearPostId, StagedComment>;
   /** The project's note steers status choices, so a status set is the agent's to choose, not 10db's pick. */
   readonly noteSteers: boolean;
-  /** The statuses 10db picked this run (`pick_linear_status`): with no steering note, the only ones that may be set. */
+  /** The statuses 10db picked this run (`report_linear_post`): with no steering note, the only ones that may be set. */
   readonly pickedStatuses: Set<string>;
 }
 
@@ -119,7 +118,7 @@ function judgeWrite(
       if (typeof state !== 'string') return refuse('state must be a status name.');
       if (!run.noteSteers && !run.pickedStatuses.has(state))
         return refuse(
-          'state is not a status 10db picked for this run. Ask pick_linear_status for it; only the status it answers can be set.',
+          "state is not a status 10db picked for this run. Only the save_issue in report_linear_post's next can be set.",
         );
       return { statusSet: state };
     }

@@ -127,7 +127,6 @@ describe('judgeReporterCall', () => {
       call(`${L}save_issue`, { id: 'iss-119', state: 'Ready for Release' }),
       'allow',
     ],
-    ['pick tool', run(), call('mcp__10db__pick_linear_status', {}), 'allow'],
     [
       'save_issue 10db link',
       run(),

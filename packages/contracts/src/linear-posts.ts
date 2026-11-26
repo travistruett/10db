@@ -75,11 +75,6 @@ export type LinearReporterSettings = z.infer<typeof LinearReporterSettings>;
 /** The longest comment body the reporter's agent may hand 10db for one post. */
 export const MAX_COMMENT_BODY_CHARS = 10_000;
 
-/**
- * What the reporter's agent hands 10db for one owed update: the comment's body and nothing else (10db adds the
- * footer, writes the comment and records its id), or that the update has nothing to report. Exactly one of the
- * two is given; the daemon checks it, so the tool's schema stays a plain object.
- */
 /** The type Linear gives every workflow status of a team. */
 export const LinearStatusType = {
   Triage: 'triage',
@@ -88,31 +83,42 @@ export const LinearStatusType = {
   Started: 'started',
   Completed: 'completed',
   Canceled: 'canceled',
+  Duplicate: 'duplicate',
 } as const;
 export type LinearStatusType = (typeof LinearStatusType)[keyof typeof LinearStatusType];
 
-/** One of a team's statuses, as Linear's `list_issue_statuses` shows it. */
-export const LinearTeamStatus = z.strictObject({
+/**
+ * One of a team's statuses, as Linear's `list_issue_statuses` shows it. Linear's MCP server lists no position
+ * and no fixed order, so a status may come without one; any other key it carries (its id) is dropped. Its type
+ * is any text, so a type Linear adds later reads as one 10db never moves to or from, not as a refused call.
+ */
+export const LinearTeamStatus = z.object({
   name: z.string().min(1).max(200),
-  type: z.enum(LinearStatusType),
-  position: z.number(),
+  type: z.string().min(1).max(50),
+  position: z.number().optional(),
 });
 export type LinearTeamStatus = z.infer<typeof LinearTeamStatus>;
 
-/** What the reporter reads from Linear for one owed update, so 10db can pick the status move. */
-export const PickLinearStatusInput = z.strictObject({
-  postId: LinearPostId,
-  /** The issue's own status now. */
-  current: LinearTeamStatus,
-  /** Every status of the issue's team. */
+/** What the reporter read from Linear so 10db can pick an update's status move. */
+export const LinearIssueStatuses = z.strictObject({
+  /** The issue's own status name now, from `get_issue`. */
+  current: z.string().min(1).max(200),
+  /** Every status of the issue's team, from `list_issue_statuses`. */
   statuses: z.array(LinearTeamStatus).min(1).max(100),
 });
-export type PickLinearStatusInput = z.infer<typeof PickLinearStatusInput>;
+export type LinearIssueStatuses = z.infer<typeof LinearIssueStatuses>;
 
+/**
+ * What the reporter's agent hands 10db for one owed update: the comment's body and nothing else (10db adds the
+ * footer, writes the comment and records its id), or that the update has nothing to report. Exactly one of the
+ * two is given; the daemon checks it, so the tool's schema stays a plain object. An update that moves the issue's
+ * status by default also carries what the agent read of the issue's statuses, and 10db answers the move to make.
+ */
 export const ReportLinearPostInput = z.strictObject({
   postId: LinearPostId,
   body: z.string().max(MAX_COMMENT_BODY_CHARS).optional(),
   nothingToReport: z.boolean().optional(),
+  status: LinearIssueStatuses.optional(),
 });
 export type ReportLinearPostInput = z.infer<typeof ReportLinearPostInput>;
 

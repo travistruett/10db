@@ -11,8 +11,7 @@ import {
   type ConversationId,
   type LinearPostDto,
   type LinearPostId,
-  type PickedLinearStatus,
-  type PickLinearStatusInput,
+  type LinearIssueStatuses,
   type LinearReporterSettings,
   type LinearSignInRowDto,
   type LinearSignInsDto,
@@ -69,7 +68,7 @@ import {
 import { judgeReporterCall, secretIn, type ReporterRun } from './reporter-guard';
 import { nothingToReport } from './reporter-needs';
 import { accountRunStart, checkSaysSignedOut, reachOutcome } from './reporter-reach';
-import { lastStatusSet, pickStatusMove } from './reporter-status';
+import { lastStatusSet, pickStatusMove, statusAimOf } from './reporter-status';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
 import { noLinearCall, signInNeeded } from './sign-in-needed';
 import {
@@ -122,22 +121,29 @@ const SESSIONS_READ = 50;
 
 const ALLOWED_BY_RULE = "10db's reporter rule allows this call.";
 const SESSION_OVER = 'This reporter run is over; nothing it calls is recorded.';
+const STATUS_NEEDED =
+  "This update moves the issue's status, so 10db needs what Linear shows: give status with current, the issue's status name from get_issue, and statuses, every status of its team from list_issue_statuses (each with its name and type). Then call report_linear_post again.";
 
-/** What `report_linear_post` answers the agent. */
-export type ReportedPost =
+/** A Linear write 10db dictates to the reporter's agent, made with these arguments unchanged. */
+export type LinearCall =
   | {
-      readonly ok: true;
-      /** The one Linear write to make, with these arguments unchanged. */
-      readonly next: {
-        readonly tool: 'save_comment';
-        readonly arguments: { readonly issueId: string; readonly body: string };
-      };
+      readonly tool: 'save_comment';
+      readonly arguments: { readonly issueId: string; readonly body: string };
     }
+  | {
+      readonly tool: 'save_issue';
+      readonly arguments: { readonly id: string; readonly state: string };
+    };
+
+/** What `report_linear_post` answers the agent. `next` is the Linear writes left to make, in order. */
+export type ReportedPost =
+  | { readonly ok: true; readonly next: readonly LinearCall[] }
   | {
       /** 10db wrote the comment itself, through the account's Linear server. */
       readonly ok: true;
       readonly written: true;
       readonly commentId: string | null;
+      readonly next?: readonly LinearCall[];
     }
   | {
       /** 10db's write was refused; the update is owed again. */
@@ -150,8 +156,13 @@ export type ReportedPost =
       readonly ok: true;
       readonly written: 'unknown';
       readonly why: string;
+      readonly next?: readonly LinearCall[];
     }
-  | { readonly ok: true; readonly recorded: 'nothing to report' }
+  | {
+      readonly ok: true;
+      readonly recorded: 'nothing to report';
+      readonly next?: readonly LinearCall[];
+    }
   | { readonly ok: true; readonly withheld: string; readonly why: string };
 
 export interface LinearReporter {
@@ -170,14 +181,10 @@ export interface LinearReporter {
    * `report_linear_post`, from a reporter session only: the agent's body for one owed update (or that it has
    * nothing to report). 10db builds the comment and writes it through the account's Linear server when it can
    * sign in to it itself; otherwise it answers the exact `save_comment` arguments, the only comment the session's
-   * guard lets through.
+   * guard lets through. An update that moves the issue's status by default needs the statuses the session read;
+   * 10db picks the move from them and answers the `save_issue` that sets it, the only one the guard lets through.
    */
   reportPost(sessionId: SessionId, input: ReportLinearPostInput): Promise<ReportedPost>;
-  /**
-   * `pick_linear_status`: picks the status an owed update sets from the team's statuses the session read, by
-   * type and position, and allows the session to set that one. The pick is 10db's, not the agent's.
-   */
-  pickStatus(sessionId: SessionId, input: PickLinearStatusInput): PickedLinearStatus;
   /** `upload_linear_picture`: refused, 10db uploads the pictures itself. */
   uploadPicture(sessionId: SessionId, input: UploadLinearPictureInput): Promise<{ ok: true }>;
   /**
@@ -250,7 +257,7 @@ interface Flight {
   taken: ReadonlySet<LinearPostId>;
   /** Rows whose comment the guard let out: recorded before the write, so a retry or a restart never repeats it. */
   readonly written: Set<LinearPostId>;
-  /** The status 10db picked for each owed update (`pick_linear_status`). */
+  /** The status 10db picked for each owed update (`report_linear_post`). */
   readonly picked: Map<LinearPostId, string>;
   /** The status the run set for each owed update: the one its row records. */
   readonly statusSet: Map<LinearPostId, string>;
@@ -795,6 +802,44 @@ export function createLinearReporter(
     return { flight, guard: flight.guard };
   };
 
+  /**
+   * The status an owed update moves the issue to, picked by 10db from what the session read of the issue's
+   * statuses, and allowed for the run's `save_issue`; null when it moves none. An update with a default move
+   * and no steering note needs the statuses, so a session that skips the reads can't skip the move.
+   */
+  const statusMoveOf = (
+    flight: Flight,
+    guard: ReporterRun,
+    post: LinearPostDto,
+    read: LinearIssueStatuses | undefined,
+  ): string | null => {
+    if (guard.noteSteers || statusAimOf(post.event) === null) return null;
+    if (read === undefined) throw new InvalidError(STATUS_NEEDED);
+    const lower = read.current.toLowerCase();
+    const current =
+      read.statuses.find((s) => s.name === read.current) ??
+      read.statuses.find((s) => s.name.toLowerCase() === lower);
+    if (current === undefined)
+      throw new InvalidError(
+        "status.current is not one of status.statuses. Give the issue's status name from get_issue and every status of its team from list_issue_statuses.",
+      );
+    const linked = linearLinkOf(state.db, flight.taskId);
+    // A follow-up's issue is its chain's, so what 10db set there includes every earlier task's rows.
+    const history = [...(linked?.chain ?? [])]
+      .concat(flight.taskId)
+      .flatMap((id) => listLinearPosts(state.db, id));
+    const picked = pickStatusMove({
+      event: post.event,
+      current,
+      statuses: read.statuses,
+      lastSet: lastStatusSet(history),
+    });
+    if (picked === null) return null;
+    guard.pickedStatuses.add(picked.name);
+    flight.picked.set(post.id, picked.name);
+    return picked.name;
+  };
+
   return {
     start() {
       const tasks = new Set(pendingLinearPosts(state.db).map((p) => p.taskId));
@@ -957,6 +1002,11 @@ export function createLinearReporter(
       const nothing = input.nothingToReport === true;
       if (nothing === (input.body !== undefined))
         throw new InvalidError('Give the comment body, or nothingToReport true, and not both.');
+      const issueId = guard.link.issueId;
+      const move = statusMoveOf(flight, guard, post, input.status);
+      const setStatus: LinearCall[] =
+        move === null ? [] : [{ tool: 'save_issue', arguments: { id: issueId, state: move } }];
+      const withMove = setStatus.length === 0 ? {} : { next: setStatus };
       if (input.body === undefined) {
         state.write((ctx) => {
           recordLinearPosts(ctx, [post.id], {
@@ -967,7 +1017,7 @@ export function createLinearReporter(
           });
         });
         refreshCard(flight.projectId);
-        return { ok: true, recorded: 'nothing to report' };
+        return { ok: true, recorded: 'nothing to report', ...withMove };
       }
       const body = cleanBody(input.body);
       if (body.length < MIN_BODY_CHARS)
@@ -987,7 +1037,6 @@ export function createLinearReporter(
           why: `The body matches ${secret}, so nothing is written for this update.`,
         };
       }
-      const issueId = guard.link.issueId;
       const writer = flight.writer;
       // The pictures never hold the comment back: whatever goes wrong with them, the words still go out.
       let pictures: Awaited<ReturnType<typeof picturesFor>> = { text: '', attachmentUrl: null };
@@ -1005,7 +1054,10 @@ export function createLinearReporter(
       const text = commentText(body, post, pictures.text);
       if (writer === null) {
         guard.comments.set(post.id, { text, written: false });
-        return { ok: true, next: { tool: 'save_comment', arguments: { issueId, body: text } } };
+        return {
+          ok: true,
+          next: [{ tool: 'save_comment', arguments: { issueId, body: text } }, ...setStatus],
+        };
       }
       // 10db's own write. The row is recorded first, so a crash or a retry never writes the comment twice; the
       // id is added when Linear answers. Only a certain refusal reopens the row with a try spent; a write Linear
@@ -1027,7 +1079,7 @@ export function createLinearReporter(
             attachLinearCommentId(ctx, post.id, commentId);
           });
         refreshCard(flight.projectId);
-        return { ok: true, written: true, commentId };
+        return { ok: true, written: true, commentId, ...withMove };
       } catch (error) {
         const why = error instanceof Error ? error.message : String(error);
         if (error instanceof LinearWriteError && error.refused) {
@@ -1063,33 +1115,8 @@ export function createLinearReporter(
           noteLinearPostError(ctx, post.id, why);
         });
         refreshCard(flight.projectId);
-        return { ok: true, written: 'unknown', why };
+        return { ok: true, written: 'unknown', why, ...withMove };
       }
-    },
-
-    pickStatus(sessionId, input) {
-      const { flight, guard } = runOf(sessionId);
-      if (guard.readOnly) throw new ConflictError('A snapshot run sets no status.');
-      if (!flight.taken.has(input.postId))
-        throw new ConflictError('That update was not given to this session.');
-      const post = listLinearPosts(state.db, flight.taskId).find((p) => p.id === input.postId);
-      if (post === undefined) throw new ConflictError('That update is not on this task.');
-      const linked = linearLinkOf(state.db, flight.taskId);
-      // A follow-up's issue is its chain's, so what 10db set there includes every earlier task's rows.
-      const history = [...(linked?.chain ?? [])]
-        .concat(flight.taskId)
-        .flatMap((id) => listLinearPosts(state.db, id));
-      const picked = pickStatusMove({
-        event: post.event,
-        current: input.current,
-        statuses: input.statuses,
-        lastSet: lastStatusSet(history),
-      });
-      if (picked !== null) {
-        guard.pickedStatuses.add(picked.name);
-        flight.picked.set(post.id, picked.name);
-      }
-      return { status: picked?.name ?? null };
     },
 
     uploadPicture() {

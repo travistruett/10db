@@ -92,9 +92,20 @@ export class FakeTaskRefs {
     if (typeof value !== 'object' || value === null) return;
     const record: Record<string, unknown> = { ...value };
     // The reporter's answer to a comment body: the arguments its `save_comment` must carry.
-    const next = record['next'];
+    const next: unknown = record['next'];
+    const comment: unknown = Array.isArray(next)
+      ? next.find(
+          (call: unknown) =>
+            typeof call === 'object' &&
+            call !== null &&
+            'tool' in call &&
+            call.tool === 'save_comment',
+        )
+      : null;
     const args =
-      typeof next === 'object' && next !== null && 'arguments' in next ? next.arguments : null;
+      typeof comment === 'object' && comment !== null && 'arguments' in comment
+        ? comment.arguments
+        : null;
     if (typeof args === 'object' && args !== null) {
       if ('issueId' in args && typeof args.issueId === 'string')
         this.comment.issueId = args.issueId;
