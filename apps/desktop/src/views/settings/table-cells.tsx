@@ -57,7 +57,8 @@ export function PathSummary({ paths }: { readonly paths: readonly string[] }) {
         </Tooltip>
       ))}
       {rest > 0 ? (
-        <HoverCard position="bottom-start" withinPortal>
+        // No popup roles: a paragraph can't carry them, and the list is a hover aid the drawer repeats in full.
+        <HoverCard position="bottom-start" withinPortal withRoles={false}>
           <HoverCard.Target>
             <Text size="xs" c="dimmed" style={{ cursor: 'default' }}>
               +{rest} more
