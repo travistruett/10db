@@ -135,4 +135,9 @@ describe('classifyDefinitionChange', () => {
     );
     expect(definitionReason(lowered, true)).toBe('bar lowered (`minimum_rate=0.5`)');
   });
+
+  it('reads a long line a lane wrote in bounded time', () => {
+    const long = '_threshold'.repeat(3200);
+    expect(kinds('evals/gate.py', [`-${long} = x`, `+${long} = y`])).toEqual([Kind.Unclassified]);
+  });
 });
