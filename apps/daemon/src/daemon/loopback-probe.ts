@@ -1,3 +1,5 @@
+import { outboundFetch } from '../outbound';
+
 /** Whether something answers HTTP at a loopback origin now. */
 export type AddressProbe = (url: string, signal?: AbortSignal) => Promise<boolean>;
 
@@ -25,7 +27,10 @@ function probedHost(url: string): boolean {
  * followed, so the probe never leaves the address it was given, and an address on any host but
  * `localhost`, `127.0.0.1` or `[::1]` is never asked.
  */
-export function loopbackProbe(ms: number = PROBE_MS, request: typeof fetch = fetch): AddressProbe {
+export function loopbackProbe(
+  ms: number = PROBE_MS,
+  request: typeof fetch = outboundFetch,
+): AddressProbe {
   return async (url, signal) => {
     if (!probedHost(url)) return false;
     const bound = AbortSignal.timeout(ms);

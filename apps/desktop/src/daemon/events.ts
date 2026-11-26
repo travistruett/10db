@@ -49,6 +49,7 @@ import { shapeKeys } from './shape-queries';
 import { linearPostKeys } from './linear-queries';
 import { designCheckKeys, screenKeys } from './screen-queries';
 import { skipKeys } from './skip-queries';
+import { evalMarkerKeys } from './evals-queries';
 import { watchpointKeys } from './watchpoint-queries';
 import { statusKeys } from './status-queries';
 import {
@@ -159,7 +160,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   claim: [...WORK, CANDIDATES],
   handoff: WORK,
   // A run's watchpoint reading is an evidence row, so its For You section follows it.
-  evidence: [...WORK, watchpointKeys.hits, watchpointKeys.allStats],
+  // A covered suite's marker is one too.
+  evidence: [...WORK, watchpointKeys.hits, watchpointKeys.allStats, evalMarkerKeys.all],
   // An account pause moves workstreams, which send their own events.
   account: [accountKeys.all, modelKeys.all],
   inbox: [
@@ -222,6 +224,16 @@ export function eventStreamUrl(conn: DaemonConnection, after: number, ticket: st
   url.searchParams.set('after', String(after));
   url.searchParams.set('ticket', ticket);
   return url.toString();
+}
+
+const eventListeners = new Set<(event: DaemonEvent) => void>();
+
+/** Hears every event the window's one stream receives (a dialog waiting on one thing), without a stream of its own. */
+export function subscribeToEvents(listener: (event: DaemonEvent) => void): () => void {
+  eventListeners.add(listener);
+  return () => {
+    eventListeners.delete(listener);
+  };
 }
 
 /**
@@ -289,6 +301,7 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       // One arrives per tool call: a pass lane's is written into its page, never refetched.
       if (event.type === EventType.SessionActivity) writePassActivity(queryClient, event);
       listener.current?.(event);
+      for (const heard of eventListeners) heard(event);
     }
 
     function retry(): void {

@@ -163,11 +163,15 @@ export function takeLinearPosts(
   emitChanged(ctx, rows);
 }
 
-/** Settles pending rows as written or withheld; a row no longer pending is skipped. */
+/**
+ * Settles pending rows as written or withheld; a row no longer pending is skipped. `dismissed` marks them seen at
+ * once, for a row withheld that asks nothing of the builder.
+ */
 export function recordLinearPosts(
   ctx: WriteContext,
   ids: readonly LinearPostId[],
   outcome: Exclude<ReportLinearPostInput['outcome'], { state: 'failed' }>,
+  opts: { readonly dismissed?: boolean } = {},
 ): void {
   const rows = pendingByIds(ctx, ids);
   if (rows.length === 0) return;
@@ -182,7 +186,13 @@ export function recordLinearPosts(
       : { state: LinearPostState.Withheld, withheldPattern: outcome.pattern };
   ctx.tx
     .update(schema.linearPosts)
-    .set({ ...set, dueAt: null, lastError: null, recordedAt: ctx.now })
+    .set({
+      ...set,
+      dueAt: null,
+      lastError: null,
+      recordedAt: ctx.now,
+      ...(opts.dismissed === true ? { dismissedAt: ctx.now } : {}),
+    })
     .where(
       inArray(
         schema.linearPosts.id,

@@ -17,7 +17,13 @@ const KIND_WORDS: Readonly<Record<EvalDefinitionChangeKind, string>> = {
   [EvalDefinitionChangeKind.Unclassified]: 'definition changed, unclassified',
 };
 
-const BAR_NAME = String.raw`\w*?(?:minimum_rate|min_rate|threshold)\w*`;
+/**
+ * A bar's name: bounded on each side, since a lane writes these lines and an unbounded `\w*?` before the
+ * alternation backtracks over every start in a long identifier.
+ */
+const BAR_NAME = String.raw`\w{0,40}?(?:minimum_rate|min_rate|threshold)\w{0,40}`;
+/** Past this a line is not read for bars: no gate table writes one, and it bounds the regex's work. */
+const MAX_BAR_LINE = 500;
 const BAR_VALUE = String.raw`-?(?:\d+(?:\.\d*)?|\.\d+)`;
 /** A bar's name (with an optional type annotation) and number, read everywhere on a line. */
 const barPattern = (): RegExp =>
@@ -70,6 +76,7 @@ interface Bar {
 }
 
 function barsOf(line: string): Bar[] {
+  if (line.length > MAX_BAR_LINE) return [];
   return [...line.matchAll(barPattern())].flatMap((m) =>
     m[1] === undefined || m[2] === undefined
       ? []
@@ -77,7 +84,8 @@ function barsOf(line: string): Bar[] {
   );
 }
 
-const masked = (line: string): string => line.replace(barPattern(), '$1=#');
+const masked = (line: string): string =>
+  line.length > MAX_BAR_LINE ? line : line.replace(barPattern(), '$1=#');
 
 /**
  * A line that lowered a bar: each removed bar line is paired with an added one (the same text with its numbers

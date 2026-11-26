@@ -49,5 +49,5 @@ Decision Models (`decision-models-view.tsx`, Settings › Models › Decision Mo
 ## Remote Access and Devices
 
 - `remote-access-section.tsx` draws `GET /sharing`: no steps means no Tailscale CLI; else the checklist, or once
-  Ready the address. It polls every 10 s and follows `sharing.changed`. Get Certificate and Share run only on a click.
-- `devices-section.tsx` lists `GET /devices` and revokes through a confirm. The e2e daemon sets `TENDB_TAILSCALE=off`.
+  Ready the address. It polls every 10 s and follows `sharing.changed`. Get Certificate and Share run on a click.
+- `devices-section.tsx` lists `GET /devices`, revokes through a confirm and opens Pair a Device (`pair-device-modal.tsx`).

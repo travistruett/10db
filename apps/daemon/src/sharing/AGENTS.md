@@ -4,7 +4,7 @@ Shares this Mac's daemon on the builder's tailnet through `tailscale serve`.
 
 - `tailscale-cli.ts` is the only module that runs the Tailscale CLI. `findTailscaleCli` reads no environment;
   `TENDB_TAILSCALE=off` is parsed in `daemonOptionsFromEnv` (`tailscaleOff`) and `start.ts` then passes
-  `cli: () => null`, so the e2e daemon sees no Tailscale on a Mac that has one. `createTailscaleRun` uses
+  `cli: () => null`, so the e2e daemon sees no Tailscale on a Mac that has one. `TENDB_TAILSCALE_CLI=<absolute path>` (`tailscaleCli`) names the CLI to run instead of the search (`start.ts` composes `tailscaleOff`, then `tailscaleCli`, then `findTailscaleCli`). `createTailscaleRun` uses
   `execFile` with no shell, a 10 s default timeout, 1 MiB of output and an environment of `PATH` and `HOME` only; it
   never rejects. Lanes can't run the CLI, so nothing here is tested against a real one: the zod schema reads only
   the fields 10db needs, and an unreadable answer throws `TailscaleUnreadableError`, naming the field, never a value.
