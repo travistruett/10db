@@ -341,6 +341,7 @@ import {
   createBrowserHost,
   createBrowserLaunches,
   createPlaywrightCamera,
+  createSignInReporter,
   launchChromium,
   refusedCamera,
   MISSED_AFTER_MS,
@@ -1627,6 +1628,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           state,
           inbox,
           logger: logger.child({ component: 'slack-pictures' }),
+          skipped: (taskId) => pictures?.skipped(taskId) ?? null,
           channelOf: (projectId) => {
             const sharing = readSlackSharing(state.db, projectId);
             // The channel belongs to the workspace it was picked in; another binding now leaves it unused.
@@ -2643,6 +2645,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     devUi: opts.devUiOrigin ? { origin: opts.devUiOrigin, token: devUiToken(opts.dataDir) } : null,
     state,
     bus,
+    signInReporter: createSignInReporter({ state, inbox }),
     camera: pictureCamera,
     daemonPort: listening.promise,
     prepareBrowser,
@@ -2854,6 +2857,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     conversations: reporterConversations(state),
     signIns: linearSignIns,
     inbox,
+    picturesSkipped: (taskId) => pictures.skipped(taskId),
   });
   lateLinearReporter = linearReporter;
   /** Each service's own next step once it works for a project. Linear: the project reports to it. */

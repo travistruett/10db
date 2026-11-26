@@ -47,6 +47,7 @@ import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { ShapeToolRequest, ShapeVerdict } from '../sessions';
 import { reporterBlockedBy } from './reporter-events';
+import { picturesFor } from './reporter-pictures';
 import { refreshReporterCard } from './reporter-inbox';
 import { LinearWriteError, type LinearCommentWriter } from './reporter-writer';
 import {
@@ -198,6 +199,10 @@ export interface LinearReporterDeps {
   readonly conversations: { reporterOf(taskId: TaskId, projectId: ProjectId): ConversationId };
   readonly signIns: { list(): Promise<LinearSignInsDto> };
   readonly inbox: InboxService;
+  /** Why a task that names a page has no pictures, or null; said once in its `ended` comment. */
+  readonly picturesSkipped?: (taskId: TaskId) => string | null;
+  /** Sends a picture to Linear's storage; the platform's `fetch` when absent. */
+  readonly send?: typeof fetch;
 }
 
 /** One run, from its trigger to its settle. */
@@ -835,9 +840,22 @@ export function createLinearReporter(
           why: `The body matches ${secret}, so nothing is written for this update.`,
         };
       }
-      const text = commentText(body, post);
       const issueId = guard.link.issueId;
       const writer = flight.writer;
+      // The pictures never hold the comment back: whatever goes wrong with them, the words still go out.
+      let pictures: Awaited<ReturnType<typeof picturesFor>> = { text: '', attachmentUrl: null };
+      try {
+        pictures = await picturesFor({
+          db: state.db,
+          post,
+          uploader: writer,
+          skipped: deps.picturesSkipped ?? (() => null),
+          send: deps.send ?? fetch,
+        });
+      } catch (error) {
+        log.warn({ err: error, taskId: flight.taskId }, 'the pictures for a Linear comment failed');
+      }
+      const text = commentText(body, post, pictures.text);
       if (writer === null) {
         guard.comments.set(post.id, { text, written: false });
         return { ok: true, next: { tool: 'save_comment', arguments: { issueId, body: text } } };
@@ -850,7 +868,7 @@ export function createLinearReporter(
           state: 'recorded',
           commentIds: [],
           statusSet: null,
-          attachmentUrl: null,
+          attachmentUrl: pictures.attachmentUrl,
         });
       });
       flight.written.add(post.id);

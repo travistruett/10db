@@ -60,11 +60,15 @@ export function cleanBody(body: string): string {
 /** Text from the run's facts, as the agent is shown it: the same removals, line ends untouched. */
 export const plainFact = (text: string): string => plainWords(text);
 
-/** The whole comment: the cleaned body, a blank line, the footer. */
+/**
+ * The whole comment: the cleaned body, 10db's own part when it has one (pictures, or why there are none; it is
+ * built by 10db, so it is not cleaned), a blank line, the footer.
+ */
 export const commentText = (
   body: string,
   post: { readonly event: string; readonly attempt: number },
-): string => `${cleanBody(body)}\n\n${footerOf(post)}`;
+  own = '',
+): string => `${cleanBody(body)}\n\n${own === '' ? '' : `${own}\n\n`}${footerOf(post)}`;
 
 /** The line an agent ends with when Linear answered that it is not signed in: its rows are held, not failed. */
 export const SIGNED_OUT_LINE = 'Linear: not signed in';

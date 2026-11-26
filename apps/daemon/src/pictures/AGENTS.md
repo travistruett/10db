@@ -49,9 +49,17 @@
   are refused to screens. `DaemonOptions.pictures` is `{ kind: 'pinned' }` from the entry point; tests give a
   camera (`test/fake-camera.ts`); absent, the daemon takes no pictures and fetches nothing. No picture is
   uploaded or sent to a model, except a design review's and `check_design`'s (to the session's model), a PR's (uploaded
-  with `prPictures`) and a `lane` screen taken by a lane's own browser, which goes to that
+  with `prPictures`), a finished task's pair in its Linear `ended` comment (`linear/reporter-pictures.ts`) and a `lane` screen taken by a lane's own browser, which goes to that
   session's model as an image block when it fits the account's limits
   (`decisions/2026-11-24-lane-screenshots-go-to-the-lanes-model.md`).
+- A failed dev login reaches the builder (`sign-in-record.ts`, `createSignInReporter`, wired in `daemon/start.ts`;
+  `decisions/2026-11-25-the-daemon-uploads-a-tasks-pictures-to-linear-and-says-why-it-has-none.md`): `SignInResult`
+  carries the command, its exit code and `loginOutputTail` (the last eight lines with any line holding the app's
+  address or a secret pattern removed), and `runSignIn` records it per project (`pictures-sign-in.<projectId>`) and
+  raises one card, "Pictures Cannot Sign In", withdrawn with the record when a sign-in succeeds or the app address or
+  dev login command changes. `Pictures.skipped(taskId)` is the one place that says why a task that names a page has
+  no pictures (a separate copy, the recorded sign-in failure, a refused browser); the Linear `ended` comment and the
+  Slack post read it.
 - The broken preview (Workbench spec §8.2, §8.4,
   `decisions/2026-11-10-a-broken-preview-is-read-from-the-page-load-that-takes-the-picture.md`): each capture of
   a pass page judges the load of its page route (`pageRoute`, its viewports and themes as one, `routeLoad`) by

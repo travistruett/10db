@@ -7,6 +7,7 @@ import {
 import { z } from 'zod';
 import type { YourSessionServer } from '../sessions';
 import { isLinearServer } from './lane-reads';
+import { parsePreparedPicture, type PictureUploader } from './reporter-pictures';
 
 // 10db's own write of a reporter comment, through the account's Linear server. It needs a sign-in 10db can
 // present itself: a Linear entry of the builder's whose headers carry an Authorization. An account whose Linear is
@@ -15,6 +16,8 @@ import { isLinearServer } from './lane-reads';
 
 /** Linear's tool that writes a comment. */
 const SAVE_COMMENT = 'save_comment';
+/** Linear's tool that signs an upload for a file a comment shows. */
+const PREPARE_FILE_UPLOAD = 'prepare_file_upload';
 /** How long Linear has to answer one write. */
 const WRITE_TIMEOUT_MS = 30_000;
 
@@ -46,7 +49,7 @@ const signInRefused = (error: unknown): boolean =>
 /** What Linear answers a written comment with: its id, which 10db records on the row. */
 const SavedComment = z.object({ id: z.string().min(1) });
 
-export interface LinearCommentWriter {
+export interface LinearCommentWriter extends PictureUploader {
   /** Writes one comment on a Linear issue (by Linear's own id); answers the comment's id, or null when Linear gave none. */
   postComment(input: { readonly issueId: string; readonly body: string }): Promise<string | null>;
 }
@@ -78,49 +81,56 @@ export function createLinearCommentWriter(
   },
   timeoutMs: number = WRITE_TIMEOUT_MS,
 ): LinearCommentWriter {
+  /** One short connection, one tool call: the text Linear answered, or a `LinearWriteError` for how it did not. */
+  const call = async (name: string, args: Record<string, string | number>): Promise<string> => {
+    const client = new Client({ name: '10db-linear-reporter', version: '0.0.0' });
+    try {
+      try {
+        await client.connect(
+          new StreamableHTTPClientTransport(new URL(server.url), {
+            requestInit: { headers: { ...server.headers } },
+          }),
+        );
+      } catch (error) {
+        throw new LinearWriteError(
+          `Could not reach Linear: ${messageOf(error)}`,
+          true,
+          signInRefused(error),
+        );
+      }
+      let result: Awaited<ReturnType<Client['callTool']>>;
+      try {
+        result = await client.callTool({ name, arguments: args }, undefined, {
+          timeout: timeoutMs,
+        });
+      } catch (error) {
+        // A refused sign-in is an answer before the write ran, so Linear certainly wrote nothing.
+        if (signInRefused(error)) throw new LinearWriteError(messageOf(error), true, true);
+        throw new LinearWriteError(messageOf(error), false);
+      }
+      const text = (Array.isArray(result.content) ? result.content : [])
+        .map((c: { type?: string; text?: string }) => (c.type === 'text' ? (c.text ?? '') : ''))
+        .join('');
+      if (result.isError === true)
+        throw new LinearWriteError(text.slice(0, 500) || `Linear refused ${name}`, true);
+      return text;
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  };
   return {
     async postComment({ issueId, body }) {
-      const client = new Client({ name: '10db-linear-reporter', version: '0.0.0' });
+      const text = await call(SAVE_COMMENT, { issueId, body });
       try {
-        try {
-          await client.connect(
-            new StreamableHTTPClientTransport(new URL(server.url), {
-              requestInit: { headers: { ...server.headers } },
-            }),
-          );
-        } catch (error) {
-          throw new LinearWriteError(
-            `Could not reach Linear: ${messageOf(error)}`,
-            true,
-            signInRefused(error),
-          );
-        }
-        let result: Awaited<ReturnType<Client['callTool']>>;
-        try {
-          result = await client.callTool(
-            { name: SAVE_COMMENT, arguments: { issueId, body } },
-            undefined,
-            { timeout: timeoutMs },
-          );
-        } catch (error) {
-          // A refused sign-in is an answer before the write ran, so Linear certainly wrote nothing.
-          if (signInRefused(error)) throw new LinearWriteError(messageOf(error), true, true);
-          throw new LinearWriteError(messageOf(error), false);
-        }
-        const text = (Array.isArray(result.content) ? result.content : [])
-          .map((c: { type?: string; text?: string }) => (c.type === 'text' ? (c.text ?? '') : ''))
-          .join('');
-        if (result.isError === true)
-          throw new LinearWriteError(text.slice(0, 500) || 'Linear refused the comment', true);
-        try {
-          const saved = SavedComment.safeParse(JSON.parse(text));
-          return saved.success ? saved.data.id : null;
-        } catch {
-          return null;
-        }
-      } finally {
-        await client.close().catch(() => undefined);
+        const saved = SavedComment.safeParse(JSON.parse(text));
+        return saved.success ? saved.data.id : null;
+      } catch {
+        return null;
       }
+    },
+    async preparePicture({ filename, size }) {
+      const text = await call(PREPARE_FILE_UPLOAD, { filename, contentType: 'image/png', size });
+      return parsePreparedPicture(text, filename);
     },
   };
 }

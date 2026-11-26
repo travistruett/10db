@@ -2,6 +2,7 @@ export type { BrowserStatus, DrawInput, PageCamera, ShootInput, Shot } from './c
 export { refusedCamera, ShotOutcome } from './camera';
 export type { Pictures } from './pictures';
 export { MISSED_AFTER_MS, startPictures } from './pictures';
+export { createSignInReporter } from './sign-in-record';
 export {
   BROWSER_CLOSE_MS,
   BROWSER_IDLE_MS,

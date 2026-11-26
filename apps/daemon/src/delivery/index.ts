@@ -49,6 +49,7 @@ export {
   type PassPullRequests,
 } from './pass-pr';
 export { createSlackPicturePost, type SlackPicturePost } from './slack-picture-post';
+export { picturePlan } from './pr-pictures';
 export { createKeptWorkGate, subscribeKeptWorkLanding } from './kept-work-start';
 export { answerPassMoveCard, resumePassSettles, subscribePassSettles } from './pass-settle';
 export { createFailedRestarts } from './restart';

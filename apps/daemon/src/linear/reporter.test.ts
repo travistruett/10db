@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import {
   AccountKind,
@@ -9,6 +12,7 @@ import {
   LinearPostState,
   LinearVia,
   Provider,
+  ScreenKind,
   type LinearPostId,
   type ProjectDto,
   type TaskDto,
@@ -18,6 +22,7 @@ import {
   enqueueLinearPost,
   findOpenByFoldKey,
   insertTask,
+  insertTaskScreen,
   insertWorkstream,
   listLinearPosts,
   seedProject,
@@ -82,11 +87,20 @@ let linearHeaders: Record<string, string> | null = null;
 /** The comments 10db wrote through its own writer, and the refusal its next write gets. */
 let written: { issueId: string; body: string }[] = [];
 let writeError: { message: string; refused: boolean; signedOut?: boolean } | null = null;
+/** The pictures 10db asked Linear to prepare, and the files it sent to the signed address. */
+let prepared: { filename: string; size: number }[] = [];
+let sent: { url: string; method: string | undefined }[] = [];
+/** Why the pictures service says the task has none. */
+let skippedReason: string | null = null;
 let bus: EventBus;
 /** The world's Inbox, wired as `daemon/start.ts` wires it: a Retry on the reporter's card wakes the reporter. */
 let inbox: InboxService;
 
 const BODY = 'The run started on this task.';
+
+/** An upload address as Linear signs it. */
+const SIGNED_UPLOAD =
+  'https://storage.googleapis.com/linear-uploads-c4/a/b?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=linear-server%40linear-1.iam.gserviceaccount.com%2F20261125%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Signature=ab';
 
 /** Hands 10db the body, writes the comment 10db built, and names its id in the closing message. */
 function recordingScript(postId: LinearPostId, closing = `${postId}: comment-1`): FakeStep[] {
@@ -130,6 +144,14 @@ function makeReporter(): LinearReporter {
         }),
     },
     inbox,
+    picturesSkipped: () => skippedReason,
+    send: (url, init) => {
+      sent.push({
+        url: typeof url === 'string' ? url : url instanceof URL ? url.href : url.url,
+        method: init?.method,
+      });
+      return Promise.resolve(new Response(null, { status: 200 }));
+    },
   });
   engine.register(
     ConversationOwnerKind.Reporter,
@@ -155,6 +177,15 @@ function makeReporter(): LinearReporter {
           }),
       },
       commentWriter: () => ({
+        preparePicture: ({ filename, size }) => {
+          prepared.push({ filename, size });
+          return Promise.resolve({
+            url: SIGNED_UPLOAD,
+            headers: { 'Content-Type': 'image/png' },
+            markdown: `![${filename}](https://uploads.linear.app/${filename})`,
+            assetUrl: `https://uploads.linear.app/${filename}`,
+          });
+        },
         postComment: (comment) => {
           written.push(comment);
           return writeError === null
@@ -211,6 +242,9 @@ beforeEach(async () => {
   linearHeaders = null;
   written = [];
   writeError = null;
+  prepared = [];
+  sent = [];
+  skippedReason = null;
   clock = new ManualClock();
   // The store writes on the world's clock, as the daemon's does.
   ({ store, close: closeStore } = createTestStore(() => clock.now()));
@@ -518,6 +552,74 @@ describe('the Linear reporter', () => {
     expect(written[0]?.body).not.toContain(id);
     expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(1);
     expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(0);
+  });
+
+  /** A kept picture of the task's home page, its file written as the pictures service writes one. */
+  const keepPicture = (kind: ScreenKind, content: string): void => {
+    const storedPath = join(repo.path, `${kind}.png`);
+    writeFileSync(storedPath, content);
+    store.write((ctx) =>
+      insertTaskScreen(ctx, {
+        taskId: task.id,
+        turnId: null,
+        kind,
+        route: '/',
+        viewport: { width: 1440, height: 900 },
+        theme: 'default',
+        sha256: createHash('sha256').update(content).digest('hex'),
+        size: content.length,
+        width: 1440,
+        height: 900,
+        storedPath,
+        keptSha: null,
+      }),
+    );
+  };
+
+  /** Hands 10db a body for the one owed row and lets its own write finish. */
+  const endedComment = async (id: LinearPostId): Promise<string> => {
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: id, body: 'The run ended and its change landed.' },
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    return written[0]?.body ?? '';
+  };
+
+  it('puts a finished task’s before and after pictures in its ended comment, uploaded by 10db, and names no pull request', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    keepPicture(ScreenKind.Before, 'before-bytes');
+    keepPicture(ScreenKind.After, 'after-bytes');
+    const body = await endedComment(oweOne('ended:1:0', LinearEventKind.Ended));
+    expect(prepared.map((p) => p.filename)).toEqual(['1-home-before.png', '1-home-after.png']);
+    expect(prepared.map((p) => p.size)).toEqual(['before-bytes'.length, 'after-bytes'.length]);
+    expect(sent).toEqual([
+      { url: SIGNED_UPLOAD, method: 'PUT' },
+      { url: SIGNED_UPLOAD, method: 'PUT' },
+    ]);
+    expect(body).toContain('![1-home-before.png](https://uploads.linear.app/1-home-before.png)');
+    expect(body).toContain('![1-home-after.png](https://uploads.linear.app/1-home-after.png)');
+    expect(body).not.toMatch(/pull request/i);
+    expect(rows()[0]?.attachmentUrl).toBe('https://uploads.linear.app/1-home-before.png');
+  });
+
+  it('says once, with the reason, that a finished task has no pictures, and never names a pull request', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    skippedReason = 'The dev login command failed (exit 1)';
+    const body = await endedComment(oweOne('ended:1:0', LinearEventKind.Ended));
+    expect(body).toContain(
+      'No before and after pictures were taken. The dev login command failed (exit 1).',
+    );
+    expect(body.match(/dev login command failed/g)).toHaveLength(1);
+    expect(body).not.toMatch(/pull request/i);
+    expect(prepared).toEqual([]);
   });
 
   it('owes an update again when its own write is refused, and does not hold it for a sign-in', async () => {

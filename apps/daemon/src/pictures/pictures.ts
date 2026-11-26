@@ -91,6 +91,7 @@ import {
 } from './picture-routes';
 import { judgePreview, routeLoad, type RouteShot } from './preview-marks';
 import { signIn, sweepLoginLogs, type SignInDeps, type SignInProject } from './sign-in';
+import { signInRecordOf, type SignInReporter } from './sign-in-record';
 import { forgetStorageState, readStorageState, type StorageState } from './storage-state';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §10, §12: the pictures of a
@@ -157,6 +158,8 @@ export interface PicturesDeps {
   readonly git: Pick<Git, 'head'>;
   /** The dev login's runner and environment; the camera is this service's own. */
   readonly signIn: Omit<SignInDeps, 'camera'>;
+  /** Where a failed or successful sign-in is told: the project's card and the record its updates read. */
+  readonly signInReporter: SignInReporter;
   readonly dataDir: string;
   readonly clock: Clock;
   readonly logger: Logger;
@@ -199,6 +202,11 @@ export interface Pictures {
   awaitBefore(task: TaskDto, signal: AbortSignal): Promise<void>;
   /** Settings › App Preview's status line for a project. */
   status(projectId: ProjectId): PicturesStatusDto;
+  /**
+   * Why a task that names a page has no pictures (a sentence with no full stop), or null when nothing says they
+   * were skipped: the task names no page, or nothing kept them from being taken.
+   */
+  skipped(taskId: TaskId): string | null;
   /**
    * Shots of the routes as they are now, for a design check: the first viewport and theme of the
    * project's matrix, signed in as a capture is, one at a time with every other capture. Nothing is
@@ -462,6 +470,13 @@ export function startPictures(deps: PicturesDeps): Pictures {
       problem: result.ok ? null : result.problem,
       at: deps.clock.now().toISOString(),
     });
+    const at = deps.clock.now().toISOString();
+    try {
+      if (result.ok) deps.signInReporter.succeeded(project.id);
+      else deps.signInReporter.failed(project.id, result.problem, result.failure, at);
+    } catch (error) {
+      log.warn({ projectId: project.id, err: errorText(error) }, 'a picture sign-in not recorded');
+    }
     if (result.ok) log.info({ projectId: project.id }, 'signed the browser for pictures in');
     else
       log.warn(
@@ -673,9 +688,15 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const loginWas = devLogins.get(projectId) ?? null;
     appUrls.set(projectId, project.appUrl);
     devLogins.set(projectId, project.devLoginCommand);
-    // A sign-in kept for another address or another dev login is not this one's.
-    if (was !== project.appUrl || loginWas !== project.devLoginCommand)
+    // A sign-in kept for another address or another dev login is not this one's, and neither is its failure.
+    if (was !== project.appUrl || loginWas !== project.devLoginCommand) {
       forgetStorageState(deps.dataDir, projectId);
+      try {
+        deps.signInReporter.succeeded(projectId);
+      } catch (error) {
+        log.warn({ projectId, err: errorText(error) }, 'a picture sign-in failure not withdrawn');
+      }
+    }
     if (was === project.appUrl) return;
     if (was !== null) apply({ kind: 'app_changed', projectId });
     if (project.appUrl !== null) {
@@ -973,6 +994,21 @@ export function startPictures(deps: PicturesDeps): Pictures {
         signal.addEventListener('abort', finish, { once: true });
         beforeWaiters.set(task.id, [...(beforeWaiters.get(task.id) ?? []), finish]);
       });
+    },
+    skipped(taskId) {
+      const task = getTask(db, taskId);
+      const project = getProject(db, task.projectId);
+      if (project.appUrl === null) return null;
+      const reported = reportedFor(ScreenKind.After, task, null, task.passId != null);
+      if (pictureRoutes(project, task, reported).length === 0) return null;
+      if (!takesPictures(project, task, reported, inLocalCopy(task)))
+        return 'The task ran in a separate copy of the project, and 10db takes pictures only of tasks in Your folder, in a local copy or on a page of a pass';
+      const failed = signInRecordOf(db, project.id);
+      if (failed !== null) return failed.problem;
+      const browser = deps.camera.status();
+      return browser.state === BrowserState.Refused
+        ? `The pictures browser is not available (${browser.problem})`
+        : null;
     },
     status(projectId) {
       const { appUrl } = getProject(db, projectId);
