@@ -17,6 +17,7 @@ import {
 } from '@10db/contracts';
 import type { GateResult, GateRunner } from '../verify';
 import type { PageCamera } from './camera';
+import { loginOutputTail } from './sign-in-output';
 import { browserDir, writeStorageState, type StorageState } from './storage-state';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §10, §13: signing the
@@ -78,9 +79,30 @@ export interface SignInDeps {
   readonly checkouts: () => readonly string[];
 }
 
+/** Where a sign-in stopped: before the command ran, in the command, or in the browser opening its address. */
+export const SignInStep = { Setup: 'setup', Command: 'command', Browser: 'browser' } as const;
+export type SignInStep = (typeof SignInStep)[keyof typeof SignInStep];
+
 export type SignInResult =
   | { readonly ok: true; readonly state: StorageState }
-  | { readonly ok: false; readonly problem: string };
+  | {
+      readonly ok: false;
+      readonly problem: string;
+      readonly step: SignInStep;
+      /** The command's exit code; null when it did not run to an end. */
+      readonly exitCode: number | null;
+      /** The last lines the command printed, masked; empty when it printed none. */
+      readonly output: string;
+    };
+
+const failed = (
+  step: SignInStep,
+  problem: string,
+  run: { readonly exitCode: number | null; readonly output: string } = {
+    exitCode: null,
+    output: '',
+  },
+): SignInResult => ({ ok: false, problem, step, ...run });
 
 const NEEDS_DOCKER = 'The dev login needs Docker: turn on Allow Docker in Settings › Sandbox';
 
@@ -104,15 +126,16 @@ export async function signIn(
   signal: AbortSignal,
 ): Promise<SignInResult> {
   const { appUrl, devLoginCommand } = project;
-  if (appUrl === null) return { ok: false, problem: 'The project has no app address' };
+  if (appUrl === null) return failed(SignInStep.Setup, 'The project has no app address');
   if (devLoginCommand === null)
-    return { ok: false, problem: 'The project has no dev login command' };
+    return failed(SignInStep.Setup, 'The project has no dev login command');
   const dir = browserDir(deps.dataDir, project.id);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const logPath = join(dir, `login-${String(deps.now())}.log`);
   // Made before the command runs, so the runner's write keeps this mode.
   closeSync(openSync(logPath, 'wx', 0o600));
   let url: string | null;
+  let printed: string;
   try {
     const result = await deps.gate.run({
       project: {
@@ -129,22 +152,31 @@ export async function signIn(
       signal,
     });
     const problem = devLoginProblem(result);
-    if (problem !== null) return { ok: false, problem };
-    url = parseLoginUrl(appUrl, readFileSync(logPath, 'utf8'));
+    if (problem !== null)
+      return failed(SignInStep.Command, problem, {
+        exitCode: result.timedOut || result.aborted ? null : result.exitCode,
+        output: loginOutputTail(result.tail),
+      });
+    printed = readFileSync(logPath, 'utf8');
+    url = parseLoginUrl(appUrl, printed);
   } finally {
     rmSync(logPath, { force: true });
   }
   if (url === null)
-    return { ok: false, problem: `The dev login command printed no address on ${appUrl}` };
+    return failed(SignInStep.Command, `The dev login command printed no address on ${appUrl}`, {
+      exitCode: 0,
+      output: loginOutputTail(printed),
+    });
   let state: StorageState;
   try {
     state = await deps.camera.signIn({ appUrl, url, signal });
   } catch {
     // The camera's words may carry the address, and with it the token: none of them is kept.
-    return {
-      ok: false,
-      problem: 'The browser could not sign in at the address the dev login printed',
-    };
+    return failed(
+      SignInStep.Browser,
+      'The browser could not sign in at the address the dev login printed',
+      { exitCode: 0, output: '' },
+    );
   }
   writeStorageState(deps.dataDir, project.id, state);
   return { ok: true, state };

@@ -265,6 +265,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     taskDesignCheck: track('taskDesignCheck'),
     designCheckPicture: track('designCheckPicture'),
     picturesStatus: track('picturesStatus'),
+    checkSignIn: track('checkSignIn'),
     restartPreview: track('restartPreview'),
     startShape: track('startShape'),
     shapeMeasures: track('shapeMeasures'),

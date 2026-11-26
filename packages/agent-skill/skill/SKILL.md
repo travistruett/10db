@@ -157,6 +157,13 @@ When the builder asks you to check a project, or after one is added or changed, 
 - **hazards**: assess them as below.
 - **dependencies**: each task's `dependsOn` names the tasks that must finish first; a chain reads backward
   from the last task.
+- **dev login** (Settings › App Preview; `project` does not print it): the command that signs 10db's picture
+  browser in to the app. It must work by itself every time: create its fictional user if that user is missing,
+  run only against the dev database, be safe to repeat, and print one sign-in URL or path. It never signs in as a
+  user the project's tests or e2e cleanup delete, and never touches a database that is not the dev one. When you
+  write or review such a command in the repo, hold it to that. The builder's Check Sign-In button runs it and shows
+  the page it signed in to or its error, and 10db checks it again when it changes, at start and once a day, with
+  one Inbox card while it fails.
 
 Report each value with what you expected and say which differ. Never change a setting from here: hazards are the only
 thing this skill adds to, and the builder changes the rest in Settings.

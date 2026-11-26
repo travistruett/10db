@@ -16,6 +16,7 @@ import {
   ProjectId,
   ScreenKind,
   ScreenTheme,
+  SignInCheckState,
   TaskId,
   TaskMessageAuthor,
   TaskStatus,
@@ -29,6 +30,7 @@ import {
   type PicturesStatusDto,
   type ProjectDto,
   type ScreenViewport,
+  type SignInCheckDto,
   type TaskDto,
   type TaskScreenDto,
   type TaskScreenId,
@@ -90,7 +92,16 @@ import {
   turnChangedSomething,
 } from './picture-routes';
 import { judgePreview, routeLoad, type RouteShot } from './preview-marks';
-import { signIn, sweepLoginLogs, type SignInDeps, type SignInProject } from './sign-in';
+import {
+  signIn,
+  SignInStep,
+  sweepLoginLogs,
+  type SignInDeps,
+  type SignInProject,
+  type SignInResult,
+} from './sign-in';
+import { firstRoutedPage, runSignInCheck, uncheckedReport } from './sign-in-check';
+import { startSignInSchedule, type SignInSchedule } from './sign-in-schedule';
 import { forgetStorageState, readStorageState, type StorageState } from './storage-state';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §10, §12: the pictures of a
@@ -143,6 +154,16 @@ export interface ShootNowInput {
 export type MockupDrawn =
   { readonly sha256: string; readonly path: string } | { readonly missing: string };
 
+/** What a project's dev login came to, for its one Inbox card. */
+export interface SignInReport {
+  readonly projectId: ProjectId;
+  /** Why it did not sign the browser in; null when it did. */
+  readonly problem: string | null;
+  readonly exitCode: number | null;
+  /** The command's last lines, masked. */
+  readonly output: string;
+}
+
 export interface PicturesDeps {
   readonly state: StateStore;
   readonly bus: EventBus;
@@ -167,6 +188,12 @@ export interface PicturesDeps {
    * whatever rows it kept, so a finished task's pictures can be shared.
    */
   readonly onAfterCapture?: (taskId: TaskId) => void;
+  /**
+   * Told what a project's dev login came to whenever it was run for a picture or a check: a problem
+   * with what the command printed, masked, or `problem: null` once it signed the browser in (or the
+   * project has nothing left to sign in to), so a failure can raise one card and a success withdraw it.
+   */
+  readonly onSignIn?: (report: SignInReport) => void;
   /**
    * 10db's own dev UI: the browser origin the daemon trusts as it, and its read-only token. A shot of
    * an app at that origin is handed the token and may read the daemon, since the dev UI draws nothing
@@ -199,6 +226,12 @@ export interface Pictures {
   awaitBefore(task: TaskDto, signal: AbortSignal): Promise<void>;
   /** Settings › App Preview's status line for a project. */
   status(projectId: ProjectId): PicturesStatusDto;
+  /**
+   * Check Sign-in: runs the project's dev login, signs the picture browser in and loads the app's
+   * first routed page, only at the project's own app address. A check already under way is answered
+   * again rather than started twice.
+   */
+  checkSignIn(projectId: ProjectId): Promise<SignInCheckDto>;
   /**
    * Shots of the routes as they are now, for a design check: the first viewport and theme of the
    * project's matrix, signed in as a capture is, one at a time with every other capture. Nothing is
@@ -245,6 +278,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
   const appUrls = new Map<ProjectId, AppUrl | null>();
   const devLogins = new Map<ProjectId, string | null>();
   const passStates = new Map<PassId, PassState>();
+  /** Starts once the service is built; the checks of the dev login that run by themselves. */
+  let schedule: SignInSchedule | null = null;
 
   function apply(event: CaptureEvent): void {
     const s = captureStep(queue, event);
@@ -451,10 +486,11 @@ export function startPictures(deps: PicturesDeps): Pictures {
     ask({ kind: ScreenKind.After, projectId: project.id, passId, taskId: task.id, turnId: null });
   }
 
-  async function runSignIn(
+  /** Runs the dev login once and records it as the project's last sign-in; null when it was stopped. */
+  async function signInOnce(
     project: SignInProject,
     signal: AbortSignal,
-  ): Promise<StorageState | null> {
+  ): Promise<SignInResult | null> {
     const result = await signIn({ ...deps.signIn, camera: deps.camera }, project, signal);
     // A login stopped with its capture says nothing of the project's sign-in.
     if (signal.aborted) return null;
@@ -468,6 +504,33 @@ export function startPictures(deps: PicturesDeps): Pictures {
         { projectId: project.id, problem: result.problem },
         'could not sign the browser for pictures in',
       );
+    return result;
+  }
+
+  function reportSignIn(report: SignInReport): void {
+    try {
+      deps.onSignIn?.(report);
+    } catch (error) {
+      log.warn({ projectId: report.projectId, err: errorText(error) }, 'sign-in not announced');
+    }
+  }
+
+  /** The dev login for a picture: its state when it signed in. A sign-in that works, or a command that fails, is announced. */
+  async function runSignIn(
+    project: SignInProject,
+    signal: AbortSignal,
+  ): Promise<StorageState | null> {
+    const result = await signInOnce(project, signal);
+    if (result === null) return null;
+    if (result.ok) reportSignIn({ projectId: project.id, problem: null, exitCode: 0, output: '' });
+    // A browser that could not open the address may only mean the app is down: it says nothing of the command.
+    else if (result.step === SignInStep.Command)
+      reportSignIn({
+        projectId: project.id,
+        problem: result.problem,
+        exitCode: result.exitCode,
+        output: result.output,
+      });
     return result.ok ? result.state : null;
   }
 
@@ -674,8 +737,11 @@ export function startPictures(deps: PicturesDeps): Pictures {
     appUrls.set(projectId, project.appUrl);
     devLogins.set(projectId, project.devLoginCommand);
     // A sign-in kept for another address or another dev login is not this one's.
-    if (was !== project.appUrl || loginWas !== project.devLoginCommand)
+    if (was !== project.appUrl || loginWas !== project.devLoginCommand) {
       forgetStorageState(deps.dataDir, projectId);
+      // The new address or command is checked at once, not when a picture is wanted.
+      schedule?.changed(projectId);
+    }
     if (was === project.appUrl) return;
     if (was !== null) apply({ kind: 'app_changed', projectId });
     if (project.appUrl !== null) {
@@ -949,7 +1015,92 @@ export function startPictures(deps: PicturesDeps): Pictures {
     }
   }
 
+  /** What a check came to is announced only when it could tell: signed in, or failed. */
+  function settleCheck(projectId: ProjectId, check: SignInCheckDto): void {
+    if (check.state === SignInCheckState.Unchecked) return;
+    signIns.set(projectId, { problem: check.problem, at: check.at });
+    reportSignIn({
+      projectId,
+      problem: check.problem,
+      exitCode: check.exitCode,
+      output: check.output,
+    });
+  }
+
+  async function performCheck(projectId: ProjectId, signal: AbortSignal): Promise<SignInCheckDto> {
+    const project = getProject(db, projectId);
+    const unchecked = (problem: string): SignInCheckDto =>
+      uncheckedReport(deps.clock.now(), problem);
+    if (project.appUrl === null) return unchecked('The project has no app address');
+    if (project.devLoginCommand === null) return unchecked('The project has no dev login command');
+    const port = listenPort ?? (await deps.daemonPort);
+    const appUrl = shootableAddress(projectId, port);
+    if (appUrl === null) return unchecked("The app address is 10db's own port");
+    const { viewport, theme } = firstOfMatrix(project);
+    const devUi = devUiFor(appUrl, port);
+    // The address the check runs against is the project's own, read again before each step.
+    const sameAddress = (): boolean => shootableAddress(projectId, port) === appUrl;
+    const check = await runSignInCheck({
+      now: () => deps.clock.now(),
+      hold: () => deps.holdApp?.(projectId) ?? Promise.resolve({ up: true as const }),
+      signIn: () => signInOnce(project, signal),
+      shoot: (route, storageState) =>
+        sameAddress()
+          ? deps.camera.shoot({ appUrl, route, viewport, theme, storageState, devUi, signal })
+          : Promise.reject(new Error("The app address changed or names 10db's own port")),
+      sameAddress,
+      appUrl,
+      route: firstRoutedPage(project),
+    });
+    // A check stopped by a newer one, or by shutdown, says nothing of the project's sign-in.
+    if (!signal.aborted) settleCheck(projectId, check);
+    return check;
+  }
+
+  /** Checks under way, by project: a second ask shares the first unless `fresh` replaces it. */
+  const checks = new Map<
+    ProjectId,
+    { readonly abort: AbortController; readonly done: Promise<SignInCheckDto> }
+  >();
+
+  function checkSignIn(projectId: ProjectId, fresh = false): Promise<SignInCheckDto> {
+    whileRunning();
+    const running = checks.get(projectId);
+    if (running !== undefined) {
+      if (!fresh) return running.done;
+      running.abort.abort();
+    }
+    const abort = new AbortController();
+    nowRuns.add(abort);
+    const done = performCheck(projectId, abort.signal)
+      .catch((error: unknown) => {
+        log.warn({ projectId, err: errorText(error) }, 'could not check the picture sign-in');
+        return uncheckedReport(deps.clock.now(), 'The check could not finish');
+      })
+      .finally(() => {
+        nowRuns.delete(abort);
+        if (checks.get(projectId)?.abort === abort) checks.delete(projectId);
+      });
+    checks.set(projectId, { abort, done });
+    return done;
+  }
+
+  schedule = startSignInSchedule({
+    clock: deps.clock,
+    logger: log,
+    ready: deps.daemonPort,
+    projects: () => listProjects(db),
+    project: (projectId) => getProject(db, projectId),
+    check: checkSignIn,
+    nothingToCheck: (projectId) => {
+      // With no app address or dev login left there is no sign-in to fail.
+      signIns.delete(projectId);
+      reportSignIn({ projectId, problem: null, exitCode: null, output: '' });
+    },
+  });
+
   return {
+    checkSignIn: (projectId) => checkSignIn(projectId, false),
     shootNow,
     drawMockup,
     bytesOf(sha256) {
@@ -1017,8 +1168,10 @@ export function startPictures(deps: PicturesDeps): Pictures {
     async stop() {
       stopping = true;
       unsubscribe();
+      schedule.stop();
       apply({ kind: 'shutdown' });
       for (const abort of nowRuns) abort.abort();
+      await Promise.allSettled([...checks.values()].map((c) => c.done));
       await current?.done;
     },
   };

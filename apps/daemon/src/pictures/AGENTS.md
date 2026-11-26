@@ -52,6 +52,20 @@
   with `prPictures`) and a `lane` screen taken by a lane's own browser, which goes to that
   session's model as an image block when it fits the account's limits
   (`decisions/2026-11-24-lane-screenshots-go-to-the-lanes-model.md`).
+- The sign-in check (`sign-in-check.ts`, `sign-in-schedule.ts`; `POST /projects/:projectId/pictures/sign-in-check`,
+  Settings › App Preview's Check Sign-In): the dev login is a contract (it creates its fictional user if missing, runs
+  only against the dev database, is safe to repeat and prints one sign-in URL or path), so it is checked and not trusted.
+  A check holds the app up (`holdApp`), runs the saved command, signs the browser in and loads the first page area
+  route that loads (else `/`), only at the project's own address, read again before each step (`shootableAddress`; a
+  printed address off the app's origin is refused by `parseLoginUrl`). It answers a `SignInCheckDto`: `signed_in` with
+  the page as a PNG, `failed` with the exit code and the command's last lines, or `unchecked` when the app, not the
+  login, kept it from telling (no answer, an error overlay, a browser that could not open the address while the app
+  was down). The output is masked (`sign-in-output.ts`: addresses, queries, the outbound scan's secret patterns and long
+  bare tokens). It runs by itself once the API listens, when the app address or the dev login command changes (the
+  check under way is stopped), and every 24 h, for each live project with both. A failed command or check reports
+  through `PicturesDeps.onSignIn`, and `daemon/start.ts` raises the project's one card (`inbox/sign-in-card.ts`), which
+  a check or a picture's sign-in that works closes; an `unchecked` check changes nothing. A project whose address or
+  command is cleared closes its card.
 - The broken preview (Workbench spec §8.2, §8.4,
   `decisions/2026-11-10-a-broken-preview-is-read-from-the-page-load-that-takes-the-picture.md`): each capture of
   a pass page judges the load of its page route (`pageRoute`, its viewports and themes as one, `routeLoad`) by

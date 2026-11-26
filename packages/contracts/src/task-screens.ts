@@ -139,6 +139,34 @@ export const PicturesStatusDto = z.object({
 });
 export type PicturesStatusDto = z.infer<typeof PicturesStatusDto>;
 
+/**
+ * How a check of a project's dev login ended: the browser signed in and loaded a page, the sign-in
+ * failed, or the check could not tell (the app did not answer, or showed an error).
+ */
+export const SignInCheckState = {
+  SignedIn: 'signed_in',
+  Failed: 'failed',
+  Unchecked: 'unchecked',
+} as const;
+export type SignInCheckState = ValueOf<typeof SignInCheckState>;
+
+/** What Check Sign-in answers: the dev login run, and the page the signed-in browser loaded. */
+export const SignInCheckDto = z.object({
+  state: z.enum(SignInCheckState),
+  at: Timestamp,
+  /** What went wrong, in the status line's words; null for a check that signed in. */
+  problem: z.string().nullable(),
+  /** The dev login command's exit code; null when it did not run to an end. */
+  exitCode: z.int().nullable(),
+  /** The last lines the dev login printed, with tokens and secrets masked; empty when it printed none. */
+  output: z.string(),
+  /** The page the signed-in browser loaded; null when none was loaded. */
+  route: z.string().nullable(),
+  /** That page as a base64 PNG; null unless it loaded signed in. */
+  picture: z.string().nullable(),
+});
+export type SignInCheckDto = z.infer<typeof SignInCheckDto>;
+
 /** `task.screen_added`: a picture of the task was kept. */
 export const TaskScreenAddedData = z.object({
   taskId: TaskId,

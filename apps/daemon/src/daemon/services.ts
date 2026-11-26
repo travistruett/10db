@@ -1070,6 +1070,7 @@ export function createServices(deps: {
     taskDesignCheck: (taskId) => deps.pictures.designCheck(taskId),
     designCheckPicture: (checkId, part) => deps.pictures.designCheckFile(checkId, part),
     picturesStatus: (projectId) => deps.pictures.status(projectId),
+    checkSignIn: (projectId) => deps.pictures.checkSignIn(projectId),
     restartPreview: async (projectId) => {
       getProject(db, projectId);
       await deps.preview.restart(projectId);

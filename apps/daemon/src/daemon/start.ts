@@ -275,10 +275,12 @@ import {
 import { createGithubServices } from './github-services';
 import {
   CardTier,
+  clearPictureSignInCard,
   createInboxService,
   createJudgeOutageCard,
   createParkAnswers,
   leftWithBuilder,
+  raisePictureSignInCard,
   withdrawStaleConversationCards,
 } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
@@ -2660,6 +2662,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // A finished task's pictures go to its project's Slack channel, once per after.
     onAfterCapture: (taskId) => {
       picturePost?.announceTask(taskId);
+    },
+    // A project's dev login that fails raises its one card, and one that signs in closes it.
+    onSignIn: (report) => {
+      if (report.problem === null) clearPictureSignInCard({ state, inbox }, report.projectId);
+      else raisePictureSignInCard({ state, inbox }, { ...report, problem: report.problem });
     },
     // An on-demand picture (Design review, `check_design`) holds the preview up with no pass open.
     holdApp: (projectId, say) => previewNow.hold(projectId, say),

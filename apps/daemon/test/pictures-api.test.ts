@@ -1,12 +1,15 @@
 import {
+  InboxItemDto,
   PassOpenedDto,
   PicturesStatusDto,
   ProjectDto,
+  SignInCheckDto,
   TaskDto,
   TaskScreensDto,
 } from '@10db/contracts';
 import { latestEventSeq } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
@@ -142,5 +145,46 @@ describe("a task's pictures over HTTP", () => {
       browser: { state: 'ready', problem: null },
       signIn: null,
     });
+  });
+});
+
+describe("a project's sign-in check", () => {
+  const signInCards = async () =>
+    (await api().get('/inbox?state=OPEN', z.array(InboxItemDto))).filter((i) =>
+      i.title.includes("can't sign in"),
+    );
+  const check = (id: string) =>
+    api().post(`/projects/${id}/pictures/sign-in-check`, SignInCheckDto, {});
+  const setLogin = (id: string, devLoginCommand: string) =>
+    api().patch(`/projects/${id}`, ProjectDto, { devLoginCommand });
+
+  it('loads the first routed page signed in, and a failure raises one card that the next success withdraws', async () => {
+    const p = await project();
+    await setLogin(p.id, `echo ${APP}/people?token=secret123456789 boom; exit 3`);
+    const failed = await check(p.id);
+    expect(failed).toMatchObject({ state: 'failed', exitCode: 3, picture: null });
+    expect(failed.output).not.toContain('secret123456789');
+    await check(p.id);
+    expect(await signInCards()).toHaveLength(1);
+    expect(cam.signIns).toEqual([]);
+
+    // A changed command is checked by itself: the card goes once it signs in.
+    await setLogin(p.id, `echo ${APP}/people?token=abc`);
+    await waitForAsync(async () => ((await signInCards()).length === 0 ? true : undefined));
+    const ok = await check(p.id);
+    expect(ok).toMatchObject({ state: 'signed_in', problem: null, route: '/people' });
+    expect(ok.picture).toBe(pngOfSize(1440, 900, 1).toString('base64'));
+    expect(cam.shots.at(-1)).toMatchObject({ appUrl: APP, route: '/people' });
+  });
+
+  it("never runs against an address that is not the project's own", async () => {
+    const p = await project();
+    // A command that prints another host's address, or the daemon's own port, is not signed in at.
+    await setLogin(p.id, `echo http://localhost:${new URL(daemon.url).port}/people`);
+    expect(await check(p.id)).toMatchObject({ state: 'failed', picture: null });
+    await setLogin(p.id, 'echo http://elsewhere.example/people');
+    expect(await check(p.id)).toMatchObject({ state: 'failed', picture: null });
+    expect(cam.signIns).toEqual([]);
+    expect(cam.shots).toEqual([]);
   });
 });

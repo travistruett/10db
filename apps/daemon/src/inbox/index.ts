@@ -8,6 +8,7 @@ export { createJudgeOutageCard } from './judge-outage-card';
 export { leftWithBuilder } from './builder-card';
 export { clearGateHoldCard, raiseGateHoldCard } from './gate-hold-card';
 export { raiseGateHostCards } from './gate-host-card';
+export { clearPictureSignInCard, raisePictureSignInCard } from './sign-in-card';
 export { hazardCardFoldKey, hazardRemovalCard, pendingHazardRemovals } from './hazard-card';
 export { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
 export { createRepoMcpServers } from './repo-mcp-servers';
