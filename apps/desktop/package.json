@@ -7,6 +7,7 @@
     "e2e": "tsx e2e/prepare.ts && playwright test -c e2e/playwright.config.ts",
     "dev": "vite",
     "build": "vite build",
+    "build:app": "vite build --config vite.app.config.ts",
     "sidecar": "tsx scripts/prepare-sidecar.ts",
     "dev:factory": "tsx scripts/factory-ui.ts",
     "dev:preview": "vite --no-cors",

@@ -7,16 +7,16 @@ import './plain-links.css';
 import { CodeHighlightAdapterProvider } from '@mantine/code-highlight';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
-import { RouterProvider } from '@tanstack/react-router';
+import { RouterProvider, type AnyRouter } from '@tanstack/react-router';
 import { LinkConfirmHost } from './conversation/link-confirm';
 import { shikiAdapter } from './conversation/shiki';
 import type { ConnectionResolver } from './daemon/connection';
 import { DaemonProvider, type DaemonIntervals } from './daemon/provider';
-import type { AppRouter } from './router';
 import { cssVariablesResolver, theme } from './theme';
 
 export interface AppProps {
-  readonly router: AppRouter;
+  /** The window's router, or the phone's. */
+  readonly router: AnyRouter;
   readonly queryClient: QueryClient;
   readonly resolve: ConnectionResolver;
   readonly intervals?: DaemonIntervals;
