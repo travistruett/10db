@@ -353,3 +353,58 @@ export const EvalManifestResult = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(false), untracked: z.array(z.string()), message: z.string() }),
 ]);
 export type EvalManifestResult = z.infer<typeof EvalManifestResult>;
+
+/** Where a request for an eval came from, so the task says why it exists. */
+export const NewEvalOrigin = {
+  /** The Evals page's header button. */
+  Page: 'page',
+  /** A row of the No Eval tab. */
+  Gap: 'gap',
+  /** A goal's proposed eval in a Shape plan. */
+  PlanEval: 'plan_eval',
+} as const;
+export type NewEvalOrigin = (typeof NewEvalOrigin)[keyof typeof NewEvalOrigin];
+
+/** The path a gap's `where` names, without its `:line` or `:line:column`. */
+export const evalGapPath = (where: string): string => where.replace(/:\d+(?::\d+)?$/u, '');
+
+/** Text with no control character but a newline or tab, which would otherwise read as structure in a brief. */
+const NO_CONTROLS = /^[^\p{Cc}]*$/u;
+const plainText = (s: string): boolean => NO_CONTROLS.test(s.replaceAll(/[\n\t]/gu, ' '));
+
+const RationaleText = z
+  .string()
+  .trim()
+  .max(4000)
+  .refine(plainText, 'no control characters other than newlines and tabs');
+
+/** A path the brief names in backticks: one line, and no backtick to end the span early. */
+const BriefPath = RepoPath.refine(
+  (p) => !/[\p{Cc}`]/u.test(p),
+  'no control characters or backticks',
+);
+
+/**
+ * What the New Eval form sends: the rationale an eval is written from, which becomes the brief of a task
+ * that drafts it. Only the behavior is required; each other section reads "not stated" when empty.
+ */
+export const NewEvalRequest = z.strictObject({
+  /** The behavior the eval pins, as the task's title names it. */
+  behavior: z
+    .string()
+    .trim()
+    .min(1)
+    .max(150)
+    .refine((b) => !/\p{Cc}/u.test(b), 'no control characters such as newlines or tabs'),
+  decision: RationaleText.default(''),
+  evidence: RationaleText.default(''),
+  oracle: RationaleText.default(''),
+  /** The cases to cover and the bar a model must reach. */
+  coverageAndBar: RationaleText.default(''),
+  models: RationaleText.default(''),
+  execution: RationaleText.default(''),
+  /** Tracked paths the behavior lives in; the lane reads them, and they pick the task's areas. */
+  where: z.array(BriefPath).max(20).default([]),
+  origin: z.enum([NewEvalOrigin.Page, NewEvalOrigin.Gap, NewEvalOrigin.PlanEval]).default('page'),
+});
+export type NewEvalBody = z.output<typeof NewEvalRequest>;
