@@ -56,7 +56,10 @@ export function accountRunStart(
 type McpCall = Extract<ToolCallView, { kind: 'mcp' }>;
 
 /** The calls on one of the run's Linear servers, by the adapters' shared `server` field. */
-const linearCalls = (calls: readonly ToolCallView[], prefixes: readonly string[]): McpCall[] =>
+export const linearCalls = (
+  calls: readonly ToolCallView[],
+  prefixes: readonly string[],
+): McpCall[] =>
   calls.filter(
     (call): call is McpCall =>
       call.kind === 'mcp' && prefixes.includes(`mcp__${mcpToolPrefix(call.server)}__`),
