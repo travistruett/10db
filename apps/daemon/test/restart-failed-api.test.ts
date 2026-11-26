@@ -1,12 +1,24 @@
 import {
   BatchDto,
+  DaemonEvent,
   ProjectDto,
   TaskDto,
   WorkstreamDto,
   type ProjectId,
   type TaskId,
 } from '@10db/contracts';
-import { insertBatch, transitionBatch, transitionWorkstream, insertWorkstream } from '@10db/db';
+import {
+  acquireClaims,
+  activeClaims,
+  claimConflict,
+  claimRequestsForTask,
+  getProject,
+  insertBatch,
+  insertWorkstream,
+  patchWorkstream,
+  transitionBatch,
+  transitionWorkstream,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
@@ -121,5 +133,75 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
     await waitForAsync(async () =>
       (await batchesOf(project.id)).every((b) => b.id !== fresh.id) ? true : undefined,
     );
+  });
+});
+
+describe('POST /tasks/:id/start on a task whose failed lane run kept its claims', () => {
+  // Value: protects=a new start of a task frees the claims its failed lane run kept, so the new run
+  // and the tasks sharing its areas can start; fails_when=the replaced run keeps its claims for good,
+  // and every run in its areas waits on a run that has finished; why_new=claims (core);
+  // no_claim=what the new run makes of the files the failed run left in Your folder.
+  it('lets the failed run go, so the new run and its area can start', async () => {
+    const project = await api().post('/projects', ProjectDto, {
+      name: 'lanes',
+      repoPath: repo.path,
+      gateCommand: 'true',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+      delivery: 'local',
+    });
+    const task = await api().post(`/projects/${project.id}/tasks`, TaskDto, {
+      title: 'Alpha',
+      acceptanceCriteria: ['x'],
+      areas: ['src'],
+      dependsOn: [],
+    });
+    // A lane run whose take-out could not move its files (Your folder is not on its base), so it
+    // keeps its claims.
+    const failed = daemon.state.write((ctx) => {
+      const ws = insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      });
+      patchWorkstream(ctx, ws.id, null, {
+        branch: 'elsewhere',
+        laneBranch: `10db/lane/${ws.id.slice(-8)}`,
+      });
+      const claimed = acquireClaims(ctx, {
+        projectId: project.id,
+        workstreamId: ws.id,
+        requests: claimRequestsForTask(task, getProject(ctx.tx, project.id)),
+        leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+      });
+      if (!claimed.ok) throw new Error('the failed run could not claim its area');
+      for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+        transitionWorkstream(ctx, ws.id, { to, fence: null });
+      return ws.id;
+    });
+    // Its take-out has run and left the files where they are.
+    await waitForAsync(async () => {
+      const events = await api().get('/events?after=0&limit=1000', z.array(DaemonEvent));
+      return events.find(
+        (e) => e.type === 'notice.posted' && e.data['key'] === `lane-take-out:${task.id}`,
+      );
+    }, 10_000);
+    expect(activeClaims(daemon.state.db, failed)).toHaveLength(1);
+
+    const res = await startTask(task.id, {});
+
+    expect(res.status).toBe(201);
+    const started = WorkstreamDto.parse(res.body);
+    expect(started.id).not.toBe(failed);
+    expect(activeClaims(daemon.state.db, failed)).toEqual([]);
+    expect(
+      claimConflict(daemon.state.db, {
+        projectId: project.id,
+        workstreamId: started.id,
+        requests: claimRequestsForTask(task, project),
+      }),
+    ).toBeNull();
+    // The scheduler may launch the new run; cancel it so no lane outlives the daemon.
+    await fetch(`${daemon.url}/workstreams/${started.id}/cancel`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${daemon.token}` },
+    });
   });
 });

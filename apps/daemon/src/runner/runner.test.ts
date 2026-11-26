@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   readlinkSync,
   realpathSync,
   rmSync,
@@ -3409,12 +3410,25 @@ describe('a step that ends with changes in its claims', () => {
     ).not.toContain('src/api/new.txt');
   });
 
-  // Value: protects=a base change made after a lane started is never undone by the lane's landing;
-  // fails_when=the landing takes a file from the lane's tip over a base commit that changed it;
-  // why_new=git landing (core); no_claim=a base change the lane's work already holds.
-  it('refuses to land over a base change the lane does not hold, keeping both', async () => {
+  // Value: protects=a base change made after a lane's newest commit of a file is never undone by the
+  // lane's landing, and one the lane's commit already took lands; fails_when=the landing takes a file
+  // from the lane's tip over a base commit that changed it, or refuses a file a builder's commit in the
+  // shared folder took the lane's edits of; why_new=git landing (core); no_claim=a base change to a file
+  // the lane never committed again after it.
+  it('lands over a base change its lane already holds, and refuses one it does not', async () => {
     engine = await createTestEngine({
       Alpha: [
+        [
+          write('src/api/g.txt'),
+          commit('op-held-0001', ['src/api/g.txt']),
+          write('src/api/f.txt', 'a\nb2\nc\nd\n'),
+          { do: 'await_signal', name: 'builder-took' },
+          write('src/api/f.txt', 'a\nb2\nc\nd\ne\n'),
+          commit('op-held-0002', ['src/api/f.txt']),
+          turn,
+        ],
+      ],
+      Beta: [
         [
           write('src/api/a.txt', 'run\n'),
           commit('op-undo-0001', ['src/api/a.txt']),
@@ -3428,12 +3442,35 @@ describe('a step that ends with changes in its claims', () => {
         env: isolatedGitEnv(),
         encoding: 'utf8',
       }).trim();
-    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
-    engine.launch(workstream.id);
+    mkdirSync(join(engine.repoPath, 'src/api'), { recursive: true });
+    writeFileSync(join(engine.repoPath, 'src/api/f.txt'), 'a\nb\nc\n');
+    repoGit('add', 'src/api/f.txt');
+    repoGit('commit', '-q', '-m', 'Start f');
+
+    // The builder commits the file from the shared folder while the run is editing it, which takes
+    // the run's edits with it; the run then commits the file again, holding the builder's commit.
+    const alpha = engine.addTask('Alpha', ['api'], [], { flow: 'quick' }).workstream;
+    engine.launch(alpha.id);
+    await waitFor(() =>
+      readFileSync(join(engine.repoPath, 'src/api/f.txt'), 'utf8') === 'a\nb2\nc\nd\n'
+        ? true
+        : undefined,
+    );
+    repoGit('add', 'src/api/f.txt');
+    repoGit('commit', '-q', '-m', 'Builder takes f');
+    engine.adapter.signal('builder-took');
+    await engine.runner.idle();
+    await engine.jobs.idle();
+    expect(ws(alpha.id).state).toBe('DONE');
+    expect(repoGit('show', 'HEAD:src/api/f.txt')).toBe('a\nb2\nc\nd\ne');
+
+    // A base change after the run's commit of the file, which the run's work lacks, is never undone.
+    const beta = engine.addTask('Beta', ['api'], [], { flow: 'quick' }).workstream;
+    engine.launch(beta.id);
     await waitFor(
       () =>
         engine.adapter.observations.find(
-          (o) => o.kind === 'mcp_result' && o.detail['tool'] === 'commit',
+          (o) => o.kind === 'mcp_result' && o.detail['tool'] === 'commit' && o.title === 'Beta',
         ) ?? undefined,
     );
     // The builder adds a line to the file in Your folder and commits it on the base.
@@ -3444,10 +3481,10 @@ describe('a step that ends with changes in its claims', () => {
     engine.adapter.signal('builder-committed');
     await engine.runner.idle();
     await engine.jobs.idle();
-    expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureKind: 'landing_refused' });
+    expect(ws(beta.id)).toMatchObject({ state: 'FAILED', failureKind: 'landing_refused' });
     expect(repoGit('rev-parse', 'HEAD')).toBe(builders);
     expect(repoGit('show', 'HEAD:src/api/a.txt')).toBe('run\nbuilder');
-    expect(repoGit('show', `10db/lane/${workstream.id.slice(-8)}:src/api/a.txt`)).toBe('run');
+    expect(repoGit('show', `10db/lane/${beta.id.slice(-8)}:src/api/a.txt`)).toBe('run');
   });
 
   // Value: protects=a task's failures show as one Inbox card that speaks for its newest run;

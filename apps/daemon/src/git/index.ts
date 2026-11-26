@@ -29,6 +29,7 @@ export {
   type FolderAt,
   type Git,
   OP_TRAILER,
+  BASE_TRAILER,
   OVER_BUDGET_REFUSAL,
   type SurveyTexts,
   type KeptCommit,

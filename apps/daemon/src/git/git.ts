@@ -55,6 +55,12 @@ import { lockedOwner, parseWorktreeList, type WorktreeEntry } from './worktree-l
 
 /** The trailer the commit tool writes on every commit it makes, naming the call's opId. */
 export const OP_TRAILER = '10db-Op';
+/**
+ * The trailer of a commit made on a branch that is not checked out (`commitOnBranch`): the commit the
+ * folder's own branch was at as its files were taken, so every change that branch had made by then
+ * to a file the commit names is in the commit.
+ */
+export const BASE_TRAILER = '10db-Base';
 const OP_TRAILER_LINE = new RegExp(`^${OP_TRAILER}:`, 'm');
 const OP_SEARCH_DEPTH = 200;
 const OBJECT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
@@ -911,6 +917,17 @@ export interface Git extends ChatGit {
     readonly from: string;
     readonly paths: readonly string[];
   }): Promise<string[]>;
+  /**
+   * The `key` trailer of the newest commit after `from`, up to `to`, that changes `path`; null when
+   * none does or it carries none.
+   */
+  lastChangeTrailer(input: {
+    readonly repo: string;
+    readonly from: string;
+    readonly to: string;
+    readonly path: string;
+    readonly key: string;
+  }): Promise<string | null>;
   /**
    * Brings `path` as commit `theirs` has it into the file on disk, by a three-way merge from its
    * version in `base` (`merge-file`, which runs no driver), under the repo lock. `merged` when the file
@@ -3279,6 +3296,31 @@ export function createGit(opts: GitOptions = {}): Git {
     return missing;
   }
 
+  async function lastChangeTrailer(input: {
+    readonly repo: string;
+    readonly from: string;
+    readonly to: string;
+    readonly path: string;
+    readonly key: string;
+  }): Promise<string | null> {
+    const c = await pinned(input.repo);
+    const out = await git(
+      c,
+      [
+        'log',
+        '-1',
+        '--no-show-signature',
+        `--format=%(trailers:key=${input.key},valueonly,separator=%x2c)`,
+        `${input.from}..${input.to}`,
+        '--',
+        checkPathName(input.path),
+      ],
+      { env: { GIT_LITERAL_PATHSPECS: '1' } },
+    );
+    const value = out.trim().split(',').at(-1)?.trim() ?? '';
+    return value === '' ? null : value;
+  }
+
   async function mergeFileBack(input: {
     readonly repo: string;
     readonly path: string;
@@ -4081,6 +4123,8 @@ export function createGit(opts: GitOptions = {}): Git {
         const existing = await findCommitByOp(c, held, input.opId);
         if (existing) return { sha: existing, alreadyCommitted: true };
       }
+      const based = await revParse(c, `refs/heads/${input.checkedOut}^{commit}`);
+      if (based === null) throw new InvalidError(`Branch ${input.checkedOut} does not exist`);
       const tree = await withPrivateIndex(c, tip, async (env) => {
         const changed = await stage(c, env, named, tip);
         const filtered = await filteredPaths(c, env, changed);
@@ -4093,7 +4137,7 @@ export function createGit(opts: GitOptions = {}): Git {
       const sign = signing(c, await configEntries(c));
       const sha = (
         await git(c, ['commit-tree', ...sign.flags, tree, '-p', tip], {
-          input: withOpTrailer(input.message, input.opId),
+          input: `${withOpTrailer(input.message, input.opId)}${BASE_TRAILER}: ${based}\n`,
           config: sign.config,
         })
       ).trim();
@@ -5098,6 +5142,7 @@ export function createGit(opts: GitOptions = {}): Git {
     hashOnDisk,
     restoreFiles,
     changesMissing,
+    lastChangeTrailer,
     moveKeptRef,
     narrowKeptRef,
     mergeFileBack,

@@ -5625,7 +5625,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       const unlanded =
         lane === null
           ? ''
-          : `. The gate ran with this run's commits on branch ${lane.lane}, not on ${lane.base}, so a gate that reads git (git diff HEAD, git log, a check that the index is clean) saw its work as uncommitted`;
+          : `. This run's commits are on branch ${lane.lane}, not on ${lane.base}, until it lands: if your gate reads git history, diffs HEAD or checks that the index is clean, it saw the run's work as uncommitted`;
       fail(id, ctl.fence, {
         kind: WorkstreamFailure.GateFailed,
         reason: `The gate failed ${String(attempt)} times (last exit ${String(result.exitCode)})${unlanded}`,

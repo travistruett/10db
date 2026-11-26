@@ -5,11 +5,13 @@ import {
   getProject,
   getTaskStartDirt,
   getWorkstreamRow,
+  latestWorkstreamOf,
   listWorkstreams,
   releaseClaims,
   setTaskKeptWork,
   type DbReader,
   type WorkstreamRow,
+  type WriteContext,
 } from '@10db/db';
 import {
   jobKey,
@@ -82,7 +84,8 @@ export function subscribeLaneTakeOut(
   };
   for (const run of listWorkstreams(db, { states: [WorkstreamState.Failed] })) {
     const row = getWorkstreamRow(db, run.id);
-    if (laneBranchOf(row) !== null && activeClaims(db, row.id).length > 0) queue(row);
+    if (laneBranchOf(row) !== null && activeClaims(db, row.id).length > 0 && isLatest(db, row))
+      queue(row);
   }
   return bus.subscribe((event) => {
     if (event.type !== EventType.WorkstreamChanged) return;
@@ -115,9 +118,11 @@ async function takeOutWhenFree(
   try {
     // The job waited its turn. A run the builder started again meanwhile keeps its files: they are
     // still in the folder for its session, and nothing was recorded as saved to put back.
+    // A run a new start of its task replaced has let go of its claims, and its files are the new
+    // run's to meet: nothing comes out under it.
     const row = getWorkstreamRow(db, failed.id);
     const lane = laneBranchOf(row);
-    if (row.state !== WorkstreamState.Failed || lane === null) return;
+    if (row.state !== WorkstreamState.Failed || lane === null || !isLatest(db, row)) return;
     const outcome = await takeOut(ctx, row, lane).catch((error: unknown): TakeOutOutcome => {
       const why = error instanceof Error ? error.message : String(error);
       ctx.logger.warn(
@@ -130,6 +135,32 @@ async function takeOutWhenFree(
   } finally {
     ctx.folderHold.releaseGit(token);
   }
+}
+
+/** Whether `row` is its task's newest run, the one a take-out or a Retry acts on. */
+const isLatest = (db: DbReader, row: WorkstreamRow): boolean =>
+  latestWorkstreamOf(db, row.taskId)?.id === row.id;
+
+/**
+ * A new start of the task replaces its failed lane run, which a Retry would have continued: the
+ * failed run lets go of the claims it kept because its work could not be taken out of Your folder
+ * (or before its take-out's turn), so the new run and the tasks sharing its areas can start. A task
+ * notice says where the replaced run's work may still be.
+ */
+export function releaseReplacedLaneRun(w: WriteContext, id: WorkstreamId): void {
+  const row = getWorkstreamRow(w.tx, id);
+  const lane = laneBranchOf(row);
+  if (row.state !== WorkstreamState.Failed || lane === null) return;
+  if (releaseClaims(w, id) === 0) return;
+  postNotice(w, {
+    projectId: row.projectId,
+    tier: CardTier.Notice,
+    taskId: row.taskId,
+    key: takeOutKey(row),
+    tone: 'warning',
+    line: 'The replaced run’s files may still be in Your folder',
+    body: `A new run of this task starts in place of a failed one whose work was not taken out of Your folder. What the failed run committed is on branch ${lane.lane}; any of its files still in Your folder stay there, and the new run starts with them.`,
+  });
 }
 
 /** Every claim another workstream of the project holds now. */
@@ -219,7 +250,8 @@ async function takeOut(
 
 /** What the failed card says of the run's work once its take-out ended. */
 function noteFor(lane: LaneBranch, outcome: TakeOutOutcome): string {
-  const waits = 'Tasks that share its areas wait until the run is retried or cancelled.';
+  const waits =
+    'Tasks that share its areas wait until the run is retried from this card or its task is started again.';
   switch (outcome.kind) {
     case 'kept': {
       const left =

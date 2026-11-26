@@ -20,10 +20,13 @@ run's base.
 - **Landing.** Once its last check has passed and it would be done (the gate passed with no step left, or its
   last review approved), the run's files land on the base as one commit taken from the lane's tip
   (`landLaneWork`, `Git.landPaths`, op `land-<workstream id>`). Only then is the run marked done. A file the base
-  changed after the lane started, in a way the lane's tip does not hold (`Git.changesMissing`, a three-way merge
-  from the lane's start), is never taken from the lane, which would undo the base's change: the landing is
-  refused. A base that moves between that check and the landing (`landPaths`' `expect`) is checked once more from
-  its new tip. A landing refused (the base changed one of its files, the folder off the base, the base raced
+  changed after the lane's newest commit of it, in a way the lane's tip does not hold, is never taken from the
+  lane, which would undo the base's change: the landing is refused. The check is a three-way merge
+  (`Git.changesMissing`) from the base commit that lane commit was made against, which `commitOnBranch` records as
+  its `10db-Base` trailer: the folder was on the base then and the commit took the file from disk, so it holds
+  every base change to the file up to then, a builder's commit in the shared folder that took the run's edits with
+  it included. A base that moves between that check and the landing (`landPaths`' `expect`) is checked once more
+  from its new tip. A landing refused (the base changed one of its files, the folder off the base, the base raced
   twice) fails the run as `landing_refused`, its failed card says why, and nothing reaches the base. A project
   whose gate was removed mid-run reaches the builder's check, and its approval lands the run the same way. The
   lane branch stays after landing: the run's Changes view and check facts read it.
@@ -38,8 +41,10 @@ run's base.
   The take-out never takes a path another run holds a claim on. Once the work is out it lets go of the claims, and
   the failed card then says what became of the work: on the branch it names, nothing left to keep, or already on
   the base when a landing was made before the run failed. A take-out that could not move the files (Your folder
-  off the base, a git error) keeps the claims, so the tasks sharing its areas wait until the run is retried or
-  cancelled, and the card says the files are still in the folder.
+  off the base, a git error) keeps the claims, so the tasks sharing its areas wait until the run is retried from
+  its card or its task is started again, and the card says the files are still in the folder. A new start replaces
+  the failed run, which then lets go of its claims and leaves a task notice naming its branch
+  (`releaseReplacedLaneRun`); a take-out still waiting for a replaced run does nothing.
 
 - **Retry and the take-out.** The kept-work gate holds a run from its failure until its take-out has ended, so a
   Retry never launches on files the take-out is still moving, and each take-out makes the run's next start put

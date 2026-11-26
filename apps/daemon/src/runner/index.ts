@@ -18,4 +18,4 @@ export { endTurnSteps, finishEndedTurn, passOfWorkstream, queueUntaken } from '.
 export { raisePassCheck, raiseTurnFailed } from './pass-check';
 export { startTurnChecks, TURN_CHECK_TIMEOUT_MS, withTurnChecks } from './turn-checks';
 export { yieldClaimsWhileWaiting } from './claim-yield';
-export { subscribeLaneTakeOut } from './lane-take-out';
+export { releaseReplacedLaneRun, subscribeLaneTakeOut } from './lane-take-out';
