@@ -186,23 +186,27 @@ describe('splitPatch', () => {
 });
 
 describe('revisedWatchpoints', () => {
-  const s1Migrations = (over: Partial<Watchpoint> = {}): Watchpoint => {
+  const firstShippedMigrations = (over: Partial<Watchpoint> = {}): Watchpoint => {
     const starter = STARTER_WATCHPOINTS.find((w) => w.key === 'migrations');
     if (starter === undefined) throw new Error('no migrations starter');
     return { ...starter, loudness: WatchpointLoudness.Show, ...over };
   };
 
   it('moves a starter unchanged since first shipped to ask and leaves an edited one, and every other watchpoint, alone', () => {
-    const edited = s1Migrations({ guidance: 'my own check' });
+    const edited = firstShippedMigrations({ guidance: 'my own check' });
     const other = watchpoint('mine', ['**/mine/**']);
-    const [unchanged, kept, untouched] = revisedWatchpoints([s1Migrations(), edited, other]);
+    const [unchanged, kept, untouched] = revisedWatchpoints([
+      firstShippedMigrations(),
+      edited,
+      other,
+    ]);
     expect(unchanged?.loudness).toBe(WatchpointLoudness.Ask);
     expect(kept).toEqual(edited);
     expect(untouched).toEqual(other);
   });
 
   it('leaves a list saved at the current revision alone, so a starter set back to show stays show', () => {
-    const [kept] = revisedWatchpoints([s1Migrations()], STARTER_REVISION);
+    const [kept] = revisedWatchpoints([firstShippedMigrations()], STARTER_REVISION);
     expect(kept?.loudness).toBe(WatchpointLoudness.Show);
   });
 });

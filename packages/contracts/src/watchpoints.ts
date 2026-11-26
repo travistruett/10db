@@ -191,7 +191,7 @@ export const STARTER_WATCHPOINT_REVISIONS: readonly {
   readonly was: Watchpoint;
 }[] = [
   {
-    since: STARTER_REVISION,
+    since: 2,
     was: {
       key: 'migrations',
       label: 'Migrations',
@@ -210,7 +210,7 @@ export const STARTER_WATCHPOINT_REVISIONS: readonly {
     },
   },
   {
-    since: STARTER_REVISION,
+    since: 2,
     was: {
       key: 'contracts',
       label: 'Contracts and API',
