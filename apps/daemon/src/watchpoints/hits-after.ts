@@ -8,7 +8,7 @@ import {
   type WatchpointHit,
 } from '@10db/contracts';
 import { matchWatchpoints } from './match';
-import { splitPatch } from './split-patch';
+import { splitPatch, type PatchSection } from './split-patch';
 
 /** What a diff read answers: the whole change's counts, and the patch text of the files asked for. */
 export interface WatchpointChanges {
@@ -102,14 +102,21 @@ export async function watchpointHitsAfter(input: {
     joined(sources, listed, input.watchpoints).flatMap((hit) => hit.files.map((f) => f.path)),
   );
   if (matched.size === 0) return { hits: [], head: input.head, skipped: null };
-  const changes = await input.read(
-    [...matched],
-    WATCHPOINT_ROW_PATCH_BYTES + WATCHPOINT_FILE_PATCH_BYTES,
-  );
-  const sections = splitPatch(changes.diff, {
-    fileBytes: WATCHPOINT_FILE_PATCH_BYTES,
-    diffCut: changes.truncated,
-  });
+  // Each file is read at its own cap, so one huge file cannot starve the files after it; reading stops
+  // once the row's budget is spent, and the rest keep their counts, clipped.
+  const sections = new Map<string, PatchSection>();
+  let spent = 0;
+  for (const path of matched) {
+    if (spent >= WATCHPOINT_ROW_PATCH_BYTES) break;
+    const changes = await input.read([path], WATCHPOINT_FILE_PATCH_BYTES + 1024);
+    const found = splitPatch(changes.diff, {
+      fileBytes: WATCHPOINT_FILE_PATCH_BYTES,
+      diffCut: changes.truncated,
+    }).get(path);
+    if (found === undefined) continue;
+    sections.set(path, found);
+    spent += Buffer.byteLength(found.patch, 'utf8');
+  }
   const files = listed.map((file): WatchpointFileHit => {
     const section = sections.get(file.path);
     return section === undefined

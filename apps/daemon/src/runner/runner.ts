@@ -1713,8 +1713,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       );
       detail = { hits: [], head: '', skipped: 'the changes could not be read' };
     }
-    const earlier = newestWatchpointRow(listEvidence(db, id))?.detail.hits.length ?? 0;
-    return detail.hits.length === 0 && detail.skipped === null && earlier === 0 ? null : detail;
+    // An empty reading is written only to retire an earlier one that showed something: hits or a skip.
+    const earlier = newestWatchpointRow(listEvidence(db, id))?.detail;
+    const showed = earlier !== undefined && (earlier.hits.length > 0 || earlier.skipped !== null);
+    return detail.hits.length === 0 && detail.skipped === null && !showed ? null : detail;
   }
 
   /** Records a watchpoint reading as the run's newest, in the write that moves the run on. */
@@ -3255,7 +3257,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               .at(-1)?.detail ?? null,
           )
         : null;
-    // A build step is told which watchpoints its task's areas touch; a Review or QA step's first round, what the
+    // A build step is told which watchpoints its task's areas touch; a Review or QA step's every round, what the
     // newest reading found and what the agent said of each file.
     const watchpoints = effectiveWatchpoints(
       readYourWatchpoints(db),
@@ -3267,10 +3269,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         : null;
     const reading = newestWatchpointRow(listEvidence(db, id));
     const watchpointReview =
-      (step.role === StepRole.Review || step.role === StepRole.Qa) &&
-      action.kind === 'start' &&
-      !step.earlier.some((r) => r.verdict === Verdict.Reject) &&
-      reading !== null
+      (step.role === StepRole.Review || step.role === StepRole.Qa) && reading !== null
         ? watchpointReviewBrief(reading.detail, agentNotesOf(db, id))
         : null;
     const prompt = buildSessionPrompt({

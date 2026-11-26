@@ -30,11 +30,18 @@ export function agentNotesOf(db: DbReader, workstreamId: WorkstreamId): Map<stri
 
 const CHECKING_ROLES: readonly StepRole[] = [StepRole.Review, StepRole.Qa];
 
-/** The reviewer's check per file, from the Review and QA steps in order, the newest step winning per path. */
+/**
+ * The reviewer's check per file, from the Review and QA steps in order, each step's earlier rounds before its
+ * latest result, the newest note winning per path, so the final diff keeps a Reviewer line.
+ */
 export function reviewerNotesOf(steps: readonly WorkstreamStep[]): Map<string, string> {
   return newestPerPath(
     steps.flatMap((s) =>
-      CHECKING_ROLES.includes(s.role) ? (s.result?.watchpointNotes ?? []) : [],
+      CHECKING_ROLES.includes(s.role)
+        ? [...s.earlier, ...(s.result === null ? [] : [s.result])].flatMap(
+            (r) => r.watchpointNotes ?? [],
+          )
+        : [],
     ),
   );
 }

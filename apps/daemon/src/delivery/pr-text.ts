@@ -138,6 +138,11 @@ const AFTER_FOR_YOU = '\n\n## How it was checked';
 const FOR_YOU_START = '<!-- 10db:for-you -->';
 const FOR_YOU_END = '<!-- /10db:for-you -->';
 
+/** A path in code ticks, or JSON-quoted when it holds a control character that could break the line. */
+const pathText = (path: string): string =>
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u001f\u007f]/.test(path) ? JSON.stringify(plain(path)) : `\`${plain(path)}\``;
+
 /** A note's text with nothing that could close or open the markers' comments. */
 const plain = (text: string): string => text.replaceAll('<!--', '<!- -').replaceAll('-->', '- ->');
 
@@ -157,7 +162,7 @@ export function forYouSection(hits: WatchpointHitsDto['hits']): string {
     [
       `**${plain(hit.watchpoint.label)}** (${hit.watchpoint.loudness})`,
       ...hit.files.flatMap((file) => [
-        `- \`${file.path}\`${file.added === null ? '' : ` (+${String(file.added)} −${String(file.removed ?? 0)})`}`,
+        `- ${pathText(file.path)}${file.added === null ? '' : ` (+${String(file.added)} −${String(file.removed ?? 0)})`}`,
         ...(file.agentNote === null ? [] : [`  - Agent: ${plain(file.agentNote)}`]),
         ...(file.reviewerNote === null ? [] : [`  > ${plain(file.reviewerNote)}`]),
       ]),

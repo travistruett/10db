@@ -99,7 +99,7 @@ describe('effectiveWatchpoints', () => {
 
 describe('splitPatch', () => {
   // A real `git diff-tree -p --no-renames` of one commit: a modified, an added and a deleted file, a rename
-  // (shown as a delete and an add) and a path with spaces, whose ---/+++ lines git ends with a tab.
+  // (shown as a delete and an add), a path with spaces and two that git quotes (an accented name in octal bytes, and a bell), whose ---/+++ lines git ends with a tab.
   const diff = [
     'diff --git a/added.txt b/added.txt',
     'new file mode 100644',
@@ -115,6 +115,20 @@ describe('splitPatch', () => {
     '@@ -1 +1 @@',
     '-x',
     '+y',
+    'diff --git "a/caf\\303\\251.txt" "b/caf\\303\\251.txt"',
+    'index 1111111..2222222 100644',
+    '--- "a/caf\\303\\251.txt"',
+    '+++ "b/caf\\303\\251.txt"',
+    '@@ -1 +1 @@',
+    '-a',
+    '+b',
+    'diff --git "a/bell\\a.txt" "b/bell\\a.txt"',
+    'index 3333333..4444444 100644',
+    '--- "a/bell\\a.txt"',
+    '+++ "b/bell\\a.txt"',
+    '@@ -1 +1 @@',
+    '-c',
+    '+d',
     'diff --git a/mod.txt b/mod.txt',
     'index 814f4a4..879de50 100644',
     '--- a/mod.txt',
@@ -145,6 +159,8 @@ describe('splitPatch', () => {
     expect([...found.values()].map((f) => [f.path, f.status, f.clipped])).toEqual([
       ['added.txt', 'A', false],
       ['dir with space/a b.md', 'M', false],
+      ['café.txt', 'M', false],
+      ['bell\x07.txt', 'M', false],
       ['mod.txt', 'M', false],
       ['new.txt', 'A', false],
       ['old.txt', 'D', false],

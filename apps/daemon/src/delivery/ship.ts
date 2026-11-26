@@ -872,7 +872,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
         db,
         members(db, batch.id).map((w) => w.id),
       );
-      if (hits.length === 0) return;
       const section = forYouSection(hits);
       const call = ghCall(deps, signal);
       const current = await deps.gh.prBody({ repo: target.repo, ref: target.url }, call);

@@ -12,6 +12,17 @@ export interface PatchSection {
 const HEADER = 'diff --git ';
 const MODE_LINES = 12;
 
+/** What `\x` stands for in a path git quotes. */
+const ESCAPES: Readonly<Record<string, string>> = {
+  a: '\x07',
+  b: '\b',
+  f: '\f',
+  n: '\n',
+  r: '\r',
+  t: '\t',
+  v: '\v',
+};
+
 /** A C-style quoted path (git quotes names with unusual bytes), as the UTF-8 text it spells. */
 function unquote(quoted: string): string {
   const bytes: number[] = [];
@@ -27,7 +38,7 @@ function unquote(quoted: string): string {
     if (octal !== null) {
       bytes.push(Number.parseInt(octal[0], 8));
       i += 2;
-    } else bytes.push(...Buffer.from(next === 'n' ? '\n' : next === 't' ? '\t' : next, 'utf8'));
+    } else bytes.push(...Buffer.from(ESCAPES[next] ?? next, 'utf8'));
   }
   return Buffer.from(bytes).toString('utf8');
 }

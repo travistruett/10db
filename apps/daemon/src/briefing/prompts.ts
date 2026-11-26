@@ -98,7 +98,7 @@ export interface PromptInput {
    * instruction to give a reason per covered file in the commit's `watchpointNotes`.
    */
   readonly watchpoints?: string | null;
-  /** What a Review or QA step's first round is told of the watchpoint files the change touched. */
+  /** What a Review or QA step is told, every round, of the watchpoint files the change touched. */
   readonly watchpointReview?: string | null;
   readonly revisedBy: {
     readonly role: StepRole;
@@ -1095,11 +1095,7 @@ function stepSection(input: PromptInput): string[] {
   if (step.role === StepRole.Review && firstRound && input.acceptance)
     lines.push('', input.acceptance);
   if (step.role === StepRole.Implement && input.watchpoints) lines.push('', input.watchpoints);
-  if (
-    (step.role === StepRole.Review || step.role === StepRole.Qa) &&
-    firstRound &&
-    input.watchpointReview
-  )
+  if ((step.role === StepRole.Review || step.role === StepRole.Qa) && input.watchpointReview)
     lines.push('', input.watchpointReview);
   return lines;
 }
