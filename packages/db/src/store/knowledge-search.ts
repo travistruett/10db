@@ -21,13 +21,22 @@ import type { DbReader } from './store';
 // Every full-text query lives here, so the storage engine can change later (packages/db/AGENTS.md).
 
 /**
+ * The most distinct words one query holds. SQLite runs a search synchronously, on the daemon's one
+ * thread, and its cost grows with the words OR'd together: a Fix CI task described by 100 KB of log
+ * held 20,000 and froze the daemon for two minutes. A task's title and opening words come first, so
+ * they are the ones kept.
+ */
+const MAX_QUERY_TERMS = 200;
+
+/**
  * Turns text into an FTS5 query of quoted terms, so user text is never parsed as syntax. `AnyWord`
  * joins whole words with OR, so a long question or a task's description still finds what it shares.
  * `AllPrefixes` makes every term a prefix that must match, so a word still being typed finds its
  * record and each added word narrows, the rule the Proposals tab filters with (`matchesSearch`).
+ * A word repeated counts once.
  */
 function ftsQuery(text: string, match: SearchMatch = SearchMatch.AnyWord): string | null {
-  const terms = searchTerms(text);
+  const terms = [...new Set(searchTerms(text))].slice(0, MAX_QUERY_TERMS);
   if (terms.length === 0) return null;
   return match === SearchMatch.AllPrefixes
     ? terms.map((t) => `"${t}"*`).join(' AND ')
