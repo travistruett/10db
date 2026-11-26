@@ -29,6 +29,7 @@ import {
   type RunningAgentTools,
 } from './environment';
 import type { Logger } from './log';
+import { isOutboundTransportError } from './outbound';
 import {
   resolveAgentSkillDir,
   resolveDataDir,
@@ -59,11 +60,22 @@ import {
 } from './sessions';
 
 // An unhandled error exits loudly; the supervisor restarts the daemon and recovery runs at startup.
+// A failed outbound connection is the exception: a background socket's error (an idle timeout, a
+// reset) reaches these handlers with no caller left to tell, and says nothing about the daemon's own
+// state, so it is logged and the daemon carries on.
 process.on('unhandledRejection', (error) => {
+  if (isOutboundTransportError(error)) {
+    console.error('10db daemon: outbound transport error, ignored', error);
+    return;
+  }
   console.error('10db daemon: unhandled rejection', error);
   process.exit(1);
 });
 process.on('uncaughtException', (error) => {
+  if (isOutboundTransportError(error)) {
+    console.error('10db daemon: outbound transport error, ignored', error);
+    return;
+  }
   console.error('10db daemon: uncaught exception', error);
   process.exit(1);
 });

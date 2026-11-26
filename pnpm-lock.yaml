@@ -274,6 +274,9 @@ importers:
       smol-toml:
         specifier: 1.9.1
         version: 1.9.1
+      undici:
+        specifier: 8.13.1
+        version: 8.13.1
       unpdf:
         specifier: 2.2.1
         version: 2.2.1
@@ -5147,6 +5150,10 @@ packages:
 
   undici@8.12.3:
     resolution: {integrity: sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==}
+    engines: {node: '>=22.19.0'}
+
+  undici@8.13.1:
+    resolution: {integrity: sha512-Kt7EaPjh0s93lJH/PmW3d5rhkcpUa6fS3jqZ7+YGxNd9L7Xy/i827xe4C2uhhq+pJebM4tQOl5AgHmW11G5Skg==}
     engines: {node: '>=22.19.0'}
 
   unified@11.0.5:
@@ -10525,6 +10532,8 @@ snapshots:
   undici-types@8.9.0: {}
 
   undici@8.12.3: {}
+
+  undici@8.13.1: {}
 
   unified@11.0.5:
     dependencies:
