@@ -51,7 +51,7 @@ import { and, asc, desc, eq, inArray, isNull, max, ne, or } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn, listBoardColumns } from './board-columns';
 import { checkTaskKinds, listKinds } from './kinds';
-import { isLocalCopy } from './local-copies';
+import { isLocalCopy, queuedCopyBatchIds } from './local-copies';
 import { getProposal } from './knowledge';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -1113,9 +1113,10 @@ function removeUnstarted(
       run ? { id: run.id, live: !isTerminal(run.state) } : null,
     );
   // A pull-request start inserts its workstreams only once its batch is cut; removing a task in that
-  // window would abort the cut.
+  // window would abort the cut. A copy waiting for its turn has begun no cut.
+  const queued = new Set(queuedCopyBatchIds(ctx.tx));
   const cutting = ctx.tx
-    .select({ title: schema.batches.title })
+    .select({ id: schema.batches.id, title: schema.batches.title })
     .from(schema.batches)
     .where(
       and(
@@ -1123,7 +1124,8 @@ function removeUnstarted(
         eq(schema.batches.state, BatchState.Cutting),
       ),
     )
-    .get();
+    .all()
+    .find((batch) => !queued.has(batch.id));
   if (cutting)
     throw new ConflictError(
       `Batch "${cutting.title}" is being cut; remove ${task.title} once it has started`,

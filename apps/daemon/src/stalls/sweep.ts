@@ -5,7 +5,7 @@ import {
   type TaskId,
   type WorkstreamDto,
 } from '@10db/contracts';
-import { listActiveProjects, listBatches, listWorkstreams } from '@10db/db';
+import { listActiveProjects, listBatches, listWorkstreams, queuedCopyBatchIds } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
 import { cardsResolvedByEvent, flagCard, resolveStaleCards, type InboxService } from '../inbox';
@@ -68,10 +68,13 @@ export function createStallSweep(deps: {
     const active = listWorkstreams(db, {
       states: [WorkstreamState.Starting, WorkstreamState.Running, WorkstreamState.Verifying],
     }).filter(inLive);
+    // A copy waiting for its turn is not being cut, however long it waits.
+    const waiting = new Set(queuedCopyBatchIds(db));
     const batches = listBatches(db, {
       states: [BatchState.Open, BatchState.Shipping, BatchState.Cutting],
     })
       .filter(inLive)
+      .filter((batch) => !waiting.has(batch.id))
       .map((batch) => ({
         batch,
         members: latestPerTask(listWorkstreams(db, { batchId: batch.id })),
