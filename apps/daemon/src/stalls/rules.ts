@@ -48,6 +48,11 @@ export interface StallInput {
   readonly batches: readonly BatchMembers[];
   /** The `since` each open Stuck card already says, by its key: a restart keeps the count. */
   readonly carried: ReadonlyMap<string, string>;
+  /**
+   * Silence is counted from here at the earliest: the later of the daemon's start and the last moment
+   * 10db's own admission held new work. Time before it was spent down or waiting on 10db, not stuck.
+   */
+  readonly countFrom: Date;
 }
 
 export interface Stall {
@@ -81,6 +86,9 @@ const MOVING_BATCH: ReadonlySet<string> = new Set([BatchState.Shipping, BatchSta
 export function findStalls(input: StallInput): Stall[] {
   const now = input.now.getTime();
   const older = (at: string, ms: number): boolean => now - Date.parse(at) > ms;
+  /** `at`, or `countFrom` when the silence began before it. */
+  const counted = (at: string): string =>
+    Date.parse(at) < input.countFrom.getTime() ? input.countFrom.toISOString() : at;
   const earliest = (key: string, at: string): string => {
     const carried = input.carried.get(key);
     return carried !== undefined && Date.parse(carried) < Date.parse(at) ? carried : at;
@@ -152,7 +160,10 @@ export function findStalls(input: StallInput): Stall[] {
           waitingRunIds: unfinished.map((m) => m.id),
         }),
       );
-    } else if (MOVING_BATCH.has(batch.state) && older(batch.updatedAt, STALL.batchMovingMs)) {
+    } else if (
+      MOVING_BATCH.has(batch.state) &&
+      older(counted(batch.updatedAt), STALL.batchMovingMs)
+    ) {
       stalls.push(
         stall({
           key: batchStallKey(batch.id),
@@ -164,7 +175,7 @@ export function findStalls(input: StallInput): Stall[] {
             batch.state === BatchState.Cutting
               ? 'Its copy is still being cut.'
               : 'It is still shipping.',
-          since: batch.updatedAt,
+          since: counted(batch.updatedAt),
           actions: [StallAction.AbandonBatch],
           dependencyRunId: null,
           waitingRunIds: [],
@@ -176,7 +187,7 @@ export function findStalls(input: StallInput): Stall[] {
 
   for (const run of input.active) {
     if (!ACTIVE.has(run.state)) continue;
-    const at = run.lastActivityAt ?? run.updatedAt;
+    const at = counted(run.lastActivityAt ?? run.updatedAt);
     if (!older(at, STALL.activeIdleMs)) continue;
     stalls.push(
       stall({
