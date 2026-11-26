@@ -89,8 +89,10 @@ function step(
 
 function ask(queue: CaptureQueue, request: CaptureRequest): CaptureStep {
   if (queue.closed || queue.browser === 'refused') return step(queue);
-  // A download in progress holds befores back (they must be before the first edit); the rest wait for no one.
-  if (queue.browser === 'fetching' && !isBefore(request)) return step(queue);
+  // A fetch in progress holds befores (they must be before the first edit) and afters (what the task
+  // ended as stays true; start-up asks its missed ones while the fetch checks the build) back; a turn
+  // picture would show a turn long past, so it is not asked.
+  if (queue.browser === 'fetching' && isTurn(request)) return step(queue);
   if (request.passId !== null && queue.holding.includes(request.passId))
     return isAfter(request) && !queue.deferred.some((r) => sameAsk(r, request))
       ? step({ ...queue, deferred: [...queue.deferred, request] })
@@ -183,14 +185,15 @@ export function captureStep(queue: CaptureQueue, event: CaptureEvent): CaptureSt
           event.state === 'refused'
             ? []
             : event.state === 'fetching'
-              ? queue.waiting.filter(isBefore)
+              ? queue.waiting.filter((r) => !isTurn(r))
               : queue.waiting,
         deferred: event.state === 'refused' ? [] : queue.deferred,
       });
     case 'shutdown':
       return step({ ...queue, closed: true, waiting: [], deferred: [] }, loading !== null);
     case 'start': {
-      const next = queue.waiting[0];
+      // A before has a deadline (its task's launch waits for it only so long), so it goes first.
+      const next = queue.waiting.find(isBefore) ?? queue.waiting[0];
       if (
         queue.closed ||
         loading !== null ||
@@ -200,7 +203,12 @@ export function captureStep(queue: CaptureQueue, event: CaptureEvent): CaptureSt
       )
         return step(queue);
       return step(
-        { ...queue, loading: next, loadingAborted: false, waiting: queue.waiting.slice(1) },
+        {
+          ...queue,
+          loading: next,
+          loadingAborted: false,
+          waiting: queue.waiting.filter((r) => r !== next),
+        },
         false,
         next,
       );
