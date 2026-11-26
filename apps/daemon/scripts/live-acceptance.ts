@@ -240,6 +240,7 @@ function startDaemonProcess(): ChildProcess {
       TENDB_JUDGE: 'off',
       // No question may reach a real person from a throwaway daemon.
       TENDB_SLACK: 'off',
+      TENDB_TAILSCALE: 'off',
       // The daemon shuts down when this pipe closes, which is how it learns this script died.
       TENDB_PARENT_STDIN: '1',
     },

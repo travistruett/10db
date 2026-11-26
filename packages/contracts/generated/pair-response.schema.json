@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "deviceId": {
+      "type": "string",
+      "pattern": "^dev_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "token": {
+      "type": "string"
+    },
+    "host": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "fqdn": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "protocolVersion": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "name",
+        "fqdn",
+        "port",
+        "protocolVersion"
+      ]
+    }
+  },
+  "required": [
+    "deviceId",
+    "token",
+    "host"
+  ]
+}

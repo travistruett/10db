@@ -94,8 +94,18 @@ were made.
 - Its code is trusted. It holds the UI token, the captured login environment and `gh`'s login. It holds each
   keyed account's secret briefly, read through `/usr/bin/security` when a session starts.
 - It spawns lanes' `claude` processes, the gate, `git`, `gh`, `security`, `caffeinate` and `ps`.
-- It listens on `127.0.0.1` only. Every route needs the UI token except `/health` and `/mcp`, and `/mcp` needs
+- It binds `127.0.0.1` only. Every route needs the UI token except `/health` and `/mcp`, and `/mcp` needs
   a session's token. `/builder/mcp` needs the UI token (§4.11). CORS limits browsers only, so a local process with the token is a full client.
+- **A shared Mac answers its tailnet through `tailscale serve`**, never by binding anything else
+  ([the decision](decisions/2026-11-25-a-shared-mac-answers-on-its-tailnet-address.md)). While sharing is on, a
+  second listener (default port 4319) also binds `127.0.0.1`, and `serve` maps the tailnet name to it over HTTPS,
+  tailnet only, never Funnel. It takes device tokens only; any other bearer there is never compared. A device
+  token fails on the main listener, and a remote-marked request on the main listener is refused but for `/health`.
+  The event stream opens only with a one-use, 30-second ticket, with no `?token=`. The credential for each route
+  class on each listener is the table in `apps/daemon/src/api/auth-matrix.ts`, enforced in
+  `api/request-guards.ts`. The first `tailscale cert` waits for the builder's Get Certificate click, because it
+  publishes the name to public certificate logs. A device token doesn't expire and any paired device can pair
+  another; the builder revokes a device in the app.
 - A **render token** is the one other token the routes take. The daemon mints one for each screen a Shape session
   asks to see (Shape spec §5.5), and it dies when that request is answered. It reads the `GET` routes named in
   `screens/render-access.ts` and nothing else, every other request answering 403 (`/mcp` answers 401: it is no
@@ -107,7 +117,7 @@ were made.
 ### 4.2 The desktop app
 
 - A Tauri shell and its webview:
-  - its CSP allows only loopback;
+  - its CSP allows only loopback (the daemon's share listener is reached through `serve` by other devices, never by the desktop app);
   - it registers no filesystem, shell or HTTP plugin;
   - its opener is limited to `https://github.com/*`, `https://auth.openai.com/*` and `https://artificialanalysis.ai/*` (the second is the page a ChatGPT plan account's Connect opens, and the third the site the Artificial Analysis credit beside its scores links; the daemon hands over only an `https` address on `auth.openai.com`. A Claude subscription's Connect opens no page from the app. Either login is written by the agent into the account's directory, never read, copied or stored by 10db);
   - its dialog plugin is registered with `dialog:allow-open` only, and the call site opens the folder panel; the picked path goes to the

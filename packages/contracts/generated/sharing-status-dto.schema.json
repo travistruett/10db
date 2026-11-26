@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": [
+        "off",
+        "setting_up",
+        "ready",
+        "paused"
+      ]
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 65535
+    },
+    "fqdn": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "login": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "certificateRequested": {
+      "type": "boolean"
+    },
+    "certificateExists": {
+      "type": "boolean"
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "portHolder": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "step": {
+            "type": "string",
+            "enum": [
+              "installed",
+              "connected",
+              "untagged",
+              "https",
+              "certificate",
+              "shared"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "waiting",
+              "failed",
+              "todo"
+            ]
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "step",
+          "status",
+          "detail",
+          "error"
+        ]
+      }
+    }
+  },
+  "required": [
+    "state",
+    "enabled",
+    "port",
+    "fqdn",
+    "login",
+    "certificateRequested",
+    "certificateExists",
+    "url",
+    "portHolder",
+    "steps"
+  ]
+}

@@ -52,6 +52,7 @@ describe('the bundled daemon', () => {
         TENDB_CATALOGUE: 'off',
         // It never messages a real person.
         TENDB_SLACK: 'off',
+        TENDB_TAILSCALE: 'off',
         // It still builds its model profiles, from the fixture catalogue.
         TENDB_CATALOGUE_SNAPSHOT: resolve(import.meta.dirname, 'fixtures/catalogue.json'),
       },
@@ -74,7 +75,11 @@ describe('the bundled daemon', () => {
         const parsed = readRuntimeInfo(dataDir);
         return Promise.resolve(parsed.pid === child.pid ? parsed : undefined);
       }, 30_000);
-      const res = await fetch(`http://127.0.0.1:${String(info.port)}/health`);
+      // With no credential /health answers only status and protocol; the commit needs the app's token.
+      const token = readFileSync(join(dataDir, 'ui-token'), 'utf8').trim();
+      const res = await fetch(`http://127.0.0.1:${String(info.port)}/health`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       expect(res.status).toBe(200);
       // The header shows this commit; a bundle outside Applications shows it and never updates itself.
       const built = z

@@ -73,6 +73,8 @@ const ID_SCHEMAS = {
   SkipListing: idSchema(['skl'], 'SkipListingId'),
   RunHost: idSchema(['rhs'], 'RunHostId'),
   TrustGrant: idSchema(['tgr'], 'TrustGrantId'),
+  Device: idSchema(['dev'], 'DeviceId'),
+  PushSubscription: idSchema(['psh'], 'PushSubscriptionId'),
 } as const;
 
 const ID_PREFIX = {
@@ -131,6 +133,8 @@ const ID_PREFIX = {
   SkipListing: 'skl',
   RunHost: 'rhs',
   TrustGrant: 'tgr',
+  Device: 'dev',
+  PushSubscription: 'psh',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -265,6 +269,10 @@ export const RunHostId = ID_SCHEMAS.RunHost;
 export type RunHostId = IdOf<'RunHost'>;
 export const TrustGrantId = ID_SCHEMAS.TrustGrant;
 export type TrustGrantId = IdOf<'TrustGrant'>;
+export const DeviceId = ID_SCHEMAS.Device;
+export type DeviceId = IdOf<'Device'>;
+export const PushSubscriptionId = ID_SCHEMAS.PushSubscription;
+export type PushSubscriptionId = IdOf<'PushSubscription'>;
 /** A task's thread message is a conversation item. @alias */
 export const TaskMessageId = ConversationItemId;
 export type TaskMessageId = ConversationItemId;
