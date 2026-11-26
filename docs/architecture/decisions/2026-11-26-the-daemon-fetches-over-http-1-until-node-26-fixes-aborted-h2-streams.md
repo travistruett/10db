@@ -22,7 +22,14 @@ Built, in `apps/daemon/src/outbound/` and `apps/daemon/src/watchdog/`.
    recovery resumes the lanes. A late tick of the worker itself (sleep, a stopped process) resets the count.
    `TENDB_WATCHDOG=off` turns it off, which stopping at a debugger breakpoint needs. A daemon run without the
    desktop app (`pnpm dev`) has no supervisor, so there the watchdog only ends the process.
-5. **An outbound transport error is logged, not fatal.** `main.ts` still exits 1 on any other unhandled
+5. **Once the watchdog runs, the main thread never waits on work whose size someone else sets.** Removing a
+   tree a lane, a server, a build or the builder's project can fill runs off the main thread: a lane's and an
+   MCP server's temp dir at the session's end (`removeLaneTempDirAsync`), a stray worktree directory, a
+   copy's `node_modules`, a half-made worktree and a chat's files (`rm` from `node:fs/promises`). ESLint
+   refuses a recursive `rmSync` and the synchronous `removeLaneTempDir` in `apps/daemon/src`; a line that
+   keeps one says what bounds its tree (a folder only 10db fills, or the sweep at start, which ends before
+   the watchdog begins).
+6. **An outbound transport error is logged, not fatal.** `main.ts` still exits 1 on any other unhandled
    rejection or uncaught exception. An error whose `code`, or whose cause's, is one of undici's (`UND_ERR_*`),
    an HTTP/2 session's (`ERR_HTTP2_*`) or a socket's (`ECONNRESET`, `ETIMEDOUT`, `ECONNREFUSED`, `ENOTFOUND`,
    `EAI_AGAIN`, `EHOSTUNREACH`, `ENETUNREACH`) is logged and the daemon carries on. `EPIPE` is not in the
@@ -66,5 +73,12 @@ Turned down:
   that.
 
 The cost is one connection per concurrent request to a host instead of one multiplexed session, which the
-daemon's few, small calls do not notice. The risk of the watchdog is a kill during honest synchronous work of
-15 s or more; the daemon's known synchronous work (a few short child processes) is far below it.
+daemon's few, small calls do not notice.
+
+The risk of the watchdog is a kill during honest synchronous work of 15 s or more, which interrupts every
+running lane where before it was only a pause. The daemon did have such work: a session's end removed its temp
+dir with `chmod -R` and `rm -rf` through `execFileSync`, and a lane decides what is in that dir, so a lane
+could have forced a restart by filling it. Point 5 takes that and the other removals of the kind off the main
+thread. What still runs synchronously after start is child processes with a timeout below it (`git ls-files`
+for a plan's ceremony, 10 s; `security` for a Keychain item, 5 s) and removals of folders only 10db fills.
+Not checked: every synchronous read of a directory a project fills; none is known to come near 15 s.
