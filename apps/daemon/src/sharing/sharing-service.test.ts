@@ -71,6 +71,7 @@ const run: TailscaleRun = (args) => {
 
 /** `cli` is the Tailscale CLI's path, or null where Tailscale is not installed. */
 function make(cli: string | null = '/usr/local/bin/tailscale') {
+  cliPath = cli;
   const sockets = createSocketRegistry();
   sockets.add(
     { scope: 'full', deviceId: null, listener: 'share' },
@@ -97,13 +98,7 @@ function make(cli: string | null = '/usr/local/bin/tailscale') {
     state,
     clock,
     log: silentLogger,
-<<<<<<< 7b1d4789aaabb196ce337b4dc348ea8296bc8ae9
     cli: () => cliPath,
-||||||| 34d2260c3
-    cli: () => '/usr/local/bin/tailscale',
-=======
-    cli: () => cli,
->>>>>>> e9704305abaddb24dbbfc0554e46c7c27254b62f
     run: () => run,
     listen,
     sockets,
@@ -128,7 +123,6 @@ beforeEach(() => {
   listenCalls = 0;
   failUnserve = false;
   clock = new ManualClock();
-  cliPath = '/usr/local/bin/tailscale';
 });
 afterEach(() => {
   closeStore();
