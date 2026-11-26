@@ -32,11 +32,15 @@ async function registration(): Promise<ServiceWorkerRegistration | null> {
   return (await navigator.serviceWorker.getRegistration('/app/')) ?? null;
 }
 
-/** Subscribes with the host's key and tells the Mac, which holds the subscription it pushes to. */
+/**
+ * Subscribes with the host's key and tells the Mac, which holds the subscription it pushes to. A refusal drops the
+ * browser's subscription only when the builder is turning push on; a re-send keeps it, so the next start tries again.
+ */
 async function subscribeAndKeep(
   reg: ServiceWorkerRegistration,
   client: DaemonClient,
   key: string,
+  dropOnRefusal: boolean,
 ): Promise<void> {
   const subscription = await reg.pushManager.subscribe({
     userVisibleOnly: true,
@@ -51,7 +55,7 @@ async function subscribeAndKeep(
     json: { endpoint, p256dh: keys['p256dh'], auth: keys['auth'] },
   });
   if (!kept.ok) {
-    await subscription.unsubscribe();
+    if (dropOnRefusal) await subscription.unsubscribe();
     throw new Error('The Mac did not keep this phone for notifications.');
   }
 }
@@ -71,7 +75,7 @@ export async function resyncPush(client: DaemonClient): Promise<boolean> {
   const { key } = await readJson(await client.push.key.$get(), PushKeyDto);
   if (!sameBytes(existing.options.applicationServerKey, keyBytes(key)))
     await existing.unsubscribe();
-  await subscribeAndKeep(reg, client, key);
+  await subscribeAndKeep(reg, client, key, false);
   return true;
 }
 
@@ -116,7 +120,7 @@ export function usePushSwitch() {
       return;
     }
     const { key } = await readJson(await client.push.key.$get(), PushKeyDto);
-    await subscribeAndKeep(reg, client, key);
+    await subscribeAndKeep(reg, client, key, true);
     setState(PushState.On);
   }
 

@@ -68,13 +68,15 @@ export function ServedFrame() {
       resyncPush(client).catch(() => undefined);
     };
     resync();
+    if (!('serviceWorker' in navigator)) return undefined;
     // The worker says so when the push service rotated the subscription under an open page.
     const heard = (message: MessageEvent): void => {
       if (PushResync.safeParse(message.data).success) resync();
     };
-    navigator.serviceWorker.addEventListener('message', heard);
+    const workers = navigator.serviceWorker;
+    workers.addEventListener('message', heard);
     return () => {
-      navigator.serviceWorker.removeEventListener('message', heard);
+      workers.removeEventListener('message', heard);
     };
   }, [client]);
   const [titleHost, setTitleHost] = useState<HTMLElement | null>(null);

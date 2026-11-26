@@ -32,16 +32,17 @@ export function thisPlatform(): { readonly platform: DevicePlatform; readonly la
 
 /** Pairs with the Mac that served this page and keeps the token; returns the Mac's name. */
 export async function pairWithThisHost(input: PairRequest): Promise<string> {
-  // A phone that still holds a token has the Mac drop that device first, so it doesn't stay in the list.
   const old = readDevice();
+  const client = createAnonymousDaemonClient(window.location.origin);
+  const paired = await readJson(await client.devices.pair.$post({ json: input }), PairResponse);
+  saveDevice({ deviceId: paired.deviceId, token: paired.token, host: paired.host.name });
+  // Only once the new pairing holds does the old device go, so a wrong code never costs a working one, and it
+  // doesn't stay in the Mac's list.
   if (old !== null) {
     await createDaemonClient({ url: window.location.origin, token: old.token })
       .devices.me.$delete()
       .catch(() => undefined);
   }
-  const client = createAnonymousDaemonClient(window.location.origin);
-  const paired = await readJson(await client.devices.pair.$post({ json: input }), PairResponse);
-  saveDevice({ deviceId: paired.deviceId, token: paired.token, host: paired.host.name });
   return paired.host.name;
 }
 
