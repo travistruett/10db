@@ -35,6 +35,12 @@ const HOLDER_POLL: Duration = Duration::from_secs(1);
 /// How long that holder may go without a /health answer before this shell starts its own daemon,
 /// whose instance lock then decides whether the holder is replaced.
 const HOLDER_SILENCE: Duration = Duration::from_secs(30);
+/// How often the supervisor's own daemon is asked for /health once it serves.
+const HEALTH_INTERVAL: Duration = Duration::from_secs(5);
+/// How long that daemon may stay silent on /health before it is killed and replaced.
+const FROZEN_AFTER: Duration = Duration::from_secs(30);
+/// How long a killed daemon gets to exit before the supervisor moves on without collecting it.
+const KILL_WAIT: Duration = Duration::from_secs(5);
 /// How long one /health probe may take to connect, and again to answer.
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
 /// What a healthy daemon's /health reply starts with.
@@ -294,7 +300,7 @@ fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, data_dir: &Path, log_di
                     guard.stdin = child.stdin.take();
                     guard.child = Some(child);
                     drop(guard);
-                    wait_for_exit(shared, log_dir)
+                    wait_for_exit(shared, data_dir, log_dir)
                 }
                 Err(error) => {
                     drop(guard);
@@ -320,9 +326,132 @@ fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, data_dir: &Path, log_di
     }
 }
 
-/// Polls rather than blocking in `wait`, so `stop` can take the lock to signal the child.
-fn wait_for_exit(shared: &Mutex<Shared>, log_dir: &Path) -> Option<i32> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChildHealth {
+    /// Answering, not yet serving, or not silent for long enough to judge.
+    Fine,
+    /// No longer running, though its exit has not been collected: a daemon that takes minutes to
+    /// tear down stays unreaped that long.
+    Gone,
+    /// Running, but silent on /health for `FROZEN_AFTER`.
+    Frozen,
+}
+
+/// Probes the child's /health once it serves, so a daemon that froze or is slow to die is replaced.
+#[derive(Debug)]
+struct HealthWatch {
+    last_check: Instant,
+    /// When the child last answered, or when it was first found silent. `None` until then: a daemon
+    /// that is still starting has no `daemon.json` and is never judged.
+    last_answer: Option<Instant>,
+}
+
+impl HealthWatch {
+    fn new() -> Self {
+        Self {
+            last_check: Instant::now(),
+            last_answer: None,
+        }
+    }
+
+    fn check(&mut self, pid: u32, data_dir: &Path) -> ChildHealth {
+        if self.last_check.elapsed() < HEALTH_INTERVAL {
+            return ChildHealth::Fine;
+        }
+        self.last_check = Instant::now();
+        let Some((named, port)) = read_runtime_info(data_dir) else {
+            return ChildHealth::Fine;
+        };
+        if named != pid {
+            return ChildHealth::Fine;
+        }
+        if health_answers(port) {
+            self.last_answer = Some(Instant::now());
+            return ChildHealth::Fine;
+        }
+        if process_gone(pid) {
+            return ChildHealth::Gone;
+        }
+        let silent_since = *self.last_answer.get_or_insert_with(Instant::now);
+        if silent_since.elapsed() >= FROZEN_AFTER {
+            ChildHealth::Frozen
+        } else {
+            ChildHealth::Fine
+        }
+    }
+}
+
+/// Stops tracking a child that is gone or frozen, killing it first when `kill` is set, and returns
+/// its exit code when it could be collected within `wait`. A child still unreaped then is handed to
+/// a thread that waits for it, so the supervisor can start the next daemon now.
+fn release_child(
+    shared: &Mutex<Shared>,
+    log_dir: &Path,
+    kill: bool,
+    wait: Duration,
+) -> Option<i32> {
+    let deadline = Instant::now() + wait;
+    let mut kill = kill;
     loop {
+        {
+            let mut guard = lock(shared);
+            let child = guard.child.as_mut()?;
+            if kill {
+                kill = false;
+                if let Err(error) = child.kill() {
+                    report(log_dir, &format!("could not kill the daemon: {error}"));
+                }
+            }
+            if let Ok(Some(status)) = child.try_wait() {
+                guard.child = None;
+                guard.stdin = None;
+                return status.code();
+            }
+            if Instant::now() >= deadline {
+                guard.stdin = None;
+                if let Some(mut child) = guard.child.take() {
+                    thread::spawn(move || {
+                        // Only to reap it; how it ended no longer matters.
+                        let _ = child.wait();
+                    });
+                }
+                return None;
+            }
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+}
+
+/// Polls rather than blocking in `wait`, so `stop` can take the lock to signal the child. Between
+/// polls it watches the child's health: the mutex is free while a probe runs.
+fn wait_for_exit(shared: &Mutex<Shared>, data_dir: &Path, log_dir: &Path) -> Option<i32> {
+    let mut watch = HealthWatch::new();
+    loop {
+        let pid = {
+            let guard = lock(shared);
+            // A daemon told to stop closes its server before it exits; that silence is not a freeze.
+            if guard.quitting {
+                None
+            } else {
+                guard.child.as_ref().map(Child::id)
+            }
+        };
+        let health = pid.map_or(ChildHealth::Fine, |pid| watch.check(pid, data_dir));
+        if health != ChildHealth::Fine && !lock(shared).quitting {
+            return match health {
+                ChildHealth::Frozen => {
+                    report(
+                        log_dir,
+                        "the daemon stopped answering /health; killing it to start another",
+                    );
+                    release_child(shared, log_dir, true, KILL_WAIT)
+                }
+                ChildHealth::Gone | ChildHealth::Fine => {
+                    report(log_dir, "the daemon is gone; starting another");
+                    release_child(shared, log_dir, false, Duration::ZERO)
+                }
+            };
+        }
         {
             let mut guard = lock(shared);
             let status = guard.child.as_mut()?.try_wait();
