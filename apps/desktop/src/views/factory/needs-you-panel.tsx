@@ -42,6 +42,7 @@ const KIND_LABELS: Readonly<Record<InboxKind, string>> = {
   [InboxKind.Plan]: 'Plan to approve',
   [InboxKind.PlaybookMoveReport]: 'Report',
   [InboxKind.Acceptance]: 'Acceptance',
+  [InboxKind.Watchpoint]: 'Look',
 };
 
 /** A question or a plan to approve reads yellow; any other kind of card is gray. */

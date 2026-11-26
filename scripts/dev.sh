@@ -19,6 +19,8 @@ export TENDB_BENCHMARKS="${TENDB_BENCHMARKS:-off}"
 export TENDB_JUDGE="${TENDB_JUDGE:-off}"
 # Nor does it message the builder's stakeholders on the Slack bot token.
 export TENDB_SLACK="${TENDB_SLACK:-off}"
+# Nor does it touch the installed app's Tailscale serve mapping.
+export TENDB_TAILSCALE="${TENDB_TAILSCALE:-off}"
 # `TENDB_FAKE_SLACK=on` turns Slack on against a fake one (scripts/fake-slack.mjs) with made-up workspaces:
 # connect with the token xoxb-fake-acme or xoxb-fake-globex. Nothing reaches the real Slack.
 if [ "${TENDB_FAKE_SLACK:-off}" = on ]; then
