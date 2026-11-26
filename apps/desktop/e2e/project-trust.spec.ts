@@ -198,7 +198,8 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await page.getByRole('table', { name: 'Suites' }).getByText('plain').click();
-  await expect(liveDrawer).toContainText("The assessment hasn't said how this command runs");
+  await expect(liveDrawer).toContainText('10db does not know how this command runs yet');
+  await expect(liveDrawer.getByRole('button', { name: 'Assess Now' })).toBeVisible();
   await expect(liveDrawer.getByRole('button', { name: 'Run', exact: true })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await page.getByRole('tab', { name: /No Eval/u }).click();
