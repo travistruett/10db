@@ -13,7 +13,7 @@ import { prepareCommandEnv, withCopyId } from './command-env';
 import { dockerAccess, dockerEnvNames } from './docker-access';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
-import { pathsEqual } from './protected-reads';
+import { isEqualOrUnder, pathsEqual } from './protected-reads';
 import { buildLaneProfile } from './profile';
 import {
   laneRootsOf,
@@ -74,6 +74,11 @@ export interface GateRunInput {
    * install scripts, no pnpmfile) should ask: nothing else in the sandbox may write there.
    */
   readonly packageInstall?: boolean;
+  /**
+   * Checkout-relative env files open for reading, never writing (a Docker live eval run only, whose
+   * compose reads them). Every other `.env*` stays closed.
+   */
+  readonly dotEnvReadable?: readonly string[];
   /** The copy the gate's batch runs in (`copyIdForBatch`); absent or null for any other gate. */
   readonly copyId?: CopyId | null;
   /**
@@ -295,9 +300,12 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           },
           input.copyId ?? null,
         );
+        const opened = (input.dotEnvReadable ?? [])
+          .map((file) => realOr(join(checkout, file)))
+          .filter((file) => isEqualOrUnder(file, checkout));
         const secrets = splitSecrets(
           checkout,
-          access.checkoutSecrets,
+          access.checkoutSecrets.filter((file) => !opened.some((o) => pathsEqual(realOr(file), o))),
           dataDenyEnforced(deps.runtime),
         );
         const profile = buildLaneProfile({
@@ -339,6 +347,8 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
             ...access.pinnedTools,
             // An existing .env is untracked and can't be recovered, so it is never appended or truncated.
             ...secrets.statVisible,
+            ...opened,
+            ...access.checkoutSecrets,
           ],
           // srt reads the settings file before the sandbox starts; the command reads no file here.
           sandboxRoots: access.sandboxRoots,
