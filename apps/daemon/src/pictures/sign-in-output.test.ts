@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loginOutputTail } from './sign-in-output';
+import { loginOutputTail, maskedProse } from './sign-in-output';
 
 // Value: protects=a dev login's sign-in address and secrets never reach Settings or a card;
 // fails_when=the tail shows a token, a query string or a credential assignment as printed;
@@ -21,6 +21,21 @@ describe('loginOutputTail', () => {
     );
     expect(out).toContain('Error: user insert failed');
     expect(out).not.toMatch(/abc123|zzz|hunter2|localhost|sk-ant|aGVsbG8/);
+  });
+
+  it("masks an agent's sentence as prose: a question, a long name and its whole length are kept", () => {
+    const long = `${'The app signs in through a provider. '.repeat(20)}End`;
+    expect(maskedProse('Do you want a dev-only login route?')).toBe(
+      'Do you want a dev-only login route?',
+    );
+    expect(maskedProse('See authentication_controller_test and "is it /dev?"')).toBe(
+      'See authentication_controller_test and "is it /dev?"',
+    );
+    expect(maskedProse(long)).toBe(long);
+    const out = maskedProse(
+      'It uses /auth/dev?token=abc123 on http://localhost:5173/x with password = hunter2 and aGVsbG8gd29ybGQgdGhpcyBpcyBhIHNlc3Npb24x9',
+    );
+    expect(out).not.toMatch(/abc123|localhost|hunter2|aGVsbG8/);
   });
 
   it('keeps only the last lines', () => {

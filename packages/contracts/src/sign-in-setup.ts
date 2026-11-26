@@ -50,3 +50,8 @@ export type SignInSetupChoice = (typeof SignInSetupChoice)[keyof typeof SignInSe
 export const SIGN_IN_OFFER = 'signInOffer';
 /** The `detail` key of the card of a sign-in being set up: the task setting it up. */
 export const SIGN_IN_SETUP_TASK = 'signInSetupTask';
+/**
+ * The `detail` key of a sign-in card whose setup task found no dev login can work: what it found, what
+ * the builder must decide, and the address and command that held for.
+ */
+export const SIGN_IN_CANNOT = 'signInCannot';

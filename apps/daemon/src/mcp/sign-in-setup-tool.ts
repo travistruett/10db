@@ -12,7 +12,7 @@ import {
 } from '@10db/contracts';
 import { getTask, getWorkstreamRow, type DbReader } from '@10db/db';
 import { signInSetupTaskOf } from '../inbox';
-import { loginOutputTail, realAccountProblem } from '../pictures';
+import { maskedProse, realAccountProblem } from '../pictures';
 
 // The sign-in setup task's lane writes a dev login and hands it to `save_dev_login`. 10db, not the
 // agent, decides whether it is saved: only a command its own sign-in check signs the picture browser
@@ -75,8 +75,8 @@ export function saveDevLoginTool(
       const task = getTask(db, row.taskId);
       if (input.cannot !== undefined) {
         signInSetup.cannot(task.projectId, {
-          found: loginOutputTail(input.cannot.found),
-          decide: loginOutputTail(input.cannot.decide),
+          found: maskedProse(input.cannot.found),
+          decide: maskedProse(input.cannot.decide),
         });
         return "Recorded: the builder's card says what you found and what they must decide. Nothing was saved.";
       }

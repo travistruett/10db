@@ -24,12 +24,27 @@ const QUERY = /\?\S*/g;
 /** A long run of token characters: a bare token or session id that no pattern names. */
 const BARE_TOKEN = /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{24,}(?![A-Za-z0-9_-])/g;
 
+/** A query string in a sentence: a question mark with a name right after it, so a question's own mark is kept. */
+const QUERY_IN_PROSE = /\?[A-Za-z0-9_%][^\s"')]*/g;
+
 /** A line with every address, query and secret in it masked. */
 function maskLine(line: string): string {
   let masked = line.replace(ADDRESS, '<address>').replace(QUERY, `?${MASK}`);
   masked = masked.replace(BARE_TOKEN, MASK);
   for (const pattern of SECRET_PATTERNS) masked = masked.replace(pattern, MASK);
   return masked.length > LINE_MAX ? `${masked.slice(0, LINE_MAX)}…` : masked;
+}
+
+/**
+ * A sentence an agent wrote for the builder, with every address, query string and secret in it masked
+ * and nothing cut. Unlike a command's output it is prose: a question keeps its mark, and a long name
+ * (a file or a class) is kept, since only a long run holding a digit is taken for a token.
+ */
+export function maskedProse(text: string): string {
+  let masked = text.replace(ADDRESS, '<address>').replace(QUERY_IN_PROSE, `?${MASK}`);
+  masked = masked.replace(BARE_TOKEN, (run) => (/\d/.test(run) ? MASK : run));
+  for (const pattern of SECRET_PATTERNS) masked = masked.replace(pattern, MASK);
+  return masked;
 }
 
 /** The last lines of a dev login's output, masked; empty when it printed none. */

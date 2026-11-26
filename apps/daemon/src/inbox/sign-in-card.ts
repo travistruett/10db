@@ -4,6 +4,7 @@ import {
   InboxKind,
   ProjectId,
   SAVE_DEV_LOGIN_TOOL,
+  SIGN_IN_CANNOT,
   SIGN_IN_OFFER,
   SIGN_IN_SETUP_TASK,
   SignInSetupChoice,
@@ -76,9 +77,32 @@ function setupArea(project: Pick<ProjectDto, 'areas'>): string | null {
   return area?.name ?? null;
 }
 
-/** The title of the task that sets a project's picture sign-in up. */
-export function signInSetupTitle(projectName: string): string {
-  return `10db's pictures can sign in to ${projectName}`;
+/** What a setup task that found no dev login can work left on the card, and the address and command it held for. */
+const CannotWords = z.object({
+  found: z.string(),
+  decide: z.string(),
+  appUrl: z.string().nullable(),
+  devLoginCommand: z.string().nullable(),
+});
+type CannotWords = z.infer<typeof CannotWords>;
+
+/**
+ * What the project's open card says a setup task found, while the address and command it was found
+ * for still stand: a later failure of the same sign-in keeps the words, and a change by the builder
+ * starts afresh.
+ */
+function standingCannotWords(db: DbReader, project: ProjectDto): CannotWords | null {
+  const card = findOpenByFoldKey(db, project.id, pictureSignInFoldKey(project.id));
+  // The detail is the card's own JSON, read back from the database: a boundary, so parse it.
+  const words = CannotWords.safeParse(card?.detail?.[SIGN_IN_CANNOT]);
+  if (!words.success) return null;
+  const same =
+    words.data.appUrl === project.appUrl && words.data.devLoginCommand === project.devLoginCommand;
+  return same ? words.data : null;
+}
+
+function cannotLines(words: Pick<CannotWords, 'found' | 'decide'>): string[] {
+  return [`What it found: ${words.found}`, `What you need to decide: ${words.decide}`];
 }
 
 /** The task Set Up Sign-In makes; null when the project has no area for it to name. */
@@ -86,7 +110,7 @@ export function signInSetupTask(project: Pick<ProjectDto, 'name' | 'areas'>): Ta
   const area = setupArea(project);
   if (area === null) return null;
   return {
-    title: signInSetupTitle(project.name),
+    title: `10db's pictures can sign in to ${project.name}`,
     description: [
       "10db takes pictures of this project's app signed in, and signs its browser in with a dev login: a command, run from this folder, that prints an address which signs a browser in. Write one.",
       "Read the repository's auth, its user model and its seed or fixture code to find how a session is made. The command must create its fictional user (an address on example.test) when it is missing, refuse to run against any database but the local dev one (a non-local database host or a production environment stops it), be safe to run again and again, and print one sign-in URL or path on the app at $TENDB_APP_URL as its last line.",
@@ -128,13 +152,19 @@ interface FlagParts {
  * The one card for a project whose picture sign-in failed: no picture of its pages is taken, and
  * none reaches Slack or Linear, until the dev login works. A status card that a check or a sign-in
  * that works closes, so a repeat of the failure only refreshes the card's words. It offers to set the
- * sign-in up, and is left as it is while a task does.
+ * sign-in up, and is left as it is while a task does. What a setup task found when no dev login
+ * could work stays on it, until the builder changes the address or the command.
  */
 export function raisePictureSignInCard(deps: CardDeps, failure: PictureSignInFailure): void {
   if (signInSetupTaskOf(deps.state.db, failure.projectId) !== null) return;
   const project = getProject(deps.state.db, failure.projectId);
   const printed = failure.output === '' ? [] : ['What it printed (masked):', failure.output];
   const offer = offerOptions(project);
+  const cannot = standingCannotWords(deps.state.db, project);
+  const setupFound =
+    cannot === null
+      ? []
+      : ['10db tried to set the sign-in up and could not.', ...cannotLines(cannot)];
   deps.inbox.flag({
     projectId: failure.projectId,
     workstreamId: null,
@@ -147,6 +177,7 @@ export function raisePictureSignInCard(deps: CardDeps, failure: PictureSignInFai
     title: `${project.name}'s pictures can't sign in`,
     body: [
       failure.problem,
+      ...setupFound,
       `No picture of its pages is taken while this lasts, so none reaches Slack or Linear. ${SIGN_IN_CONTRACT}`,
       'Fix the command in Settings › App Preview, or let 10db set it up. 10db checks it again when it changes, when the daemon starts and once a day, and this card closes itself when it signs in.',
       ...printed,
@@ -154,6 +185,7 @@ export function raisePictureSignInCard(deps: CardDeps, failure: PictureSignInFai
     detail: {
       ...OPEN_APP_PREVIEW,
       [SIGN_IN_OFFER]: failure.projectId,
+      ...(cannot === null ? {} : { [SIGN_IN_CANNOT]: cannot }),
       ...(failure.exitCode === null ? {} : { exitCode: failure.exitCode }),
     },
     ...offer,
@@ -228,7 +260,8 @@ export function applySignInSetupChoice(
 
 /**
  * The setup task found no dev login can work: the one card says what it found and what the builder
- * must decide. `found` and `decide` come masked.
+ * must decide. `found` and `decide` come masked. The words are kept in the card's detail, so a later
+ * failed sign-in that rewrites the card keeps them.
  */
 export function cannotSignInCard(
   deps: CardDeps,
@@ -247,11 +280,18 @@ export function cannotSignInCard(
     },
     title: `10db can't sign in to ${project.name}'s app for pictures`,
     body: [
-      `What it found: ${words.found}`,
-      `What you need to decide: ${words.decide}`,
+      ...cannotLines(words),
       'Until a dev login works, 10db pictures only the pages anyone can see without signing in. Later, 10db will let you sign in once in a window it opens and keep that sign-in until it expires; that is not built yet.',
     ].join('\n'),
-    detail: OPEN_APP_PREVIEW,
+    detail: {
+      ...OPEN_APP_PREVIEW,
+      [SIGN_IN_CANNOT]: {
+        found: words.found,
+        decide: words.decide,
+        appUrl: project.appUrl,
+        devLoginCommand: project.devLoginCommand,
+      } satisfies CannotWords,
+    },
     refresh: true,
     foldKey: pictureSignInFoldKey(projectId),
   });

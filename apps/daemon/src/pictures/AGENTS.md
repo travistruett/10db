@@ -74,7 +74,9 @@
   (`fictional-account.ts`) is refused unrun; any other is checked by `checkDevLogin` (the check, run from the
   project's folder, never recorded or announced, keeping no state unless it signed in) and saved through
   `patchProject` only when `signed_in`, whose change checks it again and closes the card. `cannot` rewords the card
-  with the masked words.
+  with what was found and what the builder must decide, masked as prose (`maskedProse`: addresses, query strings and
+  secrets, nothing cut), and keeps them in its detail (`SIGN_IN_CANNOT`, with the address and command they held
+  for). A later failed sign-in that rewrites the card keeps those lines until the builder changes either.
 - The broken preview (Workbench spec §8.2, §8.4,
   `decisions/2026-11-10-a-broken-preview-is-read-from-the-page-load-that-takes-the-picture.md`): each capture of
   a pass page judges the load of its page route (`pageRoute`, its viewports and themes as one, `routeLoad`) by

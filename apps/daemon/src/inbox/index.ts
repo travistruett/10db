@@ -15,7 +15,6 @@ export {
   raiseNoSignInOffer,
   raisePictureSignInCard,
   signInSetupTaskOf,
-  signInSetupTitle,
 } from './sign-in-card';
 export { hazardCardFoldKey, hazardRemovalCard, pendingHazardRemovals } from './hazard-card';
 export { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
