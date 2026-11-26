@@ -1,6 +1,5 @@
 import {
   BatchId,
-  BatchState,
   EventType,
   InboxItemId,
   LinearEventKind,
@@ -134,14 +133,16 @@ export function linearRowOf(event: DaemonEvent, read: LinearEventRead): LinearRo
   if (event.type === EventType.StepChanged) {
     const verdict = data['verdict'];
     if (ws === undefined || typeof verdict !== 'string') return [];
+    // A plan review has no comment of its own: the run's one verdict comment tells it with the reviews and
+    // checks of the work, since the brief reads every verdict the run has.
+    if (data['role'] === StepRole.PlanReview) return [];
     return [
       {
         taskId: ws.taskId,
         workstreamId: ws.id,
         event: LinearEventKind.Verdict,
-        // One update per run phase: the plan reviews of a run are one comment and its reviews and checks another,
-        // so a send-back and a second round are told in the end's words, not as a comment each.
-        dedupeKey: `verdict:${ws.id}:${String(ws.ends)}:${data['role'] === StepRole.PlanReview ? 'plan' : 'work'}`,
+        // One verdict comment per run phase: a send-back and a second round are told in the end's words.
+        dedupeKey: `verdict:${ws.id}:${String(ws.ends)}`,
         detail: {
           workstreamId: ws.id,
           role: text(data['role']),
@@ -156,15 +157,14 @@ export function linearRowOf(event: DaemonEvent, read: LinearEventRead): LinearRo
     const changed = data['changed'];
     const merged =
       Array.isArray(changed) && changed.includes('pr') && batch.prState === PullRequestState.Merged;
-    const shipped = data['to'] === BatchState.Shipped;
-    if (!merged && !shipped) return [];
-    const kind = merged ? LinearEventKind.PrMerged : LinearEventKind.PrOpened;
-    const prefix = merged ? 'pr_merged' : 'pr_opened';
+    // The landing is the merge, the one comment of that phase. A pull request that is only opened is told in the
+    // end's comment, which names it and what waits on it.
+    if (!merged) return [];
     return batch.workstreams.map((w) => ({
       taskId: w.taskId,
       workstreamId: w.id,
-      event: kind,
-      dedupeKey: `${prefix}:${event.entityId}`,
+      event: LinearEventKind.PrMerged,
+      dedupeKey: `pr_merged:${event.entityId}`,
       detail: { workstreamId: w.id, prUrl: batch.prUrl },
     }));
   }
@@ -225,9 +225,7 @@ function readFor(db: DbReader, event: DaemonEvent): LinearEventRead {
   }
   if (event.type === EventType.BatchUpdated) {
     const changed = event.data['changed'];
-    const relevant =
-      event.data['to'] === BatchState.Shipped || (Array.isArray(changed) && changed.includes('pr'));
-    if (!relevant) return {};
+    if (!Array.isArray(changed) || !changed.includes('pr')) return {};
     const parsed = BatchId.safeParse(event.entityId);
     if (!parsed.success) return {};
     const batchId = parsed.data;

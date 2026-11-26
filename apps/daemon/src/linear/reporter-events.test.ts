@@ -44,9 +44,10 @@ describe('linearRowOf', () => {
 
     const step = (stepIndex: number, role: string): string[] =>
       keys(event(EventType.StepChanged, { stepIndex, role, verdict: 'reject' }), wsRead(0));
-    expect(step(1, 'plan_review')).toEqual(step(2, 'plan_review'));
-    expect(step(3, 'review')).toEqual(step(5, 'qa'));
-    expect(step(1, 'plan_review')).not.toEqual(step(3, 'review'));
+    // A plan review has no comment of its own: the run's one verdict comment tells it with the code review.
+    expect(step(1, 'plan_review')).toEqual([]);
+    expect(step(3, 'review')).toEqual([`verdict:${ws}:0`]);
+    expect(step(5, 'qa')).toEqual(step(3, 'review'));
   });
 
   it('makes nothing from a step without a verdict, or a batch update that is not a PR event', () => {
@@ -62,6 +63,10 @@ describe('linearRowOf', () => {
     });
     const prChanged = event(EventType.BatchUpdated, { changed: ['pr'] }, batchId);
     expect(keys(prChanged, batch('open'))).toEqual([]);
+    // A shipped batch (its pull request opened) makes no comment: the landing is the merge.
+    expect(keys(event(EventType.BatchUpdated, { to: 'SHIPPED' }, batchId), batch('open'))).toEqual(
+      [],
+    );
     expect(linearRowOf(prChanged, batch('merged')).map((d) => [d.event, d.dedupeKey])).toEqual([
       [LinearEventKind.PrMerged, `pr_merged:${batchId}`],
     ]);
