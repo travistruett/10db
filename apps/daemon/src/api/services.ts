@@ -260,6 +260,7 @@ import type {
   DesignCheckId,
   PicturesStatusDto,
   SignInCheckDto,
+  PreviewSignInDto,
   TaskInput,
   RunNextResult,
   TaskMove,
@@ -658,6 +659,8 @@ export interface ApiServices extends PlanRecordServices {
   picturesStatus(projectId: ProjectId): PicturesStatusDto;
   /** Settings › App Preview's Check Sign-in: runs the dev login and loads the app's first routed page. */
   checkSignIn(projectId: ProjectId): Promise<SignInCheckDto>;
+  /** Pick on Page spec §2: the project signed in for its Preview window; never a credential. */
+  previewSignIn(projectId: ProjectId): Promise<PreviewSignInDto>;
   /** Restart Preview: runs the project's preview command again, its restarts forgotten. */
   restartPreview(projectId: ProjectId): Promise<void>;
   /** `start_shape`: a conversation from a terminal session, listed at once; starts no turn. */

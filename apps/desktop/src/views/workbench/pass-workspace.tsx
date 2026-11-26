@@ -10,6 +10,7 @@ import { Announcer } from './announcer';
 import { hasContent } from '../../conversation/drafts';
 import { draftKey, sessionDrafts, useSessionDraft } from '../sessions/session-drafts';
 import { focusTarget } from './focus-target';
+import { focusIsPreviews, onPicksFocus } from './preview-focus';
 import { DiscardPageModal } from './discard-page-modal';
 import { PagePane } from './page-pane';
 import { PassMenu } from './pass-header';
@@ -78,10 +79,25 @@ export function PassWorkspace(props: PassWorkspaceProps) {
         markPassNotificationsActed(target);
         if (target !== shown?.page.taskId) props.onSelect(target);
       }
+      // The Preview's ask brought the window forward: its picks take the cursor, never the input.
+      if (focusIsPreviews()) return;
       if (document.querySelector('[role="dialog"]') === null)
         setComposerFocus((asked) => asked + 1);
     };
   });
+  const [picksFocus, setPicksFocus] = useState(0);
+  const select = useRef(props.onSelect);
+  useEffect(() => {
+    select.current = props.onSelect;
+  });
+  useEffect(
+    () =>
+      onPicksFocus((taskId) => {
+        select.current(taskId);
+        setPicksFocus((asked) => asked + 1);
+      }),
+    [],
+  );
   useEffect(() => {
     const focused = () => {
       onFocus.current();
@@ -206,6 +222,9 @@ export function PassWorkspace(props: PassWorkspaceProps) {
         <PagePane
           passId={view.pass.id}
           appUrl={project.appUrl}
+          projectId={project.id}
+          repoPath={project.repoPath}
+          picksFocus={picksFocus}
           row={shown}
           passOpen={view.pass.state === PassState.Open}
           openedAt={

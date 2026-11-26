@@ -98,6 +98,7 @@ import {
   EvalSuiteQuery,
   PersonInput,
   PickSize,
+  PreviewSignInDto,
   ProjectId,
   TrustGrantId,
   ProjectInput,
@@ -2278,6 +2279,13 @@ export function createApp(deps: ApiDeps) {
     )
     .post('/projects/:projectId/pictures/sign-in-check', async (c) =>
       c.json(await deps.services.checkSignIn(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post('/projects/:projectId/preview/sign-in', async (c) =>
+      c.json(
+        PreviewSignInDto.parse(
+          await deps.services.previewSignIn(ProjectId.parse(c.req.param('projectId'))),
+        ),
+      ),
     )
     .post('/projects/:projectId/preview/restart', async (c) => {
       await deps.services.restartPreview(ProjectId.parse(c.req.param('projectId')));

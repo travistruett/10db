@@ -1,8 +1,13 @@
-import type { ImageFormat } from '@10db/contracts';
-import { useState, type RefObject } from 'react';
+import type { ProjectId } from '@10db/contracts';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Composer } from '../../conversation/composer';
-import { hasContent, type Draft, type DraftChange } from '../../conversation/drafts';
+import { hasTyped, type Draft, type DraftChange } from '../../conversation/drafts';
+import { dropPreviewPicks } from '../../desktop/preview';
+import { PAGE_IMAGES } from './page-images';
+import { PickChips } from './pick-chips';
+import { picksMessage, withoutPick } from './pick-message';
 import { pageComposerPhase, pagePhase } from './page-composer-phase';
+import { focusIsPreviews } from './preview-focus';
 import type { PageStatus } from './page-status';
 
 /** What a page's composer asks the daemon to do; each rejects with the daemon's words. */
@@ -13,9 +18,6 @@ export interface PageActions {
   /** Stops the turn and starts it again from the draft. */
   readonly redo: (draft: Draft) => Promise<void>;
 }
-
-/** What a page takes: PNG, JPEG and WebP pictures, on every account (Workbench spec §4.3). */
-const PAGE_IMAGES: ImageFormat[] = ['png', 'jpeg', 'webp'];
 
 export interface PageComposerProps {
   /** The page's name, for the placeholder and the input's name. */
@@ -33,6 +35,12 @@ export interface PageComposerProps {
   readonly error?: string | null;
   /** Nothing can be sent or stopped: the pass is closing or abandoning. */
   readonly disabled?: boolean;
+  /** The page's project, whose Preview its picks came from. */
+  readonly projectId: ProjectId;
+  /** The page's route, named over its picks. */
+  readonly route: string | null;
+  /** Counts the Preview bringing the window forward on this page: each time, its picks take the cursor. */
+  readonly picksFocus?: number;
 }
 
 /**
@@ -49,15 +57,36 @@ export function PageComposer({
   inputRef,
   error = null,
   disabled = false,
+  projectId,
+  route,
+  picksFocus = 0,
 }: PageComposerProps) {
   // The input empties as Send is pressed; until the message reaches the page the composer is drawn as
   // holding it, so Send stays the primary.
   const [sending, setSending] = useState(0);
+  const picks = draft.picks ?? [];
   const { phase } = pageComposerPhase(pagePhase(status), {
-    hasContent: hasContent(draft) || sending > 0,
+    typed: hasTyped(draft) || sending > 0,
+    picks: picks.length > 0,
     label,
     firstMessage,
   });
+  const picksHead = useRef<HTMLDivElement>(null);
+  // The Preview's ask: the picks take the cursor, or, with none yet, nothing in the composer holds it.
+  // It runs on a page the ask selected too, which mounts a new composer; an ask long past moves nothing.
+  useEffect(() => {
+    if (picksFocus === 0 || !focusIsPreviews()) return;
+    if (picksHead.current !== null) picksHead.current.focus();
+    else if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  }, [picksFocus]);
+  // A pick sent leaves the Preview too; one whose send failed comes back into the draft with its badge.
+  const settle = async (sent: Draft, go: (message: Draft) => Promise<void>) => {
+    await go(picksMessage(sent));
+    void dropPreviewPicks(
+      projectId,
+      (sent.picks ?? []).map((p) => p.pick.id),
+    );
+  };
   return (
     <Composer
       draft={draft}
@@ -67,16 +96,27 @@ export function PageComposer({
       disabledReason={null}
       error={error}
       locked={disabled}
+      pending={
+        <PickChips
+          projectId={projectId}
+          route={route}
+          picks={picks}
+          headRef={picksHead}
+          onRemove={(pickId) => {
+            onDraft((now) => withoutPick(now, pickId));
+          }}
+        />
+      }
       onSend={async (sent) => {
         setSending((n) => n + 1);
         try {
-          await actions.send(sent);
+          await settle(sent, actions.send);
         } finally {
           setSending((n) => n - 1);
         }
       }}
       onStop={actions.stop}
-      onRedo={actions.redo}
+      onRedo={(sent) => settle(sent, actions.redo)}
       label={`Message to ${label}`}
       attachLabel="Add Picture"
       {...(inputRef === undefined ? {} : { inputRef })}

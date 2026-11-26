@@ -35,11 +35,20 @@ import {
   rateLimitEvents,
 } from './codex-mapping';
 import { CODEX_COMMANDS, codexCommandOf, type CodexCommandCall } from './codex-commands';
+import { answerCommandApproval, type EscalationAnswer } from './codex-escalation';
 import {
+  BUILDER_REVIEWS,
+  CodexApprovalDecision,
+  COMMAND_APPROVAL_METHOD,
+  CommandApprovalRequest,
   ConfigReadResponse,
+  ESCALATIONS_TO_BUILDER,
   HooksListResponse,
   InitializeResponse,
+  NO_APPROVALS,
   RateLimitsReadResponse,
+  SERVER_REQUEST_RESOLVED,
+  ServerRequestResolved,
   SkillsExtraRootsResponse,
   ThreadResponse,
   TurnCompleted,
@@ -54,7 +63,9 @@ import {
   createCodexRpc,
   spawnAppServer,
   type CodexRpc,
+  type ServerRequest,
 } from './codex-rpc';
+import type { ClaudeDenial } from './claude-tool-calls';
 import { codexLoginStatus } from './codex-sign-in-check';
 import { isFullAccess } from './full-access';
 import type { SignInCheck } from './sign-in-check';
@@ -266,6 +277,19 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
   let model = spec.model;
   /** A chat the builder turned Full access on for: Codex's own full-access mode, still under 10db's guard hook. */
   const fullAccess = isFullAccess(spec);
+  /**
+   * A chat whose sandbox lets a blocked command ask to run outside it: Codex sends 10db each sandbox
+   * escalation, which the chat's guard and then the builder answer. Every other session never asks.
+   */
+  const escalates =
+    spec.profile.kind === 'explore' &&
+    spec.sandbox?.settings.allowUnsandboxedCommands === true &&
+    !fullAccess;
+  const approvals = escalates
+    ? { approvalPolicy: ESCALATIONS_TO_BUILDER, approvalsReviewer: BUILDER_REVIEWS }
+    : { approvalPolicy: NO_APPROVALS };
+  /** The escalations waiting on an answer, by request id: each stops when Codex or its turn no longer waits. */
+  const escalations = new Map<number | string, { turnId: string; stop: AbortController }>();
   /** Turns that have completed, so a `turn/start` reply is not taken for a turn that already ended. */
   let turnsCompleted = 0;
   const state = createTurnState();
@@ -332,8 +356,10 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     events.push({ type: 'ended', reason, message, ...(refusal ? { refusal } : {}) });
     events.end();
     rpc?.close();
-    // Closing the socket refuses every call still waiting on a card.
+    // Closing the socket refuses every call still waiting on a card, and an escalation's card goes too.
     void guardSocket?.close().catch(() => undefined);
+    for (const { stop } of escalations.values()) stop.abort();
+    escalations.clear();
     endSession(new SessionOver());
   };
 
@@ -549,7 +575,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     const params = {
       cwd: spec.cwd,
       model: spec.model,
-      approvalPolicy: 'never',
+      ...approvals,
       // A Full access chat's thread runs Codex's own full-access mode; the home's lane profile gives way to it.
       ...(fullAccess ? { sandbox: FULL_ACCESS_SANDBOX } : {}),
       config: codexThreadConfig(spec, secretFiles),
@@ -574,6 +600,11 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     }
     if (!fullAccess && thread.activePermissionProfile?.id !== LANE_PROFILE)
       throw sandboxRefused('Codex runs the thread under a permission profile other than the lane.');
+    // A reviewer other than 10db (Codex's own reviewer model) would answer an escape from the sandbox itself.
+    if (escalates && thread.approvalsReviewer !== BUILDER_REVIEWS)
+      throw sandboxRefused(
+        'Codex would hand requests to run a command outside the sandbox to a reviewer other than 10db.',
+      );
     if (!modelMatches(spec.model, thread.model))
       throw new StartRefused(
         SessionEndReason.BillingRefused,
@@ -647,7 +678,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
           { type: 'text', text: message.text, text_elements: [] },
           ...pictureInputs(message.images),
         ],
-        approvalPolicy: 'never',
+        ...approvals,
         ...(fullAccess ? { sandboxPolicy: { type: 'dangerFullAccess' } } : {}),
         model,
         effort: spec.effort,
@@ -760,6 +791,11 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
           return;
         }
       }
+      if (n.method === SERVER_REQUEST_RESOLVED) {
+        const resolved = ServerRequestResolved.safeParse(n.params);
+        if (resolved.success) escalations.get(resolved.data.requestId)?.stop.abort();
+        return;
+      }
       let ended: string | null = null;
       if (n.method === 'turn/completed') {
         turnsCompleted += 1;
@@ -767,6 +803,9 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
         if (completed.success) {
           ended = completed.data.turn.id;
           turnEnds.get(ended)?.();
+          // An escalation still waiting would let a command out after its turn gave the checkout back.
+          for (const waiting of escalations.values())
+            if (waiting.turnId === ended) waiting.stop.abort();
         }
         const end = endOfTurn(n.params);
         if (end !== null) {
@@ -895,7 +934,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
         }
       }
       if (message.steerOnly) {
-        log.warn({}, 'pictures a tool returned were dropped: no turn is open to take them');
+        log.warn({}, 'a message for the open turn was dropped: no turn is open to take it');
         return;
       }
       await startTurn(threadId, message);
@@ -978,6 +1017,64 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     return state.turnId;
   };
 
+  /** Keeps who refused a call for its item, which Codex reports as declined. */
+  const noteDenial = (toolUseId: string, denial: ClaudeDenial): void => {
+    state.denials.set(toolUseId, denial);
+    // A refusal for an item the agent never reports is dropped, oldest first.
+    if (state.denials.size > DENIALS_KEPT) {
+      const [oldest] = state.denials.keys();
+      if (oldest !== undefined) state.denials.delete(oldest);
+    }
+  };
+
+  /** Hands a message to the open turn only, in order with every other message sent. */
+  const enqueue = (message: Outgoing): void => {
+    waiting.add(message);
+    // One at a time, so messages reach Codex in the order they were sent. A command sent
+    // mid-turn waits for the turn on a chain of its own, so a steer after it still reaches that turn.
+    if (message.command !== null && state.turnId !== null) {
+      heldCommands = heldCommands.then(() => deliver(message));
+    } else {
+      sends = sends.then(() => deliver(message));
+    }
+  };
+
+  /**
+   * Answers one request to run a blocked command outside the sandbox. A decline with a reason is steered
+   * into the turn, since Codex's decline tells the model nothing; a request Codex stopped waiting on is not.
+   */
+  const answerEscalation = async ({
+    id,
+    params,
+  }: ServerRequest): Promise<{ decision: CodexApprovalDecision }> => {
+    const request = CommandApprovalRequest.safeParse(params);
+    if (!request.success || done || closing) return { decision: CodexApprovalDecision.Decline };
+    const stop = new AbortController();
+    escalations.set(id, { turnId: request.data.turnId, stop });
+    let answer: EscalationAnswer;
+    try {
+      answer = await answerCommandApproval(spec, {
+        request: request.data,
+        cwd: spec.cwd,
+        signal: stop.signal,
+        // Codex reports the escalated item itself once it is declined, so only its refusal is kept.
+        onDenied: noteDenial,
+      });
+    } catch (error) {
+      log.error(
+        { errName: error instanceof Error ? error.name : 'unknown' },
+        'a request to run a codex command outside the sandbox could not be answered',
+      );
+      answer = { decision: CodexApprovalDecision.Decline, steer: null };
+    } finally {
+      escalations.delete(id);
+    }
+    // The session's end aborts every escalation still waiting, so an aborted one covers it too.
+    if (answer.steer !== null && !stop.signal.aborted)
+      enqueue({ text: answer.steer, images: [], uuid: undefined, command: null, steerOnly: true });
+    return { decision: answer.decision };
+  };
+
   /** The guard hook's answer for one call; a throw here is a refusal, since the socket answers 500. */
   const judgeCall = async (hook: HookInput, signal: AbortSignal): Promise<GuardAnswer> => {
     try {
@@ -986,12 +1083,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
         { ...hook, cwd: hook.cwd ?? spec.cwd },
         signal,
         (toolUseId, denial, refused) => {
-          state.denials.set(toolUseId, denial);
-          // A refusal for an item the agent never reports is dropped, oldest first.
-          if (state.denials.size > DENIALS_KEPT) {
-            const [oldest] = state.denials.keys();
-            if (oldest !== undefined) state.denials.delete(oldest);
-          }
+          noteDenial(toolUseId, denial);
           // Codex reports no item for a call its hook refused: the thread shows the call from the hook's input.
           if (started)
             for (const call of refusedToolCalls(refused, denial, clock.now().getTime(), refusals++))
@@ -1075,6 +1167,8 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     });
     rpc = createCodexRpc(child, log);
     rpc.onNotification(onNotification);
+    // Any other session leaves the request unanswered (-32601), which Codex reads as declined.
+    if (escalates) rpc.onRequest(COMMAND_APPROVAL_METHOD, answerEscalation);
     void rpc.exited.then(({ code }) => {
       if (stopRequested) finish(SessionEndReason.Stopped, null);
       else if (started)
@@ -1149,21 +1243,13 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
   return {
     events,
     send: (text, images = [], uuid, options) => {
-      const message: Outgoing = {
+      enqueue({
         text,
         images,
         uuid,
         command: codexCommandOf(text),
         steerOnly: options?.steerOnly === true,
-      };
-      waiting.add(message);
-      // One at a time, so messages reach Codex in the order they were sent. A command sent
-      // mid-turn waits for the turn on a chain of its own, so a steer after it still reaches that turn.
-      if (message.command !== null && state.turnId !== null) {
-        heldCommands = heldCommands.then(() => deliver(message));
-      } else {
-        sends = sends.then(() => deliver(message));
-      }
+      });
     },
     // The receipt names what 10db still holds: each runs once the interrupted turn has ended.
     interrupt: async () => {

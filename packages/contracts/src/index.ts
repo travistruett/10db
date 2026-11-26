@@ -62,6 +62,7 @@ export * from './sign-in-setup';
 export * from './mockup-document';
 export * from './model-profiles';
 export * from './page-areas';
+export * from './page-pick';
 export { globsOverlap } from './glob-overlap';
 export * from './pass-activity';
 export * from './pass-view';

@@ -346,7 +346,7 @@ export function runFakeLaneSession(
         emit({ type: 'activity', kind: 'text', summary: step.summary });
         return 'continue';
       case 'tool': {
-        const input = step.input;
+        const input = taskRefs.resolve(step.input);
         const toolUseId = `fake-tool-${String(index)}`;
         // The hook reads the file before the tool runs; the scripted call does as its use is mapped.
         toolCalls.capture(toolUseId, step.toolName, input, spec.cwd);
@@ -425,6 +425,9 @@ export function runFakeLaneSession(
       case 'say':
         said += 1;
         for (const event of sayEvents(`fake-msg-${String(said)}`, step.text)) emit(event);
+        return 'continue';
+      case 'each_owed':
+        // Written out into its steps when the session starts; none is left to run.
         return 'continue';
       case 'think':
         thought += 1;
@@ -609,7 +612,7 @@ export function runFakeLaneSession(
     }
     try {
       // Every step that ends the session returns 'halt', so only a stop needs checking here.
-      for (const [index, step] of steps.entries()) {
+      for (const [index, step] of taskRefs.expand(steps).entries()) {
         if (abort.signal.aborted) break;
         if ((await runStep(step, index)) === 'halt') break;
       }

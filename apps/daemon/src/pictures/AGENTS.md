@@ -49,7 +49,7 @@
   are refused to screens. `DaemonOptions.pictures` is `{ kind: 'pinned' }` from the entry point; tests give a
   camera (`test/fake-camera.ts`); absent, the daemon takes no pictures and fetches nothing. No picture is
   uploaded or sent to a model, except a design review's and `check_design`'s (to the session's model), a PR's (uploaded
-  with `prPictures`) and a `lane` screen taken by a lane's own browser, which goes to that
+  with `prPictures`), a finished task's pair in its Linear `ended` comment (`linear/reporter-pictures.ts`) and a `lane` screen taken by a lane's own browser, which goes to that
   session's model as an image block when it fits the account's limits
   (`decisions/2026-11-24-lane-screenshots-go-to-the-lanes-model.md`).
 - The sign-in check (`sign-in-check.ts`, `sign-in-schedule.ts`; `POST /projects/:projectId/pictures/sign-in-check`,
@@ -77,6 +77,15 @@
   with what was found and what the builder must decide, masked as prose (`maskedProse`: addresses, query strings and
   secrets, nothing cut), and keeps them in its detail (`SIGN_IN_CANNOT`, with the address and command they held
   for). A later failed sign-in that rewrites the card keeps those lines until the builder changes either.
+- A failed dev login leaves a record for the task updates (`sign-in-record.ts`, `createSignInReporter`, wired in
+  `daemon/start.ts`;
+  `decisions/2026-11-25-the-daemon-uploads-a-tasks-pictures-to-linear-and-says-why-it-has-none.md`): the command,
+  its exit code and the masked last lines of its output, kept per project (`pictures-sign-in.<projectId>`) and cleared
+  when a sign-in succeeds or the app address or dev login command changes. The builder's card is the sign-in check's
+  (above). `Pictures.outlook(taskId)` is the one place that says what a task that names a page can expect of
+  its after: `none`, `wait` (an After capture of it is queued or running), `later` (a local copy not yet shipped) or
+  `skipped` with the reason (a separate copy, the recorded sign-in failure, a refused browser); the Linear `ended` and
+  landing comments and the Slack post read it, and the Linear reporter waits on `wait`.
 - The broken preview (Workbench spec §8.2, §8.4,
   `decisions/2026-11-10-a-broken-preview-is-read-from-the-page-load-that-takes-the-picture.md`): each capture of
   a pass page judges the load of its page route (`pageRoute`, its viewports and themes as one, `routeLoad`) by
