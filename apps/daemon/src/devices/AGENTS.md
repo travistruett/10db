@@ -18,3 +18,8 @@ Credentials for paired devices on the share listener.
 - `device-service.ts`: pairing, `authenticate`, `revoke`. An unknown id still runs `secretMatches` against a dummy
   hash so timing doesn't tell it from a wrong secret. `authenticate` writes `last_used_at` at most once a minute.
   `revoke` closes sockets after its write commits.
+- Routes a device calls on itself: `DELETE /devices/me` (Forget This Device, the same `revoke`), `PUT` and
+  `DELETE /devices/me/push` (`push/AGENTS.md`). They answer 409 to a caller that is not a paired device, and sit
+  before `/devices/:deviceId` in `api/app.ts` so `me` is never read as an id. The pairing dialog on the Mac
+  (`views/settings/pair-device-modal.tsx`) calls `POST /devices/pairing-code`, and closes when the devices list gains
+  a device (`device.changed { change: 'paired' }` refetches it).

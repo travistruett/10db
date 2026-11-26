@@ -177,7 +177,7 @@ import { dropPendingPageLabels } from './page-label-guess';
 import { adoptGoal } from '../goals';
 import { classifyPath } from '../guard';
 import { taskSession } from '../chat';
-import type { EvalsService } from '../evals';
+import { suitesOfTasks, type EvalsService } from '../evals';
 import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
@@ -987,6 +987,29 @@ export function createServices(deps: {
     },
     evalModels(projectId) {
       return deps.evals.models(projectId, getProject(db, projectId).repoPath);
+    },
+    async evalMarkers(projectId) {
+      const found = await suitesOfTasks(
+        db,
+        deps.evals,
+        getProject(db, projectId).repoPath,
+        listTasks(db, projectId),
+      );
+      return {
+        tasks: Object.fromEntries(
+          [...found].map(([taskId, suites]) => [
+            taskId,
+            suites.map((s) => ({ suiteKey: s.suiteKey, label: s.label, state: s.state })),
+          ]),
+        ),
+      };
+    },
+    async taskEvalCoverage(taskId) {
+      const task = getTask(db, taskId);
+      const found = await suitesOfTasks(db, deps.evals, getProject(db, task.projectId).repoPath, [
+        task,
+      ]);
+      return { suites: found.get(taskId) ?? [] };
     },
     evalSuite(projectId, key, run) {
       return deps.evals.suite(projectId, getProject(db, projectId).repoPath, key, run);

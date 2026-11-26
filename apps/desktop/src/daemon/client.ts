@@ -20,7 +20,13 @@ function clientOptions(conn: DaemonConnection) {
   return {
     headers: { Authorization: `Bearer ${conn.token}` },
     ...(conn.readOnly === true ? { fetch: readOnlyFetch } : {}),
+    ...(conn.fetch !== undefined ? { fetch: conn.fetch } : {}),
   };
+}
+
+/** The typed client for a daemon route that takes no credential (pairing a device). */
+export function createAnonymousDaemonClient(url: string) {
+  return hc<AppType>(url);
 }
 
 /** The typed Hono client for one daemon connection; every call carries the token it was given. */

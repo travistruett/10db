@@ -12,6 +12,7 @@ import {
   Urgency,
 } from '@10db/contracts';
 import { insertInboxItem, type WriteContext } from '@10db/db';
+import { coverageLinesOf, coverageSection } from '../evals';
 import { flagCard, CardTier } from '../inbox';
 
 // Workbench spec §6.1, §6.2: a Ready page is a new `check` item each time, answered only by Sign Off;
@@ -60,7 +61,9 @@ export function raisePassCheck(ctx: WriteContext, check: PassCheck): InboxItemDt
     projectId: check.pass.projectId,
     kind: InboxKind.Check,
     title: `Ready: ${check.task.title}`,
-    body: checkBody(check),
+    body: [checkBody(check), ...coverageSection(coverageLinesOf(ctx.tx, check.workstreamId))].join(
+      '\n',
+    ),
     options: [{ label: PASS_SIGN_OFF_CHOICE, description: 'The page is right' }],
     recommendation: null,
     category: 'product',

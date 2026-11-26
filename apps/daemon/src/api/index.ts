@@ -1,4 +1,4 @@
-export { createApp, type AppType } from './app';
+export { createApp, type AppType, type PushRoutes } from './app';
 export type {
   ApiServices,
   GoalAdoptResult,

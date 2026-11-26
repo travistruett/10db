@@ -17,6 +17,7 @@ import { join, relative } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
+import { outboundFetch } from '../outbound';
 import { AGENT_PLATFORM, type PinnedRelease } from './agent-pins';
 
 const TAR = '/usr/bin/tar';
@@ -40,7 +41,9 @@ export type Download = (url: string, to: string) => Promise<void>;
 export type Extract = (file: string, into: string, pin: PinnedRelease) => Promise<void>;
 
 export const downloadFile: Download = async (url, to) => {
-  const response = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+  const response = await outboundFetch(url, {
+    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+  });
   if (!response.ok || response.body === null)
     throw new Error(`${url} answered ${String(response.status)}`);
   // The response body is a web stream; node's pipeline takes the node kind.
