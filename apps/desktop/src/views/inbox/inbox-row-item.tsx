@@ -3,9 +3,10 @@ import {
   InboxOutcome,
   inboxOutcome,
   isDismissable,
+  Urgency,
   type InboxItemDto,
 } from '@10db/contracts';
-import { Button, Text } from '@mantine/core';
+import { Badge, Button, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 import type { InboxRow } from '../../daemon/inbox-queries';
 import { ProjectLabel } from '../../shell/project-label';
@@ -121,6 +122,19 @@ function rowAge(state: InboxListState, item: InboxItemDto, now: number): string 
   return shortAgo(state === InboxListState.Resolved ? item.updatedAt : item.createdAt, now);
 }
 
+/**
+ * A High marker on an Open row: Open lists the most urgent first, so it says why a row sits above
+ * a newer one. Normal and Low rows are the common case and carry none.
+ */
+function UrgencyMark({ urgency }: { readonly urgency: Urgency }) {
+  if (urgency !== Urgency.High) return null;
+  return (
+    <Badge size="xs" color="red" variant="light" style={{ flexShrink: 0 }}>
+      High
+    </Badge>
+  );
+}
+
 /** What a chat's card says in place of its body: the session that raised it. */
 function SessionLine({ item }: { readonly item: InboxItemDto }) {
   const session = useSessionOfCard(item);
@@ -170,6 +184,7 @@ export function InboxRowItem({
   const pass = row.row.passId !== null;
   return (
     <Lines
+      mark={state === InboxListState.Open ? <UrgencyMark urgency={first.urgency} /> : null}
       title={first.title}
       count={pass ? 1 : items.length}
       age={rowAge(state, first, now)}
