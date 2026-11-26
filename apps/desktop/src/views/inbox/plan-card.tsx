@@ -3,6 +3,7 @@ import { Stack, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { CardActions } from './card-actions';
 import { CardSurface } from './card-surface';
+import { decisionLine } from './decision-line';
 import classes from './inbox-card.module.css';
 import { useCardAnswer } from './use-card-answer';
 import { useViewTaskButton } from './view-task';
@@ -57,8 +58,10 @@ export function PlanCard({
         framed={framed}
         start={[viewTask]}
         error={answer.failure}
+        decision={decisionLine(item)}
         sendBack={{
           label: 'What Needs to Change in the Plan',
+          buttonLabel: 'Re-plan',
           description: 'The planner gets this note and plans again.',
           note,
           onNote,

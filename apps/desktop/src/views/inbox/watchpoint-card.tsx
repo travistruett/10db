@@ -5,6 +5,7 @@ import { useWatchpointHits } from '../../daemon/watchpoint-queries';
 import { WatchpointFolds, WholeDiff } from '../board/watchpoint-folds';
 import { CardActions } from './card-actions';
 import { CardSurface } from './card-surface';
+import { decisionLine } from './decision-line';
 import classes from './inbox-card.module.css';
 import { useCardAnswer } from './use-card-answer';
 import { useViewTaskButton } from './view-task';
@@ -66,6 +67,7 @@ export function WatchpointCard({
           ) : null,
         ]}
         error={answer.failure}
+        decision={decisionLine(item)}
         sendBack={{
           label: 'What Needs to Change',
           description: 'The follow-up task gets this note.',

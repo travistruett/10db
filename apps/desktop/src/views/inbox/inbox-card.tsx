@@ -29,6 +29,7 @@ import { ReviewRejection, reviewRejection } from '../review/review-rejection';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
 import { CardActions, KeyHint } from './card-actions';
 import { CardHeader } from './card-header';
+import { decisionLine } from './decision-line';
 import { CardSurface } from './card-surface';
 import classes from './inbox-card.module.css';
 import { KIND_ICONS } from './kind-icons';
@@ -407,6 +408,7 @@ export function InboxCard({
           link === null ? null : <ExternalLink url={link} label="Open on GitHub" asButton />,
         ]}
         error={error ?? batch.error}
+        decision={closesItself ? null : decisionLine(item, { batch: batch.offers })}
         noteRef={noteRef}
         note={
           hasOptions

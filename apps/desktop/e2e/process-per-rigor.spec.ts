@@ -120,6 +120,10 @@ test('a Critical task waits for the plan to be approved, then builds and finishe
   await openPlanCard(page, title, planText);
   await expect(page.getByRole('option', { name: /Plan ready for you to approve/ })).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
+  // The bar says what each answer does, and Send Back is named by its effect.
+  await expect(
+    page.getByText('Approve starts the build. Re-plan sends it back with your note.'),
+  ).toBeVisible();
   // The rows of the panel hold a flag's Dismiss button inside the option, which axe reports as
   // nested-interactive; the card beside them is scanned.
   await expectAccessible(page, 'inbox, plan card');
@@ -141,7 +145,7 @@ test('Send Back needs a note, and with one plans again', async ({ page, request 
   await openPage(page, '/inbox', projectId);
   await openPlanCard(page, title, 'PLAN FIRST: write notes/second.txt.');
 
-  await page.getByRole('button', { name: 'Send Back', exact: true }).click();
+  await page.getByRole('button', { name: 'Re-plan', exact: true }).click();
   const send = page.getByRole('button', { name: 'Send It Back' });
   await expect(send).toBeDisabled();
   await page.getByLabel('What Needs to Change in the Plan').fill('Add a header to the file.');
