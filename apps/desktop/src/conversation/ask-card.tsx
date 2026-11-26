@@ -1,20 +1,10 @@
 import { PermissionChoice, type InboxItemDto, type InboxOption } from '@10db/contracts';
-import {
-  Box,
-  Button,
-  Divider,
-  Group,
-  Kbd,
-  Paper,
-  Stack,
-  Text,
-  TextInput,
-  Tooltip,
-} from '@mantine/core';
+import { Button, Divider, Group, Kbd, Paper, Stack, Text, TextInput, Tooltip } from '@mantine/core';
 import { IconShieldHalf } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { DaemonRequestError } from '../daemon/client';
 import { useAnswerInbox } from '../daemon/queries';
+import { CommandBlock } from '../views/inbox/command-block';
 import { optionLabel } from '../views/inbox/permission-labels';
 import { WAITING_CARD_ATTRIBUTE } from './escape';
 
@@ -86,11 +76,16 @@ export function AskCard({
   };
   if (answer.isSuccess) return null;
   const call = detailText(item, 'summary');
-  // The command is in the block above; the body's own paragraph that repeats it is left out.
-  const rest = item.body
-    .split('\n\n')
-    .filter((paragraph) => paragraph !== call)
-    .join('\n\n');
+  // The command is in its own block; a body that opens with it drops that copy whole. Split into paragraphs
+  // instead, a command with blank lines would leave its pieces among 10db's text.
+  const rest =
+    call === null
+      ? item.body
+      : item.body === call
+        ? ''
+        : item.body.startsWith(`${call}\n\n`)
+          ? item.body.slice(call.length + 2)
+          : item.body;
   return (
     <Paper
       {...{ [WAITING_CARD_ATTRIBUTE]: true }}
@@ -119,25 +114,7 @@ export function AskCard({
             </Text>
           ) : null}
         </Group>
-        {call === null ? null : (
-          <Box
-            component="pre"
-            m={0}
-            p="xs"
-            fz="xs"
-            style={{
-              fontFamily: 'var(--mantine-font-family-monospace)',
-              background: 'var(--mantine-color-body)',
-              borderRadius: 'var(--mantine-radius-sm)',
-              whiteSpace: 'pre-wrap',
-              overflowWrap: 'anywhere',
-              maxHeight: 160,
-              overflowY: 'auto',
-            }}
-          >
-            {call}
-          </Box>
-        )}
+        {call === null ? null : <CommandBlock command={call} />}
         {rest === '' ? null : (
           <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-line' }}>
             {rest}

@@ -512,16 +512,25 @@ export function createSharingService(deps: {
     publish();
   }
 
+  /**
+   * True when this daemon holds no share: no listener and not enabled. Stop then unserves nothing and owes nothing,
+   * since the port's mapping may be another daemon's; an unserve owed by an earlier Stop is retried by the monitor.
+   */
+  function notSharing(): boolean {
+    return listener === null && !readEnabled();
+  }
+
   async function stopSharing(port: number): Promise<void> {
     stopMonitor();
-    const settled = await unshare(port);
+    const settled = notSharing() || (await unshare(port));
     deps.state.write((ctx) => {
       setAppSetting(ctx, KEY_ENABLED, false);
     });
     if (!settled) writeUnserveOwed([...new Set([...readUnserveOwed(), port])]);
     pausedReason = null;
     portHolder = null;
-    if (!settled) scheduleMonitor();
+    // stopMonitor above cancelled any pending run, so schedule one again while an unserve is owed.
+    if (readUnserveOwed().length > 0) scheduleMonitor();
   }
 
   async function share(port: number): Promise<void> {
@@ -665,9 +674,8 @@ export function createSharingService(deps: {
       return enqueue(async () => {
         closed = true;
         stopMonitor();
-        // A daemon that never shared leaves the mapping alone: it may be another daemon's.
         await settleOwed();
-        if (listener === null && !readEnabled()) return;
+        if (notSharing()) return;
         const port = readPort();
         if (!(await unshare(port))) writeUnserveOwed([...new Set([...readUnserveOwed(), port])]);
       }).catch((error: unknown) => {
