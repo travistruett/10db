@@ -48,10 +48,6 @@ Decision Models (`decision-models-view.tsx`, Settings › Models › Decision Mo
 
 ## Remote Access and Devices
 
-- `remote-access-section.tsx` draws `GET /sharing` (`daemon/sharing-queries.ts`): no steps means no Tailscale CLI, so
-  the "needs Tailscale" card; otherwise the checklist, or, once Ready, the address and the collapsed checks. It polls
-  every 10 s while open and follows `sharing.changed`. Get Certificate and Share are buttons only: nothing asks for a
-  certificate or turns sharing on by itself, and a refusal (409) shows the daemon's message.
-- `devices-section.tsx` lists `GET /devices` and revokes through a confirm; there is no Pair button until the phone app.
-- The rail's foot line ("Shared on your tailnet", "Sharing paused: <step>") is `shell/sharing-status.tsx`.
-- The e2e daemon runs with `TENDB_TAILSCALE=off`, so it never reads the builder's own tailnet.
+- `remote-access-section.tsx` draws `GET /sharing`: no steps means no Tailscale CLI; else the checklist, or once
+  Ready the address. It polls every 10 s and follows `sharing.changed`. Get Certificate and Share run only on a click.
+- `devices-section.tsx` lists `GET /devices` and revokes through a confirm. The e2e daemon sets `TENDB_TAILSCALE=off`.
