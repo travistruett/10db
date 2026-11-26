@@ -1,5 +1,7 @@
 import {
+  PrecedentKind,
   PrecedentScope,
+  ProgramKey,
   WorkstreamFailure,
   type LimitName,
   type PrecedentCandidateDto,
@@ -66,10 +68,23 @@ interface Doubt {
   blocked: boolean;
 }
 
-/** The kind line a candidate starts with, which the builder may reword: the key, and arguments like the examples. */
+/** The kind line of a key the store can't quote: a kind needs no key to say what it covers. */
+const GENERIC_KIND = 'A kind of command with arguments like the examples';
+
+/**
+ * The kind line a candidate starts with, which the builder may reword: the key, and arguments like the examples.
+ * It always passes `PrecedentKind`, so approving it never throws: a long key is cut, and one the kind can't hold
+ * gives a line that names no key.
+ */
 export function defaultPrecedentKind(key: string): string {
   const shown = key.length > KEY_IN_KIND_MAX ? `${key.slice(0, KEY_IN_KIND_MAX)}…` : key;
-  return `\`${shown}\` with arguments like the examples`;
+  const parsed = PrecedentKind.safeParse(`\`${shown}\` with arguments like the examples`);
+  return parsed.success ? parsed.data : GENERIC_KIND;
+}
+
+/** Whether the store can hold a precedent for this key, as `approvePrecedent` parses it. */
+export function isStorableProgramKey(key: string): boolean {
+  return ProgramKey.safeParse(key).success;
 }
 
 /** The text of what a call runs, as the card shows it: a recipe or a script's head, bounded. */
@@ -197,6 +212,8 @@ export async function precedentCandidates(
   const project = getProject(db, projectId);
   const candidates: PrecedentCandidateDto[] = [];
   for (const [key, found] of byKey) {
+    // A key the store would refuse can't be approved, so it is never offered.
+    if (!isStorableProgramKey(key)) continue;
     // A call that ended in a skip went to the second opinion first, so the likelier count of distinct doubtful
     // calls is the larger of the two lists, not their sum.
     const calls = Math.max(found.skips.length, found.unclear.length);

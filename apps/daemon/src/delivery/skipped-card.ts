@@ -48,7 +48,7 @@ import type { Git } from '../git';
 import { coverageLinesOf, coverageSection } from '../evals';
 import { flagCard, rewordCard, BY_ANSWER, CardTier, type InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { defaultPrecedentKind, LIMITS, writtenConfig } from '../trust';
+import { defaultPrecedentKind, isStorableProgramKey, LIMITS, writtenConfig } from '../trust';
 import { checkoutOf } from './checkout';
 import { followUpStart } from './follow-up-start';
 import { sourceStateOf } from './skip-follow-up';
@@ -477,7 +477,7 @@ function makeKindsRoutine(
 ): void {
   const byKey = new Map<string, SkippedActionDto[]>();
   for (const skip of skips) {
-    if (skip.programKey === null) continue;
+    if (skip.programKey === null || !isStorableProgramKey(skip.programKey)) continue;
     byKey.set(skip.programKey, [...(byKey.get(skip.programKey) ?? []), skip]);
   }
   for (const [programKey, of] of byKey) {

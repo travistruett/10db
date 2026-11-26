@@ -10,7 +10,13 @@ import {
   seedProject,
   type Store,
 } from '@10db/db';
-import { SkipKind, SkipSource, type ProjectId, type WorkstreamId } from '@10db/contracts';
+import {
+  PrecedentKind,
+  SkipKind,
+  SkipSource,
+  type ProjectId,
+  type WorkstreamId,
+} from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore } from '../events';
@@ -177,5 +183,27 @@ describe('standing approvals proposed on one card', () => {
     );
     expect(listPrecedents(store.db, project.id).map((r) => r.state)).toEqual(['active', 'active']);
     expect(listTrustGrants(store.db, project.id)).toEqual([]);
+  });
+
+  it('offers no key the store would refuse, and a default kind that always fits', async () => {
+    const { project, runs, service } = setup();
+    const [a, b] = runs;
+    if (a === undefined || b === undefined) throw new Error('two runs');
+    const deep = `node ${'scripts/deep/'.repeat(20)}run.js`;
+    const keys = [deep, 'make $defaults', `node ${'x'.repeat(320)}`];
+    for (const key of keys) {
+      skip(a, key, `${key} one`);
+      skip(a, key, `${key} two`);
+      skip(b, key, `${key} three`);
+    }
+    const offered = await precedentCandidates(store.db, project.id, clock.now(), null);
+    expect(offered.map((c) => c.programKey)).toEqual([deep]);
+    for (const candidate of offered) {
+      expect(PrecedentKind.safeParse(candidate.kind).success).toBe(true);
+    }
+    await service.answer(project.id, {
+      kinds: [{ programKey: deep, scope: 'project', choice: 'approve' }],
+    });
+    expect(listPrecedents(store.db, project.id).map((r) => r.programKey)).toEqual([deep]);
   });
 });

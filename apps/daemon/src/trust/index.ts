@@ -31,6 +31,7 @@ export {
 } from './precedents';
 export {
   defaultPrecedentKind,
+  isStorableProgramKey,
   PRECEDENT_REFRESH_MS,
   precedentCandidates,
 } from './precedent-candidates';
