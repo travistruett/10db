@@ -40,3 +40,12 @@ export function forgetDevice(removedBy: string | null): void {
 export function removedBy(): string | null {
   return localStorage.getItem(REMOVED_KEY);
 }
+
+let forgetting = false;
+
+/** Set around Forget This Device: the 401 its own revoke brings is not the Mac removing the device. */
+export function setForgetting(on: boolean): void {
+  forgetting = on;
+}
+
+export const isForgetting = (): boolean => forgetting;

@@ -8,8 +8,16 @@ self.addEventListener('install', () => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(Promise.all([self.clients.claim(), pruneAssets()]));
 });
+
+// Hashed files of an earlier build are never asked for again, so they are dropped instead of piling up.
+async function pruneAssets() {
+  const cache = await caches.open(SHELL);
+  for (const request of await cache.keys()) {
+    if (new URL(request.url).pathname.startsWith('/app/assets/')) await cache.delete(request);
+  }
+}
 
 self.addEventListener('fetch', (event) => {
   const request = event.request;
@@ -87,8 +95,34 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
       const open = windows.find((w) => new URL(w.url).pathname.startsWith('/app/'));
-      if (open) return open.navigate(target).then((w) => w && w.focus());
+      if (open) {
+        // A window that can't be navigated (it is not ours any more) gives way to a new one.
+        return open.navigate(target).then(
+          (w) => w && w.focus(),
+          () => self.clients.openWindow(target),
+        );
+      }
       return self.clients.openWindow(target);
     }),
+  );
+});
+
+// The push service rotated the subscription. The worker can subscribe again with the same key, but the device token
+// lives in the page's storage, which a worker cannot read, so the Mac hears of the new one when the app next runs
+// (it puts whatever subscription the browser holds when it starts, and a page already open is told now).
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    (async () => {
+      const key = event.oldSubscription && event.oldSubscription.options.applicationServerKey;
+      if (key) {
+        await self.registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: key,
+        });
+      }
+      for (const client of await self.clients.matchAll({ type: 'window' })) {
+        client.postMessage({ type: 'push-resync' });
+      }
+    })(),
   );
 });

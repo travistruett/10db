@@ -1,6 +1,11 @@
 import { DevicePlatform, PairResponse, type PairRequest } from '@10db/contracts';
-import { createAnonymousDaemonClient, DaemonRequestError, readJson } from '../daemon/client';
-import { saveDevice } from './device-session';
+import {
+  createAnonymousDaemonClient,
+  createDaemonClient,
+  DaemonRequestError,
+  readJson,
+} from '../daemon/client';
+import { readDevice, saveDevice } from './device-session';
 
 let taken: { readonly code: string | null } | null = null;
 
@@ -27,6 +32,13 @@ export function thisPlatform(): { readonly platform: DevicePlatform; readonly la
 
 /** Pairs with the Mac that served this page and keeps the token; returns the Mac's name. */
 export async function pairWithThisHost(input: PairRequest): Promise<string> {
+  // A phone that still holds a token has the Mac drop that device first, so it doesn't stay in the list.
+  const old = readDevice();
+  if (old !== null) {
+    await createDaemonClient({ url: window.location.origin, token: old.token })
+      .devices.me.$delete()
+      .catch(() => undefined);
+  }
   const client = createAnonymousDaemonClient(window.location.origin);
   const paired = await readJson(await client.devices.pair.$post({ json: input }), PairResponse);
   saveDevice({ deviceId: paired.deviceId, token: paired.token, host: paired.host.name });

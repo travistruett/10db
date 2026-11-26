@@ -5,7 +5,7 @@ import { ConfirmModal } from '../shell/confirm-modal';
 import { RaisedPanel } from '../shell/raised-panel';
 import { fromNow, useNow } from '../shell/relative';
 import { TitleRow } from '../shell/title-row';
-import { forgetDevice, readDevice } from './device-session';
+import { forgetDevice, readDevice, setForgetting as markForgetting } from './device-session';
 import { PushState, usePushSwitch } from './push-subscription';
 
 const pushDescription = (state: PushState): string => {
@@ -35,10 +35,15 @@ export function ThisDevice() {
   const self = devices.data?.find((d) => d.id === device?.deviceId);
 
   const forget = (): void => {
+    // Marked first: the Mac's own answer to the next calls is a 401, which is this, not a removal.
+    markForgetting(true);
     forgetThis.mutate(undefined, {
       onSuccess: () => {
         forgetDevice(null);
         window.location.assign('/app/pair');
+      },
+      onError: () => {
+        markForgetting(false);
       },
     });
   };

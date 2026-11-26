@@ -1,6 +1,6 @@
 import { createDaemonClient } from '../daemon/client';
 import { resolveConnection, type ConnectionResolver } from '../daemon/connection';
-import { forgetDevice, readDevice } from './device-session';
+import { forgetDevice, isForgetting, readDevice } from './device-session';
 
 export class NotPairedError extends Error {
   override readonly name = 'NotPairedError';
@@ -17,7 +17,7 @@ export class NotPairedError extends Error {
 const watchedFetch: typeof fetch = async (input, init) => {
   const response = await fetch(input, init);
   const device = readDevice();
-  if (response.status === 401 && device !== null) {
+  if (response.status === 401 && device !== null && !isForgetting()) {
     forgetDevice(device.host);
     window.location.reload();
   }

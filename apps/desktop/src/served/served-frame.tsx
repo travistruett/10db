@@ -6,7 +6,8 @@ import {
   IconSettings,
 } from '@tabler/icons-react';
 import { Link, Outlet } from '@tanstack/react-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useDaemon } from '../daemon/provider';
 import { useEventStream } from '../daemon/events';
 import { CountBadge, CountTone } from '../shell/count-badge';
 import { FrameSlotsContext, type FrameSlots } from '../shell/frame-slots';
@@ -14,9 +15,14 @@ import { ReconnectingIndicator } from '../shell/reconnecting-indicator';
 import { UnsavedGuardProvider } from '../shell/unsaved-guard';
 import { useOpenInboxCount } from '../views/inbox/inbox-count';
 import { takeDirectCard } from './deep-link';
+import { resyncPush } from './push-subscription';
+import { z } from 'zod';
 import classes from './served-frame.module.css';
 
 /** The phone's three places, in the bottom bar. */
+/** What the worker posts when the push service rotated the subscription (sw.js). */
+const PushResync = z.object({ type: z.literal('push-resync') });
+
 function Places() {
   const open = useOpenInboxCount();
   const link = {
@@ -55,6 +61,22 @@ function Places() {
  */
 export function ServedFrame() {
   useEventStream();
+  const { client } = useDaemon();
+  // The Mac may have lost this phone's subscription while the app was closed.
+  useEffect(() => {
+    const resync = (): void => {
+      resyncPush(client).catch(() => undefined);
+    };
+    resync();
+    // The worker says so when the push service rotated the subscription under an open page.
+    const heard = (message: MessageEvent): void => {
+      if (PushResync.safeParse(message.data).success) resync();
+    };
+    navigator.serviceWorker.addEventListener('message', heard);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', heard);
+    };
+  }, [client]);
   const [titleHost, setTitleHost] = useState<HTMLElement | null>(null);
   const [panelHost, setPanelHost] = useState<HTMLElement | null>(null);
   const [drawerHost, setDrawerHost] = useState<HTMLElement | null>(null);

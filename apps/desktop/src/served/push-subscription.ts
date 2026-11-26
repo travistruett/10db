@@ -1,6 +1,6 @@
 import { PushKeyDto } from '@10db/contracts';
 import { useEffect, useState } from 'react';
-import { readJson } from '../daemon/client';
+import { readJson, type DaemonClient } from '../daemon/client';
 import { useDaemon } from '../daemon/provider';
 
 export const PushState = {
@@ -32,6 +32,49 @@ async function registration(): Promise<ServiceWorkerRegistration | null> {
   return (await navigator.serviceWorker.getRegistration('/app/')) ?? null;
 }
 
+/** Subscribes with the host's key and tells the Mac, which holds the subscription it pushes to. */
+async function subscribeAndKeep(
+  reg: ServiceWorkerRegistration,
+  client: DaemonClient,
+  key: string,
+): Promise<void> {
+  const subscription = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: keyBytes(key),
+  });
+  const { endpoint, keys } = subscription.toJSON();
+  if (endpoint === undefined || keys?.['p256dh'] === undefined || keys['auth'] === undefined) {
+    await subscription.unsubscribe();
+    throw new Error('The browser gave no push keys.');
+  }
+  const kept = await client.devices.me.push.$put({
+    json: { endpoint, p256dh: keys['p256dh'], auth: keys['auth'] },
+  });
+  if (!kept.ok) {
+    await subscription.unsubscribe();
+    throw new Error('The Mac did not keep this phone for notifications.');
+  }
+}
+
+const sameBytes = (a: ArrayBuffer | null, b: Uint8Array): boolean =>
+  a !== null && a.byteLength === b.length && new Uint8Array(a).every((byte, i) => byte === b[i]);
+
+/**
+ * The browser may hold a subscription the Mac does not (after Forget or a revoke and a re-pair, a key change, or
+ * the push service rotating it). When there is one, the Mac gets it again, and one made with another key is
+ * replaced. Returns whether this browser is subscribed afterwards.
+ */
+export async function resyncPush(client: DaemonClient): Promise<boolean> {
+  const reg = await registration();
+  const existing = (await reg?.pushManager.getSubscription()) ?? null;
+  if (reg === null || existing === null || Notification.permission !== 'granted') return false;
+  const { key } = await readJson(await client.push.key.$get(), PushKeyDto);
+  if (!sameBytes(existing.options.applicationServerKey, keyBytes(key)))
+    await existing.unsubscribe();
+  await subscribeAndKeep(reg, client, key);
+  return true;
+}
+
 /**
  * This browser's push subscription and the daemon's copy of it. Turning it on asks the browser's permission,
  * subscribes with the host's VAPID key and tells the Mac; turning it off drops both.
@@ -48,7 +91,9 @@ export function usePushSwitch() {
       .then(async (reg) => {
         if (reg === null) return PushState.Unsupported;
         if (Notification.permission === 'denied') return PushState.Blocked;
-        return (await reg.pushManager.getSubscription()) === null ? PushState.Off : PushState.On;
+        if ((await reg.pushManager.getSubscription()) === null) return PushState.Off;
+        // On means the Mac holds it too: tell it again, and say Off if it can't be kept.
+        return (await resyncPush(client).catch(() => false)) ? PushState.On : PushState.Off;
       })
       .then(
         (next) => {
@@ -61,7 +106,7 @@ export function usePushSwitch() {
     return () => {
       live = false;
     };
-  }, []);
+  }, [client]);
 
   async function turnOn(): Promise<void> {
     const reg = await registration();
@@ -71,23 +116,7 @@ export function usePushSwitch() {
       return;
     }
     const { key } = await readJson(await client.push.key.$get(), PushKeyDto);
-    const subscription = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: keyBytes(key),
-    });
-    const json = subscription.toJSON();
-    const { p256dh, auth } = json.keys ?? {};
-    if (json.endpoint === undefined || p256dh === undefined || auth === undefined) {
-      await subscription.unsubscribe();
-      throw new Error('The browser gave no push keys.');
-    }
-    const kept = await client.devices.me.push.$put({
-      json: { endpoint: json.endpoint, p256dh, auth },
-    });
-    if (!kept.ok) {
-      await subscription.unsubscribe();
-      throw new Error('The Mac did not keep this phone for notifications.');
-    }
+    await subscribeAndKeep(reg, client, key);
     setState(PushState.On);
   }
 

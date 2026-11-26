@@ -224,6 +224,16 @@ export function eventStreamUrl(conn: DaemonConnection, after: number, ticket: st
   return url.toString();
 }
 
+const eventListeners = new Set<(event: DaemonEvent) => void>();
+
+/** Hears every event the window's one stream receives (a dialog waiting on one thing), without a stream of its own. */
+export function subscribeToEvents(listener: (event: DaemonEvent) => void): () => void {
+  eventListeners.add(listener);
+  return () => {
+    eventListeners.delete(listener);
+  };
+}
+
 /**
  * One live event stream. A fresh UI starts at the daemon's head; afterwards it resumes from the
  * last seq it saw, across drops and across a daemon restart on a new port, so nothing is lost
@@ -289,6 +299,7 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       // One arrives per tool call: a pass lane's is written into its page, never refetched.
       if (event.type === EventType.SessionActivity) writePassActivity(queryClient, event);
       listener.current?.(event);
+      for (const heard of eventListeners) heard(event);
     }
 
     function retry(): void {

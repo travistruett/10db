@@ -1,7 +1,9 @@
 import { Button, Group, Image, Loader, Modal, Stack, Text } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
+import { DeviceChange, DeviceChangedData, EventType } from '@10db/contracts';
 import { useDevices, usePairingCode } from '../../daemon/device-queries';
+import { subscribeToEvents } from '../../daemon/events';
 import { useNow } from '../../shell/relative';
 
 /** How long "Paired" shows before the dialog closes. */
@@ -39,9 +41,22 @@ function PairBody({ onClose }: { readonly onClose: () => void }) {
   const devices = useDevices();
   const now = useNow(1000);
   const [picture, setPicture] = useState<string | null>(null);
-  // The devices there when it opened: any other that appears is the pairing this dialog waits for.
-  const [before] = useState<ReadonlySet<string>>(
-    () => new Set((devices.data ?? []).map((d) => d.id)),
+  // The devices there when it opened, when the list had loaded: any other that appears is the pairing this
+  // dialog waits for. With no list yet, the pairing event alone says so.
+  const [before] = useState<ReadonlySet<string> | null>(() =>
+    devices.isSuccess ? new Set(devices.data.map((d) => d.id)) : null,
+  );
+  const [pairedSeen, setPairedSeen] = useState(false);
+  useEffect(
+    () =>
+      subscribeToEvents((event) => {
+        if (
+          event.type === EventType.DeviceChanged &&
+          DeviceChangedData.safeParse(event.data).data?.change === DeviceChange.Paired
+        )
+          setPairedSeen(true);
+      }),
+    [],
   );
   const { mutate } = code;
 
@@ -66,14 +81,21 @@ function PairBody({ onClose }: { readonly onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const arrived = devices.data?.find((d) => !before.has(d.id));
+  const newest = devices.data?.at(-1);
+  const arrived =
+    before === null
+      ? pairedSeen
+        ? { label: newest?.label ?? '' }
+        : undefined
+      : devices.data?.find((d) => !before.has(d.id));
+  const paired = arrived !== undefined;
   useEffect(() => {
-    if (arrived === undefined) return undefined;
+    if (!paired) return undefined;
     const timer = window.setTimeout(onClose, PAIRED_SHOWN_MS);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [arrived, onClose]);
+  }, [paired, onClose]);
 
   const expiresAt = code.data === undefined ? null : Date.parse(code.data.expiresAt);
   const expired = expiresAt !== null && now >= expiresAt;
@@ -82,7 +104,7 @@ function PairBody({ onClose }: { readonly onClose: () => void }) {
     <Stack gap="md" align="center">
       {arrived !== undefined ? (
         <Text fw={600} role="status">
-          Paired: {arrived.label}
+          {arrived.label === '' ? 'Paired' : `Paired: ${arrived.label}`}
         </Text>
       ) : code.isError ? (
         <Text size="sm" c="red">
