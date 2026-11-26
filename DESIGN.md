@@ -282,7 +282,10 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   of waiting, quiet placeholder rows in the shape of what is coming take the content's place
   (`PageLoading`, `apps/desktop/src/shell/page-loading.tsx`: a list, cards or transcript lines), always static,
   with no shimmer, and no wider than 720 px. A page never shows a lone spinner as its whole content; a spinner
-  stays inside a button or a row.
+  stays inside a button or a row. A page that is not rows draws its own shape after the same delay
+  (`useLoadingDelayElapsed`): the Board draws its row of column outlines (`BoardSkeleton`,
+  `apps/desktop/src/views/board/board-skeleton.tsx`) at the loaded columns' widths, narrow rails and open columns
+  with a few card placeholders, from the saved collapsed state, so the page keeps its shape when the data arrives.
 - **Picking several from a list that is bounded** (a project's pages, which the builder reads whole) is tickable
   rows, each a checkbox named by the item, with its detail on the same line and why it can't be picked under it
   (`views/workbench/page-list.tsx`).

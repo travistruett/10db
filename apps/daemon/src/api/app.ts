@@ -196,7 +196,13 @@ import type { SocketRegistry, Tickets } from '../devices';
 import { Listener, listenerOf } from '../listeners';
 import { ticketScopeOf } from './principal';
 import type { ApiEnv } from './request-context';
-import { hostGuard, originGuard, remoteMark, type RequestGuardDeps } from './request-guards';
+import {
+  hostGuard,
+  originGuard,
+  remoteMark,
+  requestAllowlists,
+  type RequestGuardDeps,
+} from './request-guards';
 import type { ListenerAllowlists } from '../listeners';
 import { streamEvents } from './stream';
 
@@ -477,7 +483,9 @@ export function createApp(deps: ApiDeps) {
         const env: unknown = c.env;
         const bound = typeof env === 'object' && env !== null && 'listener' in env;
         const listener = bound && env.listener === Listener.Share ? Listener.Share : Listener.Main;
-        return guards.allowlists(listener)?.origins.includes(origin) === true ? origin : null;
+        return requestAllowlists(guards, c.req.raw, listener)?.origins.includes(origin) === true
+          ? origin
+          : null;
       },
       allowHeaders: ['Authorization', 'Content-Type'],
     }),
@@ -1643,6 +1651,12 @@ export function createApp(deps: ApiDeps) {
     )
     .get('/projects/:projectId/evals', async (c) =>
       c.json(await deps.services.evals(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post('/projects/:projectId/evals/assess', async (c) =>
+      c.json(
+        // Not tied to the request: a dropped connection must not end a run another page is waiting on.
+        await deps.services.assessEvals(ProjectId.parse(c.req.param('projectId'))),
+      ),
     )
     .get('/projects/:projectId/eval-models', async (c) =>
       c.json(await deps.services.evalModels(ProjectId.parse(c.req.param('projectId')))),

@@ -152,7 +152,7 @@ describe('yes/no questions', () => {
   } as const satisfies Omit<ModelNouls, 'credential'>;
 
   // A low number lets a call run, so an answer that leaves a question out or strays from 0..1 fails the call.
-  it('read every probability, and refuse an answer missing one or out of range, on a Messages body and on System One', async () => {
+  it('read every probability, and refuse an answer missing one or out of range, on a Messages body and on the decisions endpoint', async () => {
     const anthropic = (text: string): Promise<unknown> =>
       askModelNouls({
         ...asked,
@@ -170,11 +170,11 @@ describe('yes/no questions', () => {
       JudgeCallError,
     );
 
-    const systemOne = (answers: Record<string, unknown>): Promise<unknown> =>
+    const decisions = (answers: Record<string, unknown>): Promise<unknown> =>
       askModelNouls({
         ...asked,
         model: 'typesafe/jev-1.14',
-        api: ModelApi.SystemOne,
+        api: ModelApi.Decisions,
         credential: { kind: AccountKind.OpenRouter, key: 'router-key' },
         fetch: () =>
           Promise.resolve(
@@ -182,16 +182,16 @@ describe('yes/no questions', () => {
           ),
       });
     await expect(
-      systemOne({
+      decisions({
         destroys_data: { type: 'noul', noul: 0.1 },
         writes_live: { type: 'noul', noul: 0.2 },
       }),
     ).resolves.toMatchObject({ probabilities: { destroys_data: 0.1, writes_live: 0.2 } });
-    await expect(systemOne({ destroys_data: { type: 'noul', noul: 0.1 } })).rejects.toBeInstanceOf(
+    await expect(decisions({ destroys_data: { type: 'noul', noul: 0.1 } })).rejects.toBeInstanceOf(
       OpenRouterError,
     );
     await expect(
-      systemOne({
+      decisions({
         destroys_data: { type: 'noul', noul: 0.1 },
         writes_live: { type: 'noul', noul: -0.5 },
       }),

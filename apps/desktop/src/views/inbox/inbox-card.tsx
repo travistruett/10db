@@ -6,6 +6,7 @@ import {
   AccountProblem,
   InboxKind,
   isParkChoice,
+  UNSANDBOXED_DETAIL,
   type DecisionRecording,
   type InboxItemDto,
 } from '@10db/contracts';
@@ -17,6 +18,7 @@ import { CodeSpans } from '../../shell/code-spans';
 import { ExternalLink } from '../board/pull-request-link';
 import { StepLogLink, useBatchActions } from './batch-card-actions';
 import { CardOpensLink, cardOpens } from './card-opens-link';
+import { CommandBlock } from './command-block';
 import { AcceptanceCard } from './acceptance-card';
 import { WatchpointCard } from './watchpoint-card';
 import { CheckCard } from './check-card';
@@ -91,6 +93,25 @@ export interface InboxCardProps {
 
 /** Card text is untrusted (agent and tool output): it is only ever rendered as text. */
 export function CardBody({ item }: { readonly item: InboxItemDto }) {
+  // A chat's command outside the sandbox is its summary, in a block of its own above what Claude says and
+  // 10db's warning, so no line of the command reads as either.
+  const command = item.detail?.['summary'];
+  if (
+    item.kind === InboxKind.Permission &&
+    item.detail?.[UNSANDBOXED_DETAIL] === true &&
+    typeof command === 'string'
+  ) {
+    return (
+      <Stack gap="xs">
+        <CommandBlock command={command} />
+        {item.body === '' ? null : (
+          <Text size="sm" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+            {item.body}
+          </Text>
+        )}
+      </Stack>
+    );
+  }
   if (item.body === '') return null;
   if (item.kind === InboxKind.Permission) {
     return (

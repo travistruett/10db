@@ -209,6 +209,12 @@ export const MCP_APPROVAL_DETAIL = 'mcpApproval';
 export const MCP_TOOL_GRANT_DETAIL = 'mcpToolGrant';
 
 /**
+ * The `detail` key, set to true, of a chat's card for a command outside the sandbox. Its command is
+ * `detail.summary`, shown apart from the body, which holds only what Claude says and 10db's warning.
+ */
+export const UNSANDBOXED_DETAIL = 'unsandboxed';
+
+/**
  * What "always allow every tool of this server" would cover, fixed when the card is raised: the server, the
  * config hash its session is running (the one the builder approved), and the tool names the server listed
  * then. A tool the server adds later, or a changed config, is not in it.

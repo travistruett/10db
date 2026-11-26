@@ -49,9 +49,18 @@
   are refused to screens. `DaemonOptions.pictures` is `{ kind: 'pinned' }` from the entry point; tests give a
   camera (`test/fake-camera.ts`); absent, the daemon takes no pictures and fetches nothing. No picture is
   uploaded or sent to a model, except a design review's and `check_design`'s (to the session's model), a PR's (uploaded
-  with `prPictures`) and a `lane` screen taken by a lane's own browser, which goes to that
+  with `prPictures`), a finished task's pair in its Linear `ended` comment (`linear/reporter-pictures.ts`) and a `lane` screen taken by a lane's own browser, which goes to that
   session's model as an image block when it fits the account's limits
   (`decisions/2026-11-24-lane-screenshots-go-to-the-lanes-model.md`).
+- A failed dev login reaches the builder (`sign-in-record.ts`, `createSignInReporter`, wired in `daemon/start.ts`;
+  `decisions/2026-11-25-the-daemon-uploads-a-tasks-pictures-to-linear-and-says-why-it-has-none.md`): `SignInResult`
+  carries the command, its exit code and `loginOutputTail` (the last eight lines with any line holding the app's
+  address or a secret pattern removed), and `runSignIn` records it per project (`pictures-sign-in.<projectId>`) and
+  raises one card, "Pictures Cannot Sign In", withdrawn with the record when a sign-in succeeds or the app address or
+  dev login command changes. `Pictures.outlook(taskId)` is the one place that says what a task that names a page can expect of
+  its after: `none`, `wait` (an After capture of it is queued or running), `later` (a local copy not yet shipped) or
+  `skipped` with the reason (a separate copy, the recorded sign-in failure, a refused browser); the Linear `ended` and
+  landing comments and the Slack post read it, and the Linear reporter waits on `wait`.
 - The broken preview (Workbench spec §8.2, §8.4,
   `decisions/2026-11-10-a-broken-preview-is-read-from-the-page-load-that-takes-the-picture.md`): each capture of
   a pass page judges the load of its page route (`pageRoute`, its viewports and themes as one, `routeLoad`) by
@@ -70,6 +79,10 @@
   file only pruned rows name is deleted, a failed removal included; befores and afters are kept. `TaskScreensDto.fromGoal` holds, for a task in
   a goal, the newest after (else before) each other task of the goal kept on its page route.
 - On-demand pictures for a design check (`decisions/2026-11-20-design-review-shows-the-app-to-the-sessions-model.md`): `PageCamera.drawHtml` draws a mock-up's HTML (`mockupDocument` and `MOCKUP_CSP` from `@10db/contracts`, the one copy the window's iframe also reads) in a context with JavaScript off, no proxy reach (`reach` null: only `about:blank` and `data:` pass, the proxy refuses everything) and every other request refused; the live case in `browser.live.test.ts` holds all four layers at once, so no single layer's loss turns it red. `Pictures.shootNow` shoots the routes in the first viewport and theme of the project's matrix, signed in as a capture is, through the host's one-at-a-time `use`, after `holdApp` (the preview's `hold`) says the app answers; it answers `{ shots, missing }` with each missing route's reason, and keeps files only (`writePicture`), no task row. `drawMockup` caches the drawn PNG in memory by the hash of HTML, viewport and theme. `design_checks` rows (`checkShotsOf`, `design-shots.ts`) name their files, so `removeUnnamed` also asks `designCheckNames`; `prune.ts` deletes a check 14 days after its task is done or cancelled, or, with no task (a Design review), 14 days after it was made. `GET /tasks/:taskId/design-checks`, `/design-checks/:checkId/mockup` and `/shots/:index` are refused to screens.
+- `PicturesDeps.ensureApp` (`app-start/`, `decisions/2026-11-26-10db-brings-the-dev-stack-up-before-a-picture-or-a-sign-in.md`)
+  runs before a capture's shots, before each dev login (a failed one sets the status line's sign-in problem) and
+  before `shootNow`'s `holdApp`; a stack that will not start skips the capture or sign-in, logs why, and leaves the
+  project's one Inbox card. Absent, nothing is checked.
 - `PicturesDeps.onAfterCapture` is told, for every After capture of a task outside a pass that was not stopped,
   which task it was (what the capture kept is already stored); the pictures module imports nothing of Slack or
   delivery, and `daemon/start.ts` hands the call to `delivery/slack-picture-post.ts`.

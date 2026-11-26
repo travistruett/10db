@@ -202,10 +202,13 @@ The builder never edits hazards by hand; you assess and fix them.
 
 ## Assess a project's evals
 
-10db reads a project's eval files at HEAD and its eval results in the checkout, and shows them; it defines no eval format, runs no eval and calls no
-model for this. Result files and eval files are found by name. What no file name says (which code a suite covers,
-its bar and commands, the LLM work with no eval) is yours to record, as a manifest beside the project's settings,
-never a file in the repo.
+10db reads a project's eval files at HEAD and its eval results in the checkout, and shows them; it defines no eval format and runs no eval.
+Result files and eval files are found by name. What no file name says (which code a suite covers, its bar and
+commands, the LLM work with no eval) is recorded as a manifest beside the project's settings, never a file in the
+repo. 10db assesses on its own, with one model read of the eval files and the code that calls a model, when a
+project is added, when a commit changes an eval file and when the builder presses Assess now; this section is the
+deeper pass from your own session, which explores the repository and can find what that read misses. Your manifest
+replaces the one 10db recorded, and 10db's own scheduled assessment never replaces yours.
 
 1. **Read what 10db found:** `evals <projectId>`. It lists the suites, their latest result, the eval files no suite
    links and the gaps (unknown until you record a manifest).

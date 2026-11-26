@@ -135,7 +135,20 @@ export async function gateCallsDocker(
   git: Git,
   project: Pick<ProjectDto, 'repoPath' | 'baseBranch' | 'gateCommand'>,
 ): Promise<boolean> {
-  if (project.gateCommand === null) return false;
+  return commandCallsDocker(git, project, project.gateCommand);
+}
+
+/**
+ * Whether one of the project's own commands (its gate, its app's start command) is seen to call
+ * Docker in `origin/<base>`, read as `gateCallsDocker` reads a gate. False for no command and when
+ * git can't say.
+ */
+export async function commandCallsDocker(
+  git: Git,
+  project: Pick<ProjectDto, 'repoPath' | 'baseBranch'>,
+  command: string | null,
+): Promise<boolean> {
+  if (command === null) return false;
   const commit = await originBaseCommit(git, project.repoPath, project.baseBranch);
   const read: ReadRepoFile = async (path) => {
     // With no remote-tracking commit no file is read: only the command's own text counts.
@@ -148,7 +161,7 @@ export async function gateCallsDocker(
     }
   };
   try {
-    return await callsDocker(project.gateCommand, read);
+    return await callsDocker(command, read);
   } catch {
     return false;
   }

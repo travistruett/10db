@@ -87,8 +87,11 @@ export interface ShapePrepareInput {
    */
   readonly unsandboxedAsk?: {
     readonly mayRun: () => string | null;
-    /** Counts the calls let through that could change something; a remembered command lasts until it moves. */
-    readonly changes: () => number;
+    /**
+     * Counts the calls let through that could change something; a remembered command lasts until it moves.
+     * The asking call's own sandboxed attempt (a Codex escalation's, by its `toolUseId`) is not counted.
+     */
+    readonly changes: (toolUseId: string | null) => number;
     /** Counts a command the builder allowed to run outside the sandbox: it may have changed anything. */
     readonly bump: () => void;
     /** Whether a background task or job is running now, which may still write. */
