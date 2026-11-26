@@ -382,12 +382,20 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const watchAuth = { Authorization: `Bearer ${E2E_TOKEN}` };
   const readYours = async () =>
     YourWatchpoints.parse(
-      await (await request.get(`${daemonUrl}/settings/watchpoints`, { headers: watchAuth })).json(),
+      await (
+        await request.get(`${daemonUrl}/settings/watchpoints`, {
+          headers: watchAuth,
+          maxRetries: 2,
+        })
+      ).json(),
     );
   const readHere = async () =>
     ProjectEntries.parse(
       await (
-        await request.get(`${daemonUrl}/projects/${projectId}/watchpoints`, { headers: watchAuth })
+        await request.get(`${daemonUrl}/projects/${projectId}/watchpoints`, {
+          headers: watchAuth,
+          maxRetries: 2,
+        })
       ).json(),
     ).entries;
   const yoursBefore = await readYours();
