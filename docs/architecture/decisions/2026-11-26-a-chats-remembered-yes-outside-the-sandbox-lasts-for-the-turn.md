@@ -15,8 +15,10 @@
   lists (differs from HEAD, or untracked and not ignored) with its lstat fingerprint (inode, size, change
   times). It is read at the yes and at each remembered call. A state that can't be read is never taken as
   unchanged, and a yes given while it can't be read is not remembered.
-- Nothing is remembered while anything other than a waiting chat shares the checkout (another chat's turn, a
-  takeover, a lane, a pass, 10db's git work). The card then offers only Allow once and Deny.
+- Nothing is remembered while something that can write the checkout shares it (another chat's turn, a
+  takeover, a lane, an open pass, 10db's git work). The card then offers only Allow once and Deny. A chat
+  waiting for the folder and a closed pass waiting for its pull request to merge do not count: neither writes
+  the checkout while the turn holds it.
 - The answered card in the thread reads "You allowed … in this turn".
 
 ## Why

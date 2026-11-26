@@ -675,12 +675,18 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                   changes += 1;
                 },
                 background: () => runningNow(),
-                // A checkout shared with anything else can change between two reads of it, unseen by this session.
+                // A checkout shared with something that can write it can change between two reads of it, unseen
+                // by this session. A chat waiting for the folder and a closed pass waiting for its merge write
+                // nothing while this turn holds it.
                 remembers: () =>
                   !backgrounded &&
                   !deps.folderHold
                     .holders(conv.projectId, chat.id)
-                    .some((h) => h.kind !== FolderHolderKind.WaitingChat),
+                    .some(
+                      (h) =>
+                        h.kind !== FolderHolderKind.WaitingChat &&
+                        h.kind !== FolderHolderKind.PassClosed,
+                    ),
                 checkoutState: () =>
                   deps.checkoutState(launch.cwd).catch((err: unknown) => {
                     log.warn(

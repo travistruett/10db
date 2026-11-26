@@ -2,11 +2,14 @@ import {
   ConversationItemKind,
   parseItemBody,
   ChatId,
+  mintId,
+  PassState,
   PermissionChoice,
   type ChatDto,
   type InboxItemDto,
 } from '@10db/contracts';
-import { listInbox, listItems, setChatWork } from '@10db/db';
+import { insertPass, insertTask, listInbox, listItems, schema, setChatWork } from '@10db/db';
+import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPermissionBroker } from '../src/inbox';
 import { silentLogger } from '../src/log';
@@ -141,6 +144,32 @@ const openCards = (): InboxItemDto[] => listInbox(w.state.db, { states: ['OPEN']
 describe('a chat’s remembered command outside the sandbox', () => {
   it('forgets it when the turn ends and when another chat joins the checkout', async () => {
     w = chatWorld({ prepare: brokerPrepare });
+    // A closed pass waiting for its merge shares the folder with a turn and writes nothing: it stops no remembering.
+    w.state.write((ctx) => {
+      const task = insertTask(ctx, w.project.id, {
+        title: 'Page',
+        acceptanceCriteria: ['x'],
+        areas: ['api'],
+      });
+      const opened = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: w.project.id,
+        name: 'Settings pass',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/pass-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [task.id],
+        dirt: [],
+      });
+      ctx.tx
+        .update(schema.passes)
+        .set({ state: PassState.Closed })
+        .where(eq(schema.passes.id, opened.pass.id))
+        .run();
+    });
     const chat = openHere();
     const other = openHere(1);
     const seen: {

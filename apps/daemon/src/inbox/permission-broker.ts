@@ -157,8 +157,9 @@ type BrokerContext = BrokerOwner & {
       /** Whether a background task or job is running now, which may still write. */
       readonly background: () => boolean;
       /**
-       * False once the session started something in the background, and while anything else shares the
-       * checkout: no command is remembered then.
+       * False once the session started something in the background, and while something that can write
+       * the checkout shares it (not a waiting chat, nor a closed pass waiting for its merge): no command
+       * is remembered then.
        */
       readonly remembers: () => boolean;
       /** The checkout's HEAD and working tree now, as one value; null when they can't be read. */
