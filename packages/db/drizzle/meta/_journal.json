@@ -827,6 +827,13 @@
       "when": 1795674416294,
       "tag": "0117_real_wrecker",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "6",
+      "when": 1795676080349,
+      "tag": "0118_premium_living_mummy",
+      "breakpoints": true
     }
   ]
 }
