@@ -159,7 +159,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   claim: [...WORK, CANDIDATES],
   handoff: WORK,
   // A run's watchpoint reading is an evidence row, so its For You section follows it.
-  evidence: [...WORK, watchpointKeys.hits],
+  evidence: [...WORK, watchpointKeys.hits, watchpointKeys.allStats],
   // An account pause moves workstreams, which send their own events.
   account: [accountKeys.all, modelKeys.all],
   inbox: [
@@ -169,6 +169,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
     humanTouchKeys.all,
     cardTypesKeys.all,
     acceptanceFiguresKeys.all,
+    watchpointKeys.allStats,
   ],
   app_setting: [queryKeys.keepAwake, queryKeys.agentSkill, watchpointKeys.all],
   // Settings › People lists people and the routes each answers; Question Routing and a task's question routes

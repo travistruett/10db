@@ -3,6 +3,7 @@ import {
   BatchState,
   EventType,
   InboxItemId,
+  InboxKind,
   LinearEventKind,
   McpSignInChangedData,
   McpSignInState,
@@ -126,7 +127,8 @@ export function linearRowOf(event: DaemonEvent, read: LinearEventRead): LinearRo
     return [];
   }
   if (event.type === EventType.InboxOpened) {
-    if (read.inbox === undefined) return [];
+    // A Look card is the builder's to read; the run never waits on it, so Linear is not told it is waiting.
+    if (read.inbox === undefined || data['kind'] === InboxKind.Watchpoint) return [];
     const { title } = read.inbox;
     return read.inbox.workstreams.map((w) => ({
       taskId: w.taskId,

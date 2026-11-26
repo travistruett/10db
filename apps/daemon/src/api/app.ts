@@ -2241,6 +2241,9 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .get('/projects/:projectId/watchpoints/stats', (c) =>
+      c.json(deps.services.watchpointStats(ProjectId.parse(c.req.param('projectId')))),
+    )
     .get('/workstreams/:id/watchpoint-hits', (c) =>
       c.json(deps.services.watchpointHits(WorkstreamId.parse(c.req.param('id')))),
     )
