@@ -13,6 +13,7 @@ import {
   InboxKind,
   WORKSTREAM_TRANSITIONS,
   type BatchId,
+  type ExternalLink,
   type InboxItemDto,
   type NoticePostedData,
   type ProjectDto,
@@ -268,6 +269,9 @@ export interface DeliveryHarness {
       readonly landing?: TaskLanding;
       /** Where the task runs; else the project's default. */
       readonly workspaceMode?: WorkspaceMode;
+      readonly why?: string;
+      /** The tracker issue the task was made from. */
+      readonly external?: ExternalLink;
     },
   ): TaskDto;
   /** Moves a workstream on from where it is, as the runner would; DONE also marks its task done. */
@@ -462,6 +466,8 @@ export function createDeliveryHarness(
           dependsOn: opts.dependsOn ?? [],
           ...(opts.landing === undefined ? {} : { landing: opts.landing }),
           ...(opts.workspaceMode === undefined ? {} : { workspaceMode: opts.workspaceMode }),
+          ...(opts.why === undefined ? {} : { why: opts.why }),
+          ...(opts.external === undefined ? {} : { external: opts.external }),
         }),
       );
     },

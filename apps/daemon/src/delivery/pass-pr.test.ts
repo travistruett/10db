@@ -672,7 +672,7 @@ describe('Pictures to Slack', () => {
     expect(slack.uploads).toHaveLength(1);
     expect(slack.joins).toEqual(['C1']);
     expect(slack.uploads[0]).toMatchObject({ channel_id: 'C1', files: 2 });
-    expect(slack.uploads[0]?.comment).toContain(off?.url ?? 'missing');
+    expect(slack.uploads[0]?.comment).toContain(`<${off?.url ?? 'missing'}|PR #`);
     expect(slack.uploads[0]?.comment).toContain('Polish pages');
     expect(h.cards().filter((c) => c.title.includes('did not reach Slack'))).toHaveLength(0);
 
@@ -709,7 +709,16 @@ describe('Pictures to Slack', () => {
       });
     };
     done(people);
-    const task = h.addTask('Billing page', { areas: ['settings'] });
+    const task = h.addTask('Billing page', {
+      areas: ['settings'],
+      why: 'Teams pay from one place',
+      external: {
+        kind: 'linear',
+        id: 'AMP-84',
+        issueId: 'issue-84',
+        url: 'https://linear.app/acme/issue/AMP-84/billing-page',
+      },
+    });
     picture(task, 'before', '/settings', 'billing before');
     picture(task, 'after', '/settings', 'billing after');
     done(task);
@@ -752,8 +761,9 @@ describe('Pictures to Slack', () => {
     await post.retryTasks();
     expect(slack.uploads).toHaveLength(1);
     expect(slack.uploads[0]).toMatchObject({ channel_id: 'C1', files: 2 });
-    expect(slack.uploads[0]?.comment).toContain(h.project.name);
-    expect(slack.uploads[0]?.comment).toContain('Billing page');
+    expect(slack.uploads[0]?.comment).toBe(
+      `*${h.project.name}* · <https://linear.app/acme/issue/AMP-84/billing-page|AMP-84> *Billing page*\n_Teams pay from one place_`,
+    );
     expect(h.cards().filter((c) => c.title.includes('did not reach Slack'))).toHaveLength(0);
     expect(getAppSetting(h.state.db, `slack-pictures-posted.${h.project.id}`)).toHaveProperty(
       task.id,
