@@ -611,6 +611,10 @@ export interface DaemonOptions {
   readonly benchmarksOff?: boolean;
   /** Sharing finds and runs no Tailscale CLI (`TENDB_TAILSCALE=off`). */
   readonly tailscaleOff?: boolean;
+  /** The Tailscale CLI to run (`TENDB_TAILSCALE_CLI`), in place of the search for the installed one. */
+  readonly tailscaleCli?: string;
+  /** The built served app the share listener serves at `/app/`; absent when this build carries none. */
+  readonly appDir?: string | null;
   readonly fetch?: typeof fetch;
   /** The `fetch` a Plan session's Figma tools post a mock-up with and read assets with; the real one by default. */
   readonly figmaFetch?: typeof fetch;
@@ -3342,7 +3346,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     clock,
     log: logger.child({ component: 'sharing' }),
-    cli: opts.tailscaleOff ? () => null : () => findTailscaleCli(existsSync),
+    cli: opts.tailscaleOff ? () => null : () => opts.tailscaleCli ?? findTailscaleCli(existsSync),
     run: createTailscaleRun,
     listen: (sharePort) =>
       startShareListener({
@@ -3367,6 +3371,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     listenPort: () => listenPort,
     share: { allowlists: () => sharing.allowlists(), hostLogin: () => sharing.hostLogin() },
     remote: { sharing, devices },
+    appDir: opts.appDir ?? null,
     devices,
     tickets: streamTickets,
     sockets: deviceSockets,

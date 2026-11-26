@@ -34,6 +34,7 @@ import {
   resolveDataDir,
   resolveHarnessDir,
   resolveMigrationsDir,
+  resolveServedAppDir,
   resolveSqliteBinding,
 } from './paths';
 import { agentSkillPlacement } from './agent-skill';
@@ -184,6 +185,7 @@ try {
     // With the fake adapter, Figma answers as it did when the round trip was first run: no network.
     ...(env.TENDB_FAKE_SCRIPTS ? { figmaFetch: fakeFigmaFetch } : {}),
     migrationsDir: resolveMigrationsDir(),
+    appDir: resolveServedAppDir(),
     harnessDir: resolveHarnessDir(),
     agentSkill: agentSkillPlacement(resolveAgentSkillDir(), dataDir, defaultDataDir()),
     catalogueSnapshot: catalogueSnapshotFromEnv(

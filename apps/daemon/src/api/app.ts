@@ -173,6 +173,7 @@ import {
   type SharingStatusDto,
   DeviceId,
 } from '@10db/contracts';
+import { serveApp } from './app-static';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
@@ -264,6 +265,8 @@ export interface ApiDeps {
     readonly token: string;
     mayRead(method: string, path: string): boolean;
   } | null;
+  /** The built served app (`dist-app/`) that `/app/` serves on the share listener; null or absent when there is none. */
+  readonly appDir?: string | null;
   /** The self-update setting; its routes answer 501 without it. */
   readonly selfUpdate?: SelfUpdateServices;
   readonly upgradeWebSocket: UpgradeWebSocket;
@@ -513,6 +516,10 @@ export function createApp(deps: ApiDeps) {
   // After the token check, before any route reads the body. A declared length over the limit is
   // refused unread; a body with none is read only up to the limit.
   base.use('*', limitBody);
+  // The served app's files: only the share listener reaches them, the matrix answers 404 on the main one.
+  const served = serveApp(deps.appDir ?? null);
+  base.get('/app', served);
+  base.get('/app/*', served);
   const app = base
     .all('/mcp', (c) => deps.mcp(c.req.raw))
     // Behind the UI-token middleware above: a managed session's token fails it.
