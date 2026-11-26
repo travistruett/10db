@@ -1,4 +1,4 @@
-import { createDeliveryJobs, workstreamChanges } from '../delivery';
+import { createDeliveryJobs, jobKey, JobQueue, workstreamChanges } from '../delivery';
 import { execFileSync } from 'node:child_process';
 import {
   cpSync,
@@ -3323,7 +3323,7 @@ describe('a step that ends with changes in its claims', () => {
     // The failed card names where the work is.
     expect(
       listInbox(engine.store.db, { states: ['OPEN'] }).some((card) =>
-        card.body.includes(`The work is on branch ${lane}`),
+        card.body.includes(`Its work is on branch ${lane}`),
       ),
     ).toBe(true);
     // The builder commits their own work on the shared branch before pressing Retry.
@@ -3349,6 +3349,105 @@ describe('a step that ends with changes in its claims', () => {
     expect(repoGit('show', 'HEAD:src/api/b.txt')).toBe(repoGit('show', `${second}:src/api/b.txt`));
     expect(repoGit('status', '--porcelain')).toBe('');
     expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[own, second]]);
+  });
+
+  // Value: protects=a failed lane run's files stay its own until its take-out has them out of Your
+  // folder; fails_when=the failure frees its claims before the take-out's turn, so another run starts on
+  // its area and the take-out commits and removes that run's files; why_new=claims and git (core);
+  // no_claim=a take-out a restart cut short.
+  it("holds a failed lane run's claims until its take-out ends, so no run starts on its files", async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          write('src/api/a.txt'),
+          commit('op-hold-0001', ['src/api/a.txt']),
+          { do: 'tool', toolName: 'Bash', input: { command: 'curl -s https://example.com' } },
+          { do: 'mcp', tool: 'report_blocked', args: { reason: 'The checks could not start.' } },
+          turn,
+        ],
+      ],
+      Beta: [[write('src/api/new.txt'), commit('op-hold-0002', ['src/api/new.txt']), turn]],
+    });
+    const repoGit = (...args: string[]) =>
+      execFileSync('git', ['-C', engine.repoPath, ...args], {
+        env: isolatedGitEnv(),
+        encoding: 'utf8',
+      }).trim();
+    const alpha = engine.addTask('Alpha', ['api'], [], { flow: 'quick' }).workstream;
+    const beta = engine.addTask('Beta', ['api'], [], { flow: 'quick' }).workstream;
+    // Your folder's git work is busy when Alpha fails, so its take-out waits its turn.
+    let free = (): void => undefined;
+    const busy = new Promise<void>((resolve) => {
+      free = resolve;
+    });
+    engine.jobs.run(
+      jobKey({ projectId: engine.project.id, worktreePath: null }, JobQueue.Cut),
+      () => busy,
+    );
+    engine.launch(alpha.id);
+    await engine.runner.idle();
+    expect(ws(alpha.id)).toMatchObject({ state: 'FAILED', failureKind: 'blocked' });
+    let refused: unknown = null;
+    try {
+      engine.launch(beta.id);
+    } catch (error) {
+      refused = error;
+    }
+    free();
+    expect(String(refused)).toContain('claim conflict on api');
+    await engine.jobs.idle();
+    engine.launch(beta.id);
+    await engine.runner.idle();
+    await engine.jobs.idle();
+    expect(ws(beta.id).state).toBe('DONE');
+    // Beta's file landed and stays in Your folder; Alpha's work is on its own branch alone.
+    expect(repoGit('show', 'HEAD:src/api/new.txt')).toBe('x');
+    expect(existsSync(join(engine.repoPath, 'src/api/new.txt'))).toBe(true);
+    expect(existsSync(join(engine.repoPath, 'src/api/a.txt'))).toBe(false);
+    expect(
+      repoGit('ls-tree', '-r', '--name-only', `10db/lane/${alpha.id.slice(-8)}`).split('\n'),
+    ).not.toContain('src/api/new.txt');
+  });
+
+  // Value: protects=a base change made after a lane started is never undone by the lane's landing;
+  // fails_when=the landing takes a file from the lane's tip over a base commit that changed it;
+  // why_new=git landing (core); no_claim=a base change the lane's work already holds.
+  it('refuses to land over a base change the lane does not hold, keeping both', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          write('src/api/a.txt', 'run\n'),
+          commit('op-undo-0001', ['src/api/a.txt']),
+          { do: 'await_signal', name: 'builder-committed' },
+          turn,
+        ],
+      ],
+    });
+    const repoGit = (...args: string[]) =>
+      execFileSync('git', ['-C', engine.repoPath, ...args], {
+        env: isolatedGitEnv(),
+        encoding: 'utf8',
+      }).trim();
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
+    engine.launch(workstream.id);
+    await waitFor(
+      () =>
+        engine.adapter.observations.find(
+          (o) => o.kind === 'mcp_result' && o.detail['tool'] === 'commit',
+        ) ?? undefined,
+    );
+    // The builder adds a line to the file in Your folder and commits it on the base.
+    writeFileSync(join(engine.repoPath, 'src/api/a.txt'), 'run\nbuilder\n');
+    repoGit('add', 'src/api/a.txt');
+    repoGit('commit', '-q', '-m', 'Builder line');
+    const builders = repoGit('rev-parse', 'HEAD');
+    engine.adapter.signal('builder-committed');
+    await engine.runner.idle();
+    await engine.jobs.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureKind: 'landing_refused' });
+    expect(repoGit('rev-parse', 'HEAD')).toBe(builders);
+    expect(repoGit('show', 'HEAD:src/api/a.txt')).toBe('run\nbuilder');
+    expect(repoGit('show', `10db/lane/${workstream.id.slice(-8)}:src/api/a.txt`)).toBe('run');
   });
 
   // Value: protects=a task's failures show as one Inbox card that speaks for its newest run;
@@ -3382,13 +3481,17 @@ describe('a step that ends with changes in its claims', () => {
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('FAILED');
+    // A failed run keeps its claims until its take-out has its work out of Your folder.
+    await engine.jobs.idle();
     const second = later();
     engine.launch(second.id);
     await engine.runner.idle();
+    await engine.jobs.idle();
     const third = later();
     engine.launch(third.id);
     await engine.runner.idle();
     expect(ws(third.id).state).toBe('FAILED');
+    await engine.jobs.idle();
 
     const [card, ...more] = failedCards();
     expect(more).toEqual([]);

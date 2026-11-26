@@ -184,6 +184,15 @@ describe('§1.3 with the fake adapter', () => {
     expect(opsOn('HEAD').filter((t) => t.startsWith('land-'))).toEqual(
       expect.arrayContaining(all.map((w) => `land-${w.id}`)),
     );
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv(), encoding: 'utf8' });
+    expect(git('status', '--porcelain')).toBe('');
+    expect(git('ls-tree', '-r', '--name-only', 'HEAD', '--', 'src').trim().split('\n')).toEqual([
+      'src/a/one.txt',
+      'src/a/two.txt',
+      'src/b/one.txt',
+      'src/c/one.txt',
+    ]);
     // The retried commit succeeds and returns the original result rather than failing on an empty diff.
     const gammaCommits = adapter.observations.filter(
       (o) => o.title === 'Gamma' && o.kind === 'mcp_result' && o.detail['tool'] === 'commit',

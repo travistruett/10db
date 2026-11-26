@@ -951,7 +951,7 @@ export function createToolHandlers(
       }
       // A Commit Directly run in Your folder commits on its own lane branch; the base gets its work
       // only once its final gate passed.
-      const lane = laneBranchOf(db, row);
+      const lane = laneBranchOf(row);
       const result =
         lane === null
           ? await deps.git.commit({
@@ -1278,7 +1278,7 @@ export function createToolHandlers(
       const row = getWorkstreamRow(db, workstreamId);
       const checkout = checkoutOf(db, row);
       // A run on a lane branch commits there, not on the checkout's head.
-      const lane = laneBranchOf(db, row);
+      const lane = laneBranchOf(row);
       const head =
         (lane === null ? null : await deps.git.branchTip(checkout, lane.lane)) ??
         (await deps.git.head(checkout));

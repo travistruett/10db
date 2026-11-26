@@ -18,12 +18,11 @@
   its session started with (the permission broker's own hazard checks still read the session's copy): an area narrowed or split while a session runs is judged as it is now, so a claim the
   session takes later never covers files another area now holds.
 - A session of a separate copy's batch (builder, reviewer, takeover, on every start and resume) gets `TENDB_COPY_ID` from the batch's journal row through `copyIdForBatch` and `withCopyId`, never from the ambient environment. A copy batch whose row can't be read doesn't launch and fails with the error's reason. A copy's step checks run in the copy, and a batch's final check is the landing's gate, not the runner's.
-- A lane-branch run (`laneBranchOf`) commits on its lane, never the base, and is marked done only after `landThenDone` lands it on the base; a refused
-  landing fails it as `landing_refused`. `claimedChanges` counts a path the folder holds as the lane's tip does as
-  committed, and such a run keeps its claims while it waits. When it fails, `lane-take-out.ts` commits what the
-  folder holds of it onto the lane, puts its files back to the base's and records the lane as the task's kept work,
-  which the kept-work gate puts back before every Retry; the gate holds the run until the take-out ends
-  (`takingOut`)
+- A lane-branch run (`laneBranchOf(row)`, pinned at its first session by `laneBranchFor`) commits on its lane and
+  is done only after `landThenDone` lands it; a refused landing fails it as `landing_refused`. `claimedChanges`
+  counts a path held as the lane's tip has it as committed. A waiting or failed lane run keeps its claims:
+  `lane-take-out.ts` moves a failed run's work onto the lane, puts its files back, records the kept work the
+  kept-work gate restores before every Retry (`takingOut` holds the run), then releases the claims
   (`decisions/2026-11-26-a-commit-directly-lane-commits-on-its-own-branch-until-its-gate-passes.md`).
 - Acceptance pass: how the runner checks criteria after the last gate, sends back through a resumable `fix`, and leaves the `acceptance` card is in `acceptance/AGENTS.md`.
 - A task has one failed card (`inbox/failed-card.ts`, fold key `failed:<taskId>`): `flagFailedRun`, which the runner and

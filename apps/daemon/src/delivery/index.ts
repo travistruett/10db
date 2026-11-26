@@ -1,6 +1,6 @@
 export { finished as taskFinished, unfinishedDependencies } from './deps';
 export { batchBranchName } from './branch-name';
-export { LANE_BRANCH_DETAIL, laneBranchOf, type LaneBranch } from './lane-branch';
+export { LANE_BRANCH_DETAIL, laneBranchFor, laneBranchOf, type LaneBranch } from './lane-branch';
 export { landLaneWork } from './lane-landing';
 export {
   createBaseUpdates,

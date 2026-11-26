@@ -41,7 +41,7 @@ export async function runCommits(
   base: string,
   head: string,
 ): Promise<RunCommits> {
-  const lane = laneBranchOf(deps.db, row);
+  const lane = laneBranchOf(row);
   if (lane !== null) return laneCommits(deps.git, checkout, lane);
   const all = await deps.git.commitsSince(checkout, base, head);
   if (checkout !== getProject(deps.db, row.projectId).repoPath)

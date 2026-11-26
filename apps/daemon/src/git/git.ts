@@ -900,6 +900,18 @@ export interface Git extends ChatGit {
     paths: readonly string[],
   ): Promise<string>;
   /**
+   * Of `paths`, those whose changes from commit `from` to commit `other` commit `tip` lacks: a
+   * three-way merge of `other` into `tip` from `from` (merge-tree, which writes objects only) would
+   * change them, or conflicts on them. Empty when `tip` already holds everything `other` did to them.
+   */
+  changesMissing(input: {
+    readonly repo: string;
+    readonly tip: string;
+    readonly other: string;
+    readonly from: string;
+    readonly paths: readonly string[];
+  }): Promise<string[]>;
+  /**
    * Brings `path` as commit `theirs` has it into the file on disk, by a three-way merge from its
    * version in `base` (`merge-file`, which runs no driver), under the repo lock. `merged` when the file
    * now holds both sides, or already did; `conflict` when they don't merge cleanly, a side is not a
@@ -963,7 +975,9 @@ export interface Git extends ChatGit {
    * branch's tip for the paths again; a tree equal to the tip's makes none and answers null. Refused
    * with `PassFolderOffBranchError` while HEAD names another branch. A compare-and-swap that loses
    * a race is refused; with `willRetry` (the caller lands once more from the new tip) the refusal is
-   * thrown without reaching `onRefused`, so a race the caller recovers from raises no card.
+   * thrown without reaching `onRefused`, so a race the caller recovers from raises no card. With
+   * `expect`, the tip the caller checked the paths against, a branch that holds another tip and no
+   * commit of `opId` is refused the same way, before anything is written.
    */
   landPaths(input: {
     readonly repo: string;
@@ -973,6 +987,7 @@ export interface Git extends ChatGit {
     readonly message: string;
     readonly opId: string;
     readonly willRetry?: boolean;
+    readonly expect?: string;
   }): Promise<LandedPaths>;
   /** Sets `ref`, under `refs/10db/`, to commit `sha`, whatever it held. */
   keepRef(repo: string, ref: string, sha: string): Promise<void>;
@@ -3101,6 +3116,7 @@ export function createGit(opts: GitOptions = {}): Git {
     readonly message: string;
     readonly opId: string;
     readonly willRetry?: boolean;
+    readonly expect?: string;
   }): Promise<LandedPaths> {
     const named = [...new Set(input.paths.map(checkPathName))].sort();
     return withRepoLock(realpathSync(input.repo), async () => {
@@ -3124,6 +3140,9 @@ export function createGit(opts: GitOptions = {}): Git {
       // A rerun's index follows the branch too: the run it repeats may have stopped before it did.
       if (existing)
         return { sha: existing, alreadyLanded: true, indexStale: await followIndex(tip) };
+      const raced = { kind: GitTrustFailure.Ref, ref, reason: 'raced' } as const;
+      if (input.expect !== undefined && tip !== input.expect)
+        throw input.willRetry === true ? new GitTrustError(c.real, raced) : refusal(c.real, raced);
       const from = await revParse(c, `${input.from}^{commit}`);
       if (from === null) throw new InvalidError(`${input.from} names no commit`);
       const tree = await treeTaking(c, tip, from, named);
@@ -3140,7 +3159,6 @@ export function createGit(opts: GitOptions = {}): Git {
         await git(c, ['update-ref', '--no-deref', '-m', `10db: ${input.opId}`, ref, sha, tip]);
       } catch (error) {
         if (!(error instanceof GitError)) throw error;
-        const raced = { kind: GitTrustFailure.Ref, ref, reason: 'raced' } as const;
         throw input.willRetry === true ? new GitTrustError(c.real, raced) : refusal(c.real, raced);
       }
       return { sha, alreadyLanded: false, indexStale: await followIndex(sha) };
@@ -3234,6 +3252,31 @@ export function createGit(opts: GitOptions = {}): Git {
       }
       return { written, left };
     });
+  }
+
+  async function changesMissing(input: {
+    readonly repo: string;
+    readonly tip: string;
+    readonly other: string;
+    readonly from: string;
+    readonly paths: readonly string[];
+  }): Promise<string[]> {
+    const c = await pinned(input.repo);
+    const merged = await mergeTree(c, input.tip, input.other, input.from);
+    const conflicted = new Set(merged.conflicted);
+    const missing: string[] = [];
+    for (const path of [...new Set(input.paths.map(checkPathName))].sort()) {
+      if (conflicted.has(path)) {
+        missing.push(path);
+        continue;
+      }
+      const [held, wanted] = await Promise.all([
+        treeEntry(c, input.tip, path),
+        treeEntry(c, merged.tree, path),
+      ]);
+      if (held?.oid !== wanted?.oid || held?.mode !== wanted?.mode) missing.push(path);
+    }
+    return missing;
   }
 
   async function mergeFileBack(input: {
@@ -5054,6 +5097,7 @@ export function createGit(opts: GitOptions = {}): Git {
     pageChanges,
     hashOnDisk,
     restoreFiles,
+    changesMissing,
     moveKeptRef,
     narrowKeptRef,
     mergeFileBack,

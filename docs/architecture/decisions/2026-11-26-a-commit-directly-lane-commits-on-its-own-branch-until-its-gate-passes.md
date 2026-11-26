@@ -7,30 +7,46 @@
 
 A run in Your folder of a Commit Directly (`delivery: local`) project with a gate command, outside any batch
 or pass, commits through the commit tool on a lane branch of its own, `10db/lane/<last 8 hex of the workstream
-id>` (`laneBranchOf`, `Git.commitOnBranch`). The commit takes the named paths as the folder holds them onto the
-lane's tip, or onto the base when the lane has no commit yet. It moves neither the base, HEAD nor the folder's
-index, and it is refused while the folder is not on the run's base.
+id>` (`Git.commitOnBranch`). The lane is pinned on the run's row (`workstreams.lane_branch`) with its base as its
+first session starts (`laneBranchFor`), and `laneBranchOf` reads only the row: a gate added or removed, a delivery
+changed or a pass that picks up the task mid-run never moves where the run commits or whether it lands. The commit
+takes the named paths as the folder holds them onto the lane's tip, or onto the base when the lane has no commit
+yet. It moves neither the base, HEAD nor the folder's index, and it is refused while the folder is not on the
+run's base.
 
 - **The run's work** is the lane's commits the base lacks, in one range (`runCommits`). A path is committed when
   the folder holds it as the lane's tip does (`claimedChanges`). A run waiting on a person with lane commits
   keeps its claims.
 - **Landing.** Once its last check has passed and it would be done (the gate passed with no step left, or its
   last review approved), the run's files land on the base as one commit taken from the lane's tip
-  (`landLaneWork`, `Git.landPaths`, op `land-<workstream id>`). Only then is the run marked done. A landing
-  refused (the folder off the base, the base raced) fails the run as `landing_refused`, and nothing reaches the
-  base. The lane branch stays after landing: the run's Changes view and check facts read it.
-- **Failure.** When the run fails (blocked, out of attempts, refused), a delivery job (`subscribeLaneTakeOut`)
-  holds Your folder and does three things:
+  (`landLaneWork`, `Git.landPaths`, op `land-<workstream id>`). Only then is the run marked done. A file the base
+  changed after the lane started, in a way the lane's tip does not hold (`Git.changesMissing`, a three-way merge
+  from the lane's start), is never taken from the lane, which would undo the base's change: the landing is
+  refused. A base that moves between that check and the landing (`landPaths`' `expect`) is checked once more from
+  its new tip. A landing refused (the base changed one of its files, the folder off the base, the base raced
+  twice) fails the run as `landing_refused`, its failed card says why, and nothing reaches the base. A project
+  whose gate was removed mid-run reaches the builder's check, and its approval lands the run the same way. The
+  lane branch stays after landing: the run's Changes view and check facts read it.
+- **Failure.** When the run fails (blocked, out of attempts, refused, or failed by startup recovery), it keeps its
+  claims, so no lane starts on its files, and a delivery job (`subscribeLaneTakeOut`) holds Your folder and does
+  three things:
   - commits what the folder holds of the run onto the lane, as `10db: unfinished work kept`;
   - puts each of the run's files back to the base's version, leaving one that changed meanwhile;
   - records the lane's tip as the task's kept work against the commit the lane started on, so the kept-work gate
     puts it back before a Retry or a new start launches.
-    The failed card and a task notice name the branch.
+
+  The take-out never takes a path another run holds a claim on. Once the work is out it lets go of the claims, and
+  the failed card then says what became of the work: on the branch it names, nothing left to keep, or already on
+  the base when a landing was made before the run failed. A take-out that could not move the files (Your folder
+  off the base, a git error) keeps the claims, so the tasks sharing its areas wait until the run is retried or
+  cancelled, and the card says the files are still in the folder.
+
 - **Retry and the take-out.** The kept-work gate holds a run from its failure until its take-out has ended, so a
   Retry never launches on files the take-out is still moving, and each take-out makes the run's next start put
   the work back again, however often it has failed. A take-out whose turn comes after the run was started again
-  does nothing: the files are still in the folder for the run. The hold is in memory; a restart drops it with
-  the take-out itself (see what this does not cover).
+  does nothing: the files are still in the folder for the run. The hold is in memory. A failed lane run still
+  holding claims when the daemon starts has a take-out to finish (a restart cut it short, recovery failed the run,
+  or an earlier take-out could not move its files), and gets one.
 - **No gate.** A project with no gate command commits on the base as before: there is no gate for a run's
   unfinished commits to fail, and the builder checks each run.
 
@@ -52,8 +68,11 @@ Turned down:
 
 Known gaps, each a follow-up:
 
-- a take-out or landing a crash cut short is not finished at start-up;
+- a landing a crash cut short is finished only by the run's recovery, which runs its gate again;
 - Cancel and Abandon leave a run's files and branch;
 - old lane branches are not swept;
-- a project whose gate command is removed mid-run leaves that run's earlier lane commits unlanded;
-- the builder sees a running lane's work as modified in `git status` until it lands.
+- the builder sees a running lane's work as modified in `git status` until it lands, and so does a gate that reads
+  git: `git diff HEAD`, `git log` or a check that the index is clean sees the run's work as unstaged or untracked,
+  because its commits are on the lane, not HEAD. A gate that runs the project's checks on its files is unaffected.
+  The index does not follow the lane, since the builder's own `git status` and commits read it; a failed-gate card
+  says so for a lane run.

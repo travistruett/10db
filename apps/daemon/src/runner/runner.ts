@@ -232,6 +232,7 @@ import {
   flakeNote,
   gateNote,
   LANE_BRANCH_DETAIL,
+  laneBranchFor,
   laneBranchOf,
   landLaneWork,
   MIGRATIONS_HAZARD,
@@ -1365,22 +1366,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       },
       reason,
     });
-    releaseClaims(ctx, id);
+    // A run on a lane branch keeps its claims until its work is out of Your folder
+    // (`subscribeLaneTakeOut`), so no lane starts on its files meanwhile.
+    if (laneBranchOf(row) === null) releaseClaims(ctx, id);
     clearLease(ctx, id);
   }
 
   /** The task's failed card; `review` is the reviewer's rejection that ended the workstream, when one did. */
   function flagFailed(row: WorkstreamRow, reason: string, review?: ReviewCardDetail): void {
     const batch = batchCardFields(row);
-    // A run on a lane branch put nothing on the base: the card says where its work is.
-    const lane = laneBranchOf(db, row);
-    const body =
-      lane === null
-        ? reason
-        : `${reason}\n\nNothing reached ${lane.base}. The work is on branch ${lane.lane}; Retry puts it back in Your folder.`;
+    // Where a lane run's work went is added to the card by its take-out, once it has moved it.
+    const lane = laneBranchOf(row);
     opts.state.write((ctx) => {
       flagFailedRun(ctx, row, {
-        body,
+        body: reason,
         ...(batch ? { options: batch.options } : {}),
         ...(batch || review || lane
           ? {
@@ -2173,7 +2172,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         reason: 'steps complete',
       });
       // A lane branch lands before the run is done, outside the write: it is git's work.
-      if (laneBranchOf(ctx.tx, row) !== null) return { outcome: 'land' as const, qaSkipped };
+      if (laneBranchOf(row) !== null) return { outcome: 'land' as const, qaSkipped };
       markDone(ctx, id, ctl.fence, row, ending.reason(qaSkipped));
       return { outcome: 'stop' as const, qaSkipped };
     });
@@ -2927,12 +2926,17 @@ export function createRunner(opts: RunnerOptions): Runner {
     const reviser = action.kind === 'revise' ? row.steps[action.reviewStep] : undefined;
     const readOnly = step.tools === ToolAccess.ReadOnly;
     // Work with no batch commits on one branch for its whole life: the one HEAD names as its first
-    // session starts. A lane that switches branches later can't move its commits elsewhere.
+    // session starts. A lane that switches branches later can't move its commits elsewhere. A run
+    // that commits on a lane branch of its own until it lands has it pinned here too.
     if (row.batchId === null && row.branch === null) {
       const branch = await opts.git.currentBranch(checkout);
       if (branch !== null)
         opts.state.write((ctx) => {
-          patchWorkstream(ctx, id, ctl.fence, { branch });
+          const laneBranch = laneBranchFor(ctx.tx, row);
+          patchWorkstream(ctx, id, ctl.fence, {
+            branch,
+            ...(laneBranch === null ? {} : { laneBranch }),
+          });
         });
     }
     const baseHead = row.baseHead ?? (await opts.git.head(checkout));
@@ -4963,7 +4967,7 @@ export function createRunner(opts: RunnerOptions): Runner {
    * A run on a lane branch reads to the lane's tip, which the checkout's head does not carry.
    */
   async function ownWork(row: WorkstreamRow, checkout: string, base: string) {
-    const lane = laneBranchOf(db, row);
+    const lane = laneBranchOf(row);
     const head =
       (lane === null ? null : await opts.git.branchTip(checkout, lane.lane)) ??
       (await opts.git.head(checkout));
@@ -5606,7 +5610,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             steps: advanceSteps(steps, current.stepIndex, -1, entryFor(ctx, id)),
           });
         // A lane branch lands before the run is done, outside the write: it is git's work.
-        if (laneBranchOf(ctx.tx, current) !== null) return true;
+        if (laneBranchOf(current) !== null) return true;
         markDone(ctx, id, ctl.fence, current, 'gate passed');
         return false;
       });
@@ -5616,9 +5620,15 @@ export function createRunner(opts: RunnerOptions): Runner {
     const attempt = row.attempt + 1;
     const evidenceId = opts.state.write((ctx) => insertEvidence(ctx, evidence).id);
     if (attempt > opts.limits.maxFixAttempts) {
+      // A gate that reads git meets a lane run's work as uncommitted: its commits are not on HEAD.
+      const lane = laneBranchOf(row);
+      const unlanded =
+        lane === null
+          ? ''
+          : `. The gate ran with this run's commits on branch ${lane.lane}, not on ${lane.base}, so a gate that reads git (git diff HEAD, git log, a check that the index is clean) saw its work as uncommitted`;
       fail(id, ctl.fence, {
         kind: WorkstreamFailure.GateFailed,
-        reason: `The gate failed ${String(attempt)} times (last exit ${String(result.exitCode)})`,
+        reason: `The gate failed ${String(attempt)} times (last exit ${String(result.exitCode)})${unlanded}`,
       });
       return;
     }
@@ -6274,7 +6284,21 @@ export function createRunner(opts: RunnerOptions): Runner {
         fence: null,
         reason: 'the builder approved the work',
       });
-      // A project with no gate commits on the base itself (`laneBranchOf`), so nothing lands here.
+      // A run pinned to a lane branch lands before it is done, outside the write: a project whose
+      // gate was removed mid-run reaches the builder's check with its work still on the lane.
+      if (laneBranchOf(row) !== null)
+        return () => {
+          void landThenDone(id, null, 'the builder approved the work')
+            .catch((error: unknown) => {
+              opts.logger.error(
+                { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+                'an approved run on a lane branch did not land',
+              );
+            })
+            .finally(() => {
+              opts.onLaneFreed();
+            });
+        };
       markDone(ctx, id, null, row, 'the builder approved the work');
       return () => {
         opts.onLaneFreed();

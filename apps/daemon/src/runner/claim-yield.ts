@@ -33,7 +33,7 @@ export async function claimedChanges(
 ): Promise<string[]> {
   const project = getProject(db, row.projectId);
   const checkout = checkoutOf(db, row);
-  const changed = await uncommittedOnLane(db, git, row, checkout, await git.changedPaths(checkout));
+  const changed = await uncommittedOnLane(git, row, checkout, await git.changedPaths(checkout));
   const claims = activeClaims(db, row.id).map((c) => ({ kind: c.kind, name: c.name }));
   // A pass lane's claims name the pass's own areas: the whole-project page for a pass of one.
   const pass = passHoldingTask(db, getTask(db, row.taskId));
@@ -45,13 +45,12 @@ export async function claimedChanges(
 
 /** `changed` less each path the folder holds as the run's lane tip has it; all of it off a lane. */
 async function uncommittedOnLane(
-  db: DbReader,
   git: ClaimGit,
   row: WorkstreamRow,
   checkout: string,
   changed: readonly string[],
 ): Promise<string[]> {
-  const lane = laneBranchOf(db, row);
+  const lane = laneBranchOf(row);
   const tip = lane === null ? null : await git.branchTip(checkout, lane.lane);
   if (tip === null || changed.length === 0) return [...changed];
   const onDisk = new Map((await git.hashOnDisk(checkout, changed)).map((e) => [e.path, e.blob]));
@@ -63,7 +62,7 @@ async function uncommittedOnLane(
 
 /** Whether the run's lane branch holds commits: its folder then holds work the base lacks. */
 async function holdsLaneWork(db: DbReader, git: ClaimGit, row: WorkstreamRow): Promise<boolean> {
-  const lane = laneBranchOf(db, row);
+  const lane = laneBranchOf(row);
   return lane !== null && (await git.branchTip(checkoutOf(db, row), lane.lane)) !== null;
 }
 
