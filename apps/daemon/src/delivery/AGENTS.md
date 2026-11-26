@@ -20,15 +20,9 @@
 - `hand-made-worktrees.ts` (`decisions/2026-11-17-hand-made-worktrees-are-offered-for-removal-and-kept-out-of-spotlight.md`) looks, from the pull request watch's `afterRound` and at most every six hours (`createHandMadeFolderLook`), at each pull request project's hand-made folder (`handMadeWorktreeFolders`) and raises `hand-made-cards.ts`'s cards: Remove Merged Worktrees (merged pull request, tip carried by its head, unlocked, clean, no loose ignored file) and a card for the older `<repo>-worktrees` folder while it holds worktrees (`decisions/2026-11-24-hand-made-worktrees-live-in-a-noindex-folder.md`). `worktree-card.ts` answers the removal through the scoped `Git.handMade*` calls; nothing is removed unanswered, and a removal looks again first. What an answer did (`handMadeNotices`) is a notice.
 - A `Card` needs `tier`, `urgency` and `closesWhen` (`decisions/2026-11-17-every-card-has-a-tier.md`); a notice
   goes through `post` or `postIn`.
-<<<<<<< 425a765d1ee65363545fc69cc2f9009d3f751138
-- `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`).
+- `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`), else `autoTestBudgetLine` (`test-budget-reason.ts`) writes one from value cards (`decisions/2026-11-25-a-pull-request-over-its-test-budget-says-why-from-its-value-cards.md`).
 - A Your-folder run of a Commit Directly project with a gate commits on its own lane branch, `10db/lane/<8 hex>`
   (`lane-branch.ts` `laneBranchOf`, `Git.commitOnBranch`), never on the base; `runCommits` reads the lane, and
   `lane-landing.ts` `landLaneWork` lands it as one commit once its last check passed. The stray-branch card skips
   lane branches (`decisions/2026-11-26-a-commit-directly-lane-commits-on-its-own-branch-until-its-gate-passes.md`).
-||||||| 35817f224
-- `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`).
-=======
-- `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`), else `autoTestBudgetLine` (`test-budget-reason.ts`) writes one from value cards (`decisions/2026-11-25-a-pull-request-over-its-test-budget-says-why-from-its-value-cards.md`).
->>>>>>> 801433044ed043266faaff71278fb09a7a16846b
 - A check red on the base too waits, not fixes (`ci-failure-class.ts`, `decisions/2026-11-24-a-red-base-is-one-fix-not-a-fix-per-pull-request.md`); one the change failed reruns once first (`ci-rerun.ts`, `decisions/2026-11-25-a-failed-required-check-is-rerun-once-before-a-fix.md`).
