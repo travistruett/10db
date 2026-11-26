@@ -39,3 +39,8 @@
   model, and "Compare with" (a `Select`) puts a second model beside it per suite (`model-compare.ts`: the suites
   where they differ first, and the cost difference over the suites both ran with a known cost). A result from an
   older eval says so in its cell. It reads results already on disk and never runs a model.
+- New Eval (`new-eval-modal.tsx`): a button in the page header, one on each No Eval row (prefills the behavior, the
+  gap's reason as evidence and its `where` path) and one over a goal's proposed eval (`PlanEval`) in a Plan's
+  Documents tab (objective, decision, oracle, models and baseline prefill it). The modal files a task through
+  `POST /projects/:id/evals/tasks` and then links to it on the Board; the lane drafts the eval and never runs
+  the live arm.

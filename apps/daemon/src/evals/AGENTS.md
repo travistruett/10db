@@ -44,3 +44,12 @@
 - By Model (`models.ts`, `GET /projects/:id/eval-models`, not under `/evals/` where `models` would be a suite key):
   each model's newest result per suite, its cost for one run of each (unknown if any is) and the median of its p50s.
   A result from a run whose fingerprint differs from the suite's newest run is `olderEval`. Compare is the UI's join.
+- New Eval (`new-eval-task.ts`, `POST /projects/:id/evals/tasks`, `NewEvalRequest`): files a normal task on the
+  project's account, "Write the eval for <behavior>", through the ordinary task-create path (`createTask`). Its brief
+  holds the six rationale sections (Decision, Evidence, Oracle, Coverage and bar, Models, Execution), the paths
+  the behavior lives in, the project's eval skills and a few existing suites as format examples, and forbids the
+  live command and any paid model call. The skills are the tracked `.claude/skills/*/SKILL.md` and
+  `.agents/skills/*/SKILL.md` at HEAD whose front matter name or description mentions evals; the brief gives
+  each one's name and file path, so a Claude or Codex lane uses it by name or reads the file. With none, it points
+  at the existing eval files. The task's areas are those the `where` paths fall in, else the catch-all or the first
+  area. It reads, files a task and runs nothing.

@@ -2,8 +2,9 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect } from '@playwright/test';
 import { claudeIsInstalled } from './claude-is-installed';
+import { daemonUrl } from './daemon-url';
 import { test } from './routed-test';
-import { E2E_DIR } from './paths';
+import { E2E_DIR, E2E_TOKEN } from './paths';
 import { createProject } from './shape-project';
 
 /** A gate report as ampsio commits one: one model passes, the other misses a gate. */
@@ -78,6 +79,8 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
     // Results are local output a project keeps out of git, as ampsio does.
     '.gitignore': 'evals/reports/\n',
     'evals/ingest/mapping.py': 'DATASET = None\n',
+    '.claude/skills/llm-eval/SKILL.md':
+      '---\nname: llm-eval\ndescription: Writes an eval for LLM work\n---\nCases, graders, a free arm.\n',
   });
   const reports = join(E2E_DIR, 'trust-page-repo', 'evals', 'reports', 'ingest.mapping');
   mkdirSync(reports, { recursive: true });
@@ -156,4 +159,35 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await expect(compare).toContainText('passed');
   await expect(compare).toContainText('failed complete');
   await expect(page.getByText('1 suite differs, at +19% cost')).toBeVisible();
+
+  // New Eval: a No Eval row files a task whose brief carries the rationale, the project's eval skill and the ban on
+  // the live arm, and the task shows on the Board.
+  const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
+  const recorded = await request.put(`${daemonUrl}/projects/${projectId}/evals/manifest`, {
+    headers: auth,
+    data: {
+      suites: [{ key: 'ingest.mapping', definitionPaths: ['evals/ingest/mapping.py'] }],
+      gaps: [{ label: 'Summarizer', where: 'src/summarize.py:12', why: 'No suite covers it' }],
+    },
+  });
+  expect(recorded.ok()).toBe(true);
+  await page.goto('/evals');
+  await page.getByRole('tab', { name: /No Eval/u }).click();
+  await page.getByRole('button', { name: 'New Eval for Summarizer' }).click();
+  const form = page.getByRole('dialog', { name: 'New Eval' });
+  await expect(form.getByRole('textbox', { name: 'Behavior' })).toHaveValue('Summarizer');
+  await form.getByRole('textbox', { name: 'Oracle' }).fill('A human-written summary per case');
+  await form.getByRole('button', { name: 'File Task' }).click();
+  await expect(form).toContainText('Filed Write the eval for Summarizer');
+  await form.getByRole('link', { name: 'Write the eval for Summarizer' }).click();
+  await expect(page).toHaveURL(/\/board/u);
+  await expect(page.getByText('Write the eval for Summarizer').first()).toBeVisible();
+  const tasks = await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth });
+  const filed = ((await tasks.json()) as { title: string; description: string }[]).find(
+    (t) => t.title === 'Write the eval for Summarizer',
+  );
+  expect(filed?.description).toContain('A human-written summary per case');
+  expect(filed?.description).toContain('.claude/skills/llm-eval/SKILL.md');
+  expect(filed?.description).toContain('src/summarize.py');
+  expect(filed?.description).toContain('Never run the live command');
 });
