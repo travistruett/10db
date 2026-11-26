@@ -78,6 +78,8 @@ const READ_BY_REPO_TESTS = [
   /^apps\/daemon\/(test|src\/git|src\/watcher)\//,
   // agent-docs.test.ts's 'has no grab-bag modules'.
   /^(apps|packages)\/(.*\/)?(utils|helpers|misc|common)\.tsx?$/,
+  // agent-docs.test.ts's 'draws the Inbox's card buttons through CardActions'.
+  /^apps\/desktop\/src\/views\/inbox\/[^/]+\.tsx$/,
 ];
 
 /**

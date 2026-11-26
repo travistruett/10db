@@ -1,6 +1,7 @@
 import { BatchId, CARD_CLOSES_ITSELF, InboxKind, type InboxItemDto } from '@10db/contracts';
-import { Alert, Anchor, Button, Group, Stack } from '@mantine/core';
+import { Anchor } from '@mantine/core';
 import { useAbandonBatch, useShipBatch } from '../../daemon/queries';
+import type { BarButton } from './card-actions';
 
 /**
  * The gate step log a not-shipped card names (`detail.logPath`), as a file:// link with the path as its
@@ -25,67 +26,50 @@ function actionBatch(
   return retry || abandon ? { batchId: batchId.data, retry, abandon } : null;
 }
 
+/** A not-shipped card's gate step log, opened as a file. */
+export function StepLogLink({ item }: { readonly item: InboxItemDto }) {
+  const log = stepLog(item);
+  if (log === null) return null;
+  return (
+    <Anchor size="sm" href={`file://${log}`} title={log}>
+      Open the step log
+    </Anchor>
+  );
+}
+
 /**
- * A not-shipped card's step log and, when it offers them, Retry and Abandon of its batch. Either dismisses
- * a card that is answered by a dismiss; a card that closes itself leaves by its closer (the batch ships)
- * or by the withdrawal an abandon makes, and is never dismissed here.
+ * Retry and Abandon of a not-shipped card's batch, when it offers them, as buttons for the card's bar, with
+ * the error either met. Either dismisses a card that is answered by a dismiss; a card that closes itself
+ * leaves by its closer (the batch ships) or by the withdrawal an abandon makes, and is never dismissed here.
  */
-export function BatchCardActions({
-  item,
-  onDone,
-}: {
-  readonly item: InboxItemDto;
-  readonly onDone: () => void;
-}) {
+export function useBatchActions(
+  item: InboxItemDto,
+  onDone: () => void,
+): { readonly buttons: readonly BarButton[]; readonly error: string | null } {
   const ship = useShipBatch();
   const abandon = useAbandonBatch();
-  const log = stepLog(item);
   const done = item.detail?.[CARD_CLOSES_ITSELF] === true ? () => undefined : onDone;
   const offer = actionBatch(item);
-  if (log === null && offer === null) return null;
-  const error = ship.error ?? abandon.error;
-  return (
-    <Stack gap="xs">
-      {log === null ? null : (
-        <Anchor size="sm" href={`file://${log}`} title={log}>
-          Open the step log
-        </Anchor>
-      )}
-      {offer === null ? null : (
-        <Group gap="xs">
-          {offer.retry ? (
-            <Button
-              size="xs"
-              loading={ship.isPending}
-              onClick={() => {
-                abandon.reset();
-                ship.mutate(offer.batchId, { onSuccess: done });
-              }}
-            >
-              Retry
-            </Button>
-          ) : null}
-          {offer.abandon ? (
-            <Button
-              size="xs"
-              variant="default"
-              color="red"
-              loading={abandon.isPending}
-              onClick={() => {
-                ship.reset();
-                abandon.mutate(offer.batchId, { onSuccess: done });
-              }}
-            >
-              Abandon
-            </Button>
-          ) : null}
-        </Group>
-      )}
-      {error ? (
-        <Alert color="red" variant="light">
-          {error.message}
-        </Alert>
-      ) : null}
-    </Stack>
-  );
+  if (offer === null) return { buttons: [], error: null };
+  const buttons: BarButton[] = [];
+  if (offer.retry)
+    buttons.push({
+      label: 'Retry',
+      loading: ship.isPending,
+      onClick: () => {
+        abandon.reset();
+        ship.mutate(offer.batchId, { onSuccess: done });
+      },
+    });
+  if (offer.abandon)
+    buttons.push({
+      label: 'Abandon',
+      color: 'red',
+      loading: abandon.isPending,
+      onClick: () => {
+        ship.reset();
+        abandon.mutate(offer.batchId, { onSuccess: done });
+      },
+    });
+  return { buttons, error: (ship.error ?? abandon.error)?.message ?? null };
 }

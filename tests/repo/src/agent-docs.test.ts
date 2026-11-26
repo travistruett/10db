@@ -176,4 +176,37 @@ describe('code layout', () => {
     );
     expect(grabBags).toEqual([]);
   });
+
+  // Every Inbox card answers from one bar, so a new card can't grow a button row of its own. A file here that
+  // draws a Mantine Button passes it through CardActions, or is listed with why its buttons are not a card's.
+  it("draws the Inbox's card buttons through CardActions", () => {
+    const dir = 'apps/desktop/src/views/inbox';
+    const notACardsButtons: Readonly<Record<string, string>> = {
+      'card-actions.tsx': 'the bar itself',
+      'ask-someone.tsx': "Ask Someone's popover: its trigger rides in a bar or the route line",
+      'inbox-empty.tsx': "an empty list's Clear Filters",
+      'inbox-row-item.tsx': "a list row's Dismiss, over the row",
+      'pass-ready-row.tsx': "a pass's pages, each with its own Commit on its line",
+      'stakeholder-extras.tsx':
+        'Copy for, Reply To and Withdraw, each beside the message it acts on',
+      'system-card-list.tsx': "10db's own cards, never answered: each fix sits by its reason",
+    };
+    const drawsButton = (source: string): boolean =>
+      [...source.matchAll(/import\s*\{([^}]*)\}\s*from\s*'@mantine\/core'/g)].some((m) =>
+        (m[1] ?? '').split(',').some((name) => name.trim() === 'Button'),
+      );
+    const usesBar = (source: string): boolean =>
+      /import\s*\{[^}]*\bCardActions\b[^}]*\}\s*from\s*'\.\/card-actions'/.test(source);
+    const files = filesIn(dir, '.tsx').filter((path) => !path.endsWith('.test.tsx'));
+    const offenders = files.filter((path) => {
+      const source = readRepoFile(path);
+      return drawsButton(source) && !usesBar(source) && !(basename(path) in notACardsButtons);
+    });
+    expect(offenders).toEqual([]);
+    // A listed file that no longer draws a Button leaves the list.
+    const stale = Object.keys(notACardsButtons).filter(
+      (name) => !files.includes(`${dir}/${name}`) || !drawsButton(readRepoFile(`${dir}/${name}`)),
+    );
+    expect(stale).toEqual([]);
+  });
 });

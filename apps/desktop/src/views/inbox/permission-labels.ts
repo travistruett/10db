@@ -60,7 +60,7 @@ export const KIND_LABELS: Readonly<Record<InboxKind, string>> = {
   [InboxKind.Plan]: 'Plan',
   [InboxKind.PlaybookMoveReport]: 'Settings Moved',
   [InboxKind.Acceptance]: 'Acceptance',
-  [InboxKind.Watchpoint]: 'Look at these changes',
+  [InboxKind.Watchpoint]: 'Look',
 };
 
 function isPermissionChoice(label: string): label is PermissionChoice {
