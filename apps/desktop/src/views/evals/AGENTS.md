@@ -5,7 +5,7 @@
   reads eval files at HEAD and result files in the checkout (projects keep them out of git), and never runs an
   eval or calls a model. 10db defines no eval format; the daemon
   reads each project's own (`apps/daemon/src/evals/`).
-- Two tabs: Suites and No Eval. Suites is one raised table (`suite-table.tsx`): the suite and its bar in words
+- Three tabs: Suites, By Model and No Eval. Suites is one raised table (`suite-table.tsx`): the suite and its bar in words
   (one dim line; the first definition path or the key when there is no bar), the last result per model
   (`result-marks.tsx` `ModelLine`: a dot, the model, gates passed and the gate furthest under its minimum in
   red), the last eight runs as dots (hollow red for failed, with a thin rule before a run whose eval's fingerprint
@@ -29,3 +29,13 @@
   suite's definition was committed more than 12 hours after its latest run (`definitionChangedAt`), Last Run
   adds "eval changed <date>" and the drawer says that run may not measure the eval as it is now; the drawer's
   runs mark "new eval" where the fingerprint changed.
+- When HEAD has moved past the assessed commit and the manifest misses something (`drift`), Suites opens with a
+  bordered "Since the assessment at <commit>" line: new eval files no suite links, new LLM calls with no eval and
+  paths the manifest names that are gone, each listed, with Copy the Ask. It is information on the page only.
+- No Eval says under each `where` whether the gap was `assessed` or `found at HEAD` by a call pattern, and above
+  the table how many sites each pattern found, so a pattern that is too broad shows.
+- By Model (`by-model.tsx`, `GET /projects/:id/eval-models`, fetched when the tab opens): one row per model, its
+  suites passed of those it ran, the ones it failed, the cost of one run of each and p50. A row click picks the
+  model, and "Compare with" (a `Select`) puts a second model beside it per suite (`model-compare.ts`: the suites
+  where they differ first, and the cost difference over the suites both ran with a known cost). A result from an
+  older eval says so in its cell. It reads results already on disk and never runs a model.

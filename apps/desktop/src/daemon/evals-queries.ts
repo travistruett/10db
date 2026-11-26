@@ -1,4 +1,4 @@
-import { EvalsDto, EvalSuiteDetailDto, type ProjectId } from '@10db/contracts';
+import { EvalModelsDto, EvalsDto, EvalSuiteDetailDto, type ProjectId } from '@10db/contracts';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { readJson } from './client';
 import { useDaemon } from './provider';
@@ -7,6 +7,7 @@ import { useDaemon } from './provider';
 export const evalsKeys = {
   all: ['evals'],
   list: (projectId: ProjectId) => ['evals', projectId] as const,
+  models: (projectId: ProjectId) => ['evals', projectId, 'models'] as const,
   suite: (projectId: ProjectId, key: string, run: string | null) =>
     ['evals', projectId, 'suite', key, run] as const,
 } as const;
@@ -37,6 +38,20 @@ export function useEvalSuite(projectId: ProjectId, key: string | null, run: stri
           query: run === null ? {} : { run },
         }),
         EvalSuiteDetailDto,
+      ),
+  });
+}
+
+/** Every model the project's results graded, fetched once the By Model tab opens. */
+export function useEvalModels(projectId: ProjectId, enabled: boolean) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: evalsKeys.models(projectId),
+    enabled,
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId']['eval-models'].$get({ param: { projectId } }),
+        EvalModelsDto,
       ),
   });
 }

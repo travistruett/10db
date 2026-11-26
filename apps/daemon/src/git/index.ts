@@ -28,6 +28,9 @@ export {
   type CheckoutPlace,
   type FolderAt,
   type Git,
+  type GrepAnswer,
+  type GrepAt,
+  type GrepQuery,
   OP_TRAILER,
   OVER_BUDGET_REFUSAL,
   type SurveyTexts,
@@ -40,6 +43,7 @@ export {
 export { GitNetworkError, GitNetworkFailure, type NetworkCall } from './network';
 export { GIT_REPO_ENV_VARS, withoutGitRepoEnv } from './repo-env';
 export { GitError, runGit, XCODE_SELECTORS } from './run';
+export type { GrepMatch } from './grep-output';
 export {
   checkoutSwitchCommand,
   trustCard,

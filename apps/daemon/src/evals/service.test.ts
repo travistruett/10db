@@ -67,7 +67,7 @@ describe('evals service', () => {
       'evals/lane-pipeline/baselines/standard.json': baseline,
       'evals/chat/answer.py': '# eval\n',
       'evals/chat/other.py': '# eval\n',
-      'src/chat.py': 'x = 1\n',
+      'src/chat.py': '@register_task\nclass Answer: ...\n',
     };
     for (const [rel, text] of Object.entries(files)) {
       mkdirSync(dirname(join(repo.path, rel)), { recursive: true });
@@ -114,6 +114,7 @@ describe('evals service', () => {
         },
       ],
       gaps: [],
+      callPatterns: [],
     });
     expect(refused).toMatchObject({
       ok: false,
@@ -132,11 +133,14 @@ describe('evals service', () => {
         { key: 'unrun', definitionPaths: ['evals/chat/other.py'], coveredPaths: [] },
       ],
       gaps: [{ label: 'Summaries', where: 'src/chat.py:1', why: 'no eval' }],
+      callPatterns: [{ label: 'LLM task', regex: '^@register_task', globs: ['**/*.py'] }],
     });
     expect(recorded.ok).toBe(true);
     const after = await evals.read(project.id, repo.path);
     expect(after.unlinked).toEqual([]);
     expect(after.gaps).toHaveLength(1);
+    expect(after.callSites).toEqual([{ label: 'LLM task', count: 1, capped: false }]);
+    expect(after.drift).toBeNull();
     expect(after.suites.map((s) => [s.key, s.label, s.runCount])).toEqual([
       ['chat.answer', 'Chat answer', 2],
       ['lane-pipeline:standard', 'lane-pipeline:standard', 1],
@@ -145,6 +149,26 @@ describe('evals service', () => {
     const detail = await evals.suite(project.id, repo.path, 'chat.answer', undefined);
     expect(detail.runs.map((r) => r.passed)).toEqual([false, true]);
     expect(detail.coveredPaths).toEqual(['src/**']);
+
+    // A new LLM task outside every suite and a new eval file land after the assessment: both show at once.
+    mkdirSync(join(repo.path, 'jobs'), { recursive: true });
+    writeFileSync(join(repo.path, 'jobs/summarize.py'), 'import x\n@register_task\nclass S: ...\n');
+    writeFileSync(join(repo.path, 'evals/chat/new.py'), '# eval\n');
+    git(repo.path, 'add', 'jobs/summarize.py', 'evals/chat/new.py');
+    git(repo.path, 'rm', '-q', 'evals/chat/other.py');
+    git(repo.path, 'commit', '-q', '-m', 'a new task');
+    const moved = await evals.read(project.id, repo.path);
+    expect(moved.gaps).toEqual([
+      { label: 'Summaries', where: 'src/chat.py:1', why: 'no eval', source: 'assessed' },
+      { label: 'LLM task', where: 'jobs/summarize.py:2', why: '@register_task', source: 'found' },
+    ]);
+    expect(moved.callSites).toEqual([{ label: 'LLM task', count: 2, capped: false }]);
+    expect(moved.drift?.since).toBe(recorded.ok ? recorded.evals.commit : null);
+    expect(moved.drift).toMatchObject({
+      newEvalFiles: ['evals/chat/new.py'],
+      newGaps: [moved.gaps?.[1]],
+      missingPaths: ['evals/chat/other.py'],
+    });
   });
 
   it('does not read a results folder that links out of the checkout', async () => {

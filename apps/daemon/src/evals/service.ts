@@ -2,17 +2,22 @@ import {
   NotFoundError,
   type EvalManifest,
   type EvalManifestResult,
+  type EvalModelsDto,
   type EvalsDto,
   type EvalSuiteDetailDto,
   type HazardDef,
   type ProjectId,
+  type StoredEvalManifest,
 } from '@10db/contracts';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { classifyPath } from '../guard';
 import type { Logger } from '../log';
-import { buildEvals, buildSuiteDetail, type DefinitionTimes } from './build';
+import { buildEvals, buildSuiteDetail, type DefinitionTimes, type Discovery } from './build';
+import { findCallSites, patternsOf, uncoveredSites, type FoundCallSites } from './call-sites';
+import { evalDrift } from './drift';
 import { readEvalManifest, writeEvalManifest } from './manifest-store';
+import { buildModels } from './models';
 import { createEvalsCache, readEvals, type FoundEvals } from './read-results';
 
 export interface EvalsService {
@@ -23,6 +28,8 @@ export interface EvalsService {
     key: string,
     run: string | undefined,
   ): Promise<EvalSuiteDetailDto>;
+  /** Every model the project's results graded, with its newest result per suite. */
+  models(projectId: ProjectId, repoPath: string): Promise<EvalModelsDto>;
   record(
     projectId: ProjectId,
     repoPath: string,
@@ -32,7 +39,7 @@ export interface EvalsService {
 
 export interface EvalsDeps {
   readonly state: StateStore;
-  readonly git: Pick<Git, 'survey' | 'commitAt' | 'lastChangedAt'>;
+  readonly git: Pick<Git, 'survey' | 'commitAt' | 'lastChangedAt' | 'grepAt' | 'filesAt'>;
   readonly logger: Logger;
 }
 
@@ -68,6 +75,30 @@ function untrackedIn(manifest: EvalManifest, found: FoundEvals): string[] {
     }
   }
   return [...out];
+}
+
+/** Reads of a commit kept by key, the newest few: a commit's files and call sites never change. */
+const KEPT_COMMIT_READS = 16;
+
+function keptByCommit<T>(): (key: string, read: () => Promise<T>) => Promise<T> {
+  const held = new Map<string, Promise<T>>();
+  return (key, read) => {
+    const kept = held.get(key);
+    if (kept !== undefined) {
+      held.delete(key);
+      held.set(key, kept);
+      return kept;
+    }
+    const next = read();
+    held.set(key, next);
+    // A failed read is not kept, so the next open asks again.
+    next.catch(() => held.delete(key));
+    for (const old of held.keys()) {
+      if (held.size <= KEPT_COMMIT_READS) break;
+      held.delete(old);
+    }
+    return next;
+  };
 }
 
 /**
@@ -115,11 +146,60 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
     }
     return times;
   }
+  const siteReads = keptByCommit<FoundCallSites | null>();
+  const fileReads = keptByCommit<ReadonlySet<string> | null>();
+  const sitesAt = (repoPath: string, commit: string, manifest: StoredEvalManifest) => {
+    const patterns = patternsOf(manifest);
+    return siteReads(`${repoPath}\0${commit}\0${JSON.stringify(patterns)}`, () =>
+      findCallSites(deps.git, repoPath, commit, patterns),
+    );
+  };
+  const filesAt = (repoPath: string, commit: string) =>
+    fileReads(`${repoPath}\0${commit}`, () =>
+      deps.git.filesAt(repoPath, commit).then(
+        (files) => new Set(files),
+        () => null,
+      ),
+    );
+  /** The manifest's call sites at HEAD, and what changed since the commit it read. */
+  async function discover(
+    repoPath: string,
+    read: FoundEvals | null,
+    manifest: StoredEvalManifest | null,
+  ): Promise<Discovery | null> {
+    if (read === null || manifest === null) return null;
+    const now = await sitesAt(repoPath, read.commit, manifest);
+    const definitions = read.markers.definitions;
+    const uncovered = now === null ? [] : uncoveredSites(now.sites, manifest, definitions);
+    const since = manifest.commit;
+    let drift = null;
+    if (since !== null && since !== read.commit) {
+      const linked = new Set(manifest.manifest.suites.flatMap((s) => s.definitionPaths));
+      drift = evalDrift({
+        since,
+        unlinked: definitions.filter((p) => !linked.has(p)),
+        filesThen: await filesAt(repoPath, since),
+        uncoveredNow: uncovered,
+        sitesThen:
+          now === null ? null : ((await sitesAt(repoPath, since, manifest))?.sites ?? null),
+        missingPaths: untrackedIn(manifest.manifest, read),
+      });
+    }
+    return { counts: now?.counts ?? [], uncovered, drift };
+  }
   return {
     async read(projectId, repoPath) {
       const read = await found(repoPath);
       const manifest = readEvalManifest(deps.state.db, projectId);
-      return buildEvals(read, manifest, await definitionTimes(repoPath, read, manifest));
+      return buildEvals(
+        read,
+        manifest,
+        await definitionTimes(repoPath, read, manifest),
+        await discover(repoPath, read, manifest),
+      );
+    },
+    async models(projectId, repoPath) {
+      return buildModels(await found(repoPath), readEvalManifest(deps.state.db, projectId));
     },
     async suite(projectId, repoPath, key, run) {
       const read = await found(repoPath);
@@ -154,7 +234,12 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
       });
       return {
         ok: true,
-        evals: buildEvals(read, stored, await definitionTimes(repoPath, read, stored)),
+        evals: buildEvals(
+          read,
+          stored,
+          await definitionTimes(repoPath, read, stored),
+          await discover(repoPath, read, stored),
+        ),
       };
     },
   };
