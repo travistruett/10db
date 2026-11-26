@@ -864,4 +864,39 @@ describe('the Linear reporter', () => {
       reason: 'the session answered with nothing',
     });
   });
+
+  it('records every update a run owes, however many come due together, from a script that names none', async () => {
+    // A task's run raises a row per event; a script that wrote for a fixed count left the rest owed.
+    book[KEY] = [
+      [
+        {
+          do: 'each_owed',
+          steps: [
+            { do: 'mcp', tool: 'report_linear_post', args: { postId: '$post', body: BODY } },
+            {
+              do: 'tool',
+              toolName: `${PREFIX}save_comment`,
+              input: { issueId: ISSUE, body: '$comment.body' },
+              result: JSON.stringify({ id: 'comment-1' }),
+            },
+            { do: 'say', text: '$post: comment-1' },
+          ],
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    const kinds = [
+      LinearEventKind.RunStarted,
+      LinearEventKind.Waiting,
+      LinearEventKind.Verdict,
+      LinearEventKind.Verdict,
+      LinearEventKind.Ended,
+    ];
+    kinds.forEach((kind, i) => oweOne(`${kind}:1:${String(i)}`, kind));
+    clock.advance(30_000);
+    await expect
+      .poll(() => rows().map((r) => r.state), { timeout: 10_000 })
+      .toEqual(kinds.map(() => LinearPostState.Recorded));
+    expect(rows().map((r) => r.commentIds)).toEqual(kinds.map(() => ['comment-1']));
+  });
 });

@@ -1,13 +1,15 @@
 // A book script cannot know the ids the daemon mints, so a step names a task by title: `$task:<title>`
 // in an `mcp` step's arguments becomes the id a tool result showed for that title (a created task's
-// `taskId`, or a task list's `id`). The Linear reporter's script names the updates its brief lists by
-// `$owed`, an array element that becomes the post ids the prompt's brief lists as owed.
+// `taskId`, or a task list's `id`). The Linear reporter's script runs its steps once for each update its
+// brief lists as owed (`each_owed`), and reads back the comment 10db built for the body it handed over.
+
+import { FakeStep } from './fake-script';
 
 const REF = /^\$task:(.+)$/s;
-const OWED = '$owed';
 // The comment 10db built for the last body the script handed it: `$comment.issueId` and `$comment.body`.
 const COMMENT_REF = /^\$comment\.(\w+)$/;
-const OWED_AT = /\$owed\[(\d+)\]/g;
+// What an `each_owed` group's steps call the update they run for.
+const POST = '$post';
 // A line of the brief's owed updates: `- <post id>: <event>, attempt <n>, {detail}`; a recorded one has `comments [` instead.
 const OWED_LINE = /^- (lnp_[0-9a-f-]{36}): [a-z_]+, attempt \d+, \{/gm;
 
@@ -38,9 +40,17 @@ export class FakeTaskRefs {
     return out;
   }
 
-  /** A message's words with each `$owed[n]` replaced by the nth owed post id. */
-  words(text: string): string {
-    return text.replace(OWED_AT, (whole, n: string) => this.owed[Number(n)] ?? whole);
+  /** The script's steps with each `each_owed` group written out once per owed update, `$post` replaced by its id. */
+  expand(steps: readonly FakeStep[]): FakeStep[] {
+    return steps.flatMap((step) =>
+      step.do === 'each_owed'
+        ? this.owed.flatMap((id) =>
+            step.steps.map((inner) =>
+              FakeStep.parse(JSON.parse(JSON.stringify(inner).replaceAll(POST, id))),
+            ),
+          )
+        : [step],
+    );
   }
 
   private swap(value: unknown): unknown {
@@ -49,10 +59,9 @@ export class FakeTaskRefs {
       if (title !== undefined) return this.ids.get(title) ?? value;
       const comment = COMMENT_REF.exec(value)?.[1];
       if (comment === 'issueId' || comment === 'body') return this.comment[comment] ?? value;
-      return this.words(value);
+      return value;
     }
-    if (Array.isArray(value))
-      return value.flatMap((item: unknown) => (item === OWED ? this.owed : [this.swap(item)]));
+    if (Array.isArray(value)) return value.map((item: unknown) => this.swap(item));
     if (typeof value === 'object' && value !== null) return this.resolve({ ...value });
     return value;
   }

@@ -116,13 +116,18 @@ function judgeWrite(
         );
       const body = field(input, 'body');
       if (typeof body !== 'string') return refuse('body must be a string.');
-      const staged = [...run.comments].find(([, comment]) => comment.text === body);
-      if (staged === undefined)
+      // Two updates can end in the same words (two verdicts of one attempt): each save_comment takes the next
+      // one not yet written, so a text built twice is written twice.
+      const built = [...run.comments].filter(([, comment]) => comment.text === body);
+      if (built.length === 0)
         return refuse(
           'body is not a comment 10db built. Call report_linear_post with the post id and your comment body, then pass the arguments it returns to save_comment unchanged.',
         );
-      if (staged[1].written)
-        return refuse(`the comment for ${staged[0]} was already written; do not write it again.`);
+      const staged = built.find(([, comment]) => !comment.written);
+      if (staged === undefined)
+        return refuse(
+          `the comment for ${built[0]?.[0] ?? 'this update'} was already written; do not write it again.`,
+        );
       return { wrote: staged[0] };
     }
     default:
