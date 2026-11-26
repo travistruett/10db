@@ -36,7 +36,10 @@ let projectId = '';
 
 /** Answers every card this spec left open, so later specs read no stray cards. */
 async function resolveOwnCards(request: APIRequestContext): Promise<void> {
-  const response = await request.get(`${daemonUrl}/inbox?state=OPEN`, { headers: auth });
+  const response = await request.get(`${daemonUrl}/inbox?state=OPEN`, {
+    headers: auth,
+    maxRetries: 2,
+  });
   const own = OpenCards.parse(await response.json()).filter((card) => card.projectId === projectId);
   for (const card of own) {
     const answered = await request.post(`${daemonUrl}/inbox/${card.id}/answer`, {

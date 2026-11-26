@@ -140,7 +140,11 @@ test('the window draws the Board and Plan for a session, and the conversation sh
   // does not fold their list.
   const open = z
     .array(z.looseObject({ id: z.string(), projectId: z.string() }))
-    .parse(await (await request.get(`${daemonUrl}/chats?open=1`, { headers: auth })).json());
+    .parse(
+      await (
+        await request.get(`${daemonUrl}/chats?open=1`, { headers: auth, maxRetries: 2 })
+      ).json(),
+    );
   for (const chat of open.filter((c) => c.projectId === projectId))
     await request.post(`${daemonUrl}/chats/${chat.id}/archive`, { headers: auth });
 });

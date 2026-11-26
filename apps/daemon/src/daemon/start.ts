@@ -217,6 +217,7 @@ import {
   resolvePnpm,
   resumePassSettles,
   copyIdForBatch,
+  subscribeCopyQueue,
   subscribeKeptWorkLanding,
   subscribePassSettles,
   subscribePrWatch,
@@ -2733,6 +2734,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     if (!pageLabelsAbort.signal.aborted) logger.warn({ err: error }, 'page labels not guessed');
   });
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
+  // A copy waiting for its turn is cut when the copy in progress ends, and once now: recovery left
+  // a waiting copy as it was, so one whose predecessor ended while the daemon was down goes on.
+  const unsubscribeCopyQueue = subscribeCopyQueue(bus, starter);
+  starter.advanceCopyQueue();
   // A pass that closes unsettled gets its Move card, and each closed pass is looked at again; a
   // started task's saved work goes once its work lands.
   const unsubscribePassSettles = subscribePassSettles(bus, delivery);
@@ -3606,6 +3611,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         logger.warn({ err: error }, 'could not stop the sign-in');
       });
       unsubscribeShip();
+      unsubscribeCopyQueue();
       unsubscribeLinearEvents();
       unsubscribePassSettles();
       sizing.stop();

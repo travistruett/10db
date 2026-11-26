@@ -18,7 +18,8 @@
         "verdict",
         "ended",
         "pr_opened",
-        "pr_merged"
+        "pr_merged",
+        "landed"
       ]
     },
     "attempt": {
