@@ -3,6 +3,7 @@ import {
   ConversationDeltaFrame,
   DaemonEvent,
   EventsHead,
+  EventTicketDto,
   EventType,
   TaskId,
   GithubLoginEndedData,
@@ -30,6 +31,8 @@ import { HAZARD_ASSESSMENT_KEY } from './hazard-queries';
 import { KINDS_KEY } from './kind-queries';
 import { modelKeys } from './model-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
+import { deviceKeys } from './device-queries';
+import { sharingKeys } from './sharing-queries';
 import { PERSONAS_KEY } from './persona-queries';
 import { playbookKeys } from './playbook-queries';
 import {
@@ -121,6 +124,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   pass: [passKeys.all, folderKeys.all, taskSessionKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
+  // Sharing this Mac changed state; a device paired, was used or was revoked.
+  sharing: [sharingKeys.all],
+  device: [deviceKeys.all],
   // One account's sign-in to one of the builder's MCP servers started, ended or was cancelled; an ended
   // Connect Linear also turns the project's Linear on.
   mcp_sign_in: [
@@ -209,11 +215,12 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'conversation.state': [liveKeys.all, chatWorkKeys.all],
 };
 
-export function eventStreamUrl(conn: DaemonConnection, after: number): string {
+/** The stream's address: the cursor and a one-use ticket, never the token. */
+export function eventStreamUrl(conn: DaemonConnection, after: number, ticket: string): string {
   const url = new URL('/events/stream', conn.url);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   url.searchParams.set('after', String(after));
-  url.searchParams.set('token', conn.token);
+  url.searchParams.set('ticket', ticket);
   return url.toString();
 }
 
@@ -311,8 +318,19 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
           return;
         }
       }
+      let ticket: string;
+      try {
+        // A ticket opens one socket and lapses in seconds; a failed request is a failed connect.
+        const issued = await client.events.ticket.$post(undefined, {
+          init: { signal: AbortSignal.timeout(HEAD_TIMEOUT_MS) },
+        });
+        ticket = (await readJson(issued, EventTicketDto)).ticket;
+      } catch {
+        retry();
+        return;
+      }
       if (stopped) return;
-      const ws = new WebSocket(eventStreamUrl(connection, after));
+      const ws = new WebSocket(eventStreamUrl(connection, after, ticket));
       socket = ws;
       ws.addEventListener('open', () => {
         attempt = 0;

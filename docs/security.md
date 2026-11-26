@@ -123,7 +123,9 @@ Being honest about the edges is part of the design:
   install packages inside an agent (you get a card to run it yourself); browser end-to-end tests are skipped
   inside the sandbox and run in CI instead; checks that need Docker fail with a clear reason.
 - **One macOS user.** 10db, the agents and you share a user account, so anything already running as you
-  (malware, say) is out of scope.
+  (malware, say) is out of scope. When you share the Mac, other devices on your tailnet reach it through
+  `tailscale serve` with device tokens only; the daemon still binds only `127.0.0.1`, and a device token never
+  expires until you revoke it.
 - **Merged code is yours to review.** Once you merge an agent's pull request, its code runs wherever your
   code runs. Review and CI before merge are that boundary.
 - **New and unaudited.** This is young software built by one person with AI help, without an outside audit.

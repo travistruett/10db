@@ -103,14 +103,53 @@ export const EvalSuiteDto = z.object({
 export type EvalSuiteDto = z.infer<typeof EvalSuiteDto>;
 
 /** A piece of LLM work no suite covers, as the manifest names it. */
-export const EvalGapDto = z.object({
+export const EvalGap = z.object({
   label: z.string().min(1).max(200),
   /** Where the model call is, `path` or `path:line`. */
   where: z.string().min(1).max(300),
   /** Why it counts, in the repository's own words where it has them. */
   why: z.string().max(500),
 });
+export type EvalGap = z.infer<typeof EvalGap>;
+
+/** How a gap was known: an assessment named it, or a call pattern found it at HEAD. */
+export const EvalGapSource = { Assessed: 'assessed', Found: 'found' } as const;
+export type EvalGapSource = (typeof EvalGapSource)[keyof typeof EvalGapSource];
+
+/** A gap as the page shows it. */
+export const EvalGapDto = z.object({
+  label: z.string().min(1).max(200),
+  where: z.string().min(1).max(300),
+  why: z.string().max(500),
+  source: z.enum([EvalGapSource.Assessed, EvalGapSource.Found]),
+});
 export type EvalGapDto = z.infer<typeof EvalGapDto>;
+
+/** The most matches one read of a project's call sites keeps, across all its patterns. */
+export const MAX_CALL_SITES = 2000;
+
+/** How many sites one call pattern found at HEAD. */
+export const EvalCallSiteCountDto = z.object({
+  label: z.string(),
+  /** Null when git refused the pattern. */
+  count: z.int().min(0).nullable(),
+  /** The count stopped at the cap, so there are more. */
+  capped: z.boolean(),
+});
+export type EvalCallSiteCountDto = z.infer<typeof EvalCallSiteCountDto>;
+
+/** What changed since the assessment's commit that the manifest doesn't account for. */
+export const EvalDriftDto = z.object({
+  /** The commit the assessment read. */
+  since: z.string(),
+  /** Eval files by name at HEAD, not at the assessed commit, that no suite links. */
+  newEvalFiles: z.array(RepoPath),
+  /** Call sites found at HEAD outside every suite that weren't at the assessed commit. */
+  newGaps: z.array(EvalGapDto),
+  /** Definition paths and covered globs the manifest names that HEAD no longer tracks. */
+  missingPaths: z.array(z.string()),
+});
+export type EvalDriftDto = z.infer<typeof EvalDriftDto>;
 
 /** What 10db has found of a project's evals at its checkout's HEAD. */
 export const EvalsDto = z.object({
@@ -121,10 +160,55 @@ export const EvalsDto = z.object({
   suites: z.array(EvalSuiteDto),
   /** Eval files found by name that no suite links to yet. Empty once assessed. */
   unlinked: z.array(RepoPath),
-  /** The manifest's LLM work with no eval; null before an assessment, which is the only way to know. */
+  /**
+   * LLM work with no eval: what the manifest names, then what its call patterns find at HEAD outside every
+   * suite's covered paths. Null before an assessment, which is the only way to know.
+   */
   gaps: z.array(EvalGapDto).nullable(),
+  /** What each call pattern found at HEAD, so a pattern that is too broad shows. Empty before an assessment. */
+  callSites: z.array(EvalCallSiteCountDto),
+  /** Null when HEAD is the assessed commit, nothing has changed that the manifest misses, or there is no manifest. */
+  drift: EvalDriftDto.nullable(),
 });
 export type EvalsDto = z.infer<typeof EvalsDto>;
+
+/** A model's newest result in one suite. */
+export const EvalModelSuiteDto = z.object({
+  key: EvalSuiteKey,
+  label: z.string(),
+  path: RepoPath,
+  at: z.iso.datetime(),
+  passed: z.boolean(),
+  /** The gates under their minimum, by name. */
+  failedGates: z.array(z.string()),
+  costUsd: z.number().min(0).nullable(),
+  latencyP50Ms: z.number().min(0).nullable(),
+  /**
+   * The run graded an older eval than the suite's newest run (their fingerprints differ), so it can't be
+   * compared with that run's models as if they took the same test.
+   */
+  olderEval: z.boolean(),
+});
+export type EvalModelSuiteDto = z.infer<typeof EvalModelSuiteDto>;
+
+/** One model across every suite that graded it. */
+export const EvalModelDto = z.object({
+  model: z.string(),
+  /** The project's names for it (`SMART@medium`), as its runs bound it. */
+  slots: z.array(z.string()),
+  passed: z.int().min(0),
+  /** Its newest result per suite, failing first. */
+  suites: z.array(EvalModelSuiteDto),
+  /** One run of each suite it ran; null when any one's cost is unknown. */
+  costUsd: z.number().min(0).nullable(),
+  /** The median of its suites' p50 latency; null when none recorded one. */
+  latencyP50Ms: z.number().min(0).nullable(),
+});
+export type EvalModelDto = z.infer<typeof EvalModelDto>;
+
+/** Every model a project's results graded, the one that ran the most suites first. */
+export const EvalModelsDto = z.object({ models: z.array(EvalModelDto) });
+export type EvalModelsDto = z.infer<typeof EvalModelsDto>;
 
 /** A case that both passed and failed across recent runs. */
 export const EvalFlakyCaseDto = z.object({
@@ -176,6 +260,45 @@ export const EvalManifestSuite = z.strictObject({
 });
 export type EvalManifestSuite = z.infer<typeof EvalManifestSuite>;
 
+/** Regex syntax git's extended regex (`git grep -E`) reads differently or not at all: `\\d`, `\\b`, `(?…)`, `*?`. */
+const NOT_EXTENDED_REGEX = /\\[A-Za-z0-9]|\(\?|[*+?}]\?/u;
+
+/** A regex the manifest records, read by `git grep -E` and checked here as a pattern both git and JS parse alike. */
+export const EvalCallRegex = z
+  .string()
+  .min(1)
+  .max(300)
+  .refine((r) => {
+    try {
+      new RegExp(r);
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'is not a regex')
+  .refine(
+    (r) => !NOT_EXTENDED_REGEX.test(r),
+    'uses syntax git grep -E does not read (\\d, \\b, (?..), lazy quantifiers): use [0-9], [[:space:]] and plain groups',
+  );
+
+/** A glob a call pattern searches, as git's `:(glob)` pathspec reads it: no `{a,b}`. */
+const CallGlob = PathPattern.refine(
+  (g) => !g.includes('{'),
+  'git pathspecs have no {a,b}: list each glob',
+);
+
+/**
+ * How the project marks a unit of LLM work (a decorator, a registry call, an SDK call), so 10db finds each
+ * one at every HEAD with `git grep` and a new one with no eval shows the commit it lands.
+ */
+export const EvalCallPattern = z.strictObject({
+  label: z.string().min(1).max(100),
+  regex: EvalCallRegex,
+  /** The files searched; every tracked file when none is named. */
+  globs: z.array(CallGlob).min(1).max(10).default(['**']),
+});
+export type EvalCallPattern = z.infer<typeof EvalCallPattern>;
+
 /**
  * What an agent's assessment of a project's evals records, a project setting beside its hazards and
  * never a file in the repository. It names what no file name says: which code a suite covers, its bar and
@@ -184,7 +307,8 @@ export type EvalManifestSuite = z.infer<typeof EvalManifestSuite>;
 export const EvalManifest = z
   .strictObject({
     suites: z.array(EvalManifestSuite).max(500),
-    gaps: z.array(EvalGapDto).max(200),
+    gaps: z.array(EvalGap).max(200),
+    callPatterns: z.array(EvalCallPattern).max(20).default([]),
   })
   .superRefine((m, ctx) => {
     const seen = new Set<string>();
@@ -197,6 +321,17 @@ export const EvalManifest = z
         });
       }
       seen.add(suite.key);
+    }
+    const labels = new Set<string>();
+    for (const [index, pattern] of m.callPatterns.entries()) {
+      if (labels.has(pattern.label)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `the call pattern ${pattern.label} is named twice`,
+          path: ['callPatterns', index, 'label'],
+        });
+      }
+      labels.add(pattern.label);
     }
   })
   .refine((m) => m.suites.reduce((n, s) => n + s.coveredPaths.length, 0) <= 200, {
