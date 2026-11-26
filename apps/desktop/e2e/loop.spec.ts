@@ -469,17 +469,30 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(page.getByText(`Review: ${TASK}`)).toHaveCount(0);
   await expect(page.getByText(QUESTION)).toHaveCount(0);
   // The ask watchpoint left one Look card for the task, written as the run moved on. It shows the same hunk and
-  // notes as For You, and Looks right closes it.
+  // notes as For You, and Looks Right closes it.
   const lookTitle = page.getByText(`Look at these changes: ${TASK}`);
   await lookTitle.first().click();
-  // The detail pane beside the list is the Look card itself: its folds, a way back to the task and a note box.
-  await expect(page.getByRole('button', { name: 'Open the task' })).toBeVisible();
-  await page.getByRole('button', { name: 'Send back with a note' }).click();
-  await expect(page.getByRole('textbox', { name: 'What Needs to Change' })).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  // View Task, in the card's bar, opens the task's drawer over the Inbox; Back closes it and the card is still there.
+  await page.getByRole('button', { name: 'View Task', exact: true }).click();
+  await expect(taskDrawer).toBeVisible();
+  await expect(page).toHaveURL(/\/inbox\?.*task=/);
+  await expectView(page, 'Inbox');
+  await page.goBack();
+  await expect(taskDrawer).toBeHidden();
+  // Send Back turns the bar into a composer: its note is focused and required, and Esc cancels it.
+  await page.getByRole('button', { name: 'Send Back', exact: true }).click();
+  const whatToChange = page.getByRole('textbox', { name: 'What Needs to Change' });
+  await expect(whatToChange).toBeFocused();
+  const sendItBack = page.getByRole('button', { name: 'Send It Back' });
+  await expect(sendItBack).toBeDisabled();
+  await whatToChange.fill('Say where the greeting is read.');
+  await expect(sendItBack).toBeEnabled();
+  await whatToChange.press('Escape');
+  await expect(whatToChange).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Send Back', exact: true })).toBeFocused();
   await expect(page.getByText('Adds the greeting file the gate looks for.')).toBeVisible();
   await expect(page.getByText('added line 1: hello')).toBeAttached();
-  await page.getByRole('button', { name: 'Looks right' }).click();
+  await page.getByRole('button', { name: 'Looks Right', exact: true }).click();
   await expect(lookTitle).toHaveCount(0);
 
   // A locked card's reason is reachable from the keyboard, not only on hover.

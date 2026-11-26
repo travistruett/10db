@@ -5,12 +5,14 @@ import {
   type PersonDto,
   type StakeholderSendDto,
 } from '@10db/contracts';
-import { Alert, Anchor, Button, Group, Kbd, Paper, Stack, Text, Textarea } from '@mantine/core';
-import { Link } from '@tanstack/react-router';
+import { Alert, Button, Group, Paper, Stack, Text, Textarea } from '@mantine/core';
+import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useSendInbox } from '../../daemon/people';
 import { SettingsSectionKey } from '../settings/sections';
+import { CardActions, CardLinkButton, KeyHint } from './card-actions';
 import { CardSurface } from './card-surface';
+import classes from './inbox-card.module.css';
 import { AskSomeone } from './ask-someone';
 import { joinNames, routeLine } from './route-line';
 import { sendFailureWords } from './send-failure';
@@ -92,6 +94,7 @@ export function SlackPreview({
   readonly framed?: boolean;
 }) {
   const sendInbox = useSendInbox();
+  const navigate = useNavigate();
   // Until the builder is bound to their Slack member their name is the seeded one, and the message would say it.
   const unbound = people.find((p) => p.isBuilder)?.name === SEEDED_BUILDER_NAME;
   const [edited, setEdited] = useState<string | null>(null);
@@ -138,39 +141,40 @@ export function SlackPreview({
     };
   });
 
+  const content = { gap: framed ? 'sm' : 'md', className: framed ? undefined : classes['content'] };
+  const answerMyself = { label: 'Answer Myself', onClick: onAnswerMyself };
+
   if (unbound)
     return (
       <CardSurface framed={framed} selected>
-        <Stack gap="sm">
+        <Stack {...content}>
           {header}
           <Alert color="yellow" variant="light" title="Finish setting up Slack">
             Pick which Slack member you are, so the message can say whose build is asking. Until
             then it can't be sent.
           </Alert>
-          <Group justify="space-between">
-            <Anchor
-              size="sm"
-              renderRoot={(props) => (
-                <Link
-                  {...props}
-                  to="/settings/$section"
-                  params={{ section: SettingsSectionKey.Integrations }}
-                />
-              )}
-            >
-              Open Integrations
-            </Anchor>
-            <Button variant="default" onClick={onAnswerMyself}>
-              Answer Myself
-            </Button>
-          </Group>
         </Stack>
+        <CardActions
+          framed={framed}
+          start={[
+            <CardLinkButton
+              label="Open Integrations"
+              onClick={() => {
+                void navigate({
+                  to: '/settings/$section',
+                  params: { section: SettingsSectionKey.Integrations },
+                });
+              }}
+            />,
+          ]}
+          secondary={[answerMyself]}
+        />
       </CardSurface>
     );
 
   return (
     <CardSurface framed={framed} selected>
-      <Stack gap="sm">
+      <Stack {...content}>
         {header}
         {/* Who gets it and why, with the card's one way to send it to someone else. */}
         <Group gap="xs">
@@ -242,45 +246,32 @@ export function SlackPreview({
             {`${names} ${recipientCount > 1 ? 'have' : 'has'} had ${limit === null ? 'their limit of' : String(limit)} new questions today.`}
           </Alert>
         ) : null}
-        {sendInbox.isError ? (
-          <Alert color="red" variant="light">
-            {sendInbox.error.message}
-          </Alert>
-        ) : null}
-        <Group justify="space-between" wrap="nowrap" gap="md">
-          <Text size="xs" c="dimmed">
-            The task is parked until someone answers. Other work keeps running.
-          </Text>
-          <Group gap="sm" wrap="nowrap" style={{ flex: 'none' }}>
-            <Button variant="default" onClick={onAnswerMyself}>
-              Answer Myself
-            </Button>
-            {limitHeld ? (
-              <Button
-                loading={sendInbox.isPending}
-                onClick={() => {
-                  submit(true);
-                }}
-              >
-                Send Anyway
-              </Button>
-            ) : (
-              <Button
-                disabled={blocked}
-                loading={sendInbox.isPending}
-                onClick={sendNow}
-                rightSection={
-                  <Kbd size="xs" aria-hidden>
-                    ⌘↵
-                  </Kbd>
-                }
-              >
-                {`Send to ${names}`}
-              </Button>
-            )}
-          </Group>
-        </Group>
+        <Text size="xs" c="dimmed">
+          The task is parked until someone answers. Other work keeps running.
+        </Text>
       </Stack>
+      <CardActions
+        framed={framed}
+        error={sendInbox.isError ? sendInbox.error.message : null}
+        secondary={[answerMyself]}
+        primary={
+          limitHeld
+            ? {
+                label: 'Send Anyway',
+                loading: sendInbox.isPending,
+                onClick: () => {
+                  submit(true);
+                },
+              }
+            : {
+                label: `Send to ${names}`,
+                disabled: blocked,
+                loading: sendInbox.isPending,
+                onClick: sendNow,
+                hint: KeyHint.CommandEnter,
+              }
+        }
+      />
     </CardSurface>
   );
 }

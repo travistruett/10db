@@ -1,30 +1,22 @@
 import {
   CheckChoice,
-  InboxListState,
   type InboxItemDto,
   type WorkstreamChangesDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { Alert, Box, Button, Code, Group, List, Stack, Text, Textarea } from '@mantine/core';
-import { useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Alert, Box, Code, Group, List, Stack, Text } from '@mantine/core';
+import type { UseQueryResult } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { z } from 'zod';
-import { DaemonRequestError } from '../../daemon/client';
-import { dropCard, refreshCard } from '../../daemon/inbox-live';
-import { fetchRowOf } from '../../daemon/inbox-queries';
-import { useDaemon } from '../../daemon/provider';
-import {
-  queryKeys,
-  useAnswerInbox,
-  useTasks,
-  useWorkstreamChanges,
-  useWorkstreams,
-} from '../../daemon/queries';
+import { useTasks, useWorkstreamChanges, useWorkstreams } from '../../daemon/queries';
+import { CardActions } from './card-actions';
 import { CardSurface } from './card-surface';
+import classes from './inbox-card.module.css';
+import { useCardAnswer } from './use-card-answer';
 import { KEYS_IGNORE_ATTRIBUTE } from './use-inbox-keys';
+import { useTaskOfRun, ViewTaskButton } from './view-task';
 
 const SHORT_SHA = 7;
-const NOTE_MAX_LENGTH = 4000;
 /** Light-scheme Code takes the card's own color, so it needs a surface and an edge of its own. */
 const CODE_SURFACE = {
   background: 'var(--mantine-color-default-hover)',
@@ -161,77 +153,26 @@ export function CheckCard({
   onAnsweredElsewhere,
   framed = true,
 }: CheckCardProps) {
-  const answer = useAnswerInbox();
-  const queryClient = useQueryClient();
-  const { client } = useDaemon();
-  const [sendingBack, setSendingBack] = useState(note !== '');
-  const [stale, setStale] = useState(false);
-  const noteRef = useRef<HTMLTextAreaElement>(null);
-  const sendBackRef = useRef<HTMLButtonElement>(null);
-  const wasSendingBack = useRef(false);
-  // Set by the Send Back button so only a user opening the panel moves focus, not a remount.
-  const openedByUser = useRef(false);
+  const answer = useCardAnswer(item, {
+    onAnswered: () => {
+      onNote('');
+    },
+    onAnsweredElsewhere,
+  });
+  const taskId = useTaskOfRun(item);
   const workstreamId = item.targets[0]?.workstreamId;
   const detail = CheckDetail.safeParse(item.detail);
   const changes = useWorkstreamChanges(workstreamId, detail.success ? detail.data.head : null);
-  const trimmed = note.trim();
-
-  useEffect(() => {
-    if (sendingBack) {
-      if (openedByUser.current) noteRef.current?.focus();
-    } else if (wasSendingBack.current) sendBackRef.current?.focus();
-    openedByUser.current = false;
-    wasSendingBack.current = sendingBack;
-  }, [sendingBack]);
-
-  const respond = (given: { choice: string; note?: string }): void => {
-    setStale(false);
-    answer.mutate(
-      { id: item.id, answer: given },
-      {
-        onSuccess: () => {
-          dropCard(queryClient, client, item.id);
-          onNote('');
-        },
-        onError: (failure) => {
-          if (failure instanceof DaemonRequestError && failure.status === 409) {
-            // Only a card that left the open list was answered elsewhere; any other 409 carries the
-            // daemon's own reason, which the error line shows.
-            void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
-            void fetchRowOf(client, { state: InboxListState.Open }, item.id)
-              .then((row) => {
-                if (row !== null) return;
-                if (onAnsweredElsewhere === undefined) setStale(true);
-                else onAnsweredElsewhere();
-                refreshCard(queryClient, client, item.id);
-              })
-              .catch(() => undefined);
-          }
-        },
-      },
-    );
-  };
-  const approve = (): void => {
-    respond({ choice: CheckChoice.Approve });
-  };
-  const sendBack = (): void => {
-    if (trimmed === '') return;
-    respond({ choice: CheckChoice.SendBack, note: trimmed });
-  };
-  const failure = stale
-    ? 'This card was already answered.'
-    : answer.isError
-      ? answer.error.message
-      : changes.isError
-        ? 'The changes did not load. You can still approve without them.'
-        : null;
+  const failure =
+    answer.failure ??
+    (changes.isError ? 'The changes did not load. You can still approve without them.' : null);
   // The diff on screen is the one for this card's head, so Approve waits until it has loaded.
   const loadingChanges = workstreamId !== undefined && changes.isPending;
 
   return (
     // Not the Inbox's selected-card scope: a check card is answered by its buttons, not by the Inbox keys.
     <CardSurface framed={framed}>
-      <Stack gap="sm">
+      <Stack gap={framed ? 'sm' : 'md'} className={framed ? undefined : classes['content']}>
         {header}
         {item.body === '' ? null : <Text size="sm">{item.body}</Text>}
         {workstreamId === undefined ? null : (
@@ -240,71 +181,30 @@ export function CheckCard({
             <Changes changes={changes} />
           </>
         )}
-        {sendingBack ? (
-          <Textarea
-            ref={noteRef}
-            label="What Needs to Change"
-            description="The agent gets this note with the work."
-            autosize
-            minRows={2}
-            maxLength={NOTE_MAX_LENGTH}
-            value={note}
-            onChange={(e) => {
-              onNote(e.currentTarget.value);
-            }}
-          />
-        ) : null}
-        <Group justify="space-between" wrap="nowrap" align="flex-start">
-          {failure === null ? (
-            <span />
-          ) : (
-            <Text size="sm" c="red" role="alert">
-              {failure}
-            </Text>
-          )}
-          <Group justify="flex-end">
-            {sendingBack ? (
-              <>
-                <Button
-                  variant="default"
-                  onClick={() => {
-                    // A kept note would reopen the panel when the card is selected again.
-                    onNote('');
-                    setSendingBack(false);
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  color="red"
-                  loading={answer.isPending}
-                  disabled={trimmed === ''}
-                  onClick={sendBack}
-                >
-                  Send It Back
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button
-                  ref={sendBackRef}
-                  variant="default"
-                  disabled={answer.isPending}
-                  onClick={() => {
-                    openedByUser.current = true;
-                    setSendingBack(true);
-                  }}
-                >
-                  Send Back
-                </Button>
-                <Button loading={answer.isPending} disabled={loadingChanges} onClick={approve}>
-                  Approve
-                </Button>
-              </>
-            )}
-          </Group>
-        </Group>
       </Stack>
+      <CardActions
+        framed={framed}
+        start={[framed || taskId === null ? null : <ViewTaskButton taskId={taskId} />]}
+        error={failure}
+        sendBack={{
+          label: 'What Needs to Change',
+          description: 'The agent gets this note with the work.',
+          note,
+          onNote,
+          onSend: (trimmed) => {
+            answer.respond({ choice: CheckChoice.SendBack, note: trimmed });
+          },
+          pending: answer.pending,
+        }}
+        primary={{
+          label: 'Approve',
+          loading: answer.pending,
+          disabled: loadingChanges,
+          onClick: () => {
+            answer.respond({ choice: CheckChoice.Approve });
+          },
+        }}
+      />
     </CardSurface>
   );
 }

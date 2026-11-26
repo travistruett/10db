@@ -5,6 +5,7 @@ import {
   PersonId,
   ProjectId,
   InboxPageQuery,
+  TaskId,
 } from '@10db/contracts';
 import { z } from 'zod';
 import type { InboxList } from '../../daemon/inbox-queries';
@@ -23,6 +24,8 @@ export interface InboxSearch {
   readonly outcome?: InboxOutcome;
   readonly person?: PersonId;
   readonly since?: InboxSince;
+  /** The task whose drawer is open over the Inbox (View Task). */
+  readonly task?: TaskId;
 }
 
 /** Each key on its own, so one that does not parse is dropped and the rest stay. */
@@ -39,6 +42,7 @@ const InboxSearchKeys = z.object({
   outcome: z.enum(InboxOutcome).optional().catch(undefined),
   person: PersonId.optional().catch(undefined),
   since: z.enum(InboxSince).optional().catch(undefined),
+  task: TaskId.optional().catch(undefined),
 });
 
 /** The URL's search, narrowed to the keys the Inbox reads; each is kept only when it parses. */
@@ -103,6 +107,11 @@ export function withoutFilters(search: InboxSearch): InboxSearch {
 /** The search with its text removed. */
 export function withoutQuery(search: InboxSearch): InboxSearch {
   return withFilter(search, 'q', null);
+}
+
+/** The search with no task's drawer open. */
+export function withoutTask(search: InboxSearch): InboxSearch {
+  return inboxSearch({ ...search, task: undefined });
 }
 
 let last: InboxSearch = {};

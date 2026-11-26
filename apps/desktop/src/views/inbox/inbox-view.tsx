@@ -5,8 +5,15 @@ import { useEffect, useState } from 'react';
 import { TitleRow } from '../../shell/title-row';
 import { InboxPanel } from './inbox-panel';
 import { ListedInbox } from './listed-inbox';
-import { lastInboxSearch, withoutFilters, withoutQuery, withState } from './inbox-search';
+import {
+  lastInboxSearch,
+  withoutFilters,
+  withoutQuery,
+  withoutTask,
+  withState,
+} from './inbox-search';
 import { InboxShortcuts } from './inbox-shortcuts';
+import { InboxTaskDrawer } from './inbox-task-drawer';
 import { OpenInbox } from './open-inbox';
 
 /** The content's title: the list the panel shows. */
@@ -17,8 +24,9 @@ const STATE_TITLES: Record<InboxListState, string> = {
 };
 
 /**
- * The Inbox: its title row, the panel with Open, Waiting and Resolved, and the content for the state the URL
- * names. Each state's content is its own component, so Open's keys are only live while Open is shown.
+ * The Inbox: its title row, the panel with Open, Waiting and Resolved, the content for the state the URL
+ * names, and the drawer of the task a card's View Task opened (`?task=`). Each state's content is its own
+ * component, so Open's keys are only live while Open is shown.
  */
 export function InboxView() {
   const search = useSearch({ from: '/inbox' });
@@ -26,9 +34,9 @@ export function InboxView() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [listHost, setListHost] = useState<HTMLElement | null>(null);
   const state = search.state ?? InboxListState.Open;
-  // The rail opens the Inbox as it was left.
+  // The rail opens the Inbox as it was left, with no task's drawer over it.
   useEffect(() => {
-    lastInboxSearch.set(search);
+    lastInboxSearch.set(withoutTask(search));
   }, [search]);
 
   const clearFilters = (): void => {
@@ -92,6 +100,14 @@ export function InboxView() {
         onListHost={setListHost}
       />
       {content}
+      {search.task === undefined ? null : (
+        <InboxTaskDrawer
+          taskId={search.task}
+          onClose={() => {
+            void navigate({ search: withoutTask(search), replace: true });
+          }}
+        />
+      )}
     </>
   );
 }

@@ -34,7 +34,7 @@ export function TaskForYou({ workstreamId }: { readonly workstreamId: Workstream
             {`${count(reading.hits.length, 'watchpoint', 'watchpoints')} · ${count(files, 'file', 'files')}`}
           </Text>
         </Group>
-        {reading.canOpenDiff ? <WholeDiff workstreamId={workstreamId} /> : null}
+        {reading.canOpenDiff ? <WholeDiff workstreamId={workstreamId} size="compact-xs" /> : null}
       </Group>
       <WatchpointFolds hits={reading.hits} open="asked" />
     </Stack>

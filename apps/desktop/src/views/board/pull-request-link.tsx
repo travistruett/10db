@@ -1,4 +1,4 @@
-import { ActionIcon, Anchor, Text, Tooltip } from '@mantine/core';
+import { ActionIcon, Anchor, Button, Text, Tooltip } from '@mantine/core';
 import { IconGitPullRequest } from '@tabler/icons-react';
 import { useState, type MouseEvent, type ReactNode } from 'react';
 import { isTauri, openInBrowser } from '../../desktop/tauri';
@@ -14,6 +14,7 @@ export function ExternalLink({
   size = 'sm',
   inText = false,
   icon,
+  asButton = false,
 }: {
   readonly url: string;
   readonly label: string;
@@ -22,6 +23,8 @@ export function ExternalLink({
   readonly inText?: boolean;
   /** Drawn as this icon alone, named and tipped by its label, for a toolbar of links out. */
   readonly icon?: ReactNode;
+  /** Drawn as a default button, for an Inbox card's bar. */
+  readonly asButton?: boolean;
 }) {
   const [openFailure, setOpenFailure] = useState<string | null>(null);
   const open = (event: MouseEvent<HTMLAnchorElement>): void => {
@@ -37,7 +40,18 @@ export function ExternalLink({
   };
   return (
     <>
-      {icon === undefined ? (
+      {asButton ? (
+        <Button
+          component="a"
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          variant="default"
+          onClick={open}
+        >
+          {label}
+        </Button>
+      ) : icon === undefined ? (
         <Anchor
           href={url}
           target="_blank"
