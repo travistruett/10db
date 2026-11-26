@@ -269,7 +269,7 @@ const AGENT_NAME: Readonly<Record<Provider, string>> = {
   [Provider.Codex]: 'Codex',
 };
 
-/** A chat's card for a command outside the sandbox: allow once, for this exact command in this chat, or deny. */
+/** A chat's card for a command outside the sandbox: allow once, for this exact command again in this turn, or deny. */
 const chatOnceOptions = (agent: string): readonly InboxOption[] => [
   { label: PermissionChoice.AllowOnce, description: 'Run this command outside the sandbox once' },
   {
@@ -651,12 +651,18 @@ export function createPermissionBroker(
       const seen = chatAllowed.get(key);
       // Anything that may have changed since (a change, another command allowed to run outside, a job started
       // or still running, the turn's end, HEAD or a file of the checkout's) makes the same command ask again.
+      const unchanged = (): boolean =>
+        outside !== undefined &&
+        outside.remembers() &&
+        seen?.changes === outside.changes(req.toolUseId) &&
+        !outside.background();
+      // Read again after the checkout's git read: a chat that joins the checkout meanwhile ends the yes.
       const remembered =
-        remembers &&
+        unchanged() &&
         seen !== undefined &&
-        seen.changes === outside?.changes(req.toolUseId) &&
-        !outside.background() &&
-        (await outside.checkoutState()) === seen.checkout;
+        outside !== undefined &&
+        (await outside.checkoutState()) === seen.checkout &&
+        unchanged();
       const refusal = outsideRefusal();
       if (refusal !== null) return { behavior: 'deny', message: refusal, by: DeniedBy.TenDb };
       if (remembered) return { behavior: 'allow' };
