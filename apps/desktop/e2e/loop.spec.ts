@@ -9,6 +9,10 @@ import { expectAccessible } from './expect-accessible';
 
 const Runs = z.array(z.object({ id: z.string(), taskTitle: z.string() }));
 const Changes = z.object({ commits: z.array(z.string()) });
+const YourWatchpoints = z.array(z.looseObject({ key: z.string(), loudness: z.string() }));
+const ProjectEntries = z.object({
+  entries: z.array(z.looseObject({ key: z.string(), off: z.literal(true).optional() })),
+});
 const Batches = z.array(
   z.object({
     id: z.string(),
@@ -373,7 +377,56 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // A switch with no visible label has its track over the input: click the label that holds both, as a person does.
   await reportSwitch.locator('xpath=..').click();
   await expect(reportSwitch).not.toBeChecked();
-  await open(page, 'Board');
+
+  // Settings › Watchpoints: All Projects holds your list; a project page follows it, sets one here or turns it off
+  // here, and never writes your list.
+  const watchAuth = { Authorization: `Bearer ${E2E_TOKEN}` };
+  const readYours = async () =>
+    YourWatchpoints.parse(
+      await (await request.get(`${daemonUrl}/settings/watchpoints`, { headers: watchAuth })).json(),
+    );
+  const readHere = async () =>
+    ProjectEntries.parse(
+      await (
+        await request.get(`${daemonUrl}/projects/${projectId}/watchpoints`, { headers: watchAuth })
+      ).json(),
+    ).entries;
+  const yoursBefore = await readYours();
+  await page.goto('/settings/all-watchpoints');
+  await page
+    .getByRole('radiogroup', { name: 'When Prompts matches' })
+    .getByText('Ask', { exact: true })
+    .click();
+  await expect
+    .poll(async () => (await readYours()).find((w) => w.key === 'prompts')?.loudness)
+    .toBe('ask');
+  await chooseScope(page, 'This Project');
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Watchpoints', exact: true })
+    .click();
+  const promptsHere = page.getByRole('radiogroup', { name: 'When Prompts matches' });
+  // Default names what All Projects has now.
+  await expect(promptsHere.getByText('Default · Ask', { exact: true })).toBeVisible();
+  await expectAccessible(page, 'project watchpoints, dark');
+  await promptsHere.getByText('Off', { exact: true }).click();
+  await expect
+    .poll(async () => (await readHere()).find((e) => e.key === 'prompts'))
+    .toEqual({ key: 'prompts', off: true });
+  await promptsHere.getByText('Default · Ask', { exact: true }).click();
+  await expect.poll(async () => (await readHere()).some((e) => e.key === 'prompts')).toBe(false);
+  // The project page changed only the project's entries: your list is as All Projects left it.
+  expect((await readYours()).find((w) => w.key === 'prompts')?.loudness).toBe('ask');
+  expect((await readHere()).map((e) => e.key)).toEqual(['greetings', 'evals']);
+  // Later specs run under your list, so it goes back to how it was.
+  const restored = await request.put(`${daemonUrl}/settings/watchpoints`, {
+    headers: watchAuth,
+    data: yoursBefore,
+  });
+  expect(restored.ok()).toBe(true);
+  // The project's settings list Board Columns, which the rail's Board link would also match.
+  await page.goto('/board');
+  await expectView(page, 'Board');
   // The Board's card for the finished task carries the same marker.
   await expect(
     page.getByTestId('task-card').filter({ hasText: TASK }).getByTestId('eval-marker'),
