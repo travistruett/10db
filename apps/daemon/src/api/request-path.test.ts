@@ -150,6 +150,21 @@ const rows = (): Row[] => [
         headers: { ...mainHost, ...bearer(UI), Origin: 'http://localhost:1420' },
       }),
   },
+  ...[
+    ['the UI token with its last character changed', `${UI.slice(0, -1)}X`],
+    ['the UI token with a multi-byte character in place of its last', `${UI.slice(0, -1)}é`],
+    ['the dev-UI token with its last character changed', `${DEV_UI.slice(0, -1)}X`],
+  ].map(([name, token]): Row => ({
+    row: `1 main: ${String(name)}`,
+    status: 401,
+    run: () =>
+      call(Listener.Main, '/projects', { headers: { ...mainHost, ...bearer(String(token)) } }),
+  })),
+  {
+    row: '1 main: the dev-UI token is known, so its read limit answers',
+    status: 403,
+    run: () => call(Listener.Main, '/projects', { headers: { ...mainHost, ...bearer(DEV_UI) } }),
+  },
   {
     row: '2 main: a device token',
     status: 401,
