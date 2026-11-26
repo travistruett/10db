@@ -110,6 +110,7 @@ export * from './task-thread';
 export * from './team';
 export * from './trust';
 export * from './trust-policy';
+export * from './visible-line';
 export * from './your-mcp';
 export * from './tool-call-view';
 export * from './workbench-setup';

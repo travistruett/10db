@@ -45,6 +45,7 @@ const SHORT_HEALTH = { status: 'ok', protocolVersion: PROTOCOL_VERSION };
 
 let close: () => void;
 let lists: ListenerAllowlists | null;
+let listCalls = 0;
 let devices: DeviceService;
 let tickets: Tickets;
 let sockets: SocketRegistry;
@@ -56,6 +57,7 @@ const call = (listener: Listener, path: string, init?: RequestInit) =>
   app.request(path, init, listener === Listener.Share ? { listener } : undefined);
 
 beforeEach(() => {
+  listCalls = 0;
   const clock = new ManualClock();
   const made = createTestStore();
   close = made.close;
@@ -110,7 +112,13 @@ beforeEach(() => {
       builderMcp: () => Promise.resolve(new Response('builder')),
       onUnexpectedError: () => undefined,
       listenPort: () => MAIN_PORT,
-      share: { allowlists: () => lists, hostLogin: () => HOST_LOGIN },
+      share: {
+        allowlists: () => {
+          listCalls += 1;
+          return lists;
+        },
+        hostLogin: () => HOST_LOGIN,
+      },
       devices,
       tickets,
       sockets,
@@ -149,6 +157,21 @@ const rows = (): Row[] => [
       call(Listener.Main, '/projects', {
         headers: { ...mainHost, ...bearer(UI), Origin: 'http://localhost:1420' },
       }),
+  },
+  ...[
+    ['the UI token with its last character changed', `${UI.slice(0, -1)}X`],
+    ['the UI token with a multi-byte character in place of its last', `${UI.slice(0, -1)}é`],
+    ['the dev-UI token with its last character changed', `${DEV_UI.slice(0, -1)}X`],
+  ].map(([name, token]): Row => ({
+    row: `1 main: ${String(name)}`,
+    status: 401,
+    run: () =>
+      call(Listener.Main, '/projects', { headers: { ...mainHost, ...bearer(String(token)) } }),
+  })),
+  {
+    row: '1 main: the dev-UI token is known, so its read limit answers',
+    status: 403,
+    run: () => call(Listener.Main, '/projects', { headers: { ...mainHost, ...bearer(DEV_UI) } }),
   },
   {
     row: '2 main: a device token',
@@ -365,6 +388,18 @@ describe('the request path through both listeners', () => {
     const res = await row.run();
     expect(res.status).toBe(row.status);
     if (row.body !== undefined) expect(await res.json()).toEqual(row.body);
+  });
+
+  it('works out the share allowlists once per request, and again for the next', async () => {
+    const send = () =>
+      call(Listener.Share, '/projects', {
+        headers: { ...shareHost, ...bearer(pair().token), Origin: PHONE },
+      });
+    expect((await send()).status).toBe(200);
+    expect(listCalls).toBe(1);
+    lists = { hosts: ['other.ts.net:4319'], origins: [] };
+    expect((await send()).status).toBe(421);
+    expect(listCalls).toBe(2);
   });
 
   it('answers the same 401 for an unknown device, a revoked one and a wrong secret', async () => {

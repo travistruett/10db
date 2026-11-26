@@ -1,1 +1,0 @@
-ALTER TABLE `projects` ADD `copy_app_command` text;
