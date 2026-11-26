@@ -16,6 +16,7 @@ import classes from './inbox-card.module.css';
 import { AskSomeone } from './ask-someone';
 import { joinNames, routeLine } from './route-line';
 import { sendFailureWords } from './send-failure';
+import { useViewTaskButton } from './view-task';
 
 /** What a held pattern is, in words a builder knows. */
 /** The name a fresh install gives the builder. */
@@ -95,6 +96,7 @@ export function SlackPreview({
 }) {
   const sendInbox = useSendInbox();
   const navigate = useNavigate();
+  const viewTask = useViewTaskButton(item, !framed);
   // Until the builder is bound to their Slack member their name is the seeded one, and the message would say it.
   const unbound = people.find((p) => p.isBuilder)?.name === SEEDED_BUILDER_NAME;
   const [edited, setEdited] = useState<string | null>(null);
@@ -157,6 +159,7 @@ export function SlackPreview({
         <CardActions
           framed={framed}
           start={[
+            viewTask,
             <CardLinkButton
               label="Open Integrations"
               onClick={() => {
@@ -252,6 +255,7 @@ export function SlackPreview({
       </Stack>
       <CardActions
         framed={framed}
+        start={[viewTask]}
         error={sendInbox.isError ? sendInbox.error.message : null}
         secondary={[answerMyself]}
         primary={

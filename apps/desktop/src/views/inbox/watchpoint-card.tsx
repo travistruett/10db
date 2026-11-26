@@ -7,7 +7,7 @@ import { CardActions } from './card-actions';
 import { CardSurface } from './card-surface';
 import classes from './inbox-card.module.css';
 import { useCardAnswer } from './use-card-answer';
-import { useTaskOfRun, ViewTaskButton } from './view-task';
+import { useViewTaskButton } from './view-task';
 
 export interface WatchpointCardProps {
   readonly item: InboxItemDto;
@@ -42,7 +42,7 @@ export function WatchpointCard({
   });
   const workstreamId = item.targets[0]?.workstreamId;
   const reading = useWatchpointHits(workstreamId).data;
-  const taskId = useTaskOfRun(item);
+  const viewTask = useViewTaskButton(item, !framed);
 
   return (
     <CardSurface framed={framed}>
@@ -60,7 +60,7 @@ export function WatchpointCard({
       <CardActions
         framed={framed}
         start={[
-          framed || taskId === null ? null : <ViewTaskButton taskId={taskId} />,
+          viewTask,
           reading?.canOpenDiff === true && workstreamId !== undefined ? (
             <WholeDiff workstreamId={workstreamId} />
           ) : null,

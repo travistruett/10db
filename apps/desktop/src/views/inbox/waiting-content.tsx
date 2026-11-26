@@ -13,7 +13,7 @@ import headerClasses from './card-header.module.css';
 import { defaultRecording } from './record-decision';
 import { TakeBackModal } from './take-back-modal';
 import { recipientsOf, WaitingDetail } from './waiting-row';
-import { useTaskOfRun, ViewTaskButton } from './view-task';
+import { useViewTaskButton } from './view-task';
 import { WaitingTaskLine } from './waiting-task-line';
 
 /**
@@ -28,7 +28,7 @@ export function WaitingContent({ item }: { readonly item: InboxItemDto }) {
   const [takingBack, setTakingBack] = useState(false);
   const [choice, setChoice] = useState<string | null>(null);
   const [note, setNote] = useState('');
-  const taskId = useTaskOfRun(item);
+  const viewTask = useViewTaskButton(item, true);
   const send = item.send;
   const who = recipientsOf(item);
   const others = (send?.people ?? []).filter((p) => !p.recipient).map((p) => p.name);
@@ -99,7 +99,7 @@ export function WaitingContent({ item }: { readonly item: InboxItemDto }) {
       </Stack>
       <CardActions
         framed={false}
-        start={[taskId === null ? null : <ViewTaskButton taskId={taskId} />]}
+        start={[viewTask]}
         error={answer.isError ? answer.error.message : null}
         note={
           options.length === 0

@@ -68,12 +68,15 @@ const isSend = (event: KeyboardEvent<HTMLTextAreaElement>): boolean =>
 export function CardLinkButton({
   label,
   onClick,
+  loading = false,
 }: {
   readonly label: string;
   readonly onClick: () => void;
+  /** Shown but not yet ready, such as View Task while its run is read, so the bar keeps its shape. */
+  readonly loading?: boolean;
 }) {
   return (
-    <Button variant="default" onClick={onClick}>
+    <Button variant="default" loading={loading} onClick={onClick}>
       {label}
     </Button>
   );
@@ -121,7 +124,8 @@ export function CardActions({
     focusNext.current = null;
   }, [composing]);
 
-  // A way the card lacks is null and takes no room.
+  // A way the card lacks is null and takes no room. A holder passes null, never an element that draws nothing,
+  // so the bar can tell when it has nothing to show.
   const ways = start.filter((node) => node !== null && node !== undefined && node !== false);
   if (
     ways.length === 0 &&

@@ -14,7 +14,7 @@ import { CardSurface } from './card-surface';
 import classes from './inbox-card.module.css';
 import { useCardAnswer } from './use-card-answer';
 import { KEYS_IGNORE_ATTRIBUTE } from './use-inbox-keys';
-import { useTaskOfRun, ViewTaskButton } from './view-task';
+import { useViewTaskButton } from './view-task';
 
 const SHORT_SHA = 7;
 /** Light-scheme Code takes the card's own color, so it needs a surface and an edge of its own. */
@@ -159,7 +159,7 @@ export function CheckCard({
     },
     onAnsweredElsewhere,
   });
-  const taskId = useTaskOfRun(item);
+  const viewTask = useViewTaskButton(item, !framed);
   const workstreamId = item.targets[0]?.workstreamId;
   const detail = CheckDetail.safeParse(item.detail);
   const changes = useWorkstreamChanges(workstreamId, detail.success ? detail.data.head : null);
@@ -184,7 +184,7 @@ export function CheckCard({
       </Stack>
       <CardActions
         framed={framed}
-        start={[framed || taskId === null ? null : <ViewTaskButton taskId={taskId} />]}
+        start={[viewTask]}
         error={failure}
         sendBack={{
           label: 'What Needs to Change',

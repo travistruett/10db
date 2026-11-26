@@ -5,7 +5,7 @@ import { CardActions } from './card-actions';
 import { CardSurface } from './card-surface';
 import classes from './inbox-card.module.css';
 import { useCardAnswer } from './use-card-answer';
-import { useTaskOfRun, ViewTaskButton } from './view-task';
+import { useViewTaskButton } from './view-task';
 
 export interface PlanCardProps {
   readonly item: InboxItemDto;
@@ -41,7 +41,7 @@ export function PlanCard({
     },
     onAnsweredElsewhere,
   });
-  const taskId = useTaskOfRun(item);
+  const viewTask = useViewTaskButton(item, !framed);
 
   return (
     <CardSurface framed={framed}>
@@ -55,7 +55,7 @@ export function PlanCard({
       </Stack>
       <CardActions
         framed={framed}
-        start={[framed || taskId === null ? null : <ViewTaskButton taskId={taskId} />]}
+        start={[viewTask]}
         error={answer.failure}
         sendBack={{
           label: 'What Needs to Change in the Plan',

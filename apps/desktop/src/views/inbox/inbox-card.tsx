@@ -36,6 +36,7 @@ import { SettingsSectionKey } from '../settings/sections';
 import { usePeople } from '../../daemon/people';
 import { useProjectIntegrations } from '../../daemon/sign-in-queries';
 import { OpenTaskLink } from '../sessions/open-task-link';
+import { useTaskSession } from '../../daemon/task-session-queries';
 import {
   OpenSessionLink,
   SessionBadge,
@@ -43,7 +44,7 @@ import {
   useTaskOfCard,
 } from './session-card-link';
 import { SlackPreview } from './slack-preview';
-import { useTaskOfRun, ViewTaskButton } from './view-task';
+import { useViewTaskButton } from './view-task';
 import {
   AskSomeoneFooter,
   ComposedMessage,
@@ -171,7 +172,9 @@ export function InboxCard({
   const principle = usePrincipleOf(item, selected);
   const session = useSessionOfCard(item);
   const taskOfCard = useTaskOfCard(item);
-  const taskOfRun = useTaskOfRun(item);
+  // OpenTaskLink draws nothing for a task no chat made; asked here too, so the bar knows it has nothing there.
+  const fromChat = useTaskSession(taskOfCard).data?.fromChat ?? null;
+  const viewTask = useViewTaskButton(item, !framed);
   const batch = useBatchActions(item, onDismiss);
   const kind = review ? 'MCP server' : KIND_LABELS[item.kind];
   const header = (extra: ReactNode = null) => (
@@ -366,9 +369,9 @@ export function InboxCard({
       <CardActions
         framed={framed}
         start={[
-          framed || taskOfRun === null ? null : <ViewTaskButton taskId={taskOfRun} />,
+          viewTask,
           session === null ? null : <OpenSessionLink chat={session} />,
-          taskOfCard === null ? null : (
+          taskOfCard === null || fromChat === null ? null : (
             <OpenTaskLink taskId={taskOfCard} projectId={item.projectId} asButton />
           ),
           link === null ? null : <ExternalLink url={link} label="Open on GitHub" asButton />,
