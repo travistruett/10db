@@ -90,6 +90,8 @@ import {
   type NewEvalBody,
   NewEvalRequest,
   EvalSuiteKey,
+  EvalLiveRunId,
+  RunEvalLiveBody,
   EvalSuiteQuery,
   PersonInput,
   PickSize,
@@ -184,6 +186,7 @@ import type { UpgradeWebSocket } from 'hono/ws';
 import { z } from 'zod';
 import type { ApiServices } from './services';
 import type { SelfUpdateServices, TaskRemovalServices } from './services';
+import { EvalLiveRefused } from '../evals';
 import { PairingRefusedError, SharingNotReadyError, type DeviceService } from '../devices';
 import { credentialMiddleware, type CredentialDeps } from './credential';
 import type { SocketRegistry, Tickets } from '../devices';
@@ -1620,6 +1623,48 @@ export function createApp(deps: ApiDeps) {
           ),
           201,
         ),
+    )
+    .get('/projects/:projectId/evals/live/runs', (c) => {
+      const suite = c.req.query('suite');
+      return c.json(
+        deps.services.evalLiveRuns(
+          ProjectId.parse(c.req.param('projectId')),
+          suite === undefined ? null : EvalSuiteKey.parse(suite),
+        ),
+      );
+    })
+    .post('/projects/:projectId/evals/live/runs/:runId/stop', async (c) => {
+      await deps.services.stopEvalLive(
+        ProjectId.parse(c.req.param('projectId')),
+        EvalLiveRunId.parse(c.req.param('runId')),
+      );
+      return c.body(null, 204);
+    })
+    .get('/projects/:projectId/evals/:suiteKey/live', async (c) =>
+      c.json(
+        await deps.services.evalLivePreview(
+          ProjectId.parse(c.req.param('projectId')),
+          EvalSuiteKey.parse(c.req.param('suiteKey')),
+        ),
+      ),
+    )
+    .post(
+      '/projects/:projectId/evals/:suiteKey/live/runs',
+      validator('json', (value): RunEvalLiveBody => RunEvalLiveBody.parse(value)),
+      async (c) => {
+        try {
+          const run = await deps.services.startEvalLive(
+            ProjectId.parse(c.req.param('projectId')),
+            EvalSuiteKey.parse(c.req.param('suiteKey')),
+            c.req.valid('json').previewHash,
+          );
+          return c.json(run, 201);
+        } catch (error) {
+          if (error instanceof EvalLiveRefused)
+            return c.json({ refusal: error.refusal, message: error.message }, 409);
+          throw error;
+        }
+      },
     )
     .get(
       '/projects/:projectId/evals/:suiteKey',

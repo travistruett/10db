@@ -50,6 +50,9 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/projects/:projectId/evals' },
   { route: '/projects/:projectId/evals/:suiteKey' },
   { route: '/projects/:projectId/eval-models' },
+  // Evals draws a suite's Run window and its recent live runs: a database read and the manifest's own fields.
+  { route: '/projects/:projectId/evals/:suiteKey/live' },
+  { route: '/projects/:projectId/evals/live/runs' },
 ];
 
 /** A GET a screen may not read, with why. A route nothing draws is refused as well: less to reach. */
