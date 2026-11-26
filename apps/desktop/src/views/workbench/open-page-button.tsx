@@ -4,19 +4,10 @@ import { Link } from '@tanstack/react-router';
 import { SettingsSectionKey } from '../settings/sections';
 import type { OpenPageControl } from './open-page';
 
-function MenuLine({ title, byline }: { readonly title: string; readonly byline: string }) {
-  return (
-    <Stack gap={0}>
-      <Text size="sm">{title}</Text>
-      <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
-        {byline}
-      </Text>
-    </Stack>
-  );
-}
+const MARK_UP = 'Mark Up Page';
 
 /**
- * Open Preview, a split button whose menu says how each way of opening differs (Pick on Page spec §2);
+ * Mark Up Page, a split button whose menu also holds Open in Browser and Copy Link (Pick on Page spec §2);
  * where there is no Preview, Open in Browser, which reads Copy Link once the page has been opened in
  * this pass. A refusal is said by `OpenPageRefusal`.
  */
@@ -33,9 +24,9 @@ export function OpenPageButton({ control }: { readonly control: OpenPageControl 
             void preview();
           }}
         >
-          Open Preview
+          {MARK_UP}
         </Button>
-        <Menu position="bottom-end">
+        <Menu position="bottom-end" width={260}>
           <Menu.Target>
             <Button
               variant="default"
@@ -49,20 +40,15 @@ export function OpenPageButton({ control }: { readonly control: OpenPageControl 
           </Menu.Target>
           <Menu.Dropdown>
             <Menu.Item onClick={() => void preview()}>
-              <MenuLine
-                title="Open Preview"
-                byline="A 10db window, not your browser, where you can pick elements"
-              />
+              <Stack gap={0}>
+                <Text size="sm">{MARK_UP}</Text>
+                <Text size="xs" c="dimmed">
+                  A 10db window: click parts of the page and say what to change.
+                </Text>
+              </Stack>
             </Menu.Item>
-            <Menu.Item onClick={() => void control.launch()}>
-              <MenuLine
-                title="Open in Browser"
-                byline="Your default browser, with your own login and DevTools"
-              />
-            </Menu.Item>
-            <Menu.Item onClick={() => void control.copy()}>
-              <MenuLine title="Copy Link" byline="Copy the page's address to paste anywhere" />
-            </Menu.Item>
+            <Menu.Item onClick={() => void control.launch()}>Open in Browser</Menu.Item>
+            <Menu.Item onClick={() => void control.copy()}>Copy Link</Menu.Item>
           </Menu.Dropdown>
         </Menu>
       </Group>

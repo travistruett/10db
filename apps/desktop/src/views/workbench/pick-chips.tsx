@@ -54,12 +54,11 @@ export interface PickChipsProps {
 export function PickChips({ projectId, route, picks, onRemove, headRef }: PickChipsProps) {
   if (picks.length === 0) return null;
   return (
-    <Stack gap={6} pb={6} component="section" aria-label="Picks from the Preview">
+    <Stack gap={6} pb={6} component="section" aria-label="Picks from the page">
       <Group gap={6} ref={headRef} tabIndex={-1} style={{ outline: 'none' }}>
         <Box w={6} h={6} bg="var(--mantine-color-pink-filled)" style={{ borderRadius: '50%' }} />
         <Text size="xs" c="dimmed">
-          {picks.length} pick{picks.length === 1 ? '' : 's'} from the Preview
-          {route === null ? '' : ` of ${route}`}
+          {picks.length} pick{picks.length === 1 ? '' : 's'} from {route ?? 'the page'}
         </Text>
       </Group>
       <Stack gap={4} component="ul" m={0} p={0}>
@@ -77,7 +76,7 @@ export function PickChips({ projectId, route, picks, onRemove, headRef }: PickCh
               style={{ listStyle: 'none', borderRadius: 'var(--mantine-radius-sm)' }}
             >
               <UnstyledButton
-                aria-label={`Show pick ${String(index + 1)} in the Preview`}
+                aria-label={`Show pick ${String(index + 1)} on the page`}
                 onClick={() => {
                   void flashPreviewPick(projectId, pick.id);
                 }}

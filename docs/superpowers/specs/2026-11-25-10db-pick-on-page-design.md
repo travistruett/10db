@@ -53,17 +53,17 @@ a turn, and picking on a turn's headless after-picture. A Chrome extension is ou
 
 ## 2. Opening the preview
 
-- The title row's open control becomes a split button. Its face is **Open Preview** (⌘O). Its menu holds:
-  - **Open Preview**: "A 10db window, not your browser, where you can pick elements"
-  - **Open in Browser** (⌘⇧O): "Your default browser, with your own login and DevTools" This is today's
-    `open_app_page`; its name follows the default browser.
-  - **Copy Link**: "Copy the page's address to paste anywhere"
+- The title row's open control becomes a split button. Its face is **Mark Up Page** (⌘O), which opens the
+  preview window; the name says what it is for, and keeps it apart from Settings › App Preview. Its menu holds:
+  - **Mark Up Page**: "A 10db window: click parts of the page and say what to change."
+  - **Open in Browser** (⌘⇧O). This is today's `open_app_page`; it opens the default browser.
+  - **Copy Link**.
 
   A queue row's link icon keeps opening the browser.
 - **One preview window per project**, labelled `preview-<projectId>`, made on first open and reused after. Opening
   another page navigates it to that page's route and makes that page the window's **target**: the page whose
   composer gets its picks. The target is held by the shell, never taken from the page (§5). The window's title is
-  "`<Page label>` · Preview".
+  "`<Page label>` · Mark Up".
 - **Signing in.** Before it opens, the UI asks the daemon to make sure the project is signed in:
   `POST /projects/:projectId/preview/sign-in` answers `{ ok: true }` or `{ ok: false, problem }` and returns no
   credential. It runs the dev login only when no state is kept. The shell then reads

@@ -514,7 +514,7 @@ test('a pick from the Preview becomes a chip, and Send makes one message with it
   const settings = page.getByRole('region', { name: 'Settings' });
   // The desktop app opens a page in its Preview first; the browser and the link are in the menu.
   const titleRow = page.locator('[data-title-row]');
-  await expect(titleRow.getByRole('button', { name: 'Open Preview' })).toBeVisible();
+  await expect(titleRow.getByRole('button', { name: 'Mark Up Page' })).toBeVisible();
   await titleRow.getByRole('button', { name: 'More ways to open' }).click();
   await expect(page.getByRole('menuitem', { name: /^Open in Browser/ })).toContainText(
     'your own session',
@@ -553,7 +553,7 @@ test('a pick from the Preview becomes a chip, and Send makes one message with it
     },
     { projectId, taskId, pick, crop: PICTURE.toString('base64') },
   );
-  const picks = settings.getByRole('region', { name: 'Picks from the Preview' });
+  const picks = settings.getByRole('region', { name: 'Picks from the page' });
   await expect(picks).toContainText('button “Save changes”');
   await expect(picks).toContainText('src/views/settings/settings-view.tsx:1');
   await expect(picks).toContainText('make it the secondary style');

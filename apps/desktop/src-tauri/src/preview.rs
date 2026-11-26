@@ -175,7 +175,7 @@ pub async fn open_preview(
     }
     let page_label: String = page_label.chars().take(PAGE_LABEL_MAX).collect();
     let label = format!("{LABEL_PREFIX}{project_id}");
-    let title = format!("{page_label} · Preview");
+    let title = format!("{page_label} · Mark Up");
 
     allow_channel(&app, &previews, &label, &origin)?;
     let same_origin_window = {
