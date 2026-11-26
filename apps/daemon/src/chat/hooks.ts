@@ -36,6 +36,7 @@ import {
   listFiles,
   listItemFiles,
   listItems,
+  listPrecedents,
   planIdOfChat,
   planOfConversation,
   touchChat,
@@ -88,6 +89,7 @@ import {
   floorNoticeText,
   floorWhy,
   judgeForCall,
+  precedentLines,
   projectGrantLines,
   projectLiveSystems,
   sessionDevAccess,
@@ -808,6 +810,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           yourMcpServers: Object.keys(ready?.yourMcpServers ?? {}),
           claudeConnectors,
           devAccess: { ...open, compose: open.docker ? compose : null },
+          // A chat never runs in a separate copy.
+          precedents: precedentLines(listPrecedents(state.db, project.id), false),
         });
       // A Claude Full access session is judged by Claude Code, which reads no policy: it is built only if read.
       const policy =
@@ -992,6 +996,15 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                     readCommitted: deps.readCommitted(project, root),
                     skips: null,
                     limits: limitNotes,
+                    // Read on every call, so a Remove or a pause takes effect at once.
+                    precedents: () => listPrecedents(state.db, project.id),
+                    inCopy: false,
+                    onPrecedentPaused: (precedentId) => {
+                      log.info({ precedentId }, 'a precedent was paused');
+                    },
+                    onPrecedentChanged: (precedentId, hash) => {
+                      log.info({ precedentId, hash }, 'what a precedent runs has changed');
+                    },
                     onFloor: (detail) => {
                       if (saidUnavailable) return;
                       saidUnavailable = true;

@@ -89,11 +89,12 @@ const gen = { kind: 'script', path: 'app/gen.sh', text: GEN } as const;
 const script = (path: string, text = SCRIPT) => ({ kind: 'script', path, text }) as const;
 const step = (target: string, prerequisites: string[], recipe = '') =>
   ({ kind: 'make', makefile: 'Makefile', target, prerequisites, recipe, variables: [] }) as const;
-const none: CallRuns = { runs: [], cut: false };
+type Shown = Pick<CallRuns, 'runs' | 'cut'>;
+const none: Shown = { runs: [], cut: false };
 
 describe('callRuns', () => {
   it('gives the committed text of the make targets and repo scripts a command runs, bounded', async () => {
-    const rows: [string, string, string, CallRuns][] = [
+    const rows: [string, string, string, Shown][] = [
       [
         'a target and the variables it uses',
         'make migration APP=accounts',
@@ -230,15 +231,28 @@ describe('callRuns', () => {
       ['a program on the PATH', 'gate-query --open', '', none],
       ['a cd that can not be read', 'cd "$D" && ./x.sh', '', none],
     ];
-    for (const [name, command, dir, expected] of rows)
-      expect
-        .soft(
-          await callRuns(command, dir === '' ? CHECKOUT : `${CHECKOUT}/${dir}`, CHECKOUT, read),
-          name,
-        )
-        .toEqual(expected);
+    for (const [name, command, dir, expected] of rows) {
+      const { runs, cut } = await callRuns(
+        command,
+        dir === '' ? CHECKOUT : `${CHECKOUT}/${dir}`,
+        CHECKOUT,
+        read,
+      );
+      expect.soft({ runs, cut }, name).toEqual(expected);
+    }
     expect
       .soft(await callRuns('./x.sh', '/elsewhere', CHECKOUT, read), 'outside the checkout')
-      .toEqual(none);
+      .toEqual({ ...none, differs: false });
+    // A file the checkout changed or the base lacks makes `differs`; one that is only in neither, or only
+    // a case of a name make reads, does not.
+    const differs = async (command: string, dir = ''): Promise<boolean> =>
+      (await callRuns(command, dir === '' ? CHECKOUT : `${CHECKOUT}/${dir}`, CHECKOUT, read))
+        .differs;
+    expect.soft(await differs('./differs.sh'), 'a changed script').toBe(true);
+    expect.soft(await differs('make all', 'g'), 'a changed GNUmakefile').toBe(true);
+    expect.soft(await differs('make all', 'n'), 'a makefile the base lacks').toBe(true);
+    expect.soft(await differs('make all', 'm'), 'a Makefile the folder holds').toBe(false);
+    expect.soft(await differs('./x.sh'), 'a committed script').toBe(false);
+    expect.soft(await differs('./missing.sh'), 'a script in neither').toBe(false);
   });
 });

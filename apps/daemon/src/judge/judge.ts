@@ -10,6 +10,7 @@ import {
   type JudgeOutcome,
   type JudgeTestResultDto,
   type TaskId,
+  type TrustPrecedentId,
   type WorkstreamId,
 } from '@10db/contracts';
 import { getJudgeConfig, insertJudgeCall, listAccountModels } from '@10db/db';
@@ -77,6 +78,10 @@ export interface AssessRequest {
   readonly secondary?: boolean;
   readonly workstreamId?: WorkstreamId;
   readonly taskId?: TaskId;
+  /** The precedent the state shows; the row names it only when the reading is `byPrecedent`. */
+  readonly precedentId?: TrustPrecedentId;
+  /** The program the call runs, written on every row of the call. */
+  readonly programKey?: string | null;
   readonly signal?: AbortSignal;
 }
 
@@ -85,6 +90,8 @@ export interface AssessReading {
   readonly answer: string;
   readonly confidence: number;
   readonly outcome: JudgeOutcome;
+  /** The answers allowed the call through a precedent: the row records which. */
+  readonly byPrecedent?: true;
 }
 
 export type AssessAnswer =
@@ -108,6 +115,7 @@ interface LoggedAnswer {
   readonly probabilities?: Readonly<Record<string, number>>;
   readonly outcome: JudgeOutcome;
   readonly costUsd: number | null;
+  readonly byPrecedent?: true;
 }
 
 type Decided<T> =
@@ -363,6 +371,8 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       readonly signal?: AbortSignal | undefined;
       readonly timeoutMs?: number | undefined;
       readonly secondary?: boolean | undefined;
+      readonly precedentId?: TrustPrecedentId | undefined;
+      readonly programKey?: string | null | undefined;
     },
     send: (transport: Transport) => Promise<T>,
     logged: (answer: T, floor: number) => LoggedAnswer,
@@ -391,6 +401,8 @@ export function createJudge(deps: JudgeDeps): JudgeService {
             costUsd: fields.costUsd,
             workstreamId: req.workstreamId ?? null,
             taskId: req.taskId ?? null,
+            precedentId: fields.byPrecedent === true ? (req.precedentId ?? null) : null,
+            programKey: req.programKey ?? null,
           }),
         );
       const fallback = (

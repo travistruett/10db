@@ -30,6 +30,11 @@ export interface CallRuns {
   readonly runs: readonly RunText[];
   /** A bound (depth, reads or the total size) left out some of what the call runs. */
   readonly cut: boolean;
+  /**
+   * A file the walk read is changed in the checkout, or is new to it (`readCommitted` answers `differs` for
+   * both): what runs is not the base's text, so no standing approval of its kind is shown to a judge.
+   */
+  readonly differs: boolean;
 }
 
 /** How many calls deep a make target or script is followed: a target, what it needs, what that runs. */
@@ -109,10 +114,12 @@ export async function callRuns(
   read: CommittedReader,
 ): Promise<CallRuns> {
   const start = posix.relative(checkout, posix.normalize(cwd));
-  if (start.startsWith('..') || posix.isAbsolute(start)) return { runs: [], cut: false };
+  if (start.startsWith('..') || posix.isAbsolute(start))
+    return { runs: [], cut: false, differs: false };
   const runs: RunText[] = [];
   let chars = 0;
   let cut = false;
+  let differs = false;
   const seen = new Set<string>();
   const files = new Map<string, CommittedFile>();
   const makefiles = new Map<string, Makefile | null>();
@@ -158,6 +165,7 @@ export async function callRuns(
         included.add(path);
         const file = await readOnce(path);
         if (file.kind === 'absent' && optional) continue;
+        if (file.kind === 'differs') differs = true;
         if (file.kind !== 'same') return null;
         const nested = await withIncludes(dir, file.text, included);
         if (nested === null) return null;
@@ -184,6 +192,7 @@ export async function callRuns(
         MAKEFILE_NAMES.slice(i + 1).some((later) => later === file.entry)
       )
         continue;
+      if (file.kind === 'differs') differs = true;
       if (file.kind === 'same') {
         const text = await withIncludes(dir, file.text, new Set([path]));
         if (text !== null) found = { path, rules: parseRules(text), variables: variablesOf(text) };
@@ -269,6 +278,7 @@ export async function callRuns(
     if (seen.has(key)) return;
     seen.add(key);
     const file = await readOnce(path);
+    if (file.kind === 'differs') differs = true;
     if (file.kind !== 'same' || Buffer.byteLength(file.text) > RUNS_MAX_SCRIPT_BYTES) return;
     add({ kind: 'script', path, text: file.text });
   }
@@ -292,5 +302,5 @@ export async function callRuns(
   }
 
   await walk(command, start, 0);
-  return { runs, cut };
+  return { runs, cut, differs };
 }

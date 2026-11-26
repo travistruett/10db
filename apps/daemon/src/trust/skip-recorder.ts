@@ -26,6 +26,8 @@ export interface RecordedSkip {
   readonly limit: LimitName | null;
   readonly reason: string;
   readonly source: SkipSource;
+  /** The program the call runs (`programKey`); candidates for a standing approval are counted by it. */
+  readonly programKey?: string | null;
 }
 
 export interface SkipRecorder {
@@ -82,6 +84,7 @@ export function createSkipRecorder(
           limit: skip.limit,
           reason: skip.reason,
           source: skip.source,
+          programKey: skip.programKey ?? null,
         }),
       );
       deps.log.info(

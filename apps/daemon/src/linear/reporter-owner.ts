@@ -13,7 +13,7 @@ import {
   type ProjectId,
   type SessionId,
 } from '@10db/contracts';
-import { getProject, type ConversationRow } from '@10db/db';
+import { getProject, listPrecedents, type ConversationRow } from '@10db/db';
 import { pictureLimitsFor, type ExploreOwnerHooks, type ExploreStart } from '../conversation';
 import type { AccountExpectation } from '../environment';
 import type { StateStore } from '../events';
@@ -21,7 +21,7 @@ import type { Logger } from '../log';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import type { LaneSandboxSpec } from '../sandbox';
 import type { YourSessionServer } from '../sessions';
-import { buildTrustPolicy, sessionDevAccess } from '../trust';
+import { buildTrustPolicy, precedentLines, sessionDevAccess } from '../trust';
 import { readReporterFacts, reporterBrief } from './reporter-brief';
 import { linearToolPrefixes } from './reporter-guard';
 import { snapshotBrief } from './snapshot';
@@ -144,6 +144,7 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
           ...sessionDevAccess(project, { sandboxed: prepared.sandbox !== null, writes: false }),
           compose: null,
         },
+        precedents: precedentLines(listPrecedents(state.db, project.id), false),
       });
       const prompt = [
         run.readOnly

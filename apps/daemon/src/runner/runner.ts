@@ -81,6 +81,7 @@ import {
 import {
   approvedLines,
   buildTrustPolicy,
+  precedentLines,
   sessionDevAccess,
   CROSSES_LIMIT_QUESTION,
   PRE_EXISTING_READ_MAX,
@@ -180,6 +181,7 @@ import {
   recordTaskStartDirt,
   taskHasRunASession,
   listToolOpResults,
+  listPrecedents,
 } from '@10db/db';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -3091,6 +3093,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       claudeConnectors,
       devAccess,
       copyId: sessionCopyId,
+      precedents: precedentLines(listPrecedents(db, project.id), sessionCopyId !== null),
     });
     // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
     // starts on 10db's rules.
@@ -3692,6 +3695,18 @@ export function createRunner(opts: RunnerOptions): Runner {
               readCommitted: readCommitted(opts.git, project, checkout),
               skips: unattended?.skips ?? null,
               limits: limitNotes,
+              // Read on every call, so a Remove or a pause takes effect at once.
+              precedents: () => listPrecedents(opts.state.db, project.id),
+              inCopy: sessionCopyId !== null,
+              onPrecedentPaused: (precedentId) => {
+                opts.logger.info({ workstreamId: id, precedentId }, 'a precedent was paused');
+              },
+              onPrecedentChanged: (precedentId, hash) => {
+                opts.logger.info(
+                  { workstreamId: id, precedentId, hash },
+                  'what a precedent runs has changed',
+                );
+              },
               onFloor: (detail) => {
                 if (saidUnavailable) return;
                 saidUnavailable = true;

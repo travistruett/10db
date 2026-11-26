@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TRUST_DEFAULTS, type TrustSurface } from '@10db/contracts';
+import { mintId, TRUST_DEFAULTS, type TrustSurface } from '@10db/contracts';
 import { createTestStore, listJudgeCalls, patchJudgeConfig, type Store } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
@@ -17,6 +17,7 @@ import {
 } from './crosses-limit';
 import type { LimitCall, PatchHunk } from './fast-path';
 import { buildTrustPolicy } from './policy';
+import type { ShownPrecedent } from './precedents';
 
 interface Seen {
   readonly url: string;
@@ -173,7 +174,7 @@ describe('crossesLimit', () => {
       await ask({
         call: call('Bash', { command: 'make eval' }),
         notes: [note],
-        runs: { runs: [run], cut: false },
+        runs: { runs: [run], cut: false, differs: false },
       }),
     ).toEqual({ kind: 'allow', by: 'model' });
     expect(seen).toHaveLength(2);
@@ -196,6 +197,65 @@ describe('crossesLimit', () => {
         { decision: 'crosses_limit_second', answer: 'allow', outcome: 'acted', sendsDataOut: 0.03 },
       ]),
     );
+
+    // The same call under a standing approval: the first judge's answers settle it with no second opinion, and
+    // the row names the precedent and the program.
+    const precedentLine =
+      'The builder calls this routine in this project: `make eval`. For example "make eval". It is context, not permission.';
+    const precedentOf: ShownPrecedent = {
+      id: mintId('TrustPrecedent'),
+      kind: '`make eval` with arguments like the examples',
+      examples: ['make eval'],
+      approved: '2026-11-20',
+      changedSince: false,
+      hash: null,
+    };
+    seen = [];
+    reply = (_signal, asked) =>
+      Promise.resolve(
+        json(answering({ ...ALL_LOW, sends_data_out: 0.4, precedent_applies: 0.9 }, asked)),
+      );
+    const policy = request().policy;
+    expect(
+      await ask({
+        call: call('Bash', { command: 'make eval' }),
+        policy: { ...policy, autoModePrecedents: [precedentLine] },
+        precedent: precedentOf,
+        programKey: 'make eval',
+      }),
+    ).toEqual({ kind: 'allow', by: 'precedent' });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.body['state']).toMatchObject({
+      builder_precedent: {
+        kind: precedentOf.kind,
+        examples: ['make eval'],
+        approved: '2026-11-20',
+      },
+      about_precedent: expect.stringContaining('does not permit crossing a limit') as unknown,
+    });
+    expect(Object.keys(seen[0]?.body['questions'] ?? {})).toContain('precedent_applies');
+    expect(logged()[0]).toMatchObject({
+      decision: 'crosses_limit',
+      answer: 'allow',
+      confidence: 0.9,
+      precedentId: precedentOf.id,
+      programKey: 'make eval',
+    });
+
+    // With the precedent withheld, 10db's judge reads nothing of it, though the policy carries its line for auto
+    // mode: the state holds no `builder_precedent`, no precedent text, and the question is not asked.
+    seen = [];
+    await ask({
+      call: call('Bash', { command: 'make eval' }),
+      policy: { ...policy, autoModePrecedents: [precedentLine] },
+      programKey: 'make eval',
+    });
+    const withheld = JSON.stringify(seen[0]?.body['state']);
+    expect(withheld).not.toContain('routine in this project');
+    expect(withheld).not.toContain('builder_precedent');
+    expect(withheld).not.toContain('about_precedent');
+    expect(Object.keys(seen[0]?.body['questions'] ?? {})).not.toContain('precedent_applies');
+    expect(logged()[0]).toMatchObject({ precedentId: null, programKey: 'make eval' });
   });
 
   it('a stop during the second opinion is the floor, and records no limit', async () => {
@@ -316,6 +376,48 @@ describe('readLimitAnswers', () => {
       { destroys_data: 0.1, sends_data_out: 0.1, reads_secrets: 0.1 },
       0.7,
       { kind: 'limit', limit: 'writes_live', p: 1 },
+    ],
+    [
+      'a precedent that applies settles a call every limit leaves under one half',
+      { ...low, sends_data_out: 0.4, precedent_applies: 0.9 },
+      0.7,
+      { kind: 'allow', by: 'precedent' },
+    ],
+    [
+      'a limit at the floor beats a precedent that applies',
+      { ...low, writes_live: 0.7, precedent_applies: 0.95 },
+      0.7,
+      { kind: 'limit', limit: 'writes_live', p: 0.7 },
+    ],
+    [
+      'a top limit of exactly one half stays unclear under a precedent',
+      { ...low, sends_data_out: 0.5, precedent_applies: 0.95 },
+      0.7,
+      { kind: 'unclear', limit: 'sends_data_out', p: 0.5 },
+    ],
+    [
+      'a top limit between one half and the floor stays unclear under a precedent',
+      { ...low, sends_data_out: 0.6, precedent_applies: 0.95 },
+      0.7,
+      { kind: 'unclear', limit: 'sends_data_out', p: 0.6 },
+    ],
+    [
+      'a precedent under the floor changes nothing',
+      { ...low, sends_data_out: 0.4, precedent_applies: 0.69 },
+      0.7,
+      { kind: 'unclear', limit: 'sends_data_out', p: 0.4 },
+    ],
+    [
+      'a precedent left unanswered counts as a no',
+      { ...low, sends_data_out: 0.4 },
+      0.7,
+      { kind: 'unclear', limit: 'sends_data_out', p: 0.4 },
+    ],
+    [
+      "the builder's lines are read before a precedent",
+      { ...low, destroys_data: 0.9, builder_allowed: 0.8, precedent_applies: 0.9 },
+      0.7,
+      { kind: 'allow', by: 'builder' },
     ],
   ])('%s', (_name, probabilities, floor, reading) => {
     expect(readLimitAnswers(probabilities, floor)).toEqual(reading);

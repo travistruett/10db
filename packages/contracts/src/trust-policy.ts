@@ -36,6 +36,12 @@ export const TrustPolicy = z.strictObject({
   coordination: z.array(PolicyLine),
   /** What grants allow past a limit; empty until grants exist. */
   allow: z.array(z.string().min(1)),
+  /**
+   * The builder's standing approvals as context lines for Claude's auto mode, at most 30.
+   * Only the auto mode rendering reads them: they are never an allow line and never part of `environment`, which
+   * 10db's judge copies into its state.
+   */
+  autoModePrecedents: z.array(z.string().min(1)).max(30).default([]),
   switches: TrustSwitches,
 });
 export type TrustPolicy = z.infer<typeof TrustPolicy>;
