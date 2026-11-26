@@ -60,3 +60,12 @@
   route; the snapshot additionally keeps the globs fixed for the run. A snapshot's `baseAt` is the time it is taken
   (the run's start), not the base commit's time, so a result written after earlier work landed counts as before. The
   same lines close the no-gate check card, the pass check card and the skipped/config card.
+- New Eval (`new-eval-task.ts`, `POST /projects/:id/evals/tasks`, `NewEvalRequest`): files a normal task on the
+  project's account, "Write the eval for <behavior>", through the ordinary task-create path (`createTask`). Its brief
+  holds the six rationale sections (Decision, Evidence, Oracle, Coverage and bar, Models, Execution), the paths
+  the behavior lives in, the project's eval skills and a few existing suites as format examples, and forbids the
+  live command and any paid model call. The skills are the tracked `.claude/skills/*/SKILL.md` and
+  `.agents/skills/*/SKILL.md` at HEAD whose front matter name or description mentions evals; the brief gives
+  each one's name and file path, so a Claude or Codex lane uses it by name or reads the file. With none, it points
+  at the existing eval files. The task's areas are those the `where` paths fall in, else the catch-all or the first
+  area. It reads, files a task and runs nothing.

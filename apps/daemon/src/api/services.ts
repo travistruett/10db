@@ -86,6 +86,7 @@ import type {
   FolderInspectResult,
   FoundHostDto,
   EvalManifest,
+  NewEvalBody,
   EvalManifestResult,
   EvalMarkersDto,
   EvalModelsDto,
@@ -945,6 +946,11 @@ export interface ApiServices extends PlanRecordServices {
   ): Promise<EvalSuiteDetailDto>;
   /** Records an eval manifest unless it names a path HEAD does not track; nothing is kept then. */
   recordEvalManifest(projectId: ProjectId, manifest: EvalManifest): Promise<EvalManifestResult>;
+  /**
+   * Files the task that drafts an eval for the request, a normal task in the areas its files fall in; the
+   * project's eval skill and suites are read at HEAD and nothing is run.
+   */
+  newEvalTask(projectId: ProjectId, request: NewEvalBody): Promise<TaskDto>;
   /** What 10db added to the project's hazards by itself and why, and how many removals wait on the builder. */
   getHazardAssessment(projectId: ProjectId): HazardAssessmentDto;
   /**

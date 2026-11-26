@@ -236,6 +236,11 @@ freeCommand?, liveCommand? }], "gaps": [{ label, where, why }], "callPatterns": 
 7. **Report** the suites linked, the gaps, each call pattern with its count, and the evidence for each, in a few
    lines.
 
+The builder files a task that drafts an eval with New Eval on the Evals page (header, a No Eval row, or a goal's
+proposed eval). Its brief carries the rationale (Decision, Evidence, Oracle, Coverage and bar, Models, Execution):
+draft the cases, graders and free companion arm by the project's own eval skill, open a pull request, and never run
+the live command or any paid model call.
+
 ## Errors
 
 | Message                                          | Do                                                                                            |

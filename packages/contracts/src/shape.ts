@@ -142,6 +142,10 @@ export type PlanGoalTask = z.infer<typeof PlanGoalTask>;
 /** A goal's proposed eval: a north-star objective, baseline criteria, the models under test, constraints. */
 export const PlanEval = z.object({
   objective: z.string().min(1),
+  /** The decision the eval informs, such as which model to ship; absent in older plans. */
+  decision: z.string().min(1).optional(),
+  /** What counts as ground truth for a case, and who or what grades it; absent in older plans. */
+  oracle: z.string().min(1).optional(),
   baseline: z.array(z.string().min(1)).default([]),
   models: z.array(z.string().min(1)).default([]),
   constraints: z.array(z.string().min(1)).default([]),

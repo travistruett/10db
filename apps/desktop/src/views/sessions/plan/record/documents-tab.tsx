@@ -1,15 +1,29 @@
-import type {
-  PlanRecordDocument,
-  PlanRecordDto,
-  SectionIndexEntry,
-  ShapeAttachmentId,
-  ShapeId,
+import {
+  PlanEval,
+  type PlanRecordDocument,
+  type PlanRecordDto,
+  type ProjectId,
+  type SectionIndexEntry,
+  type ShapeAttachmentId,
+  type ShapeId,
 } from '@10db/contracts';
-import { Alert, Box, Group, Loader, NavLink, ScrollArea, Select, Stack, Text } from '@mantine/core';
+import {
+  Alert,
+  Box,
+  Button,
+  Group,
+  Loader,
+  NavLink,
+  ScrollArea,
+  Select,
+  Stack,
+  Text,
+} from '@mantine/core';
 import dayjs from 'dayjs';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Markdown } from '../../../../conversation';
 import { usePlanRevision } from '../../../../daemon/plan-record-queries';
+import { NewEvalModal, prefillFromPlanEval } from '../../../evals/new-eval-modal';
 import { RecordTab, type RecordSearch } from './record-tabs';
 
 // Documents: pick a document and a revision, read its outline, and read it whole. The body is drawn
@@ -43,14 +57,60 @@ export function sectionLine(body: string, start: number): number {
   return (body.slice(0, start).match(/\r\n|\r|\n/g)?.length ?? 0) + 1;
 }
 
+/** A goal's proposed eval, when the document's text is one. */
+function proposedEval(body: string): PlanEval | null {
+  try {
+    const parsed = PlanEval.safeParse(JSON.parse(body));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** New Eval over a goal's proposed eval, which fills the form's behavior, decision, oracle, models and bar. */
+function NewEvalFromPlan({
+  projectId,
+  plan,
+}: {
+  readonly projectId: ProjectId;
+  readonly plan: PlanEval;
+}) {
+  const [opened, setOpened] = useState(false);
+  return (
+    <>
+      <Button
+        size="xs"
+        variant="default"
+        mb="sm"
+        onClick={() => {
+          setOpened(true);
+        }}
+      >
+        New Eval
+      </Button>
+      <NewEvalModal
+        projectId={projectId}
+        prefill={opened ? prefillFromPlanEval(plan) : null}
+        onClose={() => {
+          setOpened(false);
+        }}
+      />
+    </>
+  );
+}
+
 function Body({
   shapeId,
+  projectId,
+  kind,
   doc,
   number,
   sections,
   section,
 }: {
   readonly shapeId: ShapeId;
+  readonly projectId: ProjectId;
+  readonly kind: PlanRecordDocument['kind'];
   readonly doc: ShapeAttachmentId;
   readonly number: number;
   readonly sections: readonly SectionIndexEntry[];
@@ -94,8 +154,10 @@ function Body({
       </Alert>
     );
   if (body === undefined) return <Loader size="sm" aria-label="Loading the document" />;
+  const plan = kind === 'eval' ? proposedEval(body) : null;
   return (
     <Box ref={drawn}>
+      {plan === null ? null : <NewEvalFromPlan projectId={projectId} plan={plan} />}
       <Markdown text={body} />
     </Box>
   );
@@ -196,6 +258,8 @@ export function DocumentsTab({
         ) : (
           <Body
             shapeId={shapeId}
+            projectId={record.projectId}
+            kind={doc.kind}
             doc={doc.id}
             number={revision.number}
             sections={revision.sections}
