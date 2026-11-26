@@ -37,7 +37,7 @@ export function hostGuard(deps: RequestGuardDeps): MiddlewareHandler<ApiEnv> {
 export function originGuard(deps: RequestGuardDeps): MiddlewareHandler<ApiEnv> {
   return async (c, next) => {
     const origin = c.req.header('origin');
-    if (origin === undefined) return next();
+    if (origin === undefined || isHealth(c.req.method, c.req.path)) return next();
     const lists = deps.allowlists(listenerOf(c.env));
     if (!lists?.origins.includes(origin)) return c.json({ error: 'forbidden origin' }, 403);
     return next();

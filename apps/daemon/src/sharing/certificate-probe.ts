@@ -26,6 +26,8 @@ export function createCertificateProbe(deps: {
   readonly clock: Clock;
 }): CertificateProbe {
   let last: { issued: boolean; error: string | null; checkedAt: Date } | null = null;
+  let lastPassed = false;
+  let failedAfterSuccess = false;
   let running = false;
 
   return {
@@ -34,7 +36,7 @@ export function createCertificateProbe(deps: {
       if (running) return;
       const now = deps.clock.now();
       if (last !== null) {
-        const wait = last.issued ? AFTER_SUCCESS_MS : AFTER_FAILURE_MS;
+        const wait = last.issued || failedAfterSuccess ? AFTER_SUCCESS_MS : AFTER_FAILURE_MS;
         if (now.getTime() - last.checkedAt.getTime() < wait) return;
       }
       running = true;
@@ -43,10 +45,14 @@ export function createCertificateProbe(deps: {
           ['cert', '--cert-file', '-', '--key-file', '-', fqdn],
           PROBE_TIMEOUT_MS,
         );
-        const issued = result.code === 0 && !result.timedOut;
+        const passed = result.code === 0 && !result.timedOut;
+        // One failure right after a pass keeps the certificate counted and retries in a minute; a second ends it.
+        const keep = !passed && lastPassed;
+        lastPassed = passed;
+        failedAfterSuccess = keep;
         last = {
-          issued,
-          error: issued ? null : result.timedOut ? 'timed out' : result.stderr.slice(-STDERR_KEPT),
+          issued: passed || keep,
+          error: passed ? null : result.timedOut ? 'timed out' : result.stderr.slice(-STDERR_KEPT),
           checkedAt: deps.clock.now(),
         };
       } finally {

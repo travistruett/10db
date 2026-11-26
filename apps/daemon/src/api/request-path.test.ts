@@ -18,7 +18,6 @@ import {
   createSocketRegistry,
   type SocketRegistry,
   createTickets,
-  mintDeviceToken,
   type DeviceService,
   type Tickets,
 } from '../devices';
@@ -374,7 +373,8 @@ describe('the request path through both listeners', () => {
     devices.revoke(revoked.deviceId);
     const last = live.token.slice(-1);
     const wrongSecret = `${live.token.slice(0, -1)}${last === 'A' ? 'B' : 'A'}`;
-    const tokens = [mintDeviceToken(mintId('Device')).token, revoked.token, wrongSecret];
+    const unknownDevice = live.token.replace(live.deviceId, mintId('Device'));
+    const tokens = [unknownDevice, revoked.token, wrongSecret];
     const answers = await Promise.all(
       tokens.map(async (token) => {
         const res = await call(Listener.Share, '/projects', {

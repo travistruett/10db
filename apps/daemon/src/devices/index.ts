@@ -1,4 +1,3 @@
-export { mintDeviceToken } from './tokens';
 export { createPairingCodes } from './pairing-codes';
 export { createTickets } from './tickets';
 export type { TicketOwner, Tickets } from './tickets';

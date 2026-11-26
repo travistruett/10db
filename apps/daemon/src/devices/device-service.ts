@@ -74,11 +74,12 @@ export function createDeviceService(deps: {
       };
     },
     pair(body) {
+      // Read before the code is spent, so a Mac with no name burns no one's try.
+      const sharing = deps.sharing();
+      if (sharing.fqdn === null) throw new PairingRefusedError(false);
       const attempt = deps.codes.attempt(body.code);
       if (attempt === PairAttempt.RateLimited) throw new PairingRefusedError(true);
       if (attempt === PairAttempt.Refused) throw new PairingRefusedError(false);
-      const sharing = deps.sharing();
-      if (sharing.fqdn === null) throw new SharingNotReadyError();
       const id = mintId('Device');
       const { token, tokenHash } = mintDeviceToken(id);
       deps.state.write((ctx) =>
