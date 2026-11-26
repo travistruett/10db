@@ -1,5 +1,6 @@
 import {
   Watchpoint,
+  WatchpointLinePattern,
   WatchpointLoudness,
   type EffectiveWatchpoint,
   type Watchpoint as WatchpointValue,
@@ -100,6 +101,7 @@ export function WatchpointDrawer({
     setInvalid(null);
     setDraft((d) => ({ ...d, ...next }));
   };
+  const badPattern = lines(draft.lines).find((p) => !WatchpointLinePattern.safeParse(p).success);
   const submit = () => {
     const taken = new Set([...lists.yours.map((w) => w.key), ...lists.entries.map((e) => e.key)]);
     const parsed = Watchpoint.safeParse({
@@ -192,6 +194,7 @@ export function WatchpointDrawer({
           minRows={2}
           styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)' } }}
           value={draft.lines}
+          error={badPattern === undefined ? undefined : `"${badPattern}" is not a valid pattern`}
           onChange={(e) => {
             change({ lines: e.currentTarget.value });
           }}
@@ -209,7 +212,7 @@ export function WatchpointDrawer({
         />
         <Input.Wrapper
           label="Loudness"
-          description="Show puts it in the task's For You and the pull request. Ask and Hold come later."
+          description="Show puts it in the task's For You and the pull request. Ask also leaves one Inbox card per task. Hold comes later."
         >
           <LoudnessControl
             mt={6}
