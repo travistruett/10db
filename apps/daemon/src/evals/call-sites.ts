@@ -1,6 +1,7 @@
 import {
   EvalGapSource,
   MAX_CALL_SITES,
+  evalGapPath,
   type EvalCallPattern,
   type EvalCallSiteCountDto,
   type EvalGapDto,
@@ -91,9 +92,6 @@ export async function findCallSites(
   return { counts, sites };
 }
 
-/** The path an assessed gap's `where` names, without its `:line`. */
-const gapPath = (where: string): string => where.replace(/:\d+(?::\d+)?$/u, '');
-
 /**
  * The sites no suite covers: outside every suite's covered globs (matched as a hazard's globs are), and not
  * in an eval's own definition file or a file an assessed gap already names.
@@ -111,7 +109,7 @@ export function uncoveredSites(
   const known = new Set([
     ...definitions,
     ...manifest.manifest.suites.flatMap((s) => s.definitionPaths),
-    ...manifest.manifest.gaps.map((g) => gapPath(g.where)),
+    ...manifest.manifest.gaps.map((g) => evalGapPath(g.where)),
   ]);
   const verdicts = new Map<string, boolean>();
   const isCovered = (path: string): boolean => {
