@@ -733,7 +733,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
   mkdirSync(join(opts.dataDir, 'logs'), { recursive: true });
-  const lock = acquireInstanceLock(opts.dataDir);
+  // On the system clock, not the injected one: the waits here are for another process.
+  const lock = await acquireInstanceLock(opts.dataDir);
   const logPath = join(opts.dataDir, 'logs', 'daemon.log');
   rotateLogFile(logPath);
   const logFile = fileDestination(logPath);
