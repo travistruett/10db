@@ -189,7 +189,10 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await form.getByRole('link', { name: 'Write the eval for Summarizer' }).click();
   await expect(page).toHaveURL(/\/board/u);
   await expect(page.getByText('Write the eval for Summarizer').first()).toBeVisible();
-  const tasks = await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth });
+  const tasks = await request.get(`${daemonUrl}/projects/${projectId}/tasks`, {
+    headers: auth,
+    maxRetries: 2,
+  });
   const filed = ((await tasks.json()) as { title: string; description: string }[]).find(
     (t) => t.title === 'Write the eval for Summarizer',
   );

@@ -6,8 +6,10 @@ import {
   BatchState,
   ConflictError,
   COPY_NEEDS_REVIEW,
+  CopyStep,
   Delivery,
   InvalidError,
+  isTerminal,
   mintId,
   NotFoundError,
   TaskStatus,
@@ -30,6 +32,7 @@ import {
   BUILDER_CHOSE_PLACEMENT,
   deleteCuttingBatch,
   findUnfinishedBatch,
+  copyInProgressOf,
   getBatch,
   getBoardColumn,
   listKinds,
@@ -41,10 +44,12 @@ import {
   getLocalCopy,
   insertLocalCopy,
   isLivePromoting,
-  unfinishedCopyOf,
+  queuedCopiesOf,
+  queuedCopyBatchIds,
   listBatches,
   listWorkstreams,
   patchBatch,
+  patchLocalCopy,
   passHoldingFolder,
   passHoldingTask,
   patchTask,
@@ -98,11 +103,20 @@ export interface BatchStarter {
    */
   startBatch(projectId: ProjectId, input: BatchStartInput): BatchDto[];
   /**
-   * One task in a local project that works in a separate copy: always a new batch of its own, refused
-   * while the project's other copy is unfinished. Otherwise one task in a pull-request project: in Your folder, a member of the open shared batch or a new
+   * One task in a local project that works in a separate copy: a new batch of its own, cut at once, or,
+   * while another copy of the project is unfinished, held until that copy ships or is abandoned
+   * (`advanceCopyQueue` then cuts it); a dependent of a task that is held joins its batch. Otherwise one
+   * task in a pull-request project: in Your folder, a member of the open shared batch or a new
    * one titled after it; in a separate copy, always a new batch of its own.
    */
   startTask(taskId: TaskId): BatchDto;
+  /**
+   * Cuts, for each local project with none in progress, its oldest waiting copy, and drops a waiting
+   * copy none of whose tasks is left. Called whenever a batch or a run changes and after startup
+   * recovery; a copy whose settings no longer admit it is refused with a card, as at a start, and the
+   * next one goes on.
+   */
+  advanceCopyQueue(): void;
   /**
    * Refuses while a join of the task is pending, from its start until the join writes or refuses: its
    * placement is the one the join will use (task placement spec §5). The store checks the rest.
@@ -263,15 +277,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   }
 
   /**
-   * What a local copy's start checks, as if the batch `ending` had already ended: copies still on,
-   * one copy at a time, a review in the task's process. Settings and rigor can change after the
-   * placement was admitted, so the start asks again.
+   * What a local copy's start checks: copies still on, a gate, a landing on the base, a review in the
+   * task's process. Settings and rigor can change after the placement was admitted, so the start asks
+   * again, and so does the cut of a copy that waited.
    */
-  function refuseLocalCopy(
-    project: ProjectDto,
-    task: TaskDto,
-    ending: BatchId | undefined,
-  ): StepPlanDto {
+  function refuseLocalCopy(project: ProjectDto, task: TaskDto): StepPlanDto {
     if (!project.localCopies || project.copyTeardownCommand === null)
       throw new InvalidError(
         `${project.name} does not allow separate copies; turn them on in its delivery settings`,
@@ -284,28 +294,58 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       throw new InvalidError(
         'A separate copy lands on the base branch, and this task lands elsewhere',
       );
-    const other = unfinishedCopyOf(db, project.id);
-    if (other !== null && other.id !== ending)
-      throw new ConflictError(
-        `Another task is in a separate copy (${other.title}); start this one when that one ships or is abandoned`,
-      );
     const plan = planForStart(db, task.id);
     if (!plan.steps.some((step) => step.role === StepRole.Review))
       throw new InvalidError(COPY_NEEDS_REVIEW);
     return plan;
   }
 
-  /** One task of a local project in a new copy: the CUTTING row, its journal and its run in one write, then the cut. */
+  /**
+   * The waiting copy that holds every unfinished dependency of the task, if there is one: the task
+   * goes into it, and the copy lands both together.
+   */
+  function waitingCopyOfDependencies(task: TaskDto, waiting: readonly BatchDto[]): BatchDto | null {
+    const blocked = unfinishedDependencies(db, [task], new Set([task.id]));
+    const deps = blocked.flatMap((b) => b.deps);
+    if (deps.length === 0) return null;
+    return (
+      waiting.find((batch) => {
+        const members = new Set(listWorkstreams(db, { batchId: batch.id }).map((w) => w.taskId));
+        return deps.every((dep) => members.has(dep.id));
+      }) ?? null
+    );
+  }
+
+  /**
+   * One task of a local project in a copy: the CUTTING row, its journal and its run in one write, then
+   * the cut. While another copy of the project is unfinished, or another is waiting ahead of it, the
+   * journal says `queued` and no cut is queued: `advanceCopyQueue` cuts the copy in its turn. A task
+   * whose dependencies are all in a waiting copy joins that copy instead.
+   */
   function startLocalCopy(project: ProjectDto, task: TaskDto): BatchDto {
     checkStartable(project, task);
-    const plan = refuseLocalCopy(project, task, undefined);
+    const plan = refuseLocalCopy(project, task);
     const teardownCommand = project.copyTeardownCommand;
     if (teardownCommand === null) throw new InvalidError(`${project.name} has no teardown command`);
+    const waiting = queuedCopiesOf(db, project.id);
+    const joined = waitingCopyOfDependencies(task, waiting);
     refuseUnfinished(
       project.id,
       { title: task.title },
-      unfinishedDependencies(db, [task], new Set([task.id])),
+      unfinishedDependencies(
+        db,
+        [task],
+        new Set([
+          task.id,
+          ...(joined ? listWorkstreams(db, { batchId: joined.id }).map((w) => w.taskId) : []),
+        ]),
+      ),
     );
+    if (joined) {
+      ctx.state.write((w) => insertPlannedWorkstream(w, task.id, plan, joined.id));
+      return joined;
+    }
+    const queued = waiting.length > 0 || copyInProgressOf(db, project.id) !== null;
     const target = sharedLanding(project, [task], 'worktree');
     const root = madeWorktreeRoot(ctx.worktreeRoot);
     const plans: Plans = new Map([[task.id, plan]]);
@@ -319,11 +359,88 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         worktreePath: worktreePathFor(root, project, batchBranchName(task.title, id)),
       });
       insertPlannedWorkstream(w, task.id, plan, id);
-      insertLocalCopy(w, { batchId: id, teardownCommand });
+      insertLocalCopy(w, {
+        batchId: id,
+        teardownCommand,
+        ...(queued ? { step: CopyStep.Queued } : {}),
+      });
       return inserted;
     });
-    runCut(batch, (signal) => cutWorktree(ctx, batch.id, plans, signal));
+    if (queued) advanceCopyQueue();
+    else runCut(batch, (signal) => cutWorktree(ctx, batch.id, plans, signal));
     return batch;
+  }
+
+  /** The tasks of a batch that was not cut yet whose run in it has not ended, such as by a cancel. */
+  function liveTasksOf(batch: BatchDto): TaskDto[] {
+    return listWorkstreams(db, { batchId: batch.id })
+      .filter((run) => !isTerminal(run.state))
+      .map((run) => getTask(db, run.taskId));
+  }
+
+  /**
+   * Cuts a waiting copy as its turn comes: the settings that admitted its tasks are asked again, then
+   * the journal opens and the cut is queued as a restart's recut is. Answers false when the copy was
+   * refused, which deletes it with a card naming its tasks.
+   */
+  function cutWaitingCopy(batch: BatchDto, tasks: readonly TaskDto[]): boolean {
+    const project = getProject(db, batch.projectId);
+    try {
+      for (const task of tasks) refuseLocalCopy(project, task);
+      const teardownCommand = project.copyTeardownCommand;
+      if (teardownCommand === null)
+        throw new InvalidError(`${project.name} has no teardown command`);
+      ctx.state.write((w) => patchLocalCopy(w, batch.id, { step: CopyStep.Open, teardownCommand }));
+    } catch (error) {
+      ctx.state.write((w) => {
+        deleteCuttingBatch(w, batch.id, 'its turn came and its copy was refused');
+        forgetStartSiblings(w, batch.id);
+      });
+      raise(
+        ctx.inbox,
+        project.id,
+        forTasks(
+          startCards.notStarted(error),
+          tasks.map((t) => t.id),
+          { title: batch.title },
+        ),
+      );
+      return false;
+    }
+    recut(batch.id);
+    return true;
+  }
+
+  function advanceCopyQueue(): void {
+    const projects = new Set(queuedCopyBatchIds(db).map((id) => getBatch(db, id).projectId));
+    for (const projectId of projects) {
+      // A copy whose every task was cancelled while it waited goes, whatever is in progress.
+      for (const batch of queuedCopiesOf(db, projectId))
+        if (liveTasksOf(batch).length === 0)
+          ctx.state.write((w) => {
+            deleteCuttingBatch(w, batch.id, 'every task waiting for this copy was cancelled');
+          });
+      while (copyInProgressOf(db, projectId) === null) {
+        const next = queuedCopiesOf(db, projectId)[0];
+        if (next === undefined) break;
+        if (cutWaitingCopy(next, liveTasksOf(next))) break;
+      }
+    }
+  }
+
+  function recut(batchId: BatchId): void {
+    const batch = getBatch(db, batchId);
+    if (batch.state !== BatchState.Cutting) return;
+    // The workstreams came QUEUED with the row and are still its own, so the tasks keep their place.
+    const tasks = liveTasksOf(batch);
+    const ids = new Map(tasks.map((task) => [task.id, null]));
+    // What the start that made this batch made, so a sibling cut again with it is no use of the branch.
+    const sameStart = startSiblings(db, batchId);
+    runCut(batch, (signal) =>
+      batch.worktreePath === null
+        ? cut(batchId, tasks, ids, new Set(ids.keys()), signal, sameStart)
+        : cutWorktree(ctx, batchId, ids, signal, sameStart),
+    );
   }
 
   /** One part of a start: what it writes, in the start's one transaction, and the job it queues after. */
@@ -419,7 +536,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       if (copy) {
         // A separate copy admits its tasks as a start does: copies on, a gate, and a review step.
         if (getLocalCopy(db, copy.id) !== null)
-          for (const task of tasks) refuseLocalCopy(project, task, copy.id);
+          for (const task of tasks) refuseLocalCopy(project, task);
         return {
           steps: [prepareJoinWorktree(project, copy, tasks)],
           placement: () => WorkspaceMode.Worktree,
@@ -588,7 +705,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       );
     }
     // Nothing starts in Your folder while a separate copy's landing may have half written it.
-    const landing = unfinishedCopyOf(db, project.id);
+    const landing = copyInProgressOf(db, project.id);
     const landingCopy = landing === null ? null : getLocalCopy(db, landing.id);
     if (landing !== null && landingCopy !== null && isLivePromoting(landingCopy))
       throw new ConflictError(
@@ -1058,7 +1175,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       const project = getProject(db, task.projectId);
       checkStartable(project, task);
       if (isCopyTask(project, task)) {
-        refuseLocalCopy(project, task, ending);
+        refuseLocalCopy(project, task);
         return;
       }
       if (project.delivery !== Delivery.PullRequest) return;
@@ -1070,20 +1187,8 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         ending,
       );
     },
-    recut(batchId) {
-      const batch = getBatch(db, batchId);
-      if (batch.state !== BatchState.Cutting) return;
-      // The workstreams came QUEUED with the row and are still its own, so the tasks keep their place.
-      const tasks = listWorkstreams(db, { batchId }).map((ws) => getTask(db, ws.taskId));
-      const ids = new Map(tasks.map((task) => [task.id, null]));
-      // What the start that made this batch made, so a sibling cut again with it is no use of the branch.
-      const sameStart = startSiblings(db, batchId);
-      runCut(batch, (signal) =>
-        batch.worktreePath === null
-          ? cut(batchId, tasks, ids, new Set(ids.keys()), signal, sameStart)
-          : cutWorktree(ctx, batchId, ids, signal, sameStart),
-      );
-    },
+    recut,
+    advanceCopyQueue,
     retry(id, note) {
       refuseIfJoining(getWorkstreamRow(db, id).taskId);
       refuseMovedRetry(id);

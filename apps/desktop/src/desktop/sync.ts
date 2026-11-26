@@ -4,6 +4,8 @@ import {
   EventType,
   InboxItemId,
   LANE_STATES,
+  shouldNotifyOpened,
+  triagedToBuilder,
   WorkstreamState,
   type ChatDto,
   type InboxItemDto,
@@ -41,13 +43,7 @@ import {
   readyPageOf,
   type PassPageTarget,
 } from './notify-pass';
-import {
-  answeredNotice,
-  askedNotices,
-  disagreementNotices,
-  shouldNotifyOpened,
-  triagedToBuilder,
-} from './notify-card';
+import { answeredNotice, askedNotices, disagreementNotices } from './notify-card';
 import {
   bringWindowForward,
   isTauri,

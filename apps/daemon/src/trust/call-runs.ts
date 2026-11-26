@@ -1,7 +1,14 @@
 import { posix } from 'node:path';
 import type { CommittedFile, CommittedReader } from '../folders';
 import { leadingWords, parseShell, redirectionSpan } from '../guard';
-import { MAKEFILE_NAMES, parseRules, within, withoutComments, type MakeRule } from './make-rules';
+import {
+  isDirectiveLine,
+  MAKEFILE_NAMES,
+  parseRules,
+  within,
+  withoutComments,
+  type MakeRule,
+} from './make-rules';
 
 /** What a call runs, as committed on the base: a make target's rule, or a repository script whole. */
 export type RunText =
@@ -123,6 +130,7 @@ function recipeCommands(recipe: string): string[] {
   return withoutComments(recipe)
     .replace(/\\\n/g, ' ')
     .split('\n')
+    .filter((line) => !isDirectiveLine(line))
     .map((line) => line.replace(/^\t/, '').replace(/^[\s@+-]+/, ''))
     .filter((line) => line !== '');
 }

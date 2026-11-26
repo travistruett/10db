@@ -48,6 +48,7 @@ import {
 import * as schema from '../schema';
 import { getBoardColumn } from './board-columns';
 import { recordLaneTime } from './lane-times';
+import { queuedCopyBatchIds } from './local-copies';
 import { passHoldingTask } from './passes';
 import { getProject } from './projects';
 import { waitingOnWorkstream } from './waiting-on';
@@ -623,12 +624,16 @@ export function countBatchesInFlight(db: DbReader): number {
       .all()
       .map((r) => r.batchId),
   );
+  // A copy waiting for its turn has begun no cut, and may wait for hours.
+  const queued = new Set(queuedCopyBatchIds(db));
   const batches = db
     .select({ id: schema.batches.id, state: schema.batches.state })
     .from(schema.batches)
     .where(inArray(schema.batches.state, [BatchState.Cutting, BatchState.Shipping]))
     .all();
-  return batches.filter((b) => !(b.state === BatchState.Shipping && parked.has(b.id))).length;
+  return batches.filter(
+    (b) => !queued.has(b.id) && !(b.state === BatchState.Shipping && parked.has(b.id)),
+  ).length;
 }
 
 function isWaitingOnCard(r: {
