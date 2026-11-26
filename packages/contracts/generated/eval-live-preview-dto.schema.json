@@ -35,6 +35,9 @@
     "loopback": {
       "type": "boolean"
     },
+    "loopbackAsked": {
+      "type": "boolean"
+    },
     "timeoutMinutes": {
       "type": "number"
     },
@@ -120,6 +123,9 @@
             },
             "stopRan": {
               "type": "boolean"
+            },
+            "stopping": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -132,7 +138,8 @@
             "exitCode",
             "tail",
             "costShownUsd",
-            "stopRan"
+            "stopRan",
+            "stopping"
           ]
         },
         {
@@ -149,6 +156,7 @@
     "hosts",
     "envFiles",
     "loopback",
+    "loopbackAsked",
     "timeoutMinutes",
     "lastRunCostUsd",
     "previewHash",

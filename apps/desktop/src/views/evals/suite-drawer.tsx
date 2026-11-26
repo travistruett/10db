@@ -157,17 +157,7 @@ function Manifest({
   if (detail.suite.definitionPaths.length > 0)
     rows.push(['Definition', detail.suite.definitionPaths.map((p) => <Code key={p}>{p}</Code>)]);
   if (detail.freeCommand !== null) rows.push(['Free Check', <Code>{detail.freeCommand}</Code>]);
-  if (detail.liveCommand !== null)
-    rows.push([
-      'Live Run',
-      <>
-        <Code>{detail.liveCommand}</Code>
-        <Text span size="xs" c="dimmed">
-          {' '}
-          spends money; you run it
-        </Text>
-      </>,
-    ]);
+  if (detail.liveCommand !== null) rows.push(['Live Run', <Code>{detail.liveCommand}</Code>]);
   if (detail.liveCommand !== null)
     rows.push(['', <LiveRunControls projectId={projectId} suiteKey={detail.suite.key} />]);
   if (rows.length === 0) return null;

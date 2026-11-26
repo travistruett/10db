@@ -84,7 +84,7 @@ function Suite({
       </Text>
       {suite.liveCommand === null ? null : <Code block>{suite.liveCommand}</Code>}
       {suite.liveCommand === null ? null : (
-        <LiveRunControls projectId={projectId} suiteKey={suite.suiteKey} label="Run now" />
+        <LiveRunControls projectId={projectId} suiteKey={suite.suiteKey} label="Run Now" />
       )}
     </Stack>
   );

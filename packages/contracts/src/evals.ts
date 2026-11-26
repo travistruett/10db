@@ -501,6 +501,8 @@ export const EvalLiveRunDto = z.object({
   tail: z.string(),
   costShownUsd: z.number().nullable(),
   stopRan: z.boolean(),
+  /** Stop was pressed (or the run is being ended) and the run has not settled yet. */
+  stopping: z.boolean(),
 });
 export type EvalLiveRunDto = z.infer<typeof EvalLiveRunDto>;
 
@@ -512,7 +514,10 @@ export const EvalLivePreviewDto = z.object({
   docker: z.boolean(),
   hosts: z.array(z.string()),
   envFiles: z.array(z.string()),
+  /** Whether the run can reach localhost: the suite asks and the project allows it. */
   loopback: z.boolean(),
+  /** The suite asks for localhost; the project's switch may keep it closed. */
+  loopbackAsked: z.boolean(),
   timeoutMinutes: z.number(),
   lastRunCostUsd: z.number().nullable(),
   /** Hashes what the window showed; Run refuses when anything it covers changed since. */

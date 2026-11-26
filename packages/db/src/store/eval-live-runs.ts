@@ -135,3 +135,7 @@ export function markEvalLiveRunStopRan(ctx: WriteContext, id: EvalLiveRunId): vo
     .where(eq(schema.evalLiveRuns.id, id))
     .run();
 }
+
+export function getEvalLiveRun(db: DbReader, id: EvalLiveRunId): EvalLiveRunRow | null {
+  return db.select().from(schema.evalLiveRuns).where(eq(schema.evalLiveRuns.id, id)).get() ?? null;
+}

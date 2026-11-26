@@ -17,6 +17,7 @@ import {
 } from '@10db/contracts';
 import {
   finishEvalLiveRun,
+  getEvalLiveRun,
   getProject,
   insertEvalLiveRun,
   interruptRunningEvalLiveRuns,
@@ -118,7 +119,7 @@ interface ActiveRun {
   readonly settled: Promise<void>;
 }
 
-const dtoOf = (row: EvalLiveRunRow): EvalLiveRunDto => ({
+const dtoOf = (row: EvalLiveRunRow, stopping = false): EvalLiveRunDto => ({
   id: row.id,
   projectId: row.projectId,
   suiteKey: row.suiteKey,
@@ -129,6 +130,7 @@ const dtoOf = (row: EvalLiveRunRow): EvalLiveRunDto => ({
   tail: row.tail,
   costShownUsd: row.costShownUsd,
   stopRan: row.stopRan,
+  stopping,
 });
 
 export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
@@ -140,6 +142,15 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
   const recovering = new Map<EvalLiveRunId, { projectId: ProjectId; done: Promise<void> }>();
   const recoveringIn = (projectId: ProjectId): boolean =>
     [...recovering.values()].some((r) => r.projectId === projectId);
+
+  /** The run as the window shows it: `stopping` while a Stop or a daemon stop is settling it. */
+  const viewOf = (row: EvalLiveRunRow): EvalLiveRunDto => {
+    const run = active.get(row.id);
+    return dtoOf(
+      row,
+      row.state === EvalLiveRunState.Running && run !== undefined && run.endedBy !== null,
+    );
+  };
 
   function suiteOf(projectId: ProjectId, suiteKey: EvalSuiteKey): EvalManifestSuite {
     const suite = readEvalManifest(state.db, projectId)?.manifest.suites.find(
@@ -392,12 +403,13 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
         docker: live?.docker ?? false,
         hosts: live?.hosts ?? [],
         envFiles: live?.envFiles ?? [],
-        loopback: live?.loopback ?? false,
+        loopback: (live?.loopback ?? false) && project.sandboxLoopback,
+        loopbackAsked: live?.loopback ?? false,
         timeoutMinutes: live?.timeoutMinutes ?? 0,
         lastRunCostUsd: await lastCostUsd(project, suiteKey),
         previewHash: previewHash(suite, project),
         refusal: refused?.refusal ?? null,
-        running: refused?.running ? dtoOf(refused.running) : null,
+        running: refused?.running ? viewOf(refused.running) : null,
       };
     },
 
@@ -501,12 +513,19 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
       if (!run.decided) {
         run.endedBy ??= EvalLiveRunState.Stopped;
         run.abort.abort();
+        // Every window shows the run as stopping before it settles.
+        const row = getEvalLiveRun(state.db, runId);
+        if (row !== null) {
+          state.write((ctx) => {
+            announce(ctx, row, EvalLiveRunState.Running);
+          });
+        }
       }
       return Promise.resolve();
     },
 
     list(projectId, suiteKey) {
-      return listEvalLiveRuns(state.db, projectId, suiteKey, RECENT_RUNS).map(dtoOf);
+      return listEvalLiveRuns(state.db, projectId, suiteKey, RECENT_RUNS).map(viewOf);
     },
 
     recoverAtStart() {

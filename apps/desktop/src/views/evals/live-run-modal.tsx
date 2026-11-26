@@ -10,6 +10,7 @@ import { useClipboard } from '@mantine/hooks';
 import { IconCopy } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
+import { z } from 'zod';
 import { DaemonRequestError } from '../../daemon/client';
 import {
   useEvalLivePreview,
@@ -19,6 +20,8 @@ import {
 } from '../../daemon/evals-queries';
 import { SettingsSectionKey } from '../settings/sections';
 import { costText, dayTimeText } from './eval-figures';
+
+const RefusalBody = z.object({ refusal: z.string() });
 
 const REFUSAL_WORDS: Readonly<Record<EvalLiveRefusal, string>> = {
   [EvalLiveRefusal.NoLive]: "The assessment hasn't said how this command runs.",
@@ -71,13 +74,16 @@ function Notes({ preview }: { readonly preview: EvalLivePreviewDto }) {
   } else {
     lines.push(preview.hosts.length > 0 ? `May reach: ${preview.hosts.join(', ')}` : 'No hosts');
   }
+  if (preview.loopback) lines.push('Can reach localhost: every port on this Mac');
+  else if (preview.loopbackAsked)
+    lines.push("Wants localhost, but the project's Allow localhost is off, so it stays closed");
   lines.push(
     preview.stopCommand !== null
       ? `Stop also runs: ${preview.stopCommand}`
       : preview.docker
         ? "Stop ends 10db's side; work in your containers may keep running"
         : 'Stop ends the command',
-    `Stops after ${String(preview.timeoutMinutes)} minutes`,
+    `Stops after ${String(preview.timeoutMinutes)} ${preview.timeoutMinutes === 1 ? 'minute' : 'minutes'}`,
     preview.lastRunCostUsd === null
       ? 'Last run cost unknown'
       : `Last run ${costText(preview.lastRunCostUsd)}`,
@@ -106,8 +112,12 @@ function RunView({
 }) {
   const stop = useStopEvalLive(projectId);
   const running = run.state === EvalLiveRunState.Running;
+  const stopping = run.stopping || stop.isPending;
   return (
     <Stack gap="sm" data-testid="live-run">
+      <Text size="xs" c="dimmed">
+        {run.suiteKey}
+      </Text>
       <Group justify="space-between" wrap="nowrap">
         <Text size="sm" fw={600}>
           {runWords(run)}
@@ -119,7 +129,7 @@ function RunView({
           ) : null}
         </Text>
         {running ? (
-          stop.isPending || stop.isSuccess ? (
+          stopping ? (
             <Text size="sm" c="dimmed">
               Stopping
             </Text>
@@ -141,6 +151,11 @@ function RunView({
           </Button>
         )}
       </Group>
+      {stop.isError ? (
+        <Text size="sm" c="red">
+          {stop.error.message}
+        </Text>
+      ) : null}
       {run.state === EvalLiveRunState.Interrupted && !run.stopRan ? (
         <Text size="sm" c="yellow">
           The work in your containers may still be running.
@@ -161,6 +176,13 @@ function RunView({
   );
 }
 
+/** True for the daemon's `manifest_changed` 409: the window refetches and says what changed instead. */
+function changedRefusal(error: unknown): boolean {
+  if (!(error instanceof DaemonRequestError) || error.status !== 409) return false;
+  const body = RefusalBody.safeParse(error.body);
+  return body.success && body.data.refusal === EvalLiveRefusal.ManifestChanged;
+}
+
 function Confirm({
   projectId,
   suiteKey,
@@ -174,7 +196,10 @@ function Confirm({
 }) {
   const start = useStartEvalLive(projectId, suiteKey);
   const navigate = useNavigate();
-  const [changed, setChanged] = useState(false);
+  // The hash of what the builder was shown last. A refetch that swaps the preview in place changes what Run
+  // would post, so Run waits until the builder has seen the new one.
+  const [seen, setSeen] = useState(preview.previewHash);
+  const changed = preview.previewHash !== seen;
   const refusal = preview.refusal;
   return (
     <Stack gap="md">
@@ -210,27 +235,31 @@ function Confirm({
       ) : (
         <>
           <Notes preview={preview} />
-          {start.isError &&
-          !(start.error instanceof DaemonRequestError && start.error.status === 409) ? (
+          {start.isError && !changedRefusal(start.error) ? (
             <Text size="sm" c="red">
               {start.error.message}
             </Text>
           ) : null}
           <Group justify="flex-end">
-            <Button
-              loading={start.isPending}
-              onClick={() => {
-                start.mutate(preview.previewHash, {
-                  onSuccess: onStarted,
-                  onError: (error) => {
-                    if (error instanceof DaemonRequestError && error.status === 409)
-                      setChanged(true);
-                  },
-                });
-              }}
-            >
-              Run
-            </Button>
+            {changed ? (
+              <Button
+                variant="default"
+                onClick={() => {
+                  setSeen(preview.previewHash);
+                }}
+              >
+                Show what runs now
+              </Button>
+            ) : (
+              <Button
+                loading={start.isPending}
+                onClick={() => {
+                  start.mutate(seen, { onSuccess: onStarted });
+                }}
+              >
+                Run
+              </Button>
+            )}
           </Group>
         </>
       )}
@@ -252,7 +281,10 @@ function RunModal({
   const preview = useEvalLivePreview(projectId, suiteKey, opened);
   const runs = useEvalLiveRuns(projectId, suiteKey);
   const [runId, setRunId] = useState<string | null>(null);
-  const run = runs.data?.find((r) => r.id === runId) ?? null;
+  // A run going in the project, even one this window didn't start, is shown as running with its Stop.
+  const run =
+    runs.data?.find((r) => r.id === runId) ??
+    (preview.data?.refusal === EvalLiveRefusal.Busy ? preview.data.running : null);
   return (
     <Modal
       opened={opened}
@@ -281,6 +313,10 @@ function RunModal({
             setRunId(started.id);
           }}
         />
+      ) : preview.isError ? (
+        <Text size="sm" c="red">
+          {preview.error.message}
+        </Text>
       ) : (
         <Loader size="sm" />
       )}
@@ -299,6 +335,11 @@ function History({
   if (runs.length === 0) return null;
   return (
     <Stack gap={2} data-testid="live-runs">
+      {stop.isError ? (
+        <Text size="xs" c="red">
+          {stop.error.message}
+        </Text>
+      ) : null}
       {runs.map((r) => (
         <Group key={r.id} gap="xs" wrap="nowrap" align="baseline">
           <Text size="xs" c="dimmed">
@@ -316,7 +357,7 @@ function History({
               ? '; the work in your containers may still be running'
               : ''}
           </Text>
-          {r.state === EvalLiveRunState.Running && stop.isSuccess && stop.variables === r.id ? (
+          {r.state === EvalLiveRunState.Running && (r.stopping || stop.variables === r.id) ? (
             <Text size="xs" c="dimmed">
               Stopping
             </Text>
@@ -376,6 +417,8 @@ export function LiveRunControls({
       </Stack>
     );
   }
+  // No Run until the daemon has said the suite may have one.
+  if (preview.data === undefined) return null;
   return (
     <Stack gap="xs" align="flex-start">
       <Button
