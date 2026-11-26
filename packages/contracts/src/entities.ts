@@ -763,6 +763,13 @@ export const ProjectDto = z.object({
    * sandbox in the project's folder; null when the builder runs the dev server.
    */
   previewCommand: z.string().nullable(),
+  /**
+   * Brings the project's dev stack up (Ampsio's `make up`): run once by 10db, in the project's folder
+   * under the gate's sandbox with Docker allowed, when a picture or the dev login finds nothing
+   * answering at the app address. It is expected to return once the stack is started; null when the
+   * builder keeps the stack up.
+   */
+  appStartCommand: z.string().nullable(),
   /** The viewports and themes each page's pictures are taken in. */
   screens: ScreensMatrix,
   /** Page names the builder left out of a Workbench rebuild: the setup never counts them as new. */
@@ -826,6 +833,8 @@ export const ProjectPatch = z
     devLoginCommand: ProjectCommand.nullable(),
     /** Run under the gate's sandbox while a pass is open; blank or null forgets it. */
     previewCommand: ProjectCommand.nullable(),
+    /** Run once, under the gate's sandbox with Docker allowed, when the app address is down; blank or null forgets it. */
+    appStartCommand: ProjectCommand.nullable(),
     screens: ScreensMatrix,
     /** Replaces the page names left out of a rebuild. */
     leftOutPages: z.array(AreaName).max(200),

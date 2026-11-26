@@ -22,6 +22,7 @@ import {
 } from '../folders';
 import type { Git } from '../git';
 import type { ReadRepoFile } from '../trust';
+import { suggestAppStart } from './app-start-suggestion';
 import { callsDocker, MAX_DOCKER_SCAN_BYTES, originBaseCommit } from './docker-need';
 import type { ListenerReader } from './listening-ports';
 import type { AddressProbe } from './loopback-probe';
@@ -65,6 +66,7 @@ export type SettingsProject = Pick<
   | 'gateCommand'
   | 'appUrl'
   | 'devLoginCommand'
+  | 'appStartCommand'
   | 'changedCheckCommand'
   | 'sandboxDocker'
   | 'sandboxDockerOptOut'
@@ -235,7 +237,7 @@ async function docker(
 
 /**
  * What the Workbench setup suggests besides areas: the settings the project lacks, in the order the
- * screen lists them (app address, dev login, turn check, Allow Docker). A setting the project has is never suggested. Files are read from `origin/<base>`'s commit; with no
+ * screen lists them (app address, dev login, app start, turn check, Allow Docker). A setting the project has is never suggested. Files are read from `origin/<base>`'s commit; with no
  * such ref they are read from HEAD, and then no dev login is suggested, since a model would write it
  * from lines a lane may have committed. The UI package is the one holding `pageGlobs` (the proposed
  * pages) and the project's page areas. A part that fails is left out; the rest stands.
@@ -280,6 +282,8 @@ export async function suggestSettings(
       ? devLogin(deps, project, files, packages, read, signal).catch(() => null)
       : null,
   ]);
+  const start =
+    project.appStartCommand === null ? await suggestAppStart(files, read).catch(() => null) : null;
   const found =
     project.changedCheckCommand === null && uiUnit !== null
       ? changedCheckFor(
@@ -303,7 +307,7 @@ export async function suggestSettings(
     savedCheck: project.changedCheckCommand,
     checkScripts: tracking === null ? [] : (found?.scripts ?? []),
   });
-  const settings = [address, login, check, dockerRow].filter(
+  const settings = [address, login, start, check, dockerRow].filter(
     (s): s is SettingSuggestion => s !== null,
   );
   return { settings };
