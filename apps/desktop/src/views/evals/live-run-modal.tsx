@@ -112,7 +112,7 @@ function RunView({
 }) {
   const stop = useStopEvalLive(projectId);
   const running = run.state === EvalLiveRunState.Running;
-  const stopping = run.stopping || stop.isPending;
+  const stopping = run.stopping || stop.isPending || stop.isSuccess;
   return (
     <Stack gap="sm" data-testid="live-run">
       <Text size="xs" c="dimmed">
