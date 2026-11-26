@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
 import { serve, type WebSocketServerLike } from '@hono/node-server';
 import { WebSocketServer } from 'ws';
@@ -13,28 +12,6 @@ export interface ShareListener {
 export type ShareListenResult =
   | { readonly ok: true; readonly listener: ShareListener }
   | { readonly ok: false; readonly holder: string | null };
-
-const LSOF_TIMEOUT_MS = 3_000;
-
-/** `"<command> (pid <n>)"` for the process listening on a loopback port, or null when none is found. */
-export function lsofHolderOf(port: number): Promise<string | null> {
-  return new Promise((resolve) => {
-    execFile(
-      'lsof',
-      ['-nP', `-iTCP:${String(port)}`, '-sTCP:LISTEN', '-Fpc'],
-      { timeout: LSOF_TIMEOUT_MS, env: { PATH: process.env['PATH'] ?? '' } },
-      (error, stdout) => {
-        if (error) {
-          resolve(null);
-          return;
-        }
-        const pid = /^p(\d+)$/m.exec(stdout)?.[1];
-        const command = /^c(.+)$/m.exec(stdout)?.[1];
-        resolve(pid === undefined || command === undefined ? null : `${command} (pid ${pid})`);
-      },
-    );
-  });
-}
 
 /**
  * A second HTTP server on 127.0.0.1 with its own WebSocket server, answering with the same app as the main

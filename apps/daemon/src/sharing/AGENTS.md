@@ -37,7 +37,9 @@ Shares this Mac's daemon on the builder's tailnet through `tailscale serve`.
   and the same app. Its fetch wrapper (and the main listener's in `start.ts`) marks the **env object in place**
   (`Object.assign(env, { listener })`): `@hono/node-server` reads back a symbol the upgrade helper writes on that very
   object, so a spread copy silently breaks every WebSocket upgrade. `EADDRINUSE` answers `{ ok: false, holder }`,
-  `holder` from `lsofHolderOf` (`"<command> (pid <n>)"`). `start.ts` calls `sharing.start()` unawaited after recovery
+  `holder` from `lsofHolderOf` in `lsof-holder.ts` (`"<command> (pid <n>)"`). That reader checks lsof's `-Fpc`
+  record with zod; malformed output, a failed run or a timeout throws `LsofUnreadableError`, whose message names
+  the failing fields, never their values. `start.ts` logs it and passes `null` ("another process"). `start.ts` calls `sharing.start()` unawaited after recovery
   and `sharing.stop()` first in shutdown.
 
 ## Serve facts
