@@ -1202,6 +1202,18 @@ export function startPictures(deps: PicturesDeps): Pictures {
   function settleCheck(projectId: ProjectId, check: SignInCheckDto): void {
     if (check.state === SignInCheckState.Unchecked) return;
     signIns.set(projectId, { problem: check.problem, at: check.at });
+    // A check that signed in but landed elsewhere failed with no command error: the record says so too.
+    if (check.problem !== null)
+      try {
+        deps.signInReporter.failed(
+          projectId,
+          getProject(db, projectId).devLoginCommand,
+          { problem: check.problem, exitCode: check.exitCode, output: check.output },
+          check.at,
+        );
+      } catch (error) {
+        log.warn({ projectId, err: errorText(error) }, 'a picture sign-in not recorded');
+      }
     reportSignIn({
       projectId,
       problem: check.problem,

@@ -44,6 +44,7 @@ import {
   getChat,
   countBatchesInFlight,
   countWaitingOnCard,
+  listOpenByFoldKeyPrefix,
   listRunningGates,
   isLaneWaitingOnCard,
   getBatch,
@@ -2729,6 +2730,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     usesDocker: (project) => commandCallsDocker(git, project, project.appStartCommand),
   });
   appStart = appStartNow;
+  // The card an earlier build raised for a failed picture sign-in has a fold key nothing closes now.
+  for (const old of listOpenByFoldKeyPrefix(state.db, 'pictures-sign-in:')) inbox.withdraw(old.id);
   pictures = startPictures({
     ensureApp: (projectId, signal) => appStartNow.ensureUp(projectId, signal),
     onNoAnswer: (projectId) => {

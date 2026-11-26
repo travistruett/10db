@@ -32,11 +32,10 @@
   failed, or the pictures browser is refused. Slack says the same once per task, in the channel, when the project
   shares pictures.
 - **A failed picture sign-in reaches the builder.** `pictures/sign-in-record.ts` keeps the latest failure per
-  project (`pictures-sign-in.<projectId>` in `app_settings`) and raises one Inbox card per project, "Pictures
-  Cannot Sign In", naming the dev login command, its exit code and the last eight lines of its output with every
-  line that holds the app's address or matches a secret pattern removed (the login prints its token there). A
-  sign-in that succeeds, or a change of the project's app address or dev login command, clears the record and
-  withdraws the card.
+  project (`pictures-sign-in.<projectId>` in `app_settings`); a sign-in that succeeds, or a change of the project's
+  app address or dev login command, clears it. The builder's one Inbox card per project, "<project>'s pictures
+  can't sign in" (`inbox/sign-in-card.ts`), names the exit code and the last twelve lines of the command's output
+  with every address, query string and secret masked (the login prints its token there).
 - **An account whose Linear sign-in only its agent holds** (a Codex login, a claude.ai connector) gives 10db no
   header to upload with, so its `ended` comment says the pictures are in 10db and why they are not here, once. A
   follow-up closes that gap.
