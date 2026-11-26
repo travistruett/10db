@@ -76,6 +76,10 @@ export const EventType = {
   StakeholderSendChanged: 'stakeholder_send.changed',
   LinearPostChanged: 'linear_post.changed',
   SlackConnectionChanged: 'slack.connection.changed',
+  /** A device paired, was used or was revoked (`DeviceChangedData`); `entityType: 'device'`. */
+  DeviceChanged: 'device.changed',
+  /** Sharing this Mac changed state; `entityType: 'sharing'`, `entityId: 'this_mac'`, data `{ state: SharingState }`. */
+  SharingChanged: 'sharing.changed',
   StakeholderTimersChanged: 'stakeholder_timers.changed',
   /** A question card was triaged (`InboxTriagedData`). */
   InboxTriaged: 'inbox.triaged',
