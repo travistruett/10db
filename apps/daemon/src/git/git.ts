@@ -1257,8 +1257,8 @@ export const OVER_BUDGET_REFUSAL =
   'the source is over what one read may take: page code is not read';
 /** Said when `surveyTexts` can't read the repository's config to tell. */
 const UNREAD_CONFIG_REFUSAL = "the repository's config could not be read: page code is not read";
-/** Said when `grepAt` meets a partial clone, or a config it can't read to tell. */
-const GREP_PARTIAL_REFUSAL = 'a partial clone, or one whose config could not be read: not searched';
+/** Said when `grepAt` meets a partial clone. */
+const GREP_PARTIAL_REFUSAL = 'a partial clone: not searched';
 
 export interface GitOptions {
   /** Called with every refusal, so the builder hears of it whoever called. */
@@ -5421,7 +5421,11 @@ export function createGit(opts: GitOptions = {}): Git {
       const at = observed(
         realpathSync((await git(observed(path), ['rev-parse', '--show-toplevel'])).trim()),
       );
-      if ((await partialClone(at)) !== 'whole') return none(GREP_PARTIAL_REFUSAL);
+      const partial = await partialClone(at);
+      // A config read that failed is a failed read, asked again next time; a partial clone is an answer.
+      if (partial === 'unread')
+        throw new GitError(['config'], 'the config could not be read', null);
+      if (partial === 'partial') return none(GREP_PARTIAL_REFUSAL);
       const commit = (
         await git(at, ['rev-parse', '-q', '--verify', `${rev}^{commit}`], {
           answerExitCodes: [1],
