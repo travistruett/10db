@@ -28,6 +28,8 @@ interface Pick {
   /** An area pick's box, in page coordinates, so it follows the scroll. */
   area: PickRect | null;
   note: string;
+  /** Not yet saved once: Cancel takes it back out rather than just closing its note. */
+  fresh: boolean;
   /** The shell took it once: its chip exists, so a refused edit keeps the badge. */
   added: boolean;
 }
@@ -120,21 +122,20 @@ export function startPicker(config: PickerConfig): void {
   function render() {
     ui.pill.classList.toggle('picking', picking);
     ui.pill.classList.toggle('has', picks.length > 0);
-    ui.pillCount.textContent =
-      picks.length === 0
-        ? 'click an element'
-        : `${String(picks.length)} pick${picks.length === 1 ? '' : 's'}`;
+    ui.pillCount.textContent = 'click an element';
     ui.pillSend.textContent = `${String(picks.length)} in ${page ?? '10db'} ›`;
     ui.marks.replaceChildren();
     picks.forEach((pick, index) => {
       boxesOf(pick).forEach((r, i) => {
         const box = document.createElement('div');
-        box.className = pick.kind === PickKind.Element ? 'box' : 'box group';
+        // While a note is open, its pick stands out and the others step back.
+        const focus = open === null ? '' : open === pick ? ' active' : ' dim';
+        box.className = `${pick.kind === PickKind.Element ? 'box' : 'box group'}${focus}`;
         place(box, r);
         ui.marks.appendChild(box);
         if (i > 0) return;
         const badge = document.createElement('div');
-        badge.className = 'badge';
+        badge.className = open === null || open === pick ? 'badge' : 'badge dim';
         badge.dataset['pick'] = pick.id;
         badge.textContent = String(index + 1);
         badge.style.left = `${String(r.x)}px`;
@@ -154,8 +155,16 @@ export function startPicker(config: PickerConfig): void {
       first?.source == null ? '' : ` · ${first.source.file}:${String(first.source.line)}`;
     const name = first?.component ?? first?.tag ?? '';
     return pick.elements.length > 1
-      ? `${String(pick.elements.length)} elements · ${name}`
+      ? `${name}${where} and ${String(pick.elements.length - 1)} more`
       : `${name}${where}`;
+  }
+
+  /** Says whom the note is for: this one pick, or every element ⇧-clicked into it. */
+  function scopeLine(pick: Pick): string {
+    if (pick.area !== null) return 'One note for this area';
+    if (pick.elements.length > 1)
+      return `One note for these ${String(pick.elements.length)} elements`;
+    return 'Note for this element only';
   }
 
   function openNote(pick: Pick) {
@@ -169,10 +178,13 @@ export function startPicker(config: PickerConfig): void {
       top = anchor.y + anchor.height + 8;
       if (top + 170 > window.innerHeight) top = anchor.y - 168;
     }
-    ui.note.style.left = `${String(Math.max(8, left))}px`;
-    ui.note.style.top = `${String(Math.max(8, top))}px`;
     ui.note.style.display = 'block';
+    // Kept inside the window, measured once it is drawn.
+    const bottom = window.innerHeight - ui.note.offsetHeight - 8;
+    ui.note.style.left = `${String(Math.max(8, left))}px`;
+    ui.note.style.top = `${String(Math.max(8, Math.min(top, bottom)))}px`;
     ui.noteNumber.textContent = String(picks.indexOf(pick) + 1);
+    ui.noteScope.textContent = scopeLine(pick);
     ui.noteSource.textContent = sourceLine(pick, null);
     const first = pick.elements[0];
     const lookup = first === undefined ? undefined : pick.described.get(first);
@@ -180,17 +192,21 @@ export function startPicker(config: PickerConfig): void {
       if (open === pick) ui.noteSource.textContent = sourceLine(pick, d);
     });
     ui.noteText.value = pick.note;
+    ui.noteRemove.style.display = pick.fresh ? 'none' : '';
     ui.noteText.focus();
     ui.hover.style.display = 'none';
+    render();
   }
 
   function closeNote() {
     const pick = open;
     if (pick === null) return;
     pick.note = ui.noteText.value.trim();
+    pick.fresh = false;
     open = null;
     ui.note.style.display = 'none';
     ui.note.classList.remove('faded');
+    render();
     void send(pick);
   }
 
@@ -249,6 +265,27 @@ export function startPicker(config: PickerConfig): void {
     render();
   }
 
+  /** Cancel: a pick just made goes back out; a reopened one keeps its note as it was. */
+  function cancelNote() {
+    const pick = open;
+    if (pick === null) return;
+    if (pick.fresh) {
+      remove(pick);
+      return;
+    }
+    open = null;
+    ui.note.style.display = 'none';
+    ui.note.classList.remove('faded');
+    render();
+  }
+
+  /** Removing the pick whose note was open moves the note to the newest pick left, so it never just vanishes. */
+  function removeAndReopen(pick: Pick, wasOpen: boolean) {
+    remove(pick);
+    const next = picks[picks.length - 1];
+    if (wasOpen && next !== undefined) openNote(next);
+  }
+
   function track(pick: Pick, element: Element) {
     pick.elements.push(element);
     pick.described.set(element, describe(element, config.repoPath));
@@ -262,12 +299,12 @@ export function startPicker(config: PickerConfig): void {
   }
 
   /** A click toggles: ⇧ takes a member out of the group, and a plain click unpicks an element with no note. */
-  function pickElement(element: Element, shift: boolean) {
+  function pickElement(element: Element, shift: boolean, wasOpen: Pick | null) {
     const newest = picks[picks.length - 1];
     if (shift && newest !== undefined) {
       if (newest.area === null && newest.elements.includes(element)) {
         if (newest.elements.length === 1) {
-          remove(newest);
+          removeAndReopen(newest, wasOpen === newest);
           return;
         }
         untrack(newest, element);
@@ -283,7 +320,8 @@ export function startPicker(config: PickerConfig): void {
     const holder = picks.find((p) => p.area === null && p.elements.includes(element));
     if (holder !== undefined) {
       // A note is never lost to a stray click: the pick opens instead.
-      if (holder.note === '' && holder.elements.length === 1) remove(holder);
+      if (holder.note === '' && holder.elements.length === 1)
+        removeAndReopen(holder, wasOpen === holder);
       else openNote(holder);
       render();
       return;
@@ -300,6 +338,7 @@ export function startPicker(config: PickerConfig): void {
       area: null,
       note: '',
       added: false,
+      fresh: true,
     };
     track(pick, element);
     picks.push(pick);
@@ -338,6 +377,7 @@ export function startPicker(config: PickerConfig): void {
       area: { ...box, x: box.x + window.scrollX, y: box.y + window.scrollY },
       note: '',
       added: false,
+      fresh: true,
     };
     for (const element of outermost.slice(0, PAGE_PICK_ELEMENTS_MAX)) track(pick, element);
     picks.push(pick);
@@ -417,9 +457,10 @@ export function startPicker(config: PickerConfig): void {
       ui.marquee.style.display = 'none';
       event.preventDefault();
       event.stopPropagation();
+      const wasOpen = open;
       if (open !== null && !started.shift) closeNote();
       if (started.moved) pickArea(started.x, started.y, event.clientX, event.clientY);
-      else if (started.target !== null) pickElement(started.target, started.shift);
+      else if (started.target !== null) pickElement(started.target, started.shift, wasOpen);
     },
     true,
   );
@@ -447,7 +488,7 @@ export function startPicker(config: PickerConfig): void {
       if (event.key === 'Escape' && open !== null) {
         event.preventDefault();
         event.stopPropagation();
-        closeNote();
+        cancelNote();
         return;
       }
       if (event.key === 'Escape' && picking) {
@@ -479,7 +520,7 @@ export function startPicker(config: PickerConfig): void {
     }
     if (event.key === 'Escape') {
       event.preventDefault();
-      closeNote();
+      cancelNote();
     }
   });
   if (!channel.available()) ui.noteDictate.style.display = 'none';
@@ -494,7 +535,12 @@ export function startPicker(config: PickerConfig): void {
     });
   });
   ui.noteRemove.addEventListener('click', () => {
-    if (open !== null) remove(open);
+    if (open !== null) removeAndReopen(open, true);
+  });
+  ui.noteCancel.addEventListener('click', cancelNote);
+  ui.noteSave.addEventListener('click', closeNote);
+  ui.pillClear.addEventListener('click', () => {
+    for (const pick of [...picks]) remove(pick);
   });
   ui.pillMark.addEventListener('click', () => {
     setPicking(!picking);

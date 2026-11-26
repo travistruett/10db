@@ -17,6 +17,8 @@ const STYLE = `
 .tag em { color: #41c7b9; font-style: normal; } .tag i { color: #72898f; font-style: normal; }
 .box { position: fixed; border: 2px solid #f275be; border-radius: 3px; background: rgba(242,117,190,.08); }
 .box.group { border-style: dashed; }
+.box.active { background: rgba(242,117,190,.18); box-shadow: 0 0 0 1px #f275be; }
+.box.dim, .badge.dim { opacity: .3; }
 .badge { position: fixed; transform: translate(-50%,-50%); min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px;
   background: #f275be; color: #103c48; font: 600 11px/20px -apple-system, system-ui, sans-serif; text-align: center;
   box-shadow: 0 1px 4px rgba(0,0,0,.35); pointer-events: auto; cursor: pointer; }
@@ -28,11 +30,17 @@ const STYLE = `
 .note.faded { opacity: .2; pointer-events: none; }
 .head { display: flex; gap: 6px; align-items: center; font-size: 11.5px; margin-bottom: 6px; min-width: 0; }
 .n { background: #f275be; color: #103c48; border-radius: 9px; padding: 0 6px; font-weight: 600; flex: none; }
-.head code { font: 11px ui-monospace, Menlo, monospace; color: #41c7b9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scope { color: #cad8d9; font-weight: 600; }
+.src { display: block; font: 11px ui-monospace, Menlo, monospace; color: #41c7b9; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; margin: -2px 0 6px; }
 textarea { width: 100%; min-height: 88px; resize: none; background: #184956; color: #cad8d9; border: 1px solid #2d5b69;
   border-radius: 7px; padding: 7px 8px; font: 13px/1.4 -apple-system, system-ui, sans-serif; outline: none; }
 textarea:focus { border-color: #4695f7; }
-.foot { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: #72898f; }
+.foot { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 11px; color: #72898f; }
+.quiet { background: none; border: 0; color: #72898f; font-size: 11.5px; padding: 3px 4px; }
+.quiet:hover { color: #cad8d9; }
+.save { background: #f275be; color: #103c48; border: 0; border-radius: 6px; padding: 4px 12px; font-size: 12px; font-weight: 600; }
+.save:hover { background: #f58bca; }
 .grow { flex: 1; }
 button { font: inherit; cursor: pointer; }
 .ghost { background: #184956; color: #adbcbc; border: 1px solid #2d5b69; border-radius: 6px; padding: 3px 7px; font-size: 11.5px; }
@@ -60,6 +68,11 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; background: #184956; border: 
 .send { display: none; background: #f275be; color: #103c48; border: 0; height: 26px; border-radius: 13px; padding: 0 11px;
   font-weight: 600; font-size: 12px; margin-right: 5px; }
 .has .send { display: inline-block; }
+.has .sep, .has .count { display: none; }
+.clear { display: none; background: none; border: 0; color: #72898f; height: 26px; padding: 0 6px; font-size: 12px; }
+.clear:hover { color: #cad8d9; }
+.has .clear { display: inline-block; }
+.pill:not(.picking) .clear { color: #103c48; }
 .exit { display: none; width: 26px; height: 26px; border-radius: 13px; margin-right: 5px; background: none; border: 0;
   color: #72898f; place-items: center; padding: 0; }
 .exit:hover { background: #184956; color: #cad8d9; }
@@ -92,16 +105,20 @@ export interface Overlay {
   readonly marks: HTMLElement;
   readonly note: HTMLElement;
   readonly noteNumber: HTMLElement;
+  readonly noteScope: HTMLElement;
   readonly noteSource: HTMLElement;
   readonly noteText: HTMLTextAreaElement;
   readonly noteDictate: HTMLButtonElement;
   readonly noteRemove: HTMLButtonElement;
+  readonly noteCancel: HTMLButtonElement;
+  readonly noteSave: HTMLButtonElement;
   readonly pill: HTMLElement;
   readonly pillMark: HTMLButtonElement;
   readonly pillStart: HTMLButtonElement;
   readonly pillExit: HTMLButtonElement;
   readonly pillCount: HTMLElement;
   readonly pillSend: HTMLButtonElement;
+  readonly pillClear: HTMLButtonElement;
   readonly notice: HTMLElement;
 }
 
@@ -120,19 +137,24 @@ export function createOverlay(): Overlay {
   const note = el('div', 'note', layer);
   const head = el('div', 'head', note);
   const noteNumber = el('span', 'n', head);
-  const noteSource = el('code', '', head);
+  const noteScope = el('span', 'scope', head);
+  const noteSource = el('code', 'src', note);
   const noteText = el('textarea', '', note);
   noteText.placeholder = 'What should change?';
   noteText.setAttribute('aria-label', 'Note for this pick');
   const foot = el('div', 'foot', note);
-  foot.innerHTML =
-    '<span><kbd>↩</kbd> save</span><span><kbd>⇧↩</kbd> line</span><span><kbd>esc</kbd> no note</span><span class="grow"></span>';
+  const noteCancel = el('button', 'quiet', foot);
+  noteCancel.textContent = 'Cancel';
+  const noteRemove = el('button', 'quiet', foot);
+  noteRemove.textContent = 'Remove';
+  el('span', 'grow', foot);
   const noteDictate = el('button', 'ghost mic', foot);
   noteDictate.innerHTML = MIC;
   noteDictate.title = 'Dictate';
   noteDictate.setAttribute('aria-label', 'Dictate');
-  const noteRemove = el('button', 'ghost', foot);
-  noteRemove.textContent = 'Remove';
+  const noteSave = el('button', 'save', foot);
+  noteSave.textContent = 'Save';
+  noteSave.title = 'Save (↩)';
   const pill = el('div', 'pill', root);
   const pillMark = el('button', 'mark', pill);
   pillMark.innerHTML = MARK;
@@ -146,6 +168,9 @@ export function createOverlay(): Overlay {
   el('span', 'sep', mode);
   const pillCount = el('span', 'count', mode);
   const pillSend = el('button', 'send', pill);
+  const pillClear = el('button', 'clear', pill);
+  pillClear.textContent = 'Clear';
+  pillClear.title = 'Remove every pick';
   const pillExit = el('button', 'exit', pill);
   pillExit.innerHTML = CLOSE;
   pillExit.title = 'Stop picking (esc)';
@@ -160,16 +185,20 @@ export function createOverlay(): Overlay {
     marks,
     note,
     noteNumber,
+    noteScope,
     noteSource,
     noteText,
     noteDictate,
     noteRemove,
+    noteCancel,
+    noteSave,
     pill,
     pillMark,
     pillStart,
     pillExit,
     pillCount,
     pillSend,
+    pillClear,
     notice,
   };
 }
