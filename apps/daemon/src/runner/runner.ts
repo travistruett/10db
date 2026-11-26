@@ -1706,6 +1706,12 @@ export function createRunner(opts: RunnerOptions): Runner {
         watchpoints,
         head,
         sources: [WATCHPOINT_HIT_SOURCES, [evalDefinitionSource(evalDefinitionSuites(row))]].flat(),
+        onLinesUnread: (keys) => {
+          opts.logger.warn(
+            { workstreamId: id, watchpoints: keys },
+            'the line patterns of these watchpoints did not finish; no line was cleared',
+          );
+        },
         read: (only, maxBytes) =>
           diffOfRanges(opts.git, checkout, ranges, maxBytes, only === null ? undefined : { only }),
       });

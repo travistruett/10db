@@ -18,6 +18,7 @@ for (const name of [
   'builder-mcp.mjs',
   'builder-mcp.mjs.map',
   'extract-worker.mjs',
+  'line-worker.mjs',
   'vendor',
   'drizzle',
   'harness',
@@ -68,6 +69,13 @@ await build({
   banner: {},
   entryPoints: [resolve(root, 'src/conversation/extract-worker.ts')],
   outfile: resolve(outDir, 'extract-worker.mjs'),
+});
+// The watchpoint line patterns run in a worker thread under a deadline: a pattern can backtrack for as long as it likes.
+await build({
+  ...bundle,
+  banner: {},
+  entryPoints: [resolve(root, 'src/watchpoints/line-worker.ts')],
+  outfile: resolve(outDir, 'line-worker.mjs'),
 });
 // srt's command line, which runs every gate under the sandbox: the app carries its own copy.
 await build({

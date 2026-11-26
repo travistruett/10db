@@ -9,7 +9,8 @@
         "scripts/*.ts",
         "test/fake-srt.ts",
         "src/builder-mcp.ts",
-        "src/conversation/extract-worker.ts"
+        "src/conversation/extract-worker.ts",
+        "src/watchpoints/line-worker.ts"
       ],
       "ignoreDependencies": ["@anthropic-ai/sandbox-runtime"]
     },

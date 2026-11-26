@@ -12,6 +12,8 @@ import {
   type WatchpointFileHit,
 } from '@10db/contracts';
 import { evalDefinitionSource } from './eval-definition-source';
+import { lineChecks } from './covers';
+import { runChecks } from './line-verdicts';
 import { matchWatchpoints } from './match';
 import { splitPatch } from './split-patch';
 
@@ -89,7 +91,9 @@ describe('matchWatchpoints with line patterns', () => {
     ].join('\n') + '\n';
   const lined = watchpoint('lined', ['src/**'], { lines: ['\\bfoo\\b'] });
   const hitPaths = (files: WatchpointFileHit[], w: Watchpoint = lined) =>
-    matchWatchpoints(files, [w]).flatMap((h) => h.files.map((f) => f.path));
+    matchWatchpoints(files, [w], runChecks(lineChecks(files, [w]))).flatMap((h) =>
+      h.files.map((f) => f.path),
+    );
 
   it('hits on a matching added or removed line, in any case', () => {
     expect(hitPaths([file('src/a.ts', { patch: patch('src/a.ts', ['+let FOO = 1;']) })])).toEqual([
@@ -138,6 +142,20 @@ describe('matchWatchpoints with line patterns', () => {
     expect(hitPaths([file('src/f.ts', { patch: patch('src/f.ts', ['+bar']) })], asking)).toEqual(
       [],
     );
+  });
+
+  it('reads CRLF lines to their end, and fails closed on a cut line or an unanswered pattern', () => {
+    const ends = watchpoint('ends', ['src/**'], { lines: ['foo$'] });
+    const crlf = file('src/g.ts', { patch: patch('src/g.ts', ['+let foo\r']) });
+    expect(hitPaths([crlf], ends)).toEqual(['src/g.ts']);
+    const asking = { ...lined, loudness: WatchpointLoudness.Ask };
+    const long = file('src/h.ts', { patch: patch('src/h.ts', [`+${'x'.repeat(2500)}`]) });
+    expect(hitPaths([long], asking)).toEqual(['src/h.ts']);
+    expect(hitPaths([long])).toEqual([]);
+    const plain = file('src/i.ts', { patch: patch('src/i.ts', ['+bar']) });
+    // No verdict at all, as when the worker timed out: ask counts the file, show does not.
+    expect(matchWatchpoints([plain], [asking]).length).toBe(1);
+    expect(matchWatchpoints([plain], [lined])).toEqual([]);
   });
 
   it('reads a stored watchpoint with no lines as having none', () => {
@@ -300,7 +318,7 @@ describe('evalDefinitionSource', () => {
         ['tests/llm/cases.jsonl', 'cases'],
       ]),
     );
-    const hits = source([file('evals/gate.py'), file('tests/llm/cases.jsonl')], [evals]);
+    const hits = source([file('evals/gate.py'), file('tests/llm/cases.jsonl')], [evals], new Map());
     expect(hits).toHaveLength(1);
     expect(hits[0]?.files.map((f) => f.path)).toEqual(['evals/gate.py', 'tests/llm/cases.jsonl']);
   });
