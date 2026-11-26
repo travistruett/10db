@@ -21,7 +21,15 @@ share listener. It reaches only what a paired device may (`api/auth-matrix.ts`).
   views draw into the same `FrameSlotsContext`. A view's panel (the Inbox's list) is a sheet that shows first; picking
   a row closes it. The routes keep the window's ids (`/inbox`, `/factory`, `/settings/$section`) so views that read
   `from: '/inbox'` work. An address the phone lacks says it is in the window.
-- Factory is `FactoryGlance`: the window's five figures, read-only. Settings is `ThisDevice`: Forget This Device
-  revokes the stored device id through `DELETE /devices/:deviceId`, then clears the token. The notification switch is
-  present and off until push exists.
-- `sw.js` keeps the page and `assets/` for no signal and never caches a daemon answer.
+- Factory is `FactoryGlance`: the window's five figures, read-only, counting Workbench passes as the window does
+  (`views/factory/live-passes.ts`). A seeded card with no task is not a run, so "need you" can read 0 beside an
+  Inbox of cards: that is the window's number too. Settings is `ThisDevice`: Forget This Device calls
+  `DELETE /devices/me`, then clears the token.
+- Push (`push-subscription.ts`, the switch on This Device): permission, then `GET /push/key`,
+  `pushManager.subscribe`, `PUT /devices/me/push`; off deletes both. It needs the worker (`getRegistration`), so it
+  reads "can't show notifications" in a dev page, which registers none.
+- `sw.js` keeps the page and `assets/` for no signal and never caches a daemon answer. A push shows the card's kind
+  and headline only; a tap opens `/app/inbox/<id>`, which the router turns into the Inbox with that card selected
+  (`deep-link.ts` keeps the list sheet from covering it).
+- A failed pairing says why in words (`pairingFailureText`), never a status number: 401 the code didn't work, 429
+  too many tries, anything else the phone can't reach the Mac.

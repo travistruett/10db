@@ -13,6 +13,7 @@ import { FrameSlotsContext, type FrameSlots } from '../shell/frame-slots';
 import { ReconnectingIndicator } from '../shell/reconnecting-indicator';
 import { UnsavedGuardProvider } from '../shell/unsaved-guard';
 import { useOpenInboxCount } from '../views/inbox/inbox-count';
+import { takeDirectCard } from './deep-link';
 import classes from './served-frame.module.css';
 
 /** The phone's three places, in the bottom bar. */
@@ -63,7 +64,7 @@ export function ServedFrame() {
   // A view's list shows first, so the phone opens on what is waiting; picking a row closes it.
   const registerPanel = useCallback(() => {
     setHasPanel(true);
-    setSheetOpen(true);
+    setSheetOpen(!takeDirectCard());
     return () => {
       setHasPanel(false);
       setSheetOpen(false);

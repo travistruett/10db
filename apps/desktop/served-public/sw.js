@@ -46,3 +46,49 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
+
+// What a lock screen may show: the card's kind and its headline (the daemon sends nothing else).
+const KIND_TITLES = {
+  question: 'A question needs you',
+  permission: 'A permission needs you',
+  proposal: 'A proposal needs you',
+  review: 'A review needs you',
+  flag: 'Something needs a look',
+  check: 'A check needs you',
+  plan: 'A plan needs you',
+};
+const CARD_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+self.addEventListener('push', (event) => {
+  let payload = null;
+  try {
+    payload = event.data ? event.data.json() : null;
+  } catch {
+    payload = null;
+  }
+  const kind = payload && typeof payload.kind === 'string' ? payload.kind : '';
+  const headline = payload && typeof payload.headline === 'string' ? payload.headline : '';
+  const id = payload && typeof payload.inboxItemId === 'string' ? payload.inboxItemId : '';
+  event.waitUntil(
+    self.registration.showNotification(KIND_TITLES[kind] ?? 'Something needs you', {
+      body: headline,
+      icon: '/app/icons/icon-192.png',
+      // One notification per card: a second push for the same card replaces the first.
+      tag: CARD_ID.test(id) ? id : 'tendb',
+      data: { id: CARD_ID.test(id) ? id : null },
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const id = event.notification.data && event.notification.data.id;
+  const target = id ? `/app/inbox/${id}` : '/app/inbox';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((w) => new URL(w.url).pathname.startsWith('/app/'));
+      if (open) return open.navigate(target).then((w) => w && w.focus());
+      return self.clients.openWindow(target);
+    }),
+  );
+});

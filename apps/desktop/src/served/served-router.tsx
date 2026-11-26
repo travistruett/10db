@@ -9,8 +9,10 @@ import {
 import { Stack, Text } from '@mantine/core';
 import { ViewBoundary } from '../shell/view-boundary';
 import { AppError } from '../shell/app-error';
-import { inboxSearch } from '../views/inbox/inbox-search';
+import { InboxItemId, InboxListState } from '@10db/contracts';
+import { inboxSearch, rememberSelected } from '../views/inbox/inbox-search';
 import { InboxView } from '../views/inbox/inbox-view';
+import { openCardDirectly } from './deep-link';
 import { FactoryGlance } from './factory-glance';
 import { ServedFrame } from './served-frame';
 import { ThisDevice } from './this-device';
@@ -52,6 +54,21 @@ const inboxRoute = createRoute({
   ),
 });
 
+// A notification's tap: `/app/inbox/<id>` shows that card, in the Inbox as it would open on it.
+const inboxCardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/inbox/$id',
+  beforeLoad: ({ params }) => {
+    const id = InboxItemId.safeParse(params.id);
+    if (id.success) {
+      rememberSelected(InboxListState.Open, id.data);
+      openCardDirectly(id.data);
+    }
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
+    throw redirect({ to: '/inbox' });
+  },
+});
+
 const factoryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/factory',
@@ -73,7 +90,13 @@ const settingsRoute = createRoute({
   ),
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, inboxRoute, factoryRoute, settingsRoute]);
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  inboxRoute,
+  inboxCardRoute,
+  factoryRoute,
+  settingsRoute,
+]);
 
 /** The phone's router, under `/app`, where the daemon serves it. */
 export function createServedRouter(history?: RouterHistory) {

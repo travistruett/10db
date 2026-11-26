@@ -1,5 +1,5 @@
 import { DevicePlatform, PairResponse, type PairRequest } from '@10db/contracts';
-import { createAnonymousDaemonClient, readJson } from '../daemon/client';
+import { createAnonymousDaemonClient, DaemonRequestError, readJson } from '../daemon/client';
 import { saveDevice } from './device-session';
 
 let taken: { readonly code: string | null } | null = null;
@@ -31,4 +31,13 @@ export async function pairWithThisHost(input: PairRequest): Promise<string> {
   const paired = await readJson(await client.devices.pair.$post({ json: input }), PairResponse);
   saveDevice({ deviceId: paired.deviceId, token: paired.token, host: paired.host.name });
   return paired.host.name;
+}
+
+/** What the pair page tells the builder when pairing failed, never a status number. */
+export function pairingFailureText(error: unknown): string {
+  if (error instanceof DaemonRequestError) {
+    if (error.status === 401) return "That code didn't work. Make a new one on your Mac.";
+    if (error.status === 429) return 'Too many tries. Wait a minute, then try again.';
+  }
+  return "This phone can't reach your Mac. Check that Tailscale is on.";
 }

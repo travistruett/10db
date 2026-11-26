@@ -26,6 +26,14 @@ cheapest rung that catches it, or into the flow it broke.
 | 10  | A setting that changes behavior               | A rigor's process edited in Settings changes the row and resets; the hosts a project's sandbox may reach are added, refused for localhost and removed. `project-trust.spec.ts` adds that a project's Trust lists what each switch brings, adds a Production entry the repo suggests and turns a repo MCP server On through its confirm, and that Evals reads the same repository: a committed gate report is a suite whose failing model names its gate, and its drawer opens.                                                                                                                                                                                        | `process-per-rigor.spec.ts` (the first test), `network-hosts.spec.ts`, `project-trust.spec.ts` |
 | 11  | A question routed to someone outside Slack    | A question card is routed from its card, the table shows the route and the Board says the task waits on that person; a question the person asked back reaches the Inbox with its reply box off while Slack is off, and answering the card closes it.                                                                                                                                                                                                                                                                                                                                                                                                                  | `stakeholder-questions.spec.ts`                                                                |
 
+`inbox.spec.ts` ends with a phone: it turns sharing on through a fake Tailscale CLI (`fake-tailscale.mjs`, reached by
+`TENDB_TAILSCALE_CLI`, its serve mapping kept in `test-results/`), puts an HTTPS stand-in for `tailscale serve`
+(`tls-standin.ts`: self-signed, forwards to the share listener with the Host and Origin the daemon allows, upgrades
+included) in front of it, makes a code in Settings › Devices, and in a separate Chromium (`--host-resolver-rules`
+maps `mac.e2e.ts.net`, `ignoreHTTPSErrors`) at 412 x 915 pairs on `/app/pair#code=`, answers a card from the phone's
+Inbox, and checks the Mac's dialog closed and the card is gone. `prepare.ts` builds `dist-app/` first. It stops
+sharing and revokes the device when it ends.
+
 Two specs are not flows. They stay because only a real WebKit can fail them and no cheaper test can:
 `window-csp.spec.ts` (the window's content policy stops an outside image, and a script policy with no eval still
 highlights code) and `see-screen.spec.ts` (the screen a session draws is a real picture, not an empty canvas).

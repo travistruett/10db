@@ -1,6 +1,6 @@
 import { Alert, Button, Center, Loader, Stack, Text, TextInput, Title } from '@mantine/core';
 import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
-import { pairWithThisHost, takeCodeFromAddress, thisPlatform } from './pairing';
+import { pairingFailureText, pairWithThisHost, takeCodeFromAddress, thisPlatform } from './pairing';
 
 /** Chrome's offer to install the page, held until the builder presses Install. */
 interface InstallOffer extends Event {
@@ -37,7 +37,7 @@ export function PairPage() {
       (error: unknown) => {
         setStage({
           kind: 'asking',
-          reason: error instanceof Error ? error.message : 'The code did not work.',
+          reason: pairingFailureText(error),
         });
       },
     );
