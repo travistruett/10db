@@ -91,6 +91,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     projectWatchpoints: () => ({ effective: [], entries: [] }),
     setProjectWatchpoints: none,
     watchpointHits: none,
+    watchpointStats: () => [],
     keepAwake: () => ({ mode: 'while_running', active: false }),
     setKeepAwake: none,
     agentSkill: none,

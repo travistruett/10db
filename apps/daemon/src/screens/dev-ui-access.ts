@@ -71,6 +71,7 @@ export const DEV_UI_READS: readonly string[] = [
   '/settings/keep-awake',
   '/settings/watchpoints',
   '/projects/:projectId/watchpoints',
+  '/projects/:projectId/watchpoints/stats',
   '/settings/agent-skill',
   '/agent-skill',
   '/settings/lane-permissions',
