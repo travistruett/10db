@@ -2267,7 +2267,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   resumeModelMarks({ state, clock });
   // What each task conversation's session streams now; the runner owns those sessions.
   const laneLive = createLiveRegistry();
+  const evalsService = createEvalsService({
+    state,
+    git,
+    logger: logger.child({ module: 'evals' }),
+  });
   const createdRunner = createRunner({
+    evals: evalsService,
     judge,
     gitTools: { git: gitBin, gh: ghBin },
     awaitBeforePicture: (task, signal) => pictures?.awaitBefore(task, signal) ?? Promise.resolve(),
@@ -3131,7 +3137,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     listeners: opts.listeners ?? systemListeners,
     probe: opts.probe ?? loopbackProbe(),
     hazards: hazardAssessor,
-    evals: createEvalsService({ state, git, logger: logger.child({ module: 'evals' }) }),
+    evals: evalsService,
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
       git.gitDirs(repoPath).catch(() => undefined);

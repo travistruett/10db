@@ -18,3 +18,7 @@
   closes, so the drawer is where those calls are run from. Each earlier run of the task that skipped something has a
   section of its own, newest first, with its own Run These Now, since a folded failed card speaks only for the newest. A refusal (a follow-up exists, the run is retried) shows
   under the heading.
+- Eval markers (`eval-marker.tsx`): a card shows one plain text line per eval suite the task's change touched
+  ("<suite> · not run", then passing, failing, regressed or "the eval itself changed"), from
+  `GET /projects/:id/eval-markers`; the drawer's Evals block, after For You, shows the results before and after and the
+  suite's live command, from `GET /tasks/:id/eval-coverage`. Both follow evidence events and refetch on focus.

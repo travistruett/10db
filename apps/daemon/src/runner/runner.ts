@@ -13,6 +13,7 @@ import {
   AcceptanceVerdict,
   EvidenceKind,
   type AcceptanceDetail,
+  type EvalCoverageDetail,
   type WatchpointDetail,
   effectiveWatchpoints,
   type EvidenceDto,
@@ -145,6 +146,7 @@ import {
   listPersonas,
   listSessions,
   listEvidence,
+  newestEvidenceOfKind,
   readProjectWatchpoints,
   readYourWatchpoints,
   listKinds,
@@ -382,7 +384,13 @@ import {
   checkAcceptance,
   raiseAcceptanceCard,
 } from '../acceptance';
-import { readEvalManifest } from '../evals';
+import {
+  coverageLinesOf,
+  matchedSuites,
+  readEvalManifest,
+  snapshotsOf,
+  type EvalsService,
+} from '../evals';
 import {
   agentNotesOf,
   newestWatchpointRow,
@@ -504,6 +512,8 @@ export interface RunnerOptions {
    * start; absent, it isn't.
    */
   readonly migrationsBase?: MigrationsBase;
+  /** Reads the project's eval results, to say what a covered suite last showed before a task; absent, the line says none. */
+  readonly evals?: Pick<EvalsService, 'standing'>;
   readonly clock: Clock;
   /** 10db's judge: asked whether it is ready as each session starts, and for each call it judges. */
   readonly judge: Judge;
@@ -1793,6 +1803,146 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
   }
 
+  /**
+   * The suites of the project's manifest as it stands as a run's first session starts, with the time of the
+   * commit the run branched from: the globs a later edit of the manifest by the run cannot change. Null when
+   * the run already holds one, or no suite names a covered path.
+   */
+  function evalSnapshotAt(row: WorkstreamRow): EvalCoverageDetail | null {
+    if (newestEvidenceOfKind(db, row.id, EvidenceKind.EvalCoverage) !== null) return null;
+    const suites = snapshotsOf(readEvalManifest(db, row.projectId)?.manifest.suites ?? []);
+    if (suites.length === 0) return null;
+    // The run's branch point is when it starts: a result the builder wrote since the base commit landed is
+    // already before the task, whatever the base commit's own time.
+    const baseAt = opts.clock.now().toISOString();
+    return { suites, matched: null, baseAt, headAt: null, skipped: null };
+  }
+
+  /** Records a run's covered-suite snapshot in the write that starts its first session. */
+  function recordEvalSnapshot(
+    ctx: WriteContext,
+    id: WorkstreamId,
+    detail: EvalCoverageDetail | null,
+  ): void {
+    if (detail === null) return;
+    insertEvidence(ctx, {
+      workstreamId: id,
+      kind: EvidenceKind.EvalCoverage,
+      command: null,
+      exitCode: null,
+      summary: `${String(detail.suites.length)} eval suite${detail.suites.length === 1 ? '' : 's'} cover code.`,
+      logPath: null,
+      commitShas: [],
+      detail,
+    });
+  }
+
+  /**
+   * What the run's change touched of the suites it was snapshotted with after its gate passed, to be recorded
+   * in the write that moves the run on. Null when the run holds no snapshot, or it touched nothing and no
+   * earlier reading did. A change that can't be read is a reading with `skipped` set; the run goes on.
+   */
+  async function evalCoverageAfter(
+    id: WorkstreamId,
+    row: WorkstreamRow,
+    checkout: string,
+  ): Promise<EvalCoverageDetail | null> {
+    const held = newestEvidenceOfKind(db, id, EvidenceKind.EvalCoverage);
+    if (held?.kind !== EvidenceKind.EvalCoverage || held.detail.suites.length === 0) return null;
+    const snapshot = held.detail;
+    const touchedBefore = (snapshot.matched?.length ?? 0) > 0;
+    let detail: EvalCoverageDetail;
+    try {
+      const base = getWorkstreamRow(db, id).baseHead;
+      if (base === null) throw new Error('the task has no base to read its changes from');
+      const { head, ranges } = await ownWork(row, checkout, base);
+      const files = new Set(
+        (
+          await Promise.all(
+            ranges.map((r) => opts.git.filesChangedBetween(checkout, r.base, r.head)),
+          )
+        ).flat(),
+      );
+      const matched = matchedSuites([...files], snapshot.suites);
+      const headAt = await opts.git.commitTimeOf(checkout, head).catch(() => null);
+      detail = { ...snapshot, matched, headAt, skipped: null };
+    } catch (error) {
+      opts.logger.warn(
+        { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+        'the changes could not be read for the eval suites; the run goes on',
+      );
+      // An earlier reading of the change stands: a failed read must not retire its marker.
+      detail = {
+        ...snapshot,
+        matched: snapshot.matched ?? [],
+        skipped: 'the changes could not be read',
+      };
+    }
+    return (detail.matched ?? []).length === 0 && !touchedBefore ? null : detail;
+  }
+
+  /** Records an eval coverage reading as the run's newest, in the write that moves the run on. */
+  function recordEvalCoverage(
+    ctx: WriteContext,
+    id: WorkstreamId,
+    detail: EvalCoverageDetail | null,
+  ): void {
+    if (detail === null) return;
+    const names = (detail.matched ?? []).map((m) => m.key);
+    insertEvidence(ctx, {
+      workstreamId: id,
+      kind: EvidenceKind.EvalCoverage,
+      command: null,
+      exitCode: null,
+      summary:
+        detail.skipped !== null
+          ? "Couldn't read this run's changes for the eval suites."
+          : names.length === 0
+            ? 'No eval suite covers this change.'
+            : `Touches ${names.join(', ')}.`,
+      logPath: null,
+      commitShas: [],
+      detail,
+    });
+  }
+
+  /**
+   * Adds what each touched suite last showed before the run, read from the checkout's results, so the card
+   * and the drawer say the same. Failing to read results leaves the line saying none.
+   */
+  async function withLastBefore(
+    row: WorkstreamRow,
+    detail: EvalCoverageDetail | null,
+  ): Promise<EvalCoverageDetail | null> {
+    const matched = detail?.matched ?? [];
+    if (detail === null || matched.length === 0 || opts.evals === undefined) return detail;
+    try {
+      const standing = await opts.evals.standing(
+        getProject(db, row.projectId).repoPath,
+        matched.map((m) => ({ key: m.key, baseAt: detail.baseAt, headAt: null })),
+      );
+      return {
+        ...detail,
+        matched: matched.map((m, i) => {
+          const before = standing[i]?.before ?? null;
+          return {
+            ...m,
+            lastBefore:
+              before === null
+                ? null
+                : `${before.passed ? 'passed' : 'failed'} ${before.at.slice(0, 10)}`,
+          };
+        }),
+      };
+    } catch (error) {
+      opts.logger.warn(
+        { workstreamId: row.id, err: error instanceof Error ? error.message : String(error) },
+        'the eval results could not be read for the run; the line says none',
+      );
+      return detail;
+    }
+  }
+
   function reviewFollows(steps: readonly WorkstreamStep[], at: number): boolean {
     return steps.slice(at + 1).some((s) => s.role === StepRole.Review);
   }
@@ -2741,6 +2891,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
     }
     const baseHead = row.baseHead ?? (await opts.git.head(checkout));
+    const evalSnapshot = evalSnapshotAt(row);
     // The task's cited plan anchors are checked against this base before the pack reads them; a
     // failure leaves them "not checked yet" in the brief and never stops the session.
     await checkTaskAnchors(
@@ -3435,6 +3586,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           baseHead,
           ...(action !== row.nextAction ? { nextAction: action } : {}),
         });
+        recordEvalSnapshot(ctx, id, evalSnapshot);
         // The message the session starts from starts the page's turn, unless one is open.
         if (pass)
           startTurn(ctx, {
@@ -4826,6 +4978,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       projectId: row.projectId,
       taskTitle: getTask(ctx.tx, row.taskId).title,
       ...facts,
+      evalLines: coverageLinesOf(ctx.tx, id),
     });
     if (getWorkstreamRow(ctx.tx, id).state !== S.Verifying)
       transitionWorkstream(ctx, id, { to: S.Verifying, fence, reason: 'steps complete' });
@@ -4853,6 +5006,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
     const step = currentStep(row);
     const watchpoints = await watchpointReadingAfter(id, row, checkout);
+    const evalCoverage = await withLastBefore(row, await evalCoverageAfter(id, row, checkout));
     const forced =
       (await reviewForcedAfter(id, ctl, row, checkout)) ?? watchpointReviewReason(watchpoints);
     const testValue = await testValueFollowUpsAfter(id, ctl, row, checkout, forced);
@@ -4862,6 +5016,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
     opts.state.write((ctx) => {
       recordWatchpointReading(ctx, row, watchpoints);
+      recordEvalCoverage(ctx, id, evalCoverage);
       countFinished(ctx, step);
       // Planned again first: a rigor changed while the session ran decides whether a step follows.
       const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
@@ -4964,6 +5119,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         taskTitle: task.title,
         detail,
         reviewFollows: reviewFollows(plan, current.stepIndex),
+        evalLines: coverageLinesOf(ctx.tx, id),
       });
     if (!sentBack) return false;
     // The fix resumes the step's own session when the rigor fixes in it; otherwise it runs fresh, a rung up.
@@ -5324,6 +5480,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       // The diff is read before the write, which then adds the review it forces.
       // Read first: a watchpoint set to ask forces a review when nothing else does.
       const watchpoints = await watchpointReadingAfter(id, row, checkout);
+      const evalCoverage = await withLastBefore(row, await evalCoverageAfter(id, row, checkout));
       const forced =
         (await reviewForcedAfter(id, ctl, row, checkout)) ?? watchpointReviewReason(watchpoints);
       // With no Review after this step, the judge's flags on the new tests become follow-up tasks.
@@ -5344,6 +5501,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (stopRequested(ctl) === 'shutdown' || acceptance === ACCEPTANCE_STOPPED) return;
       opts.state.write((ctx) => {
         insertEvidence(ctx, evidence);
+        // Before the acceptance card, which names the suites the change touched.
+        recordEvalCoverage(ctx, id, evalCoverage);
         // Planned again first, and the move chosen from those steps: a rigor changed while the gate ran
         // decides whether a Review follows or the work is done.
         const current = withCurrentPlan(ctx.tx, id, ctl.accountId);

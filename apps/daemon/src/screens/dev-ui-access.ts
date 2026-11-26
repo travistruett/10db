@@ -103,6 +103,10 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/system': 'A system check runs commands on the machine.',
   '/github': 'A GitHub status check runs gh on the machine.',
   '/workstreams/:id/changes': "A lane's changes are read by running git in its copy.",
+  '/projects/:projectId/eval-markers':
+    "A task's suites are read from result files in the checkout, which a lane's pass may be writing.",
+  '/tasks/:taskId/eval-coverage':
+    "A task's suites are read from result files in the checkout, which a lane's pass may be writing.",
   '/workstreams/:id/watchpoint-hits':
     "A run's hunks and the agent's notes are text the lane wrote, which the preview's agent-editable code must not read.",
   '/workstreams/:id/skips':
