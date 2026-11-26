@@ -2388,6 +2388,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     inbox,
     waits: queueWaits,
+    held: () => admission.held(),
     clock,
     logger: logger.child({ component: 'stalls' }),
   });
