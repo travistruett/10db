@@ -31,6 +31,7 @@ import { ExternalLink } from '../board/pull-request-link';
 import { BatchCardActions } from './batch-card-actions';
 import { CardOpensLink, cardOpens } from './card-opens-link';
 import { AcceptanceCard } from './acceptance-card';
+import { WatchpointCard } from './watchpoint-card';
 import { CheckCard } from './check-card';
 import { PlanCard } from './plan-card';
 import { isPrecedentCard, PrecedentCard } from './precedent-card';
@@ -215,6 +216,19 @@ export function InboxCard({
   if (item.kind === InboxKind.Acceptance) {
     return (
       <AcceptanceCard
+        item={item}
+        framed={framed}
+        note={sendBackNote}
+        onNote={onSendBackNote}
+        {...(onAnsweredElsewhere === undefined ? {} : { onAnsweredElsewhere })}
+        header={header()}
+      />
+    );
+  }
+
+  if (item.kind === InboxKind.Watchpoint) {
+    return (
+      <WatchpointCard
         item={item}
         framed={framed}
         note={sendBackNote}

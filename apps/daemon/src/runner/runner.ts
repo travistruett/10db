@@ -387,6 +387,8 @@ import {
 import {
   agentNotesOf,
   newestWatchpointRow,
+  announceWatchpointReading,
+  watchpointReviewReason,
   watchpointBuildBrief,
   watchpointHitsAfter,
   watchpointReviewBrief,
@@ -1727,6 +1729,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     detail: WatchpointDetail | null,
   ): void {
     if (detail === null) return;
+    const task = getTask(ctx.tx, getWorkstreamRow(ctx.tx, id).taskId);
+    announceWatchpointReading(ctx, {
+      workstreamId: id,
+      projectId: task.projectId,
+      taskId: task.id,
+      taskTitle: task.title,
+      detail,
+    });
     const files = detail.hits.reduce((n, h) => n + h.files.length, 0);
     insertEvidence(ctx, {
       workstreamId: id,
@@ -2172,8 +2182,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       outcome.kind !== 'parked' &&
       !(outcome.kind === 'stopped' && outcome.reason === 'cancelled')
     ) {
-      // The acceptance card is the builder's to read; the run never waits on it.
-      const open = openItemsForWorkstream(db, id).find((i) => i.kind !== InboxKind.Acceptance);
+      // The acceptance and Look cards are the builder's to read; the run never waits on them.
+      const open = openItemsForWorkstream(db, id).find(
+        (i) => i.kind !== InboxKind.Acceptance && i.kind !== InboxKind.Watchpoint,
+      );
       if (open) {
         park(id, ctl.fence, open.id, outcome.providerSessionId);
         return;
@@ -4822,9 +4834,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       return;
     }
     const step = currentStep(row);
-    const forced = await reviewForcedAfter(id, ctl, row, checkout);
-    const testValue = await testValueFollowUpsAfter(id, ctl, row, checkout, forced);
     const watchpoints = await watchpointReadingAfter(id, row, checkout);
+    const forced =
+      (await reviewForcedAfter(id, ctl, row, checkout)) ?? watchpointReviewReason(watchpoints);
+    const testValue = await testValueFollowUpsAfter(id, ctl, row, checkout, forced);
     if (stopRequested(ctl) === 'cancelled') {
       cancelNow(id, ctl.fence);
       return;
@@ -5291,15 +5304,16 @@ export function createRunner(opts: RunnerOptions): Runner {
         }
       }
       // The diff is read before the write, which then adds the review it forces.
-      const forced = await reviewForcedAfter(id, ctl, row, checkout);
+      // Read first: a watchpoint set to ask forces a review when nothing else does.
+      const watchpoints = await watchpointReadingAfter(id, row, checkout);
+      const forced =
+        (await reviewForcedAfter(id, ctl, row, checkout)) ?? watchpointReviewReason(watchpoints);
       // With no Review after this step, the judge's flags on the new tests become follow-up tasks.
       const testValue = await testValueFollowUpsAfter(id, ctl, row, checkout, forced);
       const acceptance = await acceptanceAfter(id, ctl, row, checkout, {
         command: gateCommand,
         summary: evidence.summary,
       });
-      // Information only: a check that passed on less than the step changed says so in its record.
-      const watchpoints = await watchpointReadingAfter(id, row, checkout);
       const note = coverageNote(await coverageOf(row, checkout, head, gateCommand));
       if (note !== null) evidence.summary = `${note}\n\n${evidence.summary}`;
       // The read took time; a cancel that landed meanwhile must not be overwritten.

@@ -1,4 +1,5 @@
 import { applyAcceptanceAnswer } from '../acceptance';
+import { applyWatchpointAnswer } from '../watchpoints';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -1175,6 +1176,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     onAcceptanceAnswer: (ctx, item, answer) => {
       applyAcceptanceAnswer(ctx, item, answer);
+    },
+    onWatchpointAnswer: (ctx, item, answer) => {
+      applyWatchpointAnswer(ctx, item, answer);
     },
     onPlanAnswer: (ctx, item, answer) => {
       if (!runner) throw new RunnerNotStartedError('plan');

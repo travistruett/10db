@@ -80,6 +80,7 @@ import {
   listKinds,
   humanTouchDays,
   inboxCardTypes,
+  watchpointStats,
   rigorFigures,
   acceptanceFigures,
   findAccountRow,
@@ -931,6 +932,10 @@ export function createServices(deps: {
       return effectiveWatchpointsOf(projectId);
     },
     watchpointHits: (id) => watchpointHitsOf(db, id),
+    watchpointStats: (projectId) => {
+      getProject(db, projectId);
+      return watchpointStats(db, projectId, deps.clock.now());
+    },
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
     agentSkill: () => deps.agentSkill.status(),

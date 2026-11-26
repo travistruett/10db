@@ -259,6 +259,7 @@ export function OpenInbox({
       selected.kind === InboxKind.Check ||
       selected.kind === InboxKind.Plan ||
       selected.kind === InboxKind.Acceptance ||
+      selected.kind === InboxKind.Watchpoint ||
       answer.isPending
     )
       return;
@@ -301,6 +302,7 @@ export function OpenInbox({
       selected?.kind === InboxKind.Check ||
       selected?.kind === InboxKind.Plan ||
       selected?.kind === InboxKind.Acceptance ||
+      selected?.kind === InboxKind.Watchpoint ||
       previewing
         ? 0
         : (selected?.options.length ?? 0),
