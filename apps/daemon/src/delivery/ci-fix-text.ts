@@ -151,6 +151,7 @@ export function ciFixDescription(input: {
           ),
         ]),
     '',
+    "A job's name can say little of what failed (one job may run several checks): the cause is the message in its log, so read that, not the name.",
     'Find the cause, fix it in this branch and commit. If the excerpt does not show the cause, ask the builder rather than guess.',
   ].join('\n');
 }

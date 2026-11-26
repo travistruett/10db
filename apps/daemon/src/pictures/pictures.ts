@@ -186,6 +186,15 @@ export interface PicturesDeps {
     projectId: ProjectId,
     say?: (line: string) => void,
   ) => Promise<{ readonly up: true } | { readonly up: false; readonly why: string }>;
+  /**
+   * Before a picture or a sign-in: brings the project's app up with its start command when nothing
+   * answers at its address, and says whether it answers, else why not; absent, the picture or sign-in
+   * goes ahead at whatever answers.
+   */
+  readonly ensureApp?: (
+    projectId: ProjectId,
+    signal: AbortSignal,
+  ) => Promise<{ readonly up: true } | { readonly up: false; readonly why: string }>;
 }
 
 /** An on-demand picture was asked of, or overtaken by, a daemon that is stopping. */
@@ -469,13 +478,32 @@ export function startPictures(deps: PicturesDeps): Pictures {
     ask({ kind: ScreenKind.After, projectId: project.id, passId, taskId: task.id, turnId: null });
   }
 
+  /** Whether the app answers, its start command run first when it doesn't; up when no check is wired. */
+  async function appUp(
+    projectId: ProjectId,
+    signal: AbortSignal,
+  ): Promise<{ readonly up: true } | { readonly up: false; readonly why: string }> {
+    if (deps.ensureApp === undefined) return { up: true };
+    return deps.ensureApp(projectId, signal);
+  }
+
   async function runSignIn(
     project: SignInProject,
     signal: AbortSignal,
   ): Promise<StorageState | null> {
+    // Read as a call: an await may abort it between two reads.
+    const stopped = (): boolean => signal.aborted;
+    const up = await appUp(project.id, signal);
+    if (stopped()) return null;
+    if (!up.up) {
+      const problem = `The app did not start: ${up.why}`;
+      signIns.set(project.id, { problem, at: deps.clock.now().toISOString() });
+      log.warn({ projectId: project.id, problem }, 'could not sign the browser for pictures in');
+      return null;
+    }
     const result = await signIn({ ...deps.signIn, camera: deps.camera }, project, signal);
     // A login stopped with its capture says nothing of the project's sign-in.
-    if (signal.aborted) return null;
+    if (stopped()) return null;
     signIns.set(project.id, {
       problem: result.ok ? null : result.problem,
       at: deps.clock.now().toISOString(),
@@ -553,6 +581,16 @@ export function startPictures(deps: PicturesDeps): Pictures {
       reportedFor(request.kind, task, request.turnId, request.passId !== null),
     );
     if (targets.length === 0) return 0;
+    // A stack that is down is brought up first; one that won't start skips the pictures, as a dead one did.
+    const up = await appUp(project.id, signal);
+    if (stopped()) return 0;
+    if (!up.up) {
+      log.warn(
+        { taskId: task.id, kind: request.kind, why: up.why },
+        'no picture taken: the app did not start',
+      );
+      return 0;
+    }
     let storageState = readStorageState(deps.dataDir, project.id);
     if (storageState === null && project.devLoginCommand !== null) {
       if (shootableAddress(project.id, port) !== appUrl) return 0;
@@ -917,6 +955,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const abort = new AbortController();
     nowRuns.add(abort);
     try {
+      const started = await appUp(project.id, abort.signal);
+      if (!started.up) return none(`the app did not start: ${started.why}`);
       if (deps.holdApp) {
         const held = await deps.holdApp(project.id, input.say);
         if (!held.up) return none(held.why);

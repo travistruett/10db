@@ -67,6 +67,11 @@ export function prSubject(
 /** A commit message line that explains a pull request's unit tests over CI's budget. */
 const TEST_BUDGET_LINE = /^Test-budget:[ \t]*\S/;
 
+/** The line CI's budget check looks for, saying `reason` on one line. */
+export function testBudgetLine(reason: string): string {
+  return `Test-budget: ${reason.replace(/\s+/g, ' ').trim()}`;
+}
+
 /**
  * The `Test-budget: <reason>` lines of a lane's commit messages, trimmed, each once and in order.
  * CI fails a pull request that adds more unit tests than its budget unless the body has one.

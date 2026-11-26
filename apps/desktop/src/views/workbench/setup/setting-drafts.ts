@@ -43,6 +43,9 @@ export function settingsPatch(drafts: readonly SettingDraft[]): ProjectPatch {
       case SettingField.DevLoginCommand:
         patch.devLoginCommand = value;
         break;
+      case SettingField.AppStartCommand:
+        patch.appStartCommand = value;
+        break;
       case SettingField.ChangedCheckCommand:
         patch.changedCheckCommand = value;
         break;
