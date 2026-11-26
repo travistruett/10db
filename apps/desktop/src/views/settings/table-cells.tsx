@@ -39,15 +39,21 @@ export function Pill({
   );
 }
 
-/** Patterns a table row shows before the rest fold into "+N more". */
+/** Patterns a table row shows before the rest fold into "+N more", unless the row asks for fewer. */
 const SHOWN_PATHS = 3;
 
 /**
- * A row's patterns in brief: the first three in monospace, then "+N more", which lists them all on hover. The
+ * A row's patterns in brief: the first `shown` (three) in monospace, then "+N more", which lists them all on hover. The
  * row's drawer holds the full, editable list. Hovering a pattern says what it means.
  */
-export function PathSummary({ paths }: { readonly paths: readonly string[] }) {
-  const shown = paths.slice(0, SHOWN_PATHS);
+export function PathSummary({
+  paths,
+  shown: limit = SHOWN_PATHS,
+}: {
+  readonly paths: readonly string[];
+  readonly shown?: number;
+}) {
+  const shown = paths.slice(0, limit);
   const rest = paths.length - shown.length;
   return (
     <Group gap={6} wrap="wrap">
@@ -130,7 +136,8 @@ export function RowActions({
         </ActionIcon>
       </Tooltip>
       {onRemove === undefined ? (
-        <Box w="var(--ai-size-md)" aria-hidden />
+        // As wide as the ActionIcon it stands in for (size md, 28 px).
+        <Box w={28} style={{ flexShrink: 0 }} aria-hidden />
       ) : (
         <Tooltip label={removeBlocked ?? `Remove ${noun}`}>
           {/* A disabled button gets no pointer events, so the tooltip hangs on its wrapper. */}

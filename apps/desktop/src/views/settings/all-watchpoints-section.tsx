@@ -41,9 +41,12 @@ export function WatchpointsHelp() {
 export function LibraryItems({
   taken,
   onAdd,
+  disabled,
 }: {
   readonly taken: ReadonlySet<string>;
   readonly onAdd: (starter: Watchpoint) => void;
+  /** While a save is on its way, so an add is never built from the list before it. */
+  readonly disabled: boolean;
 }) {
   const missing = STARTER_WATCHPOINTS.filter((s) => !taken.has(s.key));
   return (
@@ -55,6 +58,7 @@ export function LibraryItems({
         missing.map((starter) => (
           <Menu.Item
             key={starter.key}
+            disabled={disabled}
             onClick={() => {
               onAdd(starter);
             }}
@@ -110,6 +114,7 @@ export function AllWatchpointsSection() {
       accessor: 'loudness',
       title: 'When It Matches',
       noWrap: true,
+      // Wide enough for its header at the window's 1200 px; the control itself is narrower.
       width: 160,
       render: (row) => (
         // A press on the control is not a press on the row.
@@ -120,6 +125,7 @@ export function AllWatchpointsSection() {
         >
           <LoudnessControl
             ariaLabel={`When ${row.label} matches`}
+            disabled={set.isPending}
             value={row.loudness}
             onChange={(loudness) => {
               void save(withItem(list, { ...row, loudness }), () => undefined);
@@ -164,6 +170,7 @@ export function AllWatchpointsSection() {
           >
             <LibraryItems
               taken={new Set(list.map((w) => w.key))}
+              disabled={set.isPending}
               onAdd={(starter) => {
                 void save([...list, starter], () => undefined);
               }}

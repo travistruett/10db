@@ -72,6 +72,21 @@ export function projectRows(
   return [...followed, ...own];
 }
 
+/**
+ * The keys a project's page counts as taken: yours and the project's own. An `off` entry for a key no longer in
+ * your list hides nothing, so it takes no key, and a watchpoint saved under that key replaces it.
+ */
+export function keysInUse(
+  yours: readonly Watchpoint[],
+  entries: readonly ProjectWatchpointEntry[],
+): Set<string> {
+  const known = new Set(yours.map((w) => w.key));
+  return new Set([
+    ...known,
+    ...entries.filter((e) => !isWatchpointOff(e) || known.has(e.key)).map((e) => e.key),
+  ]);
+}
+
 /** Whether the project keeps its own copy of one of the builder's watchpoints. */
 export function isOverride(row: ProjectRow): boolean {
   return row.yours !== null && row.entry !== null && !isWatchpointOff(row.entry);

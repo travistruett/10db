@@ -21,6 +21,7 @@ import {
   choiceOf,
   isOffHere,
   isOverride,
+  keysInUse,
   projectRows,
   withChoice,
   withItem,
@@ -28,6 +29,13 @@ import {
   type ProjectRow,
 } from './watchpoint-lists';
 import { LoudnessControl, ProjectChoiceControl } from './watchpoint-loudness';
+
+/** Where a save from the drawer lands, for one of yours: a copy for this project, which turns an Off one on. */
+function noteFor(row: ProjectRow): string {
+  return isOffHere(row)
+    ? 'Saving turns it on in this project, with your changes.'
+    : 'Changes apply to this project only.';
+}
 
 const count = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? '' : 's'}`;
 
@@ -53,7 +61,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
     );
   const entries = here.data.entries;
   const rows = projectRows(yours.data, entries);
-  const taken = new Set([...yours.data.map((w) => w.key), ...entries.map((e) => e.key)]);
+  const taken = keysInUse(yours.data, entries);
   const save = async (next: ProjectWatchpointEntry[], done: () => void) => {
     edit.setProblem(null);
     try {
@@ -84,7 +92,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
               ) : null
             }
           />
-          <WatchpointMatches watchpoint={row.shown} />
+          <WatchpointMatches watchpoint={row.shown} shown={2} />
         </Stack>
       ),
     },
@@ -102,6 +110,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
           {row.yours === null ? (
             <LoudnessControl
               ariaLabel={`When ${row.shown.label} matches`}
+              disabled={set.isPending}
               value={row.shown.loudness}
               onChange={(loudness) => {
                 void save(withItem(entries, { ...row.shown, loudness }), () => undefined);
@@ -110,6 +119,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
           ) : (
             <ProjectChoiceControl
               ariaLabel={`When ${row.shown.label} matches`}
+              disabled={set.isPending}
               value={choiceOf(row)}
               defaultLoudness={row.yours.loudness}
               onChange={(choice) => {
@@ -123,7 +133,8 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
     {
       accessor: 'lastThirtyDays',
       title: 'Last 30 Days',
-      width: 96,
+      // Wide enough for its header at the window's 1200 px.
+      width: 112,
       render: (row) => {
         const found = stats?.find((s) => s.key === row.key);
         const color = found?.noisy === true ? 'yellow' : 'dimmed';
@@ -143,7 +154,8 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
     {
       accessor: 'actions',
       title: '',
-      width: 72,
+      // Edit and Remove (or its space) and the cell's padding, so neither icon is squeezed.
+      width: 80,
       textAlign: 'right',
       render: (row) => (
         <RowActions
@@ -184,8 +196,9 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
           >
             <LibraryItems
               taken={taken}
+              disabled={set.isPending}
               onAdd={(starter) => {
-                void save([...entries, starter], () => undefined);
+                void save(withItem(entries, starter), () => undefined);
               }}
             />
           </SplitButton>
@@ -224,9 +237,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
           onDirty={edit.setDirty}
           onSave={saveFromDrawer}
           onClose={edit.close}
-          {...((opened?.yours ?? null) === null
-            ? {}
-            : { note: 'Changes apply to this project only.' })}
+          {...(opened?.yours ? { note: noteFor(opened) } : {})}
           {...(opened !== null && isOverride(opened)
             ? {
                 onUseDefault: () => {

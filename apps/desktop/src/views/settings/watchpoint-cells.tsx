@@ -33,11 +33,18 @@ export function WatchpointName({
 }
 
 /** The paths a watchpoint covers in brief, then how many line patterns narrow them. */
-export function WatchpointMatches({ watchpoint }: { readonly watchpoint: Watchpoint }) {
+export function WatchpointMatches({
+  watchpoint,
+  shown,
+}: {
+  readonly watchpoint: Watchpoint;
+  /** How many paths show before "+N more"; PathSummary's own count when not given. */
+  readonly shown?: number;
+}) {
   const patterns = watchpoint.lines.length;
   return (
     <Stack gap={4}>
-      <PathSummary paths={watchpoint.globs} />
+      <PathSummary paths={watchpoint.globs} {...(shown === undefined ? {} : { shown })} />
       {patterns > 0 ? (
         <Text size="xs" c="dimmed">
           {`+ ${String(patterns)} line pattern${patterns === 1 ? '' : 's'}`}

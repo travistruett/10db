@@ -16,16 +16,20 @@ export function LoudnessControl({
   ariaLabel,
   mt,
   size = 'xs',
+  disabled = false,
 }: {
   readonly value: WatchpointLoudness;
   readonly onChange: (value: WatchpointLoudness) => void;
   readonly ariaLabel: string;
   readonly mt?: MantineSpacing;
   readonly size?: MantineSize;
+  /** While a save is on its way: a second change would be built from the list before it. */
+  readonly disabled?: boolean;
 }) {
   return (
     <SegmentedControl
       size={size}
+      disabled={disabled}
       {...(mt === undefined ? {} : { mt })}
       aria-label={ariaLabel}
       data={[
@@ -53,15 +57,18 @@ export function ProjectChoiceControl({
   defaultLoudness,
   onChange,
   ariaLabel,
+  disabled = false,
 }: {
   readonly value: ProjectChoice | WatchpointLoudness;
   readonly defaultLoudness: WatchpointLoudness;
   readonly onChange: (value: ProjectChoice) => void;
   readonly ariaLabel: string;
+  readonly disabled?: boolean;
 }) {
   return (
     <SegmentedControl
       size="xs"
+      disabled={disabled}
       aria-label={ariaLabel}
       data={[
         { value: ProjectChoice.Default, label: `Default · ${LOUDNESS_LABEL[defaultLoudness]}` },
