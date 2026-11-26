@@ -18,10 +18,11 @@ export function pickerSource(): Plugin {
       // Loaded here, not at the top: a config read under jsdom (a test of the window's policy) can't load it,
       // nor read its own folder, which isn't a file URL there.
       const { build } = await import('esbuild');
+      const entry = fileURLToPath(new URL('./src/picker/main.ts', import.meta.url));
       const here = fileURLToPath(new URL('.', import.meta.url));
       const result = await build({
         absWorkingDir: here,
-        entryPoints: [resolve(here, 'src/picker/main.ts')],
+        entryPoints: [entry],
         bundle: true,
         format: 'iife',
         target: 'safari18',
