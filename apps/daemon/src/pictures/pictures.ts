@@ -33,10 +33,13 @@ import {
   type TaskScreenDto,
   type TaskScreenId,
   type TaskScreensDto,
+  type PreviewSignInDto,
 } from '@10db/contracts';
 import {
   findPass,
+  getBatch,
   getDesignCheck,
+  latestWorkstreamOf,
   latestTaskDesignChecks,
   getPassTurn,
   getProject,
@@ -91,6 +94,7 @@ import {
 } from './picture-routes';
 import { judgePreview, routeLoad, type RouteShot } from './preview-marks';
 import { signIn, sweepLoginLogs, type SignInDeps, type SignInProject } from './sign-in';
+import { signInRecordOf, type SignInReporter } from './sign-in-record';
 import { forgetStorageState, readStorageState, type StorageState } from './storage-state';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §10, §12: the pictures of a
@@ -157,6 +161,8 @@ export interface PicturesDeps {
   readonly git: Pick<Git, 'head'>;
   /** The dev login's runner and environment; the camera is this service's own. */
   readonly signIn: Omit<SignInDeps, 'camera'>;
+  /** Where a failed or successful sign-in is told: the project's card and the record its updates read. */
+  readonly signInReporter: SignInReporter;
   readonly dataDir: string;
   readonly clock: Clock;
   readonly logger: Logger;
@@ -200,6 +206,17 @@ export class PicturesStoppedError extends Error {
   }
 }
 
+/**
+ * What a task's after picture can still be expected to do, for the updates that show it:
+ * - `none`: the task names no page, already has its pictures, or nothing says they were skipped;
+ * - `wait`: a capture of its after is waiting or running, so its answer is not in yet;
+ * - `later`: a local copy whose change has not landed, so its after is taken then;
+ * - `skipped`: no picture was or will be taken, and why (a sentence with no full stop).
+ */
+export type PicturesOutlook =
+  | { readonly kind: 'none' | 'wait' | 'later' }
+  | { readonly kind: 'skipped'; readonly reason: string };
+
 export interface Pictures {
   /**
    * A task's first launch: asks its before, under the before rule, and waits for it at most
@@ -208,6 +225,8 @@ export interface Pictures {
   awaitBefore(task: TaskDto, signal: AbortSignal): Promise<void>;
   /** Settings › App Preview's status line for a project. */
   status(projectId: ProjectId): PicturesStatusDto;
+  /** What a task that names a page can still expect of its after picture; see `PicturesOutlook`. */
+  outlook(taskId: TaskId): PicturesOutlook;
   /**
    * Shots of the routes as they are now, for a design check: the first viewport and theme of the
    * project's matrix, signed in as a capture is, one at a time with every other capture. Nothing is
@@ -216,6 +235,11 @@ export interface Pictures {
   shootNow(input: ShootNowInput): Promise<ShotsNow>;
   /** Draws a mock-up's HTML in the first viewport and theme of the project's matrix, cached by what it drew. */
   drawMockup(projectId: ProjectId, html: string): Promise<MockupDrawn>;
+  /**
+   * Pick on Page spec §2: makes sure the project's sign-in is kept for its Preview window, running the
+   * dev login when none is. The shell reads the kept cookies itself; this answers no credential.
+   */
+  signInForPreview(projectId: ProjectId): Promise<PreviewSignInDto>;
   /** The size of a kept picture's file by its hash; 0 when there is none. */
   bytesOf(sha256: string): number;
   screens(taskId: TaskId): TaskScreensDto;
@@ -490,6 +514,13 @@ export function startPictures(deps: PicturesDeps): Pictures {
       problem: result.ok ? null : result.problem,
       at: deps.clock.now().toISOString(),
     });
+    const at = deps.clock.now().toISOString();
+    try {
+      if (result.ok) deps.signInReporter.succeeded(project.id);
+      else deps.signInReporter.failed(project.id, result.problem, result.failure, at);
+    } catch (error) {
+      log.warn({ projectId: project.id, err: errorText(error) }, 'a picture sign-in not recorded');
+    }
     if (result.ok) log.info({ projectId: project.id }, 'signed the browser for pictures in');
     else
       log.warn(
@@ -711,9 +742,15 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const loginWas = devLogins.get(projectId) ?? null;
     appUrls.set(projectId, project.appUrl);
     devLogins.set(projectId, project.devLoginCommand);
-    // A sign-in kept for another address or another dev login is not this one's.
-    if (was !== project.appUrl || loginWas !== project.devLoginCommand)
+    // A sign-in kept for another address or another dev login is not this one's, and neither is its failure.
+    if (was !== project.appUrl || loginWas !== project.devLoginCommand) {
       forgetStorageState(deps.dataDir, projectId);
+      try {
+        deps.signInReporter.succeeded(projectId);
+      } catch (error) {
+        log.warn({ projectId, err: errorText(error) }, 'a picture sign-in failure not withdrawn');
+      }
+    }
     if (was === project.appUrl) return;
     if (was !== null) apply({ kind: 'app_changed', projectId });
     if (project.appUrl !== null) {
@@ -989,9 +1026,35 @@ export function startPictures(deps: PicturesDeps): Pictures {
     }
   }
 
+  async function signInForPreview(projectId: ProjectId): Promise<PreviewSignInDto> {
+    whileRunning();
+    const project = getProject(db, projectId);
+    if (project.appUrl === null) return { ok: false, problem: 'The project has no app address' };
+    const port = listenPort ?? (await deps.daemonPort);
+    if (shootableAddress(project.id, port) === null)
+      return { ok: false, problem: APP_URL_IS_DAEMON };
+    if (project.devLoginCommand === null) return { ok: true, signedIn: false };
+    if (readStorageState(deps.dataDir, project.id) !== null) return { ok: true, signedIn: true };
+    const abort = new AbortController();
+    nowRuns.add(abort);
+    try {
+      const state = await runSignIn(project, abort.signal);
+      if (state !== null) return { ok: true, signedIn: true };
+      return {
+        ok: false,
+        problem: abort.signal.aborted
+          ? 'the daemon is stopping'
+          : (signIns.get(project.id)?.problem ?? 'The dev login did not sign in'),
+      };
+    } finally {
+      nowRuns.delete(abort);
+    }
+  }
+
   return {
     shootNow,
     drawMockup,
+    signInForPreview,
     bytesOf(sha256) {
       try {
         return statSync(picturePath(deps.dataDir, sha256)).size;
@@ -1013,6 +1076,34 @@ export function startPictures(deps: PicturesDeps): Pictures {
         signal.addEventListener('abort', finish, { once: true });
         beforeWaiters.set(task.id, [...(beforeWaiters.get(task.id) ?? []), finish]);
       });
+    },
+    outlook(taskId) {
+      const task = getTask(db, taskId);
+      const project = getProject(db, task.projectId);
+      if (project.appUrl === null) return { kind: 'none' };
+      const reported = reportedFor(ScreenKind.After, task, null, task.passId != null);
+      if (pictureRoutes(project, task, reported).length === 0) return { kind: 'none' };
+      if (hasTaskScreen(db, taskId, ScreenKind.After)) return { kind: 'none' };
+      const localCopy = inLocalCopy(task);
+      if (!takesPictures(project, task, reported, localCopy))
+        return {
+          kind: 'skipped',
+          reason:
+            'The task ran in a separate copy of the project, and 10db takes pictures only of tasks in Your folder, in a local copy or on a page of a pass',
+        };
+      // A local copy's after is taken once its change is in the project.
+      const batchId = localCopy ? (latestWorkstreamOf(db, taskId)?.batchId ?? null) : null;
+      if (batchId !== null && getBatch(db, batchId).state !== BatchState.Shipped)
+        return { kind: 'later' };
+      const asked = (r: CaptureRequest | null): boolean =>
+        r !== null && r.kind === ScreenKind.After && r.taskId === taskId;
+      if (queue.waiting.some(asked) || asked(queue.loading)) return { kind: 'wait' };
+      const failed = signInRecordOf(db, project.id);
+      if (failed !== null) return { kind: 'skipped', reason: failed.problem };
+      const browser = deps.camera.status();
+      return browser.state === BrowserState.Refused
+        ? { kind: 'skipped', reason: `The pictures browser is not available (${browser.problem})` }
+        : { kind: 'none' };
     },
     status(projectId) {
       const { appUrl } = getProject(db, projectId);

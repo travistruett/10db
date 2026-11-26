@@ -1,10 +1,17 @@
-import { Urgency, type InboxItemDto, type LinearPostDto, type ProjectId } from '@10db/contracts';
+import {
+  Urgency,
+  type InboxAnswer,
+  type InboxItemDto,
+  type LinearPostDto,
+  type ProjectId,
+} from '@10db/contracts';
 import {
   dismissLinearPosts,
   findOpenByFoldKey,
   linearPostCounts,
   linearPostProblems,
   getTask,
+  retryLinearPosts,
   type DbReader,
   type WriteContext,
 } from '@10db/db';
@@ -17,7 +24,10 @@ import { linearLinkOf } from './task-link';
 
 /** The detail key that marks a card as the reporter's, holding the project id. */
 const REPORTER_DETAIL = 'linearReporter';
-const DISMISS = 'Dismiss';
+
+/** The card's answers. */
+export const ReporterChoice = { Retry: 'Retry', Dismiss: 'Dismiss' } as const;
+export type ReporterChoice = (typeof ReporterChoice)[keyof typeof ReporterChoice];
 
 export const linearReporterFoldKey = (projectId: ProjectId): string =>
   `linear-reporter:${projectId}`;
@@ -79,9 +89,10 @@ export function refreshReporterCard(
     ].join('\n'),
     detail: { [REPORTER_DETAIL]: projectId },
     options: [
+      { label: ReporterChoice.Retry, description: 'Try every failed update again now' },
       {
-        label: DISMISS,
-        description: 'Close this card; failed and withheld updates stay on the task',
+        label: ReporterChoice.Dismiss,
+        description: 'Close this card and stop retrying; the updates stay on the task',
       },
     ],
     recommendation: null,
@@ -90,8 +101,22 @@ export function refreshReporterCard(
   });
 }
 
-/** Answering the card marks the project's failed and withheld rows dismissed, in the answer's own write. */
-export function dismissReporterPosts(ctx: WriteContext, item: InboxItemDto): void {
-  if (typeof item.detail?.[REPORTER_DETAIL] !== 'string') return;
+/**
+ * Applies an answer to the card, in the answer's own write. Retry makes the project's failed rows (not dismissed)
+ * and its rows waiting on a retry due now, and answers the project, whose reporter is then woken. Any other
+ * answer dismisses: failed and withheld rows are marked seen and rows waiting on a retry stop. Null for a card
+ * that is not the reporter's, or once dismissed.
+ */
+export function answerReporterCard(
+  ctx: WriteContext,
+  item: InboxItemDto,
+  answer: InboxAnswer,
+): ProjectId | null {
+  if (typeof item.detail?.[REPORTER_DETAIL] !== 'string') return null;
+  if (answer.choice === ReporterChoice.Retry) {
+    retryLinearPosts(ctx, item.projectId, ctx.now);
+    return item.projectId;
+  }
   dismissLinearPosts(ctx, item.projectId);
+  return null;
 }

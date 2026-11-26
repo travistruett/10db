@@ -6,8 +6,8 @@ import {
   type LinearEventKind,
   type LinearPostDto,
   type LinearPostId,
+  type LinearPostOutcome,
   type ProjectId,
-  type ReportLinearPostInput,
   type SessionId,
   type TaskId,
 } from '@10db/contracts';
@@ -170,7 +170,7 @@ export function takeLinearPosts(
 export function recordLinearPosts(
   ctx: WriteContext,
   ids: readonly LinearPostId[],
-  outcome: Exclude<ReportLinearPostInput['outcome'], { state: 'failed' }>,
+  outcome: LinearPostOutcome,
   opts: { readonly dismissed?: boolean } = {},
 ): void {
   const rows = pendingByIds(ctx, ids);
@@ -179,7 +179,7 @@ export function recordLinearPosts(
     outcome.state === 'recorded'
       ? {
           state: LinearPostState.Recorded,
-          commentIds: outcome.commentIds,
+          commentIds: [...outcome.commentIds],
           statusSet: outcome.statusSet,
           attachmentUrl: outcome.attachmentUrl,
         }
@@ -201,6 +201,104 @@ export function recordLinearPosts(
     )
     .run();
   emitChanged(ctx, rows);
+}
+
+/** Adds the id Linear gave a comment to a recorded row that has none yet; any other row is left as it is. */
+export function attachLinearCommentId(
+  ctx: WriteContext,
+  id: LinearPostId,
+  commentId: string,
+): void {
+  const row = ctx.tx
+    .select()
+    .from(schema.linearPosts)
+    .where(
+      and(eq(schema.linearPosts.id, id), eq(schema.linearPosts.state, LinearPostState.Recorded)),
+    )
+    .get();
+  if (row === undefined || row.commentIds.length > 0) return;
+  ctx.tx
+    .update(schema.linearPosts)
+    .set({ commentIds: [commentId] })
+    .where(eq(schema.linearPosts.id, id))
+    .run();
+  emitChanged(ctx, [row]);
+}
+
+/** Adds the status the run set to a recorded row that has none yet; any other row is left as it is. */
+export function attachLinearStatusSet(ctx: WriteContext, id: LinearPostId, status: string): void {
+  const row = ctx.tx
+    .select()
+    .from(schema.linearPosts)
+    .where(
+      and(eq(schema.linearPosts.id, id), eq(schema.linearPosts.state, LinearPostState.Recorded)),
+    )
+    .get();
+  if (row === undefined) return;
+  if (row.statusSet !== null) return;
+  ctx.tx
+    .update(schema.linearPosts)
+    .set({ statusSet: status })
+    .where(eq(schema.linearPosts.id, id))
+    .run();
+  emitChanged(ctx, [row]);
+}
+
+/**
+ * Keeps why a recorded row's write may not have gone out, leaving it recorded: Linear may have taken the write
+ * without answering, so the update is never owed again. A row with a comment id was written and is left as it is.
+ */
+export function noteLinearPostError(ctx: WriteContext, id: LinearPostId, error: string): void {
+  const row = ctx.tx
+    .select()
+    .from(schema.linearPosts)
+    .where(
+      and(eq(schema.linearPosts.id, id), eq(schema.linearPosts.state, LinearPostState.Recorded)),
+    )
+    .get();
+  if (row === undefined || row.commentIds.length > 0) return;
+  ctx.tx
+    .update(schema.linearPosts)
+    .set({ lastError: error })
+    .where(eq(schema.linearPosts.id, id))
+    .run();
+  emitChanged(ctx, [row]);
+}
+
+/**
+ * A recorded row whose write Linear refused goes back to pending with a try spent (failed at `maxTries`), so the
+ * update is owed again. A null `maxTries` holds it instead: pending with tries 0 and the reason, no try spent,
+ * for a refusal a sign-in fixes. Only a row recorded without a comment id is reopened: one with an id was written.
+ */
+export function reopenLinearPost(
+  ctx: WriteContext,
+  id: LinearPostId,
+  error: string,
+  dueAt: string,
+  maxTries: number | null,
+): void {
+  const row = ctx.tx
+    .select()
+    .from(schema.linearPosts)
+    .where(
+      and(eq(schema.linearPosts.id, id), eq(schema.linearPosts.state, LinearPostState.Recorded)),
+    )
+    .get();
+  if (row === undefined || row.commentIds.length > 0) return;
+  const tries = maxTries === null ? 0 : row.tries + 1;
+  const failed = maxTries !== null && tries >= maxTries;
+  ctx.tx
+    .update(schema.linearPosts)
+    .set({
+      tries,
+      lastError: error,
+      state: failed ? LinearPostState.Failed : LinearPostState.Pending,
+      dueAt: failed ? null : dueAt,
+      recordedAt: null,
+    })
+    .where(eq(schema.linearPosts.id, id))
+    .run();
+  emitChanged(ctx, [row]);
 }
 
 /** tries+1; at `maxTries` the row is failed, else due again at `dueAt`. Rows no longer pending are skipped. */
@@ -294,8 +392,24 @@ export function dropPendingLinearPosts(
   return dropped.length;
 }
 
-/** Marks the project's failed and withheld rows as seen, so its Inbox count clears. */
+/**
+ * Marks the project's failed and withheld rows as seen, so its Inbox count clears, and stops retrying the rows
+ * waiting on a retry (pending, tries > 0): they become failed and dismissed. A held row (tries 0) is left to its
+ * sign-in.
+ */
 export function dismissLinearPosts(ctx: WriteContext, projectId: ProjectId): void {
+  const given = ctx.tx
+    .update(schema.linearPosts)
+    .set({ state: LinearPostState.Failed, dueAt: null, dismissedAt: ctx.now })
+    .where(
+      and(
+        eq(schema.linearPosts.projectId, projectId),
+        eq(schema.linearPosts.state, LinearPostState.Pending),
+        sql`${schema.linearPosts.tries} > 0`,
+      ),
+    )
+    .returning({ taskId: schema.linearPosts.taskId, projectId: schema.linearPosts.projectId })
+    .all();
   const dismissed = ctx.tx
     .update(schema.linearPosts)
     .set({ dismissedAt: ctx.now })
@@ -308,7 +422,42 @@ export function dismissLinearPosts(ctx: WriteContext, projectId: ProjectId): voi
     )
     .returning({ taskId: schema.linearPosts.taskId, projectId: schema.linearPosts.projectId })
     .all();
-  emitChanged(ctx, dismissed);
+  emitChanged(ctx, [...given, ...dismissed]);
+}
+
+/**
+ * Tries the project's failed rows again: each one not dismissed goes back to pending with no try spent and no
+ * error, due at `dueAt`, and each row waiting on a retry (pending, tries > 0) is due at `dueAt` too. Withheld,
+ * dismissed, recorded and held rows are left as they are. Answers the tasks it touched.
+ */
+export function retryLinearPosts(ctx: WriteContext, projectId: ProjectId, dueAt: string): TaskId[] {
+  const revived = ctx.tx
+    .update(schema.linearPosts)
+    .set({ state: LinearPostState.Pending, tries: 0, lastError: null, dueAt })
+    .where(
+      and(
+        eq(schema.linearPosts.projectId, projectId),
+        eq(schema.linearPosts.state, LinearPostState.Failed),
+        isNull(schema.linearPosts.dismissedAt),
+      ),
+    )
+    .returning({ taskId: schema.linearPosts.taskId, projectId: schema.linearPosts.projectId })
+    .all();
+  const hurried = ctx.tx
+    .update(schema.linearPosts)
+    .set({ dueAt })
+    .where(
+      and(
+        eq(schema.linearPosts.projectId, projectId),
+        eq(schema.linearPosts.state, LinearPostState.Pending),
+        sql`${schema.linearPosts.tries} > 0`,
+      ),
+    )
+    .returning({ taskId: schema.linearPosts.taskId, projectId: schema.linearPosts.projectId })
+    .all();
+  const touched = [...revived, ...hurried];
+  emitChanged(ctx, touched);
+  return [...new Set(touched.map((r) => r.taskId))];
 }
 
 /**

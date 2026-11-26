@@ -86,6 +86,18 @@ export function mappingProblem(
   return null;
 }
 
+/** The sentence the builder reads for a mapping problem on `<fqdn>:<port>`. */
+export function describeProblem(problem: MappingProblem, fqdn: string, port: number): string {
+  switch (problem.kind) {
+    case 'funnel':
+      return `Tailscale Funnel is on for ${fqdn}:${String(port)}, which would put 10db on the public internet. Turn Funnel off first.`;
+    case 'tcp':
+      return `Port ${String(port)} already has a TCP forward in Tailscale serve. Pick another port or remove it.`;
+    case 'elsewhere':
+      return `Port ${String(port)} already maps to ${problem.target} in Tailscale serve. Pick another port or remove it.`;
+  }
+}
+
 /** A sentence saying why Share refuses the port, or null. */
 export function shareRefusal(port: number, mainPort: number): string | null {
   if (FUNNEL_PORTS.some((funnel) => funnel === port)) {

@@ -4,7 +4,7 @@ import {
   type WatchpointHitsDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { Accordion, Badge, Button, Group, Modal, Stack, Text } from '@mantine/core';
+import { Accordion, Badge, Box, Button, Group, Modal, Stack, Text } from '@mantine/core';
 import { useState } from 'react';
 import { HunkDiff } from '../../conversation/hunk-diff';
 import { useWorkstreamChanges } from '../../daemon/queries';
@@ -20,6 +20,12 @@ const LOUDNESS_COLOR: Readonly<Record<WatchpointLoudness, string>> = {
   [WatchpointLoudness.Hold]: 'red',
 };
 
+const LOUDNESS_LABEL: Readonly<Record<WatchpointLoudness, string>> = {
+  [WatchpointLoudness.Show]: 'Show',
+  [WatchpointLoudness.Ask]: 'Ask',
+  [WatchpointLoudness.Hold]: 'Hold',
+};
+
 export type Hit = WatchpointHitsDto['hits'][number];
 
 export const count = (n: number, one: string, many: string): string =>
@@ -31,6 +37,7 @@ function checkTone(note: string): 'green' | 'yellow' | undefined {
   return note.startsWith('⚠') ? 'yellow' : undefined;
 }
 
+/** One row of a file's notes: who wrote it, then what they wrote, in the notes' two columns. */
 function Note({
   who,
   children,
@@ -41,25 +48,48 @@ function Note({
   readonly tone?: 'green' | 'yellow' | undefined;
 }) {
   return (
-    <Group gap={6} align="baseline" wrap="nowrap">
-      <Text size="xs" fw={600} c="dimmed" w={64} style={{ flexShrink: 0 }}>
+    <>
+      <Text size="xs" fw={600} c="dimmed">
         {who}
       </Text>
       <Text
         size="sm"
         {...(tone === undefined ? {} : { c: tone })}
-        style={{ overflowWrap: 'anywhere' }}
+        style={{ overflowWrap: 'anywhere', minWidth: 0 }}
       >
         {children}
       </Text>
-    </Group>
+    </>
   );
 }
 
-function FileHunks({ file }: { readonly file: WatchpointFileView }) {
+/** The Eval, Agent and Reviewer notes in two columns, the names in one and the notes in the other. */
+const NOTES_GRID = {
+  display: 'grid',
+  gridTemplateColumns: '64px minmax(0, 1fr)',
+  columnGap: 'var(--mantine-spacing-xs)',
+  rowGap: 'var(--mantine-spacing-xs)',
+  alignItems: 'baseline',
+} as const;
+
+/** A file after the first starts under a hairline, with as much room above it as below. */
+const NEXT_FILE = {
+  borderTop: '1px solid var(--mantine-color-default-border)',
+  paddingTop: 'var(--mantine-spacing-lg)',
+} as const;
+
+function FileHunks({
+  file,
+  first,
+}: {
+  readonly file: WatchpointFileView;
+  readonly first: boolean;
+}) {
   const hunks = parseChanges(file.patch).flatMap((f) => f.hunks);
+  const notes =
+    file.evalDefinition !== undefined || file.agentNote !== null || file.reviewerNote !== null;
   return (
-    <Stack gap={6} role="listitem">
+    <Stack gap="sm" role="listitem" style={first ? undefined : NEXT_FILE}>
       <Group gap="xs" wrap="nowrap">
         <Text size="sm" ff="monospace" style={{ overflowWrap: 'anywhere' }}>
           {file.path}
@@ -72,15 +102,19 @@ function FileHunks({ file }: { readonly file: WatchpointFileView }) {
               : `+${String(file.added)} −${String(file.removed ?? 0)}`}
         </Text>
       </Group>
-      {file.evalDefinition === undefined ? null : (
-        <Note who="Eval">{file.evalDefinition.reason}</Note>
-      )}
-      {file.agentNote === null ? null : <Note who="Agent">{file.agentNote}</Note>}
-      {file.reviewerNote === null ? null : (
-        <Note who="Reviewer" tone={checkTone(file.reviewerNote)}>
-          {file.reviewerNote}
-        </Note>
-      )}
+      {notes ? (
+        <Box style={NOTES_GRID}>
+          {file.evalDefinition === undefined ? null : (
+            <Note who="Eval">{file.evalDefinition.reason}</Note>
+          )}
+          {file.agentNote === null ? null : <Note who="Agent">{file.agentNote}</Note>}
+          {file.reviewerNote === null ? null : (
+            <Note who="Reviewer" tone={checkTone(file.reviewerNote)}>
+              {file.reviewerNote}
+            </Note>
+          )}
+        </Box>
+      ) : null}
       {hunks.map((hunk, index) => (
         <HunkDiff
           key={`${String(hunk.oldStart)}:${String(hunk.newStart)}:${String(index)}`}
@@ -109,7 +143,7 @@ function Fold({ hit }: { readonly hit: Hit }) {
             {watchpoint.label}
           </Text>
           <Badge size="xs" variant="light" color={LOUDNESS_COLOR[watchpoint.loudness]}>
-            {watchpoint.loudness}
+            {LOUDNESS_LABEL[watchpoint.loudness]}
           </Badge>
           <Text size="xs" c="dimmed">
             {count(files.length, 'file', 'files')}
@@ -123,9 +157,9 @@ function Fold({ hit }: { readonly hit: Hit }) {
               You asked: {watchpoint.guidance}
             </Text>
           )}
-          <Stack gap="md" role="list" aria-label={`Files under ${watchpoint.label}`}>
-            {files.map((file) => (
-              <FileHunks key={file.path} file={file} />
+          <Stack gap="lg" role="list" aria-label={`Files under ${watchpoint.label}`}>
+            {files.map((file, index) => (
+              <FileHunks key={file.path} file={file} first={index === 0} />
             ))}
           </Stack>
         </Stack>
@@ -134,19 +168,26 @@ function Fold({ hit }: { readonly hit: Hit }) {
   );
 }
 
-export function WholeDiff({ workstreamId }: { readonly workstreamId: WorkstreamId }) {
+/** Full Diff: the run's whole change in a modal. `size` fits it to where it sits: a card's bar, or a section head. */
+export function WholeDiff({
+  workstreamId,
+  size = 'sm',
+}: {
+  readonly workstreamId: WorkstreamId;
+  readonly size?: 'sm' | 'compact-xs';
+}) {
   const [open, setOpen] = useState(false);
   const changes = useWorkstreamChanges(open ? workstreamId : undefined, null);
   return (
     <>
       <Button
-        variant="subtle"
-        size="compact-xs"
+        variant="default"
+        size={size}
         onClick={() => {
           setOpen(true);
         }}
       >
-        Open the whole diff
+        Full Diff
       </Button>
       <Modal
         opened={open}

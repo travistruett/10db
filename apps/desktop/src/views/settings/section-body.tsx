@@ -1,9 +1,11 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Badge, Text } from '@mantine/core';
+import { Anchor, Badge, Text } from '@mantine/core';
+import { Link } from '@tanstack/react-router';
 import { ProjectTile } from '../../shell/project-tile';
 import { TitleRow } from '../../shell/title-row';
 import { AccountsSection } from './accounts/accounts-section';
 import { AgentSkillSection } from './agent-skill-section';
+import { AllWatchpointsSection } from './all-watchpoints-section';
 import { AgentCopiesSection } from './agent-copies-section';
 import { BoardColumnsSection } from './board-columns-section';
 import { DecisionsSection } from './decisions-section';
@@ -135,7 +137,33 @@ export function SectionBody({
       return (
         <>
           {heading}
+          {project ? (
+            <ScopeLine>
+              {'Default follows '}
+              <Anchor
+                size="sm"
+                renderRoot={(props) => (
+                  <Link
+                    {...props}
+                    to="/settings/$section"
+                    params={{ section: SettingsSectionKey.AllWatchpoints }}
+                  />
+                )}
+              >
+                All Projects › Watchpoints
+              </Anchor>
+              .
+            </ScopeLine>
+          ) : null}
           {project ? <WatchpointsSection key={project.id} project={project} /> : <NoProject />}
+        </>
+      );
+    case SettingsSectionKey.AllWatchpoints:
+      return (
+        <>
+          {heading}
+          <ScopeLine>For every project; a project can override one or add its own.</ScopeLine>
+          <AllWatchpointsSection />
         </>
       );
     case SettingsSectionKey.NetworkHosts:

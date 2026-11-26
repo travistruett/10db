@@ -73,9 +73,9 @@ describe.skipIf(!SEATBELT)('git state under a lane profile (Seatbelt)', () => {
     // It reads the toolchain and walks the checkout, which takes a while on a loaded machine.
   }, 60_000);
 
-  afterAll(() => {
-    session.dispose();
-    reading.dispose();
+  afterAll(async () => {
+    await session.dispose();
+    await reading.dispose();
     main.cleanup();
     rmSync(root, { recursive: true, force: true });
   });

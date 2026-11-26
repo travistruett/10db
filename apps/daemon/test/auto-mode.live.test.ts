@@ -581,7 +581,7 @@ async function drive(spec: RowSpec, checkout: string, dataDir: string): Promise<
       followUpText,
     };
   } finally {
-    laneSession?.dispose();
+    await laneSession?.dispose();
     test.close();
   }
 }

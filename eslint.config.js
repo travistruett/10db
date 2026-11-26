@@ -8,6 +8,20 @@ import { defineConfig, globalIgnores } from 'eslint/config';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
+/**
+ * The daemon's watchdog ends a daemon whose main thread is quiet too long
+ * (apps/daemon/src/watchdog/AGENTS.md), and the main thread waits on `rmSync` and on
+ * `removeLaneTempDir` for as long as the tree takes.
+ */
+const treeRemovalOnTheMainThread = [
+  "CallExpression[callee.name='rmSync']:has(Property[key.name='recursive'])",
+  "CallExpression[callee.name='removeLaneTempDir']",
+].map((selector) => ({
+  selector,
+  message:
+    'Remove a tree with `rm` from node:fs/promises, a lane temp dir with `removeLaneTempDirAsync`: the main thread waits on the synchronous removal, and a tree a lane, a build or the builder can fill takes longer than the watchdog allows. For a tree only 10db fills, or before the watchdog starts, disable this line and say which.',
+}));
+
 export default defineConfig(
   globalIgnores([
     '**/node_modules/**',
@@ -125,6 +139,17 @@ export default defineConfig(
     languageOptions: { globals: globals.node },
   },
   {
+    files: ['apps/daemon/src/**/*.ts'],
+    ignores: ['**/*.test.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        { selector: 'TSEnumDeclaration', message: 'Use an `as const` object and a derived type.' },
+        ...treeRemovalOnTheMainThread,
+      ],
+    },
+  },
+  {
     // The daemon's outbound calls go through `outboundFetch`, which never offers HTTP/2
     // (apps/daemon/src/outbound/AGENTS.md). The fake sessions talk to the daemon's own loopback server.
     files: ['apps/daemon/src/**/*.ts'],
@@ -133,6 +158,8 @@ export default defineConfig(
       'no-restricted-syntax': [
         'error',
         { selector: 'TSEnumDeclaration', message: 'Use an `as const` object and a derived type.' },
+        // Repeated from the block above: a later block replaces a rule's options rather than merging them.
+        ...treeRemovalOnTheMainThread,
         ...[
           "CallExpression[callee.name='fetch']",
           "MemberExpression[object.name='globalThis'][property.name='fetch']",

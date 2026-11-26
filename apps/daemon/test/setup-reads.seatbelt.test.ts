@@ -161,7 +161,7 @@ describe.skipIf(!SEATBELT)('the setup reads under the sandbox (Seatbelt)', () =>
         'write-setup-dir': 'denied',
       });
     } finally {
-      session.dispose();
+      await session.dispose();
       rmSync(join(home, '.claude/skills'), { recursive: true, force: true });
       rmSync(join(home, '.claude/plugins'), { recursive: true, force: true });
     }
@@ -175,7 +175,7 @@ describe.skipIf(!SEATBELT)('the setup reads under the sandbox (Seatbelt)', () =>
       expect(probe(session, `cat '${s}/SKILL.md'`)).toBe('denied');
       expect(probe(session, `cat '${t}/SKILL.md'`)).toBe('denied');
     } finally {
-      session.dispose();
+      await session.dispose();
       rmSync(join(home, '.claude/skills'), { recursive: true, force: true });
       rmSync(join(home, '.agents'), { recursive: true, force: true });
     }
@@ -206,8 +206,8 @@ describe.skipIf(!SEATBELT)('the setup reads under the sandbox (Seatbelt)', () =>
       expect(probe(session, `cat '${skills.at(-1)?.path ?? ''}/SKILL.md'`)).toBe('ok');
       expect(probe(session, `cat '${linked.at(-1)?.path ?? ''}/SKILL.md'`)).toBe('ok');
     } finally {
-      plain.dispose();
-      session.dispose();
+      await plain.dispose();
+      await session.dispose();
     }
   }, 120_000);
 });

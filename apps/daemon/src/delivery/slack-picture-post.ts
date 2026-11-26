@@ -51,6 +51,8 @@ export interface SlackPicturePostDeps extends Pick<DeliveryContext, 'state' | 'i
   readonly channelOf: (projectId: ProjectId) => PictureChannel | null;
   /** The client of a signed-in workspace; null when there is none. */
   readonly clientFor: (teamId: string) => SlackClient | null;
+  /** Why a finished task that names a page has no pictures, or null; said once in the channel. */
+  readonly skipped: (taskId: TaskId) => string | null;
 }
 
 export interface PassSlackPost {
@@ -101,6 +103,12 @@ function reasonOf(error: unknown): string {
   }
   return error instanceof Error ? error.message : String(error);
 }
+
+/** What a task's mark holds once its skipped pictures were said; an after's id replaces it when one is posted. */
+const SKIPPED_MARK = 'skipped';
+
+const skippedMessage = (project: string, task: string, reason: string): string =>
+  `*${escapeSlack(project)}*: ${escapeSlack(task)} is done. No before and after pictures were taken. ${escapeSlack(reason)}.`;
 
 /** The message's cut: how many pictures did not fit in it. */
 const moreOf = (planned: number): number => planned - MAX_SLACK_PICTURES;
@@ -247,9 +255,42 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
     const newest = newestScreen?.id ?? null;
     // Only what finished after sharing was turned on goes out; an unreadable or missing time posts nothing.
     const since = target.enabledAt === null ? Number.NaN : Date.parse(target.enabledAt);
+    if (newestScreen === undefined) {
+      // A finished task whose pictures were skipped says so once, with the reason, and no files.
+      const reason = deps.skipped(taskId);
+      if (
+        reason === null ||
+        task.status !== TaskStatus.Done ||
+        !(Date.parse(task.updatedAt) >= since) ||
+        marksOf(deps.state.db, project.id)[taskId] === SKIPPED_MARK
+      )
+        return settle(project);
+      await client.post({
+        channel: target.channelId,
+        text: skippedMessage(project.name, task.title, reason),
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: skippedMessage(project.name, task.title, reason),
+              verbatim: true,
+            },
+          },
+        ],
+      });
+      deps.state.write((w) => {
+        setAppSetting(w, postedSetting(project.id), {
+          ...marksOf(deps.state.db, project.id),
+          [taskId]: SKIPPED_MARK,
+        });
+      });
+      settle(project);
+      deps.logger.info({ taskId }, 'task pictures skipped, said in Slack');
+      return null;
+    }
     if (
       task.status !== TaskStatus.Done ||
-      newestScreen === undefined ||
       !Number.isFinite(since) ||
       !(Date.parse(newestScreen.createdAt) >= since) ||
       !(Date.parse(task.updatedAt) >= since) ||

@@ -3602,7 +3602,7 @@ describe("a lane's settled read-only line", () => {
         processMembers: () => [],
         markOwn: () => undefined,
         endJobs: () => Promise.resolve(),
-        dispose: () => undefined,
+        dispose: () => Promise.resolve(),
       }),
   });
 

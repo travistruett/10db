@@ -51,8 +51,8 @@ import {
   createLaneTempDir,
   laneTempRoot,
   MAX_SANDBOX_TMP_BYTES,
-  removeAll,
-  removeLaneTempDir,
+  removeAllAsync,
+  removeLaneTempDirAsync,
   SYSTEM_TEMP_ROOTS,
 } from './temp-dir';
 import { laneWritableRoots } from './lane-writable';
@@ -152,8 +152,11 @@ export interface LaneSession {
   markOwn(): void;
   /** Stops the jobs its commands started since the mark and leaves the session running. */
   endJobs(): Promise<void>;
-  /** Removes the temp dirs and files, the servers' too. Run it once the lane process is gone. */
-  dispose(): void;
+  /**
+   * Removes the temp dirs and files, the servers' too. Run it once the lane process is gone. A second
+   * call waits for the first.
+   */
+  dispose(): Promise<void>;
 }
 
 export interface LaneSessionInput {
@@ -253,7 +256,7 @@ export interface TakeoverSandbox {
   /** What the setup, the builder's servers and the project's servers left out, and why. */
   readonly leftOut: readonly { readonly what: string; readonly why: string }[];
   /** Removes the setup dir, the servers' sealed files and temp dirs. */
-  remove(): void;
+  remove(): Promise<void>;
 }
 
 export interface LaneSandbox {
@@ -315,9 +318,16 @@ interface SessionRoots {
   readonly files: string;
 }
 
-/** Removes a session's env file and temp dir; see `removeAll`. */
-function removeLaneFiles(envFile: string | null, tmpDir: string, roots: SessionRoots): void {
-  removeAll([
+/**
+ * Removes a session's env file and temp dir; see `removeAllAsync`. The lane fills its temp dir with
+ * what it likes (a package store, a clone), so the event loop never waits on its removal.
+ */
+function removeLaneFiles(
+  envFile: string | null,
+  tmpDir: string,
+  roots: SessionRoots,
+): Promise<void> {
+  return removeAllAsync([
     ...(envFile === null
       ? []
       : [
@@ -325,9 +335,7 @@ function removeLaneFiles(envFile: string | null, tmpDir: string, roots: SessionR
             removeLaneEnvFile(envFile, roots.files);
           },
         ]),
-    () => {
-      removeLaneTempDir(tmpDir, roots.temp);
-    },
+    () => removeLaneTempDirAsync(tmpDir, roots.temp),
   ]);
 }
 
@@ -639,7 +647,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         const ownYours = yours;
         const ownSetup = setupDir;
         const ownReads = readsDir;
-        let disposed = false;
+        let disposed: Promise<void> | null = null;
         return {
           spec,
           fileAccess,
@@ -662,18 +670,12 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           },
           endJobs: () => watch.endJobs(),
           dispose() {
-            if (disposed) return;
-            disposed = true;
-            removeAll([
-              () => {
-                ownMcp.dispose();
-              },
+            disposed ??= removeAllAsync([
+              () => ownMcp.dispose(),
               () => {
                 ownYours.dispose();
               },
-              () => {
-                removeLaneFiles(ownEnvFile, tmpDir, roots);
-              },
+              () => removeLaneFiles(ownEnvFile, tmpDir, roots),
               () => {
                 ownSetup?.remove();
               },
@@ -689,20 +691,15 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
                 else removeProcessLedger(ownLedger, filesRoot);
               },
             ]);
+            return disposed;
           },
         };
       } catch (error) {
         try {
           const made = mcp;
           const launched = yours;
-          removeAll([
-            ...(made === null
-              ? []
-              : [
-                  () => {
-                    made.dispose();
-                  },
-                ]),
+          await removeAllAsync([
+            ...(made === null ? [] : [() => made.dispose()]),
             ...(launched === null
               ? []
               : [
@@ -710,9 +707,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
                     launched.dispose();
                   },
                 ]),
-            () => {
-              removeLaneFiles(envFile, tmpDir, roots);
-            },
+            () => removeLaneFiles(envFile, tmpDir, roots),
             () => {
               setupDir?.remove();
             },
@@ -797,10 +792,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             ...ownMcp.failures.map((f) => ({ what: f.name, why: f.message })),
           ],
           remove() {
-            removeAll([
-              () => {
-                ownMcp.dispose();
-              },
+            return removeAllAsync([
+              () => ownMcp.dispose(),
               () => {
                 ownYours.dispose();
               },
@@ -812,10 +805,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         };
       } catch (error) {
         try {
-          removeAll([
-            () => {
-              mcp?.dispose();
-            },
+          await removeAllAsync([
+            () => mcp?.dispose(),
             () => {
               yours?.dispose();
             },

@@ -1,7 +1,10 @@
 import { configDefaults, defineProject } from 'vitest/config';
 import { localWorkerCap } from '../../tests/max-workers';
+import { pickerSource } from './picker-source.ts';
 
 export default defineProject({
+  // The Preview's picker is bundled only if a test opens a Preview.
+  plugins: [pickerSource()],
   test: {
     ...localWorkerCap,
     name: 'desktop',

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   mintId,
   PermissionChoice,
+  Provider,
   ShapeOrigin,
   type ConversationId,
   type InboxItemDto,
@@ -416,6 +417,7 @@ describe("a chat's command outside the sandbox", () => {
           hazards: [],
           commandsAsk: true,
           unsandboxed: {
+            agent: Provider.Claude,
             mayRun: () => refusal,
             changes: () => changes,
             bump: () => {

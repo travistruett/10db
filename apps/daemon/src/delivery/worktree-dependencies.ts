@@ -261,13 +261,13 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
       // Why node_modules was removed, written to the log of the install that follows (the daemon's
       // log too), so a builder who finds a copy installed from scratch can read the reason.
       let reasons: string[] = [];
-      const startOver = (reason: string): void => {
+      const startOver = async (reason: string): Promise<void> => {
         if (existsSync(join(path, 'node_modules'))) {
           startedOver = true;
           reasons.push(reason);
           deps.logger?.info({ path, reason }, 'removed node_modules: starting the install over');
         }
-        removeBrokenInstall(path);
+        await removeBrokenInstall(path);
       };
       // pnpm repairs an install that is out of date, but not one that is pruned or was made by another
       // pnpm or from another store: it decides to remove `node_modules/.pnpm`, the sandbox refuses
@@ -345,7 +345,7 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         if (health.kind === 'broken') return describeBroken(health);
         return null;
       })();
-      if (why !== null) startOver(why);
+      if (why !== null) await startOver(why);
       let attempt = 0;
       const install = async (): Promise<DependencyRefresh> => {
         attempt += 1;
@@ -413,7 +413,7 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
       ) {
         const left = checkInstall(path);
         if (left.kind === 'broken') {
-          startOver(
+          await startOver(
             `the install exited ${String(first.exitCode)} and left the copy broken (${describeBroken(left)})`,
           );
           // What the failed install left unresolved, so a caller that finds the copy whole after

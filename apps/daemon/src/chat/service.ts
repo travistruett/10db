@@ -1,4 +1,5 @@
-import { rmdirSync, rmSync } from 'node:fs';
+import { rmdirSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   ACTIVE_STATES,
@@ -241,7 +242,7 @@ export interface ArchiveTakeover {
   /** Runs `job` after the chat's earlier takeover calls, before its later ones. */
   serialized<T>(chatId: ChatId, job: () => Promise<T>): Promise<T>;
   /** The chat is archived: its hold is released, waiters served and its files removed. */
-  ended(chatId: ChatId): void;
+  ended(chatId: ChatId): Promise<void>;
 }
 
 export interface ChatServiceDeps {
@@ -524,8 +525,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
           archiveChat(ctx, id, ctx.now);
         });
         // A chat in the builder's terminal gives the folder back and its files go.
-        takeover?.ended(id);
-        rmSync(chatFolder(deps.dataDir, chat.conversationId), { recursive: true, force: true });
+        await takeover?.ended(id);
+        await rm(chatFolder(deps.dataDir, chat.conversationId), { recursive: true, force: true });
         // A chat with no plan has nothing in its derived plan folder (uploads and screens need a plan), so it is
         // empty; the next session of a reopened chat makes it again.
         if (planOfChat(state.db, id) === null)

@@ -12,7 +12,7 @@ import { createTempRepo, FAKE_SRT } from './fixtures';
  */
 export async function sandboxedMcpServer(
   server: StdioMcpServer,
-): Promise<{ readonly server: SandboxedMcpServer; cleanup(): void }> {
+): Promise<{ readonly server: SandboxedMcpServer; cleanup(): Promise<void> }> {
   const root = realpathSync(mkdtempSync('/tmp/sbx-'));
   const repo = createTempRepo();
   const cleanup = (): void => {
@@ -55,9 +55,12 @@ export async function sandboxedMcpServer(
     if (sandboxed === undefined) throw new Error('the lane sandbox made no server');
     return {
       server: sandboxed,
-      cleanup: () => {
-        session.dispose();
-        cleanup();
+      cleanup: async () => {
+        try {
+          await session.dispose();
+        } finally {
+          cleanup();
+        }
       },
     };
   } catch (error) {

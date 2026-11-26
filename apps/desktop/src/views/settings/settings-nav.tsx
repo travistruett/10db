@@ -49,6 +49,7 @@ const SECTION_ICON: Readonly<Record<SettingsSectionKey, typeof IconSettings>> = 
   [SettingsSectionKey.Planning]: IconListCheck,
   [SettingsSectionKey.Areas]: IconMap,
   [SettingsSectionKey.Watchpoints]: IconEye,
+  [SettingsSectionKey.AllWatchpoints]: IconEye,
   [SettingsSectionKey.NetworkHosts]: IconBox,
   [SettingsSectionKey.Billing]: IconCoin,
   [SettingsSectionKey.Team]: IconUsers,

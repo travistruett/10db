@@ -20,6 +20,10 @@ Shares this Mac's daemon on the builder's tailnet through `tailscale serve`.
   `http://127.0.0.1:<port>`, a `TCP[port]` entry that is exactly `{ "HTTPS": true }` and no Funnel on the name.
   `loopbackMappingOn` is the same check without a name, used only to remove 10db's mapping while the name is
   unreadable. `shareRefusal(port, mainPort)` takes the main listener's port because it is only known at run time.
+- `sharing-status.ts` (`computeSharingStatus`) is pure: the Remote Access checklist and state from the service's
+  readings. `sharing-settings.ts` owns the `sharing.*` `app_settings` keys, `serve-control.ts` reads and changes
+  `tailscale serve` and caches the last status, and `sharing-service-api.ts` holds the `SharingService` interface and
+  `SharingRefusedError`.
 - `sharing-service.ts` runs `set`, `requestCertificate`, `start`, `stop`, the refresh a stale `status()` starts and the
   60 s monitor on one queue. Stop and shutdown unserve first, then close the share sockets, then the listener, and
   remove only a mapping that is 10db's. A start with a Funnel, TCP or foreign mapping on the port never listens

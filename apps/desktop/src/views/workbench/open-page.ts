@@ -1,7 +1,15 @@
-import { DevUiConnectionDto, handOffTo, type PassId, type TaskId } from '@10db/contracts';
+import {
+  DevUiConnectionDto,
+  handOffTo,
+  PreviewSignInDto,
+  type PassId,
+  type ProjectId,
+  type TaskId,
+} from '@10db/contracts';
 import { useState } from 'react';
 import { readJson } from '../../daemon/client';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
+import { openPreview, previewAvailable } from '../../desktop/preview';
 import { appPageUrl, openAppPage } from '../../desktop/tauri';
 
 // Workbench spec §4.3, design review D18: Open in Browser's first click for a page in a pass opens it
@@ -16,19 +24,55 @@ export interface OpenPageTarget {
   readonly route: string | null;
   /** The project's app address, or null when none is set. */
   readonly appUrl: string | null;
+  /** The page's project, its folder and the page's name, for the Preview window; none, no Preview. */
+  readonly preview?: {
+    readonly projectId: ProjectId;
+    readonly repoPath: string;
+    readonly label: string;
+  };
 }
+
+/** What stopped a page from opening, which says what can fix it. */
+export const OpenFailure = {
+  /** 10db's daemon didn't answer: trying again once it is back is the fix. */
+  Daemon: 'daemon',
+  /** The project's app address, route or dev login: Settings › App Preview is the fix. */
+  Setup: 'setup',
+  /** Anything else, such as the clipboard. */
+  Other: 'other',
+} as const;
+export type OpenFailure = (typeof OpenFailure)[keyof typeof OpenFailure];
+
+export interface OpenPageRefusal {
+  /** What could not be done: "Couldn't open the Preview". */
+  readonly title: string;
+  /** Why, in a sentence. */
+  readonly reason: string;
+  readonly failure: OpenFailure;
+  readonly retry: () => Promise<void>;
+  readonly dismiss: () => void;
+}
+
+/** Which of the control's actions failed, so Try Again reruns it with the current connection. */
+const OpenAction = { Launch: 'launch', Preview: 'preview', Copy: 'copy' } as const;
+type OpenAction = (typeof OpenAction)[keyof typeof OpenAction];
 
 export interface OpenPageControl {
   /** The page has been opened in this pass: the button copies its link. */
   readonly opened: boolean;
   /** Why the page could not be opened or its link copied; null when nothing failed. */
-  readonly refusal: string | null;
+  readonly refusal: OpenPageRefusal | null;
   /** Opens the page, or copies its link once it has been opened. */
   readonly act: () => Promise<void>;
   /** Opens the page whether or not it was opened before. */
   readonly launch: () => Promise<void>;
   /** Copies the page's link (⌘L), opened or not. */
   readonly copy: () => Promise<void>;
+  /**
+   * Opens the page in the project's Preview window, signed in with its dev login; null where there is
+   * no Preview: outside the desktop app, and for 10db's own window, which the shell itself serves.
+   */
+  readonly preview: (() => Promise<void>) | null;
 }
 
 const storageKey = (passId: PassId): string => `tendb.workbench.opened.${passId}`;
@@ -72,9 +116,13 @@ function originOf(appUrl: string | null): string | null {
 /** Open in Browser, then Copy Link, for one page of a pass. */
 export function useOpenPage(target: OpenPageTarget): OpenPageControl {
   const [openedHere, setOpenedHere] = useState<ReadonlySet<string>>(new Set());
-  const [refused, setRefused] = useState<{ readonly key: string; readonly reason: string } | null>(
-    null,
-  );
+  const [refused, setRefused] = useState<
+    | (Omit<OpenPageRefusal, 'dismiss' | 'retry'> & {
+        readonly key: string;
+        readonly action: OpenAction;
+      })
+    | null
+  >(null);
   const { client, connection } = useDaemon();
   const status = useDaemonStatus();
   const devUiOrigin = status.kind === 'connected' ? status.devUiOrigin : null;
@@ -84,18 +132,36 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
   const devUi = devUiOrigin !== null && originOf(target.appUrl) === devUiOrigin;
   const opened =
     !devUi && (openedHere.has(key) || readOpened(target.passId).includes(target.taskId));
-  const attempt = async (step: (address: Address) => Promise<void>): Promise<void> => {
+  const daemonDown = status.kind !== 'connected';
+  const attempt = async (
+    action: OpenAction,
+    title: string,
+    step: (address: Address) => Promise<void>,
+    setup = true,
+  ): Promise<void> => {
     try {
       await step(addressOf(target));
       setRefused(null);
     } catch (error) {
-      setRefused({ key, reason: error instanceof Error ? error.message : String(error) });
+      // A request that never reached the daemon fails as a TypeError ("Load failed" in WebKit).
+      const unreachable = error instanceof TypeError || daemonDown;
+      setRefused({
+        key,
+        title,
+        reason: unreachable
+          ? "10db's daemon isn't answering. It may be restarting; 10db reconnects on its own."
+          : error instanceof Error
+            ? error.message
+            : String(error),
+        failure: unreachable ? OpenFailure.Daemon : setup ? OpenFailure.Setup : OpenFailure.Other,
+        action,
+      });
     }
   };
   const copy = ({ appUrl, route }: Address) =>
     navigator.clipboard.writeText(appPageUrl(appUrl, route));
   const launch = () =>
-    attempt(async (address) => {
+    attempt(OpenAction.Launch, "Couldn't open the page in your browser", async (address) => {
       // 10db's own dev UI gets the daemon's read-only dev UI token in the fragment, never the app's
       // own; a copied link carries neither.
       const handed = devUi
@@ -109,12 +175,53 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
       rememberOpened(target.passId, target.taskId);
       setOpenedHere((held) => new Set(held).add(key));
     });
-  const act = () => (opened ? attempt(copy) : launch());
+  const copyLink = () => attempt(OpenAction.Copy, "Couldn't copy the page's link", copy, false);
+  const act = () => (opened ? copyLink() : launch());
+  const ownWindow = originOf(target.appUrl) === window.location.origin;
+  const about = target.preview;
+  const preview =
+    about !== undefined && previewAvailable() && !devUi && !ownWindow
+      ? () =>
+          attempt(OpenAction.Preview, "Couldn't open Mark Up Page", async ({ appUrl, route }) => {
+            const signIn = await readJson(
+              await client.projects[':projectId'].preview['sign-in'].$post({
+                param: { projectId: about.projectId },
+              }),
+              PreviewSignInDto,
+            );
+            if (!signIn.ok) throw new Error(signIn.problem);
+            await openPreview({
+              projectId: about.projectId,
+              appUrl,
+              route,
+              taskId: target.taskId,
+              pageLabel: about.label,
+              repoPath: about.repoPath,
+            });
+          })
+      : null;
   return {
     opened,
-    refusal: refused?.key === key ? refused.reason : null,
+    refusal:
+      refused?.key === key
+        ? {
+            title: refused.title,
+            reason: refused.reason,
+            failure: refused.failure,
+            retry:
+              refused.action === OpenAction.Preview
+                ? (preview ?? launch)
+                : refused.action === OpenAction.Copy
+                  ? copyLink
+                  : launch,
+            dismiss: () => {
+              setRefused(null);
+            },
+          }
+        : null,
     act,
     launch,
-    copy: () => attempt(copy),
+    copy: copyLink,
+    preview,
   };
 }

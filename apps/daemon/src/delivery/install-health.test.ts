@@ -225,19 +225,19 @@ describe('madeByAnotherPnpm', () => {
 });
 
 describe('removeBrokenInstall', () => {
-  it('removes the root node_modules and leaves the sources', () => {
+  it('removes the root node_modules and leaves the sources', async () => {
     install();
     write(join(root, 'src/a.ts'), 'export {};');
-    removeBrokenInstall(root);
+    await removeBrokenInstall(root);
     expect(existsSync(join(root, 'node_modules'))).toBe(false);
     expect(existsSync(join(root, 'src/a.ts'))).toBe(true);
   });
 
-  it('removes a node_modules that is a link without touching its target', () => {
+  it('removes a node_modules that is a link without touching its target', async () => {
     const outside = join(tmp.path, 'outside');
     write(join(outside, 'keep.txt'), 'x');
     symlinkSync(outside, join(root, 'node_modules'));
-    removeBrokenInstall(root);
+    await removeBrokenInstall(root);
     expect(existsSync(join(outside, 'keep.txt'))).toBe(true);
     expect(existsSync(join(root, 'node_modules'))).toBe(false);
   });

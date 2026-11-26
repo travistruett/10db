@@ -539,7 +539,7 @@ describe('toSdkMcpServer', () => {
         config.args?.push('--inject');
         expect(toSdkMcpServer(made.server)).toEqual({ ...config, args: config.args?.slice(0, -1) });
       } finally {
-        made.cleanup();
+        await made.cleanup();
       }
     },
   );
@@ -568,7 +568,7 @@ describe('toSdkMcpServer', () => {
         expect(config).not.toHaveProperty('command');
         expect(config).not.toHaveProperty('args');
       } finally {
-        made.cleanup();
+        await made.cleanup();
       }
     },
   );

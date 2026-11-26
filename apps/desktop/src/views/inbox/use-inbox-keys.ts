@@ -24,19 +24,24 @@ export const KEYS_IGNORE_ATTRIBUTE = 'data-inbox-keys-ignore';
 /** Marks the panel's list of rows, which the keys move between. */
 export const LIST_ATTRIBUTE = 'data-inbox-list';
 
+/** A focused link or button, which keeps its own keys; an option (a `Radio.Card`, a button too) is the card's. */
+function onControl(target: Element): boolean {
+  return target.closest('button, a[href]') !== null && target.closest('[role="radio"]') === null;
+}
+
 /**
- * Keys count on the page itself, inside the selected card or inside the panel's list; a focused link or
- * button elsewhere, a row's own Dismiss included, keeps its own key.
+ * Keys count on the page itself, inside the selected card or inside the panel's list. A focused link or
+ * button keeps its own key anywhere: a row's own Dismiss, or a button in the card's bar, whose Enter presses
+ * it rather than answering the card.
  */
 function inScope(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return true;
   if (target.closest(`[${KEYS_IGNORE_ATTRIBUTE}]`) !== null) return false;
-  if (target.closest(`[${LIST_ATTRIBUTE}]`) !== null)
-    return target.closest('button, a[href]') === null;
+  if (target.closest(`[${LIST_ATTRIBUTE}]`) !== null) return !onControl(target);
   return (
     target === document.body ||
     target === document.documentElement ||
-    target.closest(`[${SELECTED_CARD_ATTRIBUTE}]`) !== null
+    (target.closest(`[${SELECTED_CARD_ATTRIBUTE}]`) !== null && !onControl(target))
   );
 }
 
