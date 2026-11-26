@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { Urgency } from '@10db/contracts';
 import { BY_ANSWER, CardTier } from '../inbox';
 import { detailOf, listPaths, worktreeOffer, type Card, type DeliveryNotice } from './cards';
@@ -10,22 +9,14 @@ export interface MergedHandMade {
 }
 
 /**
- * The fold keys of the hand-made folder's cards. The merged card's key names the set it lists, so
- * Keep holds for that set and a newly merged worktree is offered on its own.
+ * The fold keys of the hand-made folder's cards. A project has one merged card, which each look
+ * brings in line with the worktrees that have merged then: the key is the same whatever it lists,
+ * and a Keep answer holds for the paths its card listed (`keptPaths`).
  */
 export const MERGED_KEY_PREFIX = 'hand-made-merged:';
 
 export const handMadeKey = {
-  merged: (worktrees: readonly MergedHandMade[]): string =>
-    `${MERGED_KEY_PREFIX}${createHash('sha256')
-      .update(
-        worktrees
-          .map((w) => w.path)
-          .sort()
-          .join('\n'),
-      )
-      .digest('hex')
-      .slice(0, 16)}`,
+  merged: `${MERGED_KEY_PREFIX}offer`,
   spotlight: (folder: string): string => `hand-made-spotlight-note:${folder}`,
   /** The key of the card that once offered to write a marker file; any open one is withdrawn. */
   spotlightMarker: (folder: string): string => `hand-made-spotlight:${folder}`,
@@ -73,7 +64,8 @@ export const handMadeCards = {
     closesWhen: BY_ANSWER,
     title: `${String(worktrees.length)} worktree${worktrees.length === 1 ? '' : 's'} in ${folder} ${worktrees.length === 1 ? 'has' : 'have'} merged`,
     body: `Each pull request below merged, the branch holds nothing the pull request lacks, and the worktree has no uncommitted changes or loose files. Every one keeps a copy of node_modules and build output that the editor, Spotlight and the file watcher keep reading, which adds to the load.\n\n${listPaths(worktrees.map((w) => `${w.path} (${w.branch})`))}\n\nRemove Merged Worktrees removes them; the branches stay.`,
-    foldKey: handMadeKey.merged(worktrees),
+    foldKey: handMadeKey.merged,
+    refresh: true,
     ...worktreeOffer({ kind: 'merged-hand-made' }, { paths: worktrees.map((w) => w.path) }),
   }),
   spotlight: (folder: string): Card => ({
