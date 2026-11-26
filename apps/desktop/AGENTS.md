@@ -60,7 +60,10 @@ tokens; the app still uses the main listener.
   stops only on a clean exit, a schema mismatch (3) or a refused setting (4). On exit 2 it watches the daemon that
   holds `daemon.lock` and starts its own once that one is gone or silent on `/health` for 30 s; it never signals
   the holder, the new daemon's instance lock does. Its own daemon is asked for `/health` every 5 s once
-  `daemon.json` names it, and one silent for 30 s is killed and replaced. `ps` that can't run counts as "not gone".
+  `daemon.json` names it, and one silent for 30 s is killed and replaced. Each freeze kill within 10 minutes of
+  the last doubles that threshold (up to 8 minutes), and before each kill it writes `daemon.frozen-kill` beside
+  `daemon.lock`, so the next daemon charges no run for the restart
+  (`decisions/2026-11-26-a-freeze-kill-is-not-a-crash-of-every-run.md`). `ps` that can't run counts as "not gone".
   The loops have no scripted coverage. The check by hand (`kill -9`, then `kill -STOP`, the daemon of the built or
   installed app, which runs its own sidecar) is the builder's or the coordinator's to run: an agent signals only a
   daemon it started itself. The dev window can't show the loops: it sets `TENDB_EXTERNAL_DAEMON=1`, so it starts

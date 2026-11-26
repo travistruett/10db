@@ -56,6 +56,7 @@ export {
   TrustChoice,
 } from './trusted-writes';
 export { flagFailedRun, noteOnFailedCard, withdrawFailedCard } from './failed-card';
+export { raiseStartHoldCard, withdrawStartHoldCard, type StartHeldRun } from './start-hold-card';
 export { BY_ANSWER, CardTier, type CardClosesWhen, type StoredTier } from './card-tier';
 export { postNotice, type NoticeInput } from './notice';
 export { createHookJudge, createLimitNotes, type LimitNotes } from './hook-judge';
