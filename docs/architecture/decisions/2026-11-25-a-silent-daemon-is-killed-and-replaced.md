@@ -37,8 +37,8 @@ identifies it.
   child silent for `FROZEN_AFTER` (30 s) is killed and replaced. A daemon that has not written `daemon.json`
   yet is never judged, and nothing is judged while the app quits.
 
-Both probes speak HTTP/1.1 over loopback (the supervisor by hand on a `TcpStream`, the lock with `fetch`). If
-`/health` ever answers only HTTP/2, both change together.
+Both probes speak HTTP/1.1 over loopback (the supervisor by hand on a `TcpStream`, the lock with the daemon's
+`outboundFetch`, which never offers HTTP/2). If `/health` ever answers only HTTP/2, both change together.
 
 ## Why
 

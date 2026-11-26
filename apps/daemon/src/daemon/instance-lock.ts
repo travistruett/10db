@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
+import { outboundFetch } from '../outbound';
 import { readRuntimeInfo } from '../runtime-files';
 
 const run = promisify(execFile);
@@ -101,7 +102,7 @@ function runtimeInfo(dataDir: string): ReturnType<typeof readRuntimeInfo> | null
 
 async function healthAnswers(port: number): Promise<boolean> {
   try {
-    const response = await fetch(`http://127.0.0.1:${String(port)}${HEALTH_PATH}`, {
+    const response = await outboundFetch(`http://127.0.0.1:${String(port)}${HEALTH_PATH}`, {
       signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
     });
     return response.ok;
