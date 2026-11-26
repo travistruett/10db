@@ -1,18 +1,13 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-<<<<<<< 4d78c5591a609324457155597508b523860e06db
-import { mintId, TRUST_DEFAULTS, type TrustSurface } from '@10db/contracts';
-||||||| 6bf0103f0
-import { TRUST_DEFAULTS, type TrustSurface } from '@10db/contracts';
-=======
 import {
   JUDGE_TIMEOUT_MS,
   JUDGE_UNATTENDED_TIMEOUT_MS,
+  mintId,
   TRUST_DEFAULTS,
   type TrustSurface,
 } from '@10db/contracts';
->>>>>>> 5fe79f56284bce068e12332c78cb6b3bba102313
 import { createTestStore, listJudgeCalls, patchJudgeConfig, type Store } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ManualClock } from '../clock';
