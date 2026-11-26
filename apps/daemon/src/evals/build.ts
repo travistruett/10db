@@ -1,5 +1,7 @@
-import { EvalSuiteKey } from '@10db/contracts';
+import { EvalGapSource, EvalSuiteKey } from '@10db/contracts';
 import type {
+  EvalCallSiteCountDto,
+  EvalDriftDto,
   EvalFlakyCaseDto,
   EvalManifestSuite,
   EvalResultFormat,
@@ -9,6 +11,7 @@ import type {
   EvalTrendPointDto,
   StoredEvalManifest,
 } from '@10db/contracts';
+import { siteGap, type CallSite } from './call-sites';
 import type { FoundEvals } from './read-results';
 import { runSummary, type ParsedRun } from './run-summary';
 
@@ -97,11 +100,19 @@ function suiteDto(
 /** Failing latest first, then passing, then no results; ties by key. */
 const rank = (s: EvalSuiteDto): number => (s.latest === null ? 2 : s.latest.passed ? 1 : 0);
 
+/** What the manifest's call patterns found at HEAD, and what changed since its commit. */
+export interface Discovery {
+  readonly counts: readonly EvalCallSiteCountDto[];
+  readonly uncovered: readonly CallSite[];
+  readonly drift: EvalDriftDto | null;
+}
+
 /** What 10db has found of a project's evals, the manifest laid over it. */
 export function buildEvals(
   found: FoundEvals | null,
   manifest: StoredEvalManifest | null,
   times: DefinitionTimes = new Map(),
+  discovery: Discovery | null = null,
 ): EvalsDto {
   const suites = (found === null ? [] : candidates(found, manifest))
     .map((c) => suiteDto(c, manifest, times))
@@ -112,7 +123,15 @@ export function buildEvals(
     assessedAt: manifest?.assessedAt ?? null,
     suites,
     unlinked: (found?.markers.definitions ?? []).filter((p) => !linked.has(p)).sort(),
-    gaps: manifest?.manifest.gaps ?? null,
+    gaps:
+      manifest === null
+        ? null
+        : [
+            ...manifest.manifest.gaps.map((g) => ({ ...g, source: EvalGapSource.Assessed })),
+            ...(discovery?.uncovered ?? []).map(siteGap),
+          ],
+    callSites: [...(discovery?.counts ?? [])],
+    drift: discovery?.drift ?? null,
   };
 }
 

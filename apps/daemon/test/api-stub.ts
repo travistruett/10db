@@ -134,6 +134,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     removeNetworkHost: none,
     scanNetworkHosts: none,
     evals: none,
+    evalModels: none,
     evalSuite: none,
     recordEvalManifest: none,
     getHazardAssessment: none,

@@ -29,3 +29,18 @@
   fingerprint differs from the run before it. `definitionChangedAt` is the last commit of a suite's definition
   paths (`Git.lastChangedAt`, read once per HEAD) when it is more than 12 hours after the latest run: a run
   is often committed with its eval soon after, which isn't a change.
+- Call sites (`call-sites.ts`): the manifest's `callPatterns` (how the project marks a unit of LLM work, such as
+  `@register_task`) are searched at HEAD with `Git.grepAt` (`git grep -E` on the commit's objects, binary files
+  skipped, no textconv, a partial clone not read, at most `MAX_CALL_SITES` lines across the patterns). With no
+  pattern recorded the stock SDK table (`STOCK_CALL_PATTERNS`) runs instead. Nothing is searched before an
+  assessment. A site outside every suite's `coveredPaths` (matched as a hazard's globs), not in an eval definition
+  file and not in a file an assessed gap names, is a `found` gap beside the manifest's `assessed` ones. A commit's
+  sites and files are read once and kept (the newest 16 reads), so a new HEAD costs one search: about 20 ms for one
+  recorded pattern on orgtools, about 0.7 s for the six stock ones.
+- Drift (`drift.ts`): once HEAD moves past the manifest's commit, the page says what the manifest misses: unlinked
+  eval files the assessed commit didn't track, uncovered sites it didn't have (by label, path and line text, so a
+  line that only moved isn't new), and manifest paths HEAD no longer tracks. It raises no Inbox item. A commit that
+  can't be read any more counts no site as new.
+- By Model (`models.ts`, `GET /projects/:id/eval-models`, not under `/evals/` where `models` would be a suite key):
+  each model's newest result per suite, its cost for one run of each (unknown if any is) and the median of its p50s.
+  A result from a run whose fingerprint differs from the suite's newest run is `olderEval`. Compare is the UI's join.
