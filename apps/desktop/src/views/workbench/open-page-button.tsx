@@ -8,7 +8,7 @@ function MenuLine({ title, byline }: { readonly title: string; readonly byline: 
   return (
     <Stack gap={0}>
       <Text size="sm">{title}</Text>
-      <Text size="xs" c="dimmed">
+      <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
         {byline}
       </Text>
     </Stack>
@@ -35,7 +35,7 @@ export function OpenPageButton({ control }: { readonly control: OpenPageControl 
         >
           Open Preview
         </Button>
-        <Menu position="bottom-end" width={300}>
+        <Menu position="bottom-end">
           <Menu.Target>
             <Button
               variant="default"
@@ -51,17 +51,17 @@ export function OpenPageButton({ control }: { readonly control: OpenPageControl 
             <Menu.Item onClick={() => void preview()}>
               <MenuLine
                 title="Open Preview"
-                byline="10db's window, signed in. Pick elements here."
+                byline="A 10db window, not your browser, where you can pick elements"
               />
             </Menu.Item>
             <Menu.Item onClick={() => void control.launch()}>
               <MenuLine
                 title="Open in Browser"
-                byline="Your browser, with your own session and DevTools."
+                byline="Your default browser, with your own login and DevTools"
               />
             </Menu.Item>
             <Menu.Item onClick={() => void control.copy()}>
-              <MenuLine title="Copy Link" byline="The page's address, for anywhere else." />
+              <MenuLine title="Copy Link" byline="Copy the page's address to paste anywhere" />
             </Menu.Item>
           </Menu.Dropdown>
         </Menu>

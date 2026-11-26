@@ -54,10 +54,10 @@ a turn, and picking on a turn's headless after-picture. A Chrome extension is ou
 ## 2. Opening the preview
 
 - The title row's open control becomes a split button. Its face is **Open Preview** (⌘O). Its menu holds:
-  - **Open Preview**: "10db's window, signed in. Pick elements here."
-  - **Open in Browser** (⌘⇧O): "Chrome, with your own session and DevTools." This is today's
+  - **Open Preview**: "A 10db window, not your browser, where you can pick elements"
+  - **Open in Browser** (⌘⇧O): "Your default browser, with your own login and DevTools" This is today's
     `open_app_page`; its name follows the default browser.
-  - **Copy Link**: "The page's address, for anywhere else."
+  - **Copy Link**: "Copy the page's address to paste anywhere"
 
   A queue row's link icon keeps opening the browser.
 - **One preview window per project**, labelled `preview-<projectId>`, made on first open and reused after. Opening
