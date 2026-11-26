@@ -279,9 +279,15 @@ describe('merges of one window install together', () => {
   }
   const lines = () => statusService.current().lines.map((line) => line.line);
 
-  it('installs at once when nothing runs, whatever the last install was', async () => {
+  it('installs at once when nothing runs, and records the install so the next window counts from it', async () => {
     installedAgo(60_000);
     expect(await make().tick()).toBe('applying');
+
+    state.write((ctx) => {
+      setAppSetting(ctx, SELF_UPDATE_APPLYING_KEY, { head: RUNNING, commit: RUNNING });
+    });
+    make().settle();
+    expect(getAppSetting(state.db, SELF_UPDATE_INSTALLED_AT_KEY)).toBe(clock.now().getTime());
   });
 
   it('holds nothing before the window ends, says until when, and drains once it has', async () => {
@@ -303,14 +309,6 @@ describe('merges of one window install together', () => {
 
     world.busy = 0;
     expect(await update.tick()).toBe('applying');
-  });
-
-  it('records the install it settles, so the next window counts from it', () => {
-    state.write((ctx) => {
-      setAppSetting(ctx, SELF_UPDATE_APPLYING_KEY, { head: RUNNING, commit: RUNNING });
-    });
-    make().settle();
-    expect(getAppSetting(state.db, SELF_UPDATE_INSTALLED_AT_KEY)).toBe(clock.now().getTime());
   });
 
   it('releases a drain held up by a gate at its cap, and drains again a window later', async () => {
