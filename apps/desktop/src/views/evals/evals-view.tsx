@@ -1,5 +1,6 @@
 import {
   NewEvalOrigin,
+  evalGapPath,
   type EvalCallSiteCountDto,
   type EvalDriftDto,
   type EvalGapDto,
@@ -21,7 +22,7 @@ import { RaisedPanel } from '../../shell/raised-panel';
 import { TitleRow } from '../../shell/title-row';
 import { useSelectedProject } from '../../shell/selected-project';
 import { ByModel } from './by-model';
-import { NewEvalModal, type NewEvalPrefill } from './new-eval-modal';
+import { asBehavior, NewEvalModal, type NewEvalPrefill } from './new-eval-modal';
 import { SuiteDrawer } from './suite-drawer';
 import { SuiteTable } from './suite-table';
 
@@ -288,9 +289,9 @@ function Gaps({
                   aria-label={`New Eval for ${gap.label}`}
                   onClick={() => {
                     onNewEval({
-                      behavior: gap.label,
+                      behavior: asBehavior(gap.label),
                       evidence: gap.why,
-                      where: [gap.where.replace(/:\d+$/u, '')],
+                      where: [evalGapPath(gap.where)],
                       origin: NewEvalOrigin.Gap,
                     });
                   }}
@@ -357,6 +358,15 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
       />
     </>
   );
+  const newEvalModal = (
+    <NewEvalModal
+      projectId={project.id}
+      prefill={newEval}
+      onClose={() => {
+        setNewEval(null);
+      }}
+    />
+  );
   if (evals.data === undefined)
     return (
       <>
@@ -368,6 +378,7 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
         ) : (
           <PageLoading shape={PageLoadingShape.List} label="Loading the suites" />
         )}
+        {newEvalModal}
       </>
     );
   const data = evals.data;
@@ -404,13 +415,7 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
           onNewEval={setNewEval}
         />
       )}
-      <NewEvalModal
-        projectId={project.id}
-        prefill={newEval}
-        onClose={() => {
-          setNewEval(null);
-        }}
-      />
+      {newEvalModal}
       <SuiteDrawer
         projectId={project.id}
         suiteKey={open}

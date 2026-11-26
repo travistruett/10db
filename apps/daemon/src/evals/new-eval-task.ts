@@ -44,8 +44,8 @@ export async function findEvalSkills(
   for (const [path, text] of read.texts) {
     const folder = SKILL_FILE.exec(path)?.[1];
     if (folder === undefined) continue;
-    const name = frontmatterField(text, 'name') || folder;
-    if (!/eval/iu.test(`${name} ${frontmatterField(text, 'description')}`)) continue;
+    const name = frontmatterField(text, 'name').replaceAll(/^['"]|['"]$/gu, '') || folder;
+    if (!/\bevals?\b/iu.test(`${name} ${frontmatterField(text, 'description')}`)) continue;
     byName.set(name, [...(byName.get(name) ?? []), path]);
   }
   return [...byName].map(([name, paths]) => ({ name, paths }));

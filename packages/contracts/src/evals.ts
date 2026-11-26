@@ -365,7 +365,24 @@ export const NewEvalOrigin = {
 } as const;
 export type NewEvalOrigin = (typeof NewEvalOrigin)[keyof typeof NewEvalOrigin];
 
-const RationaleText = z.string().trim().max(4000);
+/** The path a gap's `where` names, without its `:line` or `:line:column`. */
+export const evalGapPath = (where: string): string => where.replace(/:\d+(?::\d+)?$/u, '');
+
+/** Text with no control character but a newline or tab, which would otherwise read as structure in a brief. */
+const NO_CONTROLS = /^[^\p{Cc}]*$/u;
+const plainText = (s: string): boolean => NO_CONTROLS.test(s.replaceAll(/[\n\t]/gu, ' '));
+
+const RationaleText = z
+  .string()
+  .trim()
+  .max(4000)
+  .refine(plainText, 'no control characters other than newlines and tabs');
+
+/** A path the brief names in backticks: one line, and no backtick to end the span early. */
+const BriefPath = RepoPath.refine(
+  (p) => !/[\p{Cc}`]/u.test(p),
+  'no control characters or backticks',
+);
 
 /**
  * What the New Eval form sends: the rationale an eval is written from, which becomes the brief of a task
@@ -387,7 +404,7 @@ export const NewEvalRequest = z.strictObject({
   models: RationaleText.default(''),
   execution: RationaleText.default(''),
   /** Tracked paths the behavior lives in; the lane reads them, and they pick the task's areas. */
-  where: z.array(RepoPath).max(20).default([]),
+  where: z.array(BriefPath).max(20).default([]),
   origin: z.enum([NewEvalOrigin.Page, NewEvalOrigin.Gap, NewEvalOrigin.PlanEval]).default('page'),
 });
 export type NewEvalBody = z.output<typeof NewEvalRequest>;

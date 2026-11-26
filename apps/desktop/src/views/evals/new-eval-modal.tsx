@@ -23,10 +23,17 @@ export interface NewEvalPrefill {
   readonly origin: NewEvalOrigin;
 }
 
+/** The longest behavior the task's title takes (`NewEvalRequest`). */
+const BEHAVIOR_MAX = 150;
+
+/** One line cut to what a title takes, so a long objective or gap label still files. */
+export const asBehavior = (text: string): string =>
+  text.replaceAll(/\s+/gu, ' ').trim().slice(0, BEHAVIOR_MAX);
+
 /** A goal's proposed eval as the form's start: its objective is the behavior, its baseline the bar. */
 export function prefillFromPlanEval(plan: PlanEval): NewEvalPrefill {
   return {
-    behavior: plan.objective,
+    behavior: asBehavior(plan.objective),
     ...(plan.decision === undefined ? {} : { decision: plan.decision }),
     ...(plan.oracle === undefined ? {} : { oracle: plan.oracle }),
     coverageAndBar: plan.baseline.join('\n'),
@@ -95,6 +102,7 @@ function Form({
         <Stack>
           <TextInput
             label="Behavior"
+            maxLength={BEHAVIOR_MAX}
             description="The task is titled Write the eval for this."
             value={behavior}
             onChange={(e) => {
