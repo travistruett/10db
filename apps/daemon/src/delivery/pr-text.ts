@@ -1,4 +1,5 @@
 import { WorkstreamState, type BatchId, type WatchpointHitsDto } from '@10db/contracts';
+import { definitionReason } from '../evals';
 import { fillTemplate } from './pr-template';
 
 /** Conventional Commits' longest header, as this repo's commitlint and `config-conventional` set it. */
@@ -165,7 +166,9 @@ export function forYouSection(hits: WatchpointHitsDto['hits']): string {
         `- ${pathText(file.path)}${file.added === null ? '' : ` (+${String(file.added)} −${String(file.removed ?? 0)})`}`,
         ...(file.evalDefinition === undefined
           ? []
-          : [`  - Eval: ${plain(file.evalDefinition.reason)}`]),
+          : [
+              `  - Eval: ${plain(definitionReason(file.evalDefinition.changes, true, file.clipped))}`,
+            ]),
         ...(file.agentNote === null ? [] : [`  - Agent: ${plain(file.agentNote)}`]),
         ...(file.reviewerNote === null ? [] : [`  > ${plain(file.reviewerNote)}`]),
       ]),

@@ -26,7 +26,8 @@
               "check",
               "plan",
               "playbook_move_report",
-              "acceptance"
+              "acceptance",
+              "watchpoint"
             ]
           },
           "state": {

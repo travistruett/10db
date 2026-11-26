@@ -63,6 +63,8 @@
         "stakeholder_send.changed",
         "linear_post.changed",
         "slack.connection.changed",
+        "device.changed",
+        "sharing.changed",
         "stakeholder_timers.changed",
         "inbox.triaged",
         "team.saved",

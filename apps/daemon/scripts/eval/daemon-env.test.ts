@@ -39,6 +39,7 @@ describe('evalDaemonEnv', () => {
       TENDB_CATALOGUE: 'off',
       TENDB_JUDGE: 'off',
       TENDB_SLACK: 'off',
+      TENDB_TAILSCALE: 'off',
       TENDB_PARENT_STDIN: '1',
       TENDB_LANE_TRANSCRIPT_DAYS: '30',
     });

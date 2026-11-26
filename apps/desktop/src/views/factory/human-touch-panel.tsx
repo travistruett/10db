@@ -29,6 +29,7 @@ const COLUMNS = [
   'Plan',
   'Move report',
   'Acceptance',
+  'Look',
   'Cards',
   'Per task',
   'Waited on an answer',
@@ -49,6 +50,7 @@ function DayRow({ day }: { readonly day: HumanTouchDayDto }) {
       <Table.Td>{day.plan}</Table.Td>
       <Table.Td>{day.moveReport}</Table.Td>
       <Table.Td>{day.acceptance}</Table.Td>
+      <Table.Td>{day.watchpoint}</Table.Td>
       <Table.Td>{day.cards}</Table.Td>
       <Table.Td>{perTask(day.cardsPerTask)}</Table.Td>
       <Table.Td>{`${String(Math.round(day.waitingMinutes))} min`}</Table.Td>

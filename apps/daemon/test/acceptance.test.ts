@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { DaemonEvent, ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
+import { DaemonEvent, EventTicketDto, ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
 import { listEvidence, listInbox, listSessions, listSkipsForWorkstream } from '@10db/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -219,8 +219,9 @@ describe('§1.3 with the fake adapter', () => {
     const middle = events[Math.floor(events.length / 2)]?.seq ?? 0;
     const last = events.at(-1)?.seq;
     const received: number[] = [];
+    const issued = await api.post('/events/ticket', EventTicketDto);
     const socket = new WebSocket(
-      `${daemon.url.replace('http', 'ws')}/events/stream?after=${String(middle)}&token=${daemon.token}`,
+      `${daemon.url.replace('http', 'ws')}/events/stream?after=${String(middle)}&ticket=${issued.ticket}`,
     );
     await new Promise<void>((resolve, reject) => {
       socket.onmessage = (m) => {

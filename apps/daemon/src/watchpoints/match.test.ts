@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   effectiveWatchpoints,
+  isNoisyWatchpoint,
+  revisedWatchpoints,
+  STARTER_REVISION,
+  STARTER_WATCHPOINTS,
   WatchpointFileStatus,
   WatchpointLoudness,
   type Watchpoint,
   type WatchpointFileHit,
 } from '@10db/contracts';
+import { evalDefinitionSource } from './eval-definition-source';
 import { matchWatchpoints } from './match';
 import { splitPatch } from './split-patch';
 
@@ -178,5 +183,54 @@ describe('splitPatch', () => {
     expect(splitPatch(diff, { fileBytes: 24 * 1024, diffCut: true }).get('mod.txt')?.clipped).toBe(
       false,
     );
+  });
+});
+
+describe('revisedWatchpoints', () => {
+  const firstShippedMigrations = (over: Partial<Watchpoint> = {}): Watchpoint => {
+    const starter = STARTER_WATCHPOINTS.find((w) => w.key === 'migrations');
+    if (starter === undefined) throw new Error('no migrations starter');
+    return { ...starter, loudness: WatchpointLoudness.Show, ...over };
+  };
+
+  it('moves a starter unchanged since first shipped to ask and leaves an edited one, and every other watchpoint, alone', () => {
+    const edited = firstShippedMigrations({ guidance: 'my own check' });
+    const other = watchpoint('mine', ['**/mine/**']);
+    const [unchanged, kept, untouched] = revisedWatchpoints([
+      firstShippedMigrations(),
+      edited,
+      other,
+    ]);
+    expect(unchanged?.loudness).toBe(WatchpointLoudness.Ask);
+    expect(kept).toEqual(edited);
+    expect(untouched).toEqual(other);
+  });
+
+  it('leaves a list saved at the current revision alone, so a starter set back to show stays show', () => {
+    const [kept] = revisedWatchpoints([firstShippedMigrations()], STARTER_REVISION);
+    expect(kept?.loudness).toBe(WatchpointLoudness.Show);
+  });
+});
+
+describe('isNoisyWatchpoint', () => {
+  it('is noisy at 5 cards with at least 80% waved through, and not before', () => {
+    expect(isNoisyWatchpoint({ cards: 4, waved: 4 })).toBe(false);
+    expect(isNoisyWatchpoint({ cards: 6, waved: 5 })).toBe(true);
+    expect(isNoisyWatchpoint({ cards: 5, waved: 3 })).toBe(false);
+  });
+});
+
+describe('evalDefinitionSource', () => {
+  it('shows a definition file no watchpoint covers under the evals watchpoint beside one it covers', () => {
+    const evals = watchpoint('evals', ['**/evals/**']);
+    const source = evalDefinitionSource(
+      new Map([
+        ['evals/gate.py', 'gate'],
+        ['tests/llm/cases.jsonl', 'cases'],
+      ]),
+    );
+    const hits = source([file('evals/gate.py'), file('tests/llm/cases.jsonl')], [evals]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.files.map((f) => f.path)).toEqual(['evals/gate.py', 'tests/llm/cases.jsonl']);
   });
 });

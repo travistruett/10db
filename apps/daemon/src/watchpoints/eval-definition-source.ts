@@ -17,24 +17,28 @@ export function evalDefinitionSource(suiteOf: ReadonlyMap<string, string>): Watc
       const suiteKey = suiteOf.get(file.path);
       if (suiteKey === undefined) return [];
       const changes = classifyDefinitionChange(file.path, file.patch);
-      return [{ ...file, evalDefinition: definitionHit(suiteKey, changes) }];
+      return [{ ...file, evalDefinition: definitionHit(suiteKey, changes, file.clipped) }];
     });
     if (defined.length === 0) return [];
     return watchpoints.flatMap((watchpoint): WatchpointHit[] => {
       const covered = defined.filter((file) =>
         watchpoint.globs.some((glob) => areaMatches(file.path, glob)),
       );
+      // The Evals starter also takes the definition files no watchpoint covers.
       const own =
-        covered.length > 0 || watchpoint.key !== EVALS_WATCHPOINT_KEY
-          ? covered
-          : defined.filter(
+        watchpoint.key === EVALS_WATCHPOINT_KEY
+          ? defined.filter(
               (file) =>
-                !watchpoints.some((w) => w.globs.some((glob) => areaMatches(file.path, glob))),
-            );
+                covers(watchpoint, file.path) || !watchpoints.some((w) => covers(w, file.path)),
+            )
+          : covered;
       return own.length === 0 ? [] : [{ watchpoint: snapshot(watchpoint), files: own }];
     });
   };
 }
+
+const covers = (w: Watchpoint, path: string): boolean =>
+  w.globs.some((glob) => areaMatches(path, glob));
 
 function snapshot(w: Watchpoint): WatchpointHit['watchpoint'] {
   const { key, label, why, guidance, loudness } = w;
