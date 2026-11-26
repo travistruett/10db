@@ -350,7 +350,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
   const beforePending = (taskId: TaskId): boolean =>
     queue.waiting.some(isBeforeOf(taskId)) || isBeforeOf(taskId)(queue.loading);
 
-  /** Follows the browser's readiness: a download holds befores back and drops the rest. */
+  /** Follows the browser's readiness: a fetch holds befores and afters back and drops turn pictures. */
   function syncBrowser(): void {
     const status = deps.camera.status();
     if (status.state !== queue.browser) apply({ kind: 'browser', state: status.state });
@@ -383,6 +383,18 @@ export function startPictures(deps: PicturesDeps): Pictures {
     retryRefusedFetch(false);
     syncBrowser();
     apply({ kind: 'ask', request });
+    const asked = (r: CaptureRequest | null): boolean =>
+      r !== null && r.kind === request.kind && r.taskId === request.taskId;
+    if (
+      request.kind === ScreenKind.After &&
+      !queue.waiting.some(asked) &&
+      !queue.deferred.some(asked) &&
+      !asked(queue.loading)
+    )
+      log.warn(
+        { taskId: request.taskId, browser: queue.browser, closed: queue.closed },
+        'an after picture was not queued: the browser is not available or the daemon is stopping',
+      );
     pump();
   }
 
@@ -458,9 +470,10 @@ export function startPictures(deps: PicturesDeps): Pictures {
 
   const inLocalCopy = (task: TaskDto): boolean => taskInLocalCopy(db, task.id);
 
-  /** Asks an after for each task of a shipped local copy that has none. */
+  /** Asks an after for each task a shipped local copy finished that has none. */
   function askCopyAfters(batchId: BatchId): void {
     for (const run of listWorkstreams(db, { batchId })) {
+      if (run.state !== WorkstreamState.Done) continue;
       const task = getTask(db, run.taskId);
       if (!hasTaskScreen(db, task.id, ScreenKind.After)) askAfter(task, null);
     }
@@ -700,6 +713,11 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const stopped = (): boolean => signal.aborted;
     const project = getProject(db, request.projectId);
     const task = getTask(db, request.taskId);
+    /** Ends a capture that was not stopped but keeps nothing, saying why. */
+    const skip = (why: string): number => {
+      log.info({ taskId: task.id, kind: request.kind, why }, 'no picture taken');
+      return 0;
+    };
     // A shutdown before the API listens ends the wait.
     const port = await Promise.race([
       deps.daemonPort,
@@ -711,28 +729,30 @@ export function startPictures(deps: PicturesDeps): Pictures {
       }),
     ]);
     if (port === null || stopped()) return 0;
-    if (shootableAddress(project.id, port) === null) return 0;
+    if (shootableAddress(project.id, port) === null)
+      return skip("the project has no app address, or it names 10db's own port");
     // A copy task's after may be asked when it is done and again when its copy ships: one is kept.
     if (
       request.kind === ScreenKind.After &&
       inLocalCopy(task) &&
       hasTaskScreen(db, task.id, ScreenKind.After)
     )
-      return 0;
+      return skip('the task has its after already');
     const inPass = request.passId !== null;
     if (
       request.kind === ScreenKind.Before &&
       !beforeAllowed({ inPass, ...taskStartFacts(db, task.id) })
     )
-      return 0;
+      return skip('the task has started its work');
     const targets = pictureRoutes(
       project,
       task,
       reportedFor(request.kind, task, request.turnId, request.passId !== null),
     );
-    if (targets.length === 0) return 0;
+    if (targets.length === 0) return skip('the task names no page route that loads');
     const site = await resolveSite(request.kind, task.id, project, port, signal);
-    if (site === null || stopped()) return 0;
+    if (stopped()) return 0;
+    if (site === null) return skip('there is no app to shoot');
     const { appUrl } = site;
     const copyId = site.copy?.copyId ?? null;
     // A stack that is down is brought up first; one that won't start skips the pictures, as a dead one did.
@@ -747,9 +767,10 @@ export function startPictures(deps: PicturesDeps): Pictures {
     }
     let storageState = readStorageState(deps.dataDir, project.id, copyId);
     if (storageState === null && project.devLoginCommand !== null) {
-      if (!siteStands(site, project.id, port)) return 0;
+      if (!siteStands(site, project.id, port)) return skip('the app address changed');
       storageState = await runSignIn(project, signal, site);
-      if (storageState === null) return 0;
+      if (stopped()) return 0;
+      if (storageState === null) return skip('the browser could not be signed in');
     }
     let signedInAgain = false;
     const shots: Omit<ScreenToKeep, 'keptSha'>[] = [];
@@ -771,9 +792,10 @@ export function startPictures(deps: PicturesDeps): Pictures {
         !redirectingRoutes.has(redirects)
       ) {
         signedInAgain = true;
-        if (!siteStands(site, project.id, port)) return 0;
+        if (!siteStands(site, project.id, port)) return skip('the app address changed');
         storageState = await runSignIn(project, signal, site);
-        if (storageState === null) return 0;
+        if (stopped()) return 0;
+        if (storageState === null) return skip('the browser could not be signed in again');
         shot = await shoot(storageState);
       }
       if (stopped()) return 0;
@@ -840,7 +862,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
           load,
         },
       );
-    if (shots.length === 0) return 0;
+    if (shots.length === 0) return skip('no page loaded cleanly');
     const keptSha = await keptShaOf(request, project);
     if (stopped()) return 0;
     return shots.filter(

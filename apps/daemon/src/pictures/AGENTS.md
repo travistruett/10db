@@ -20,13 +20,15 @@
   one capture queue (`capture-queue.ts`, a pure step over §3.2 of the plan: one load at a time; a newer turn
   picture replaces the waiting one; the page's next turn, a take-out, a pass entering CLOSING or ABANDONING and a
   changed app address abort a load, and nothing of an aborted load is written; a closing or abandoning pass's
-  afters wait until it leaves that state; while the browser downloads only befores wait). It follows the bus:
+  afters wait until it leaves that state; while the browser is fetched or checked, which start-up always does,
+  befores and afters wait and a turn picture is not asked,
+  `decisions/2026-11-26-an-after-picture-waits-for-the-browser-fetch.md`). It follows the bus:
   `pass.opened` and `pass.changed` (befores for open pages with none; the pass's state), `pass.turn_started` and a
   turn that ended not Ready (abort), `pass.page_ready` (a turn picture when `turnChangedSomething`: a new kept
   commit, or a shared change of the task's own held in the turn), `pass.page_signed_off` (the after),
   `task.changed` with `leftPassId` (a take-out), `workstream.changed` to DONE (the after of a Your-folder task
-  naming a routed page; a local copy's task is skipped there) and `batch.updated` to SHIPPED (the afters of a local
-  copy's tasks that name a routed page, once the change is in the copy) and `project.changed` (an app address set starts `BrowserHost.prepare`; a changed one
+  naming a routed page; a local copy's task is skipped there) and `batch.updated` to SHIPPED (the afters of the tasks a local
+  copy finished that name a routed page, once the change is in the project) and `project.changed` (an app address set starts `BrowserHost.prepare`; a changed one
   aborts). Start-up removes half-written picture files, asks befores for open pages with none and afters for
   Your-folder tasks done in the last hour with none, and for the tasks of a local copy whose batch shipped in the
   last hour (`taskInLocalCopy`, `copy-task.ts`). Which tasks and routes: `picture-routes.ts` (a pass page,
@@ -44,7 +46,8 @@
   `<data dir>/browser/<project id>/state.json` (0600, temp and rename), read back through zod
   (`storage-state.ts`). The state is forgotten when the app address or the dev login command changes. A capture signs in when no state is kept, and once again when a page lands elsewhere; a
   page still elsewhere says so once on the task's thread (`ELSEWHERE_NOTICE`) and on the status line. A route still elsewhere after a fresh sign-in is not signed in for again for that task, and a dev login stopped with its capture leaves the last sign-in as it was. No picture is taken before the API listens (`PicturesDeps.daemonPort`), nor of an app address on its port, checked again before each sign-in and shot. A refused fetch of the browser is tried again on the next ask after ten minutes, or when a pass opens. Start-up holds back the afters of a pass it finds closing or being abandoned, and removes dev login logs a stopped daemon left. Each
-  capture logs its route, outcome, milliseconds and bytes. `GET /tasks/:taskId/screens`, `GET
+  capture logs its route, outcome, milliseconds and bytes; one that keeps nothing without being stopped logs
+  why (`no picture taken`), and an after the queue would not take says so. `GET /tasks/:taskId/screens`, `GET
 /screens/:screenId` (a PNG, private and immutable; 404 once pruned) and `GET /projects/:projectId/pictures`
   are refused to screens. `DaemonOptions.pictures` is `{ kind: 'pinned' }` from the entry point; tests give a
   camera (`test/fake-camera.ts`); absent, the daemon takes no pictures and fetches nothing. No picture is

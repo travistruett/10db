@@ -76,7 +76,6 @@ export interface CaptureStep {
 
 const isTurn = (r: CaptureRequest): boolean => r.kind === ScreenKind.Turn;
 const isAfter = (r: CaptureRequest): boolean => r.kind === ScreenKind.After;
-const isBefore = (r: CaptureRequest): boolean => r.kind === ScreenKind.Before;
 const ofPass = (passId: PassId) => (r: CaptureRequest) => r.passId === passId;
 
 function step(
@@ -89,8 +88,10 @@ function step(
 
 function ask(queue: CaptureQueue, request: CaptureRequest): CaptureStep {
   if (queue.closed || queue.browser === 'refused') return step(queue);
-  // A download in progress holds befores back (they must be before the first edit); the rest wait for no one.
-  if (queue.browser === 'fetching' && !isBefore(request)) return step(queue);
+  // A fetch in progress holds befores (they must be before the first edit) and afters (what the task
+  // ended as stays true; start-up asks its missed ones while the fetch checks the build) back; a turn
+  // picture would show a turn long past, so it is not asked.
+  if (queue.browser === 'fetching' && isTurn(request)) return step(queue);
   if (request.passId !== null && queue.holding.includes(request.passId))
     return isAfter(request) && !queue.deferred.some((r) => sameAsk(r, request))
       ? step({ ...queue, deferred: [...queue.deferred, request] })
@@ -183,7 +184,7 @@ export function captureStep(queue: CaptureQueue, event: CaptureEvent): CaptureSt
           event.state === 'refused'
             ? []
             : event.state === 'fetching'
-              ? queue.waiting.filter(isBefore)
+              ? queue.waiting.filter((r) => !isTurn(r))
               : queue.waiting,
         deferred: event.state === 'refused' ? [] : queue.deferred,
       });
