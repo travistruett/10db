@@ -1,4 +1,10 @@
-import { mintId, type AccountId } from '@10db/contracts';
+import {
+  JUDGE_TIMEOUT_MS,
+  JUDGE_UNATTENDED_TIMEOUT_MS,
+  JudgeBudget,
+  mintId,
+  type AccountId,
+} from '@10db/contracts';
 import {
   createTestStore,
   listJudgeCalls,
@@ -6,7 +12,7 @@ import {
   seedAccount,
   type Store,
 } from '@10db/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
@@ -483,7 +489,58 @@ describe('judge.choose falls back', () => {
     clock.advance(1);
     const answer = await pending;
     expect(answer).toMatchObject({ kind: 'fallback', reason: 'timeout' });
-    expect(logged()[0]).toMatchObject({ outcome: 'fallback_timeout', latencyMs: 4000 });
+    expect(logged()[0]).toMatchObject({
+      outcome: 'fallback_timeout',
+      latencyMs: 4000,
+      attempts: 1,
+    });
+  });
+
+  it('gives an unattended call a longer budget and one retry on a timeout', async () => {
+    const hang = (signal: AbortSignal | undefined) =>
+      new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'));
+        });
+      });
+    handler = (_seen, signal) => {
+      if (seen.length === 1) return hang(signal);
+      clock.advance(300);
+      return json(systemOneBody({ review: 0.07, skip: 0.93 }));
+    };
+    const judge = build();
+    const retried = judge.choose({ ...request, budget: JudgeBudget.Unattended });
+    await vi.waitFor(() => {
+      expect(seen).toHaveLength(1);
+    });
+    clock.advance(JUDGE_TIMEOUT_MS);
+    expect(seen).toHaveLength(1);
+    clock.advance(JUDGE_UNATTENDED_TIMEOUT_MS - JUDGE_TIMEOUT_MS);
+    expect(await retried).toMatchObject({ kind: 'answered', choice: 'skip' });
+    expect(logged()).toEqual([
+      expect.objectContaining({ outcome: 'acted', attempts: 2, latencyMs: 12_300 }),
+    ]);
+
+    handler = (_seen, signal) => hang(signal);
+    const lost = judge.choose({ ...request, budget: JudgeBudget.Unattended });
+    await vi.waitFor(() => {
+      expect(seen).toHaveLength(3);
+    });
+    clock.advance(JUDGE_UNATTENDED_TIMEOUT_MS);
+    await vi.waitFor(() => {
+      expect(seen).toHaveLength(4);
+    });
+    clock.advance(JUDGE_UNATTENDED_TIMEOUT_MS);
+    expect(await lost).toMatchObject({
+      kind: 'fallback',
+      reason: 'timeout',
+      detail: 'No answer within 12 s in 2 tries',
+    });
+    expect(logged()[0]).toMatchObject({
+      outcome: 'fallback_timeout',
+      attempts: 2,
+      latencyMs: 24_000,
+    });
   });
 
   it('counts a key read that never answers in the four seconds', async () => {

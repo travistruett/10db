@@ -820,6 +820,13 @@
       "when": 1795668314721,
       "tag": "0116_light_talos",
       "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "6",
+      "when": 1795674416294,
+      "tag": "0117_real_wrecker",
+      "breakpoints": true
     }
   ]
 }
