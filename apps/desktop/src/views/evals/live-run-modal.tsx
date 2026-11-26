@@ -119,17 +119,22 @@ function RunView({
           ) : null}
         </Text>
         {running ? (
-          <Button
-            size="xs"
-            color="red"
-            variant="light"
-            loading={stop.isPending}
-            onClick={() => {
-              stop.mutate(run.id);
-            }}
-          >
-            Stop
-          </Button>
+          stop.isPending || stop.isSuccess ? (
+            <Text size="sm" c="dimmed">
+              Stopping
+            </Text>
+          ) : (
+            <Button
+              size="xs"
+              color="red"
+              variant="light"
+              onClick={() => {
+                stop.mutate(run.id);
+              }}
+            >
+              Stop
+            </Button>
+          )
         ) : (
           <Button size="xs" variant="default" onClick={onClose}>
             Close
@@ -182,7 +187,9 @@ function Confirm({
       {refusal !== null ? (
         <Stack gap={6}>
           <Text size="sm" c="red" data-testid="live-refusal">
-            {REFUSAL_WORDS[refusal]}
+            {refusal === EvalLiveRefusal.Busy && preview.running === null
+              ? 'What an interrupted run left running is still being stopped. Try again in a moment.'
+              : REFUSAL_WORDS[refusal]}
           </Text>
           {refusal === EvalLiveRefusal.DockerOff ? (
             <Button
@@ -309,7 +316,11 @@ function History({
               ? '; the work in your containers may still be running'
               : ''}
           </Text>
-          {r.state === EvalLiveRunState.Running ? (
+          {r.state === EvalLiveRunState.Running && stop.isSuccess && stop.variables === r.id ? (
+            <Text size="xs" c="dimmed">
+              Stopping
+            </Text>
+          ) : r.state === EvalLiveRunState.Running ? (
             <Button
               size="compact-xs"
               color="red"
