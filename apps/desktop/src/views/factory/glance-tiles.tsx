@@ -58,9 +58,16 @@ function Tile({
 }
 
 /** Factory's five figures at a glance: what needs the builder, what broke, what runs, what waits to merge, what merged. */
-export function GlanceTiles({ figures: f }: { readonly figures: GlanceFigures }) {
+export function GlanceTiles({
+  figures: f,
+  cols = 5,
+}: {
+  readonly figures: GlanceFigures;
+  /** How many tiles sit in a row: five in the window, two on the phone. */
+  readonly cols?: number;
+}) {
   return (
-    <SimpleGrid component="section" aria-label="At a glance" cols={5} spacing={12}>
+    <SimpleGrid component="section" aria-label="At a glance" cols={cols} spacing={12}>
       <Tile
         n={f.needsYou}
         mark={<StatusDot color="yellow" />}

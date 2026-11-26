@@ -12,13 +12,13 @@ export function CardActions({
   children,
 }: {
   readonly framed: boolean;
-  /** The answer's note field, at the bar's left and taking the room the buttons leave. */
+  /** The answer's note field, at the bar's left and taking the room the buttons leave; on a narrow bar it takes a line of its own. */
   readonly note?: ReactNode;
   readonly children: ReactNode;
 }) {
   const row = (
-    <Group justify="flex-end" align="flex-end" gap="sm" wrap="nowrap">
-      {note === null ? null : <div style={{ flex: 1, minWidth: 0 }}>{note}</div>}
+    <Group justify="flex-end" align="flex-end" gap="sm">
+      {note === null ? null : <div style={{ flex: '1 1 14rem', minWidth: 0 }}>{note}</div>}
       {children}
     </Group>
   );

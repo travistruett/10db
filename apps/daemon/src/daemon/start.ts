@@ -93,6 +93,7 @@ import {
   createUsageReports,
   type AccountLimits,
 } from '../accounts';
+import { createPushService, createVapidKeyStore, startPushSender } from '../push';
 import { createApp, type SelfUpdateServices } from '../api';
 import { Listener } from '../listeners';
 import {
@@ -216,6 +217,7 @@ import {
   resolvePnpm,
   resumePassSettles,
   copyIdForBatch,
+  subscribeCopyQueue,
   subscribeKeptWorkLanding,
   subscribePassSettles,
   subscribePrWatch,
@@ -614,6 +616,10 @@ export interface DaemonOptions {
   readonly benchmarksOff?: boolean;
   /** Sharing finds and runs no Tailscale CLI (`TENDB_TAILSCALE=off`). */
   readonly tailscaleOff?: boolean;
+  /** The Tailscale CLI to run (`TENDB_TAILSCALE_CLI`), in place of the search for the installed one. */
+  readonly tailscaleCli?: string;
+  /** The built served app the share listener serves at `/app/`; absent when this build carries none. */
+  readonly appDir?: string | null;
   readonly fetch?: typeof fetch;
   /** The `fetch` a Plan session's Figma tools post a mock-up with and read assets with; the real one by default. */
   readonly figmaFetch?: typeof fetch;
@@ -2735,6 +2741,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     if (!pageLabelsAbort.signal.aborted) logger.warn({ err: error }, 'page labels not guessed');
   });
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
+  // A copy waiting for its turn is cut when the copy in progress ends, and once now: recovery left
+  // a waiting copy as it was, so one whose predecessor ended while the daemon was down goes on.
+  const unsubscribeCopyQueue = subscribeCopyQueue(bus, starter);
+  starter.advanceCopyQueue();
   // A pass that closes unsettled gets its Move card, and each closed pass is looked at again; a
   // started task's saved work goes once its work lands.
   const unsubscribePassSettles = subscribePassSettles(bus, delivery);
@@ -3360,7 +3370,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     clock,
     log: logger.child({ component: 'sharing' }),
-    cli: opts.tailscaleOff ? () => null : () => findTailscaleCli(existsSync),
+    cli: opts.tailscaleOff ? () => null : () => opts.tailscaleCli ?? findTailscaleCli(existsSync),
     run: createTailscaleRun,
     listen: (sharePort) =>
       startShareListener({
@@ -3380,11 +3390,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     sharing: () => sharing.status(),
   });
   const streamTickets = createTickets({ clock });
+  const vapidKeys = createVapidKeyStore(opts.keychain ?? unavailableKeychain);
+  const pushService = createPushService({ state, keys: vapidKeys });
+  const stopPushSender = startPushSender({
+    bus,
+    state,
+    keys: vapidKeys,
+    log: logger.child({ component: 'push' }),
+  });
   const app = createApp({
     commit: build?.commit ?? null,
     listenPort: () => listenPort,
     share: { allowlists: () => sharing.allowlists(), hostLogin: () => sharing.hostLogin() },
     remote: { sharing, devices },
+    appDir: opts.appDir ?? null,
+    push: pushService,
     devices,
     tickets: streamTickets,
     sockets: deviceSockets,
@@ -3598,6 +3618,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         logger.warn({ err: error }, 'could not stop the sign-in');
       });
       unsubscribeShip();
+      unsubscribeCopyQueue();
       unsubscribeLinearEvents();
       unsubscribePassSettles();
       sizing.stop();
@@ -3675,6 +3696,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // but it reads and writes the database until it ends.
       await createdScheduler.idle();
       unsubscribeSettled();
+      stopPushSender();
       unsubscribeSkipped();
       await Promise.all(skippedRaises);
       state.write((ctx) => {

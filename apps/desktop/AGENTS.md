@@ -63,6 +63,7 @@ Read the ones for what you touch, and write a view's notes there, not here. This
 
 - `conversation/`: the conversation kit: markdown, the windowed list, tool call cards (`src/conversation/AGENTS.md`)
 - `screens/`: screens for Plan's `see_screen` (`src/screens/AGENTS.md`)
+- `served/`: the phone's app, a second build of this UI the daemon serves on the share listener (`src/served/AGENTS.md`)
 - `shell/`: the frame: rail, panel, title row, content surface, drawers (`src/shell/AGENTS.md`)
 - `views/board/`: the Board: columns, cards, task state, holds and batches (`src/views/board/AGENTS.md`)
 - `views/factory/`: Factory: a project's goals (`src/views/factory/AGENTS.md`)

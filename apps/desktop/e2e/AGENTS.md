@@ -26,6 +26,14 @@ cheapest rung that catches it, or into the flow it broke.
 | 10  | A setting that changes behavior               | A rigor's process edited in Settings changes the row and resets; the hosts a project's sandbox may reach are added, refused for localhost and removed. `project-trust.spec.ts` adds that a project's Trust lists what each switch brings, adds a Production entry the repo suggests and turns a repo MCP server On through its confirm, and that Evals reads the same repository: a committed gate report is a suite whose failing model names its gate, and its drawer opens.                                                                                                                                                                                                                                                                                                                  | `process-per-rigor.spec.ts` (the first test), `network-hosts.spec.ts`, `project-trust.spec.ts` |
 | 11  | A question routed to someone outside Slack    | A question card is routed from its card, the table shows the route and the Board says the task waits on that person; a question the person asked back reaches the Inbox with its reply box off while Slack is off, and answering the card closes it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | `stakeholder-questions.spec.ts`                                                                |
 
+`inbox.spec.ts` ends with a phone: it turns sharing on through a fake Tailscale CLI (`fake-tailscale.mjs`, reached by
+`TENDB_TAILSCALE_CLI`, its serve mapping kept in `test-results/`), puts an HTTPS stand-in for `tailscale serve`
+(`tls-standin.ts`: self-signed, forwards to the share listener with the Host and Origin the daemon allows, upgrades
+included) in front of it, makes a code in Settings › Devices, and in a separate Chromium (`--host-resolver-rules`
+maps `mac.e2e.ts.net`, `ignoreHTTPSErrors`) at 412 x 915 pairs on `/app/pair#code=`, answers a card from the phone's
+Inbox, and checks the Mac's dialog closed and the card is gone. `prepare.ts` builds `dist-app/` first. It stops
+sharing and revokes the device when it ends.
+
 Two specs are not flows. They stay because only a real WebKit can fail them and no cheaper test can:
 `window-csp.spec.ts` (the window's content policy stops an outside image, and a script policy with no eval still
 highlights code) and `see-screen.spec.ts` (the screen a session draws is a real picture, not an empty canvas).
@@ -42,10 +50,12 @@ highlights code) and `see-screen.spec.ts` (the screen a session draws is a real 
   order with one worker. A flow that adds minutes folds into one that exists.
 - **A spec that routes a request imports `test` from `./routed-test`**, whose page drops its routes when the
   test ends; the app polls `/system`, and a route callback still running then fails the test or the next one.
+- **A read retries, a write never does.** Each `request.get` passes `maxRetries: 2`: a request can reuse a keep-alive socket the daemon closed after its 5 s timeout, and Playwright retries only ECONNRESET. No `request.post` passes `maxRetries`, since a POST the daemon already applied would run twice. `request-retries.test.ts` checks both.
 - **Specs share one daemon per shard.** `first-run.spec.ts` runs first in shard 1 because the first run shows only
   while the daemon has no project. The Board shows the first project by name, so the project it makes,
   `e2e-first-run`, sorts after `e2e`, which `loop.spec.ts` and the specs after it open. Every spec adds its own
   project, and ends with nothing open that a later spec would read: Factory lists every project.
+- **A keyboard drag's move and drop keys are sent again until they show.** dnd-kit's sensor listens for them only from a timer that the pick-up starts, so a key sent before the timer fires is lost (`loop.spec.ts`). The pick-up is handled on the card itself and is sent once.
 - **Seeding scripts** in `apps/daemon/scripts/seed-*.ts` write to the idle daemon's database for a state a lane
   would raise (a question card, a waiting question); they are the one place another process writes it.
 - `E2E_DAEMON_PORT` and `E2E_UI_PORT` fix the ports while debugging; `E2E_BOOK` points the daemon at another script book.

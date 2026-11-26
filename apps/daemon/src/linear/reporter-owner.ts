@@ -23,7 +23,7 @@ import type { LaneSandboxSpec } from '../sandbox';
 import type { YourSessionServer } from '../sessions';
 import { buildTrustPolicy, sessionDevAccess } from '../trust';
 import { readReporterFacts, reporterBrief } from './reporter-brief';
-import { linearToolPrefixes } from './reporter-guard';
+import { linearToolPrefixes, runToolNames } from './reporter-guard';
 import { snapshotBrief } from './snapshot';
 import type { LinearReporter, LinearReporterRuns } from './reporter';
 
@@ -151,6 +151,8 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
           : reporterBrief(
               readReporterFacts(state.db, TaskId.parse(conv.ownerId), posts, run.pictures),
             ),
+        // A session may list its MCP tools deferred, behind a search: naming them in full lets it find them.
+        `Your tools, by full name: ${runToolNames(run).join(', ')}. If one isn't in your list, search for it by that name first (ToolSearch, tool_search).`,
         start.first.text,
       ].join('\n\n');
       return {

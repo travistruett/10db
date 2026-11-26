@@ -21,6 +21,8 @@ function run(over: Partial<ReporterRun> = {}): ReporterRun {
     prUrl: PR,
     pictures: [],
     withheld: new Set(),
+    noteSteers: false,
+    pickedStatuses: new Set(),
     ...over,
   };
 }
@@ -77,11 +79,30 @@ describe('judgeReporterCall', () => {
       'deny',
     ],
     [
-      'save_issue state',
-      run(),
+      'save_issue state 10db picked',
+      run({ pickedStatuses: new Set(['In Review']) }),
       call(`${L}save_issue`, { id: 'iss-119', state: 'In Review' }),
       'allow',
     ],
+    [
+      'save_issue state 10db did not pick',
+      run({ pickedStatuses: new Set(['In Progress']) }),
+      call(`${L}save_issue`, { id: 'iss-119', state: 'In Review' }),
+      'deny',
+    ],
+    [
+      'save_issue state before any pick',
+      run(),
+      call(`${L}save_issue`, { id: 'iss-119', state: 'In Progress' }),
+      'deny',
+    ],
+    [
+      'save_issue state a steering note names',
+      run({ noteSteers: true }),
+      call(`${L}save_issue`, { id: 'iss-119', state: 'Ready for Release' }),
+      'allow',
+    ],
+    ['pick tool', run(), call('mcp__10db__pick_linear_status', {}), 'allow'],
     [
       'save_issue 10db link',
       run(),

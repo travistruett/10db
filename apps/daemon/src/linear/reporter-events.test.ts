@@ -36,10 +36,15 @@ describe('linearRowOf', () => {
     expect(
       keys(event(EventType.StepChanged, { stepIndex: 1, role: 'plan', verdict: null }), wsRead(0)),
     ).toEqual([]);
-    const batch = (prState: string): LinearEventRead => ({
+    const batch = (
+      prState: string | null,
+      prUrl: string | null = 'https://github.com/a/b/pull/1',
+    ): LinearEventRead => ({
       batch: {
-        prUrl: 'https://github.com/a/b/pull/1',
+        prUrl,
         prState,
+        baseBranch: 'build',
+        landedSha: prUrl === null ? 'abc123def4567890' : null,
         workstreams: [{ id: ws, taskId: task }],
       },
     });
@@ -47,6 +52,20 @@ describe('linearRowOf', () => {
     expect(keys(prChanged, batch('open'))).toEqual([]);
     expect(linearRowOf(prChanged, batch('merged')).map((d) => [d.event, d.dedupeKey])).toEqual([
       [LinearEventKind.PrMerged, `pr_merged:${batchId}`],
+    ]);
+    const shipped = event(EventType.BatchUpdated, { to: 'SHIPPED' }, batchId);
+    expect(linearRowOf(shipped, batch('open')).map((d) => [d.event, d.dedupeKey])).toEqual([
+      [LinearEventKind.PrOpened, `pr_opened:${batchId}`],
+    ]);
+    // A landing with no pull request says where it landed, never that a pull request opened.
+    expect(
+      linearRowOf(shipped, batch(null, null)).map((d) => [d.event, d.dedupeKey, d.detail]),
+    ).toEqual([
+      [
+        LinearEventKind.Landed,
+        `landed:${batchId}`,
+        { workstreamId: ws, baseBranch: 'build', commit: 'abc123def4567890' },
+      ],
     ]);
   });
 });

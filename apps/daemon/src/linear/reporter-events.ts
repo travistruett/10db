@@ -18,6 +18,7 @@ import {
   enqueueLinearPost,
   getBatch,
   getInboxItem,
+  getLocalCopy,
   getTask,
   getWorkstream,
   getWorkstreamRow,
@@ -63,10 +64,13 @@ export interface LinearEventRead {
     readonly title: string;
     readonly workstreams: readonly { readonly id: WorkstreamId; readonly taskId: TaskId }[];
   };
-  /** The batch a `batch.updated` names, its workstreams and its pull request. */
+  /** The batch a `batch.updated` names, its workstreams, its pull request and where it landed. */
   readonly batch?: {
     readonly prUrl: string | null;
     readonly prState: string | null;
+    readonly baseBranch: string;
+    /** The commit a local copy promoted onto the base; null for a batch that is not one. */
+    readonly landedSha: string | null;
     readonly workstreams: readonly { readonly id: WorkstreamId; readonly taskId: TaskId }[];
   };
 }
@@ -156,14 +160,21 @@ export function linearRowOf(event: DaemonEvent, read: LinearEventRead): LinearRo
       Array.isArray(changed) && changed.includes('pr') && batch.prState === PullRequestState.Merged;
     const shipped = data['to'] === BatchState.Shipped;
     if (!merged && !shipped) return [];
-    const kind = merged ? LinearEventKind.PrMerged : LinearEventKind.PrOpened;
-    const prefix = merged ? 'pr_merged' : 'pr_opened';
+    // A batch that shipped with no pull request landed on its base: there is no pull request to name.
+    const landed = !merged && batch.prUrl === null;
+    const kind = merged
+      ? LinearEventKind.PrMerged
+      : landed
+        ? LinearEventKind.Landed
+        : LinearEventKind.PrOpened;
     return batch.workstreams.map((w) => ({
       taskId: w.taskId,
       workstreamId: w.id,
       event: kind,
-      dedupeKey: `${prefix}:${event.entityId}`,
-      detail: { workstreamId: w.id, prUrl: batch.prUrl },
+      dedupeKey: `${kind}:${event.entityId}`,
+      detail: landed
+        ? { workstreamId: w.id, baseBranch: batch.baseBranch, commit: batch.landedSha }
+        : { workstreamId: w.id, prUrl: batch.prUrl },
     }));
   }
   return [];
@@ -237,6 +248,8 @@ function readFor(db: DbReader, event: DaemonEvent): LinearEventRead {
       batch: {
         prUrl: batch.prUrl,
         prState: batch.pr?.state ?? null,
+        baseBranch: batch.baseBranch,
+        landedSha: getLocalCopy(db, batchId)?.candidate ?? null,
         workstreams: listWorkstreams(db, { batchId }).map((w) => ({
           id: w.id,
           taskId: w.taskId,
