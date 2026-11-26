@@ -14,7 +14,13 @@ import type { Git } from '../git';
 import { classifyPath } from '../guard';
 import type { Logger } from '../log';
 import { buildEvals, buildSuiteDetail, type DefinitionTimes, type Discovery } from './build';
-import { findCallSites, patternsOf, uncoveredSites, type FoundCallSites } from './call-sites';
+import {
+  findCallSites,
+  patternsOf,
+  uncoveredSites,
+  type CallSite,
+  type FoundCallSites,
+} from './call-sites';
 import { evalDrift } from './drift';
 import { readEvalManifest, writeEvalManifest } from './manifest-store';
 import { buildModels } from './models';
@@ -147,20 +153,32 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
     return times;
   }
   const siteReads = keptByCommit<FoundCallSites | null>();
-  const fileReads = keptByCommit<ReadonlySet<string> | null>();
+  const fileReads = keptByCommit<ReadonlySet<string>>();
+  // A read that failed (a timeout, a refused pin) rejects and is not kept; only an answer git gave is.
   const sitesAt = (repoPath: string, commit: string, manifest: StoredEvalManifest) => {
     const patterns = patternsOf(manifest);
     return siteReads(`${repoPath}\0${commit}\0${JSON.stringify(patterns)}`, () =>
       findCallSites(deps.git, repoPath, commit, patterns),
-    );
+    ).catch(() => null);
   };
   const filesAt = (repoPath: string, commit: string) =>
     fileReads(`${repoPath}\0${commit}`, () =>
-      deps.git.filesAt(repoPath, commit).then(
-        (files) => new Set(files),
-        () => null,
-      ),
-    );
+      deps.git.filesAt(repoPath, commit).then((files): ReadonlySet<string> => new Set(files)),
+    ).catch(() => null);
+  /**
+   * The assessed commit's sites, to tell HEAD's new ones from; null when either read is missing or stopped
+   * at the cap, where a site past it would look new.
+   */
+  async function sitesThen(
+    repoPath: string,
+    since: string,
+    manifest: StoredEvalManifest,
+    now: FoundCallSites | null,
+  ): Promise<readonly CallSite[] | null> {
+    if (now === null || now.counts.some((c) => c.capped)) return null;
+    const then = await sitesAt(repoPath, since, manifest);
+    return then === null || then.counts.some((c) => c.capped) ? null : then.sites;
+  }
   /** The manifest's call sites at HEAD, and what changed since the commit it read. */
   async function discover(
     repoPath: string,
@@ -180,8 +198,7 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
         unlinked: definitions.filter((p) => !linked.has(p)),
         filesThen: await filesAt(repoPath, since),
         uncoveredNow: uncovered,
-        sitesThen:
-          now === null ? null : ((await sitesAt(repoPath, since, manifest))?.sites ?? null),
+        sitesThen: await sitesThen(repoPath, since, manifest, now),
         missingPaths: untrackedIn(manifest.manifest, read),
       });
     }

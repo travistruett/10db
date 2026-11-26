@@ -1202,7 +1202,8 @@ export interface Git extends ChatGit {
    * The lines of commit `rev` each query's extended regex matches in the files its globs name, read as
    * `surveyTexts` reads: the object store only, unpinned, nothing written, no textconv, binary files
    * skipped, and a partial clone not read at all. At most `maxMatches` lines are kept across the queries,
-   * in order; a query past the cap is `capped`. A pattern git refuses has no matches (`refused`).
+   * in order; a query past the cap is `capped`. A pattern git can't compile has no matches (`refused`);
+   * a commit that isn't there answers no query. Any other failure, a timeout among them, rejects.
    */
   grepAt(
     path: string,
@@ -5417,69 +5418,67 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     async grepAt(path, rev, queries, maxMatches) {
       const none = (refused: string | null): GrepAt => ({ answers: [], refused });
-      try {
-        const at = observed(
-          realpathSync((await git(observed(path), ['rev-parse', '--show-toplevel'])).trim()),
-        );
-        if ((await partialClone(at)) !== 'whole') return none(GREP_PARTIAL_REFUSAL);
-        const commit = (
-          await git(at, ['rev-parse', '-q', '--verify', `${rev}^{commit}`], {
-            answerExitCodes: [1],
-          })
-        ).trim();
-        if (!OBJECT_ID.test(commit)) return none(null);
-        const answers: GrepAnswer[] = [];
-        let left = maxMatches;
-        for (const query of queries) {
-          if (left <= 0) {
-            answers.push({ matches: [], capped: true, refused: false });
-            continue;
-          }
-          let out: Buffer;
-          try {
-            out = await gitCapped(
-              at,
-              [
-                'grep',
-                '-n',
-                '-z',
-                '-I',
-                '-E',
-                '--full-name',
-                '--no-color',
-                '--no-textconv',
-                '-e',
-                query.regex,
-                commit,
-                '--',
-                ...query.globs.map((g) => `:(glob)${g}`),
-              ],
-              left * GREP_BYTES_PER_MATCH,
-              {
-                env: { GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: 'none' },
-                // The repository's grep config would change what is printed or how the regex reads.
-                config: [
-                  ...NO_TRANSPORT,
-                  '-c',
-                  'grep.column=false',
-                  '-c',
-                  'grep.patternType=extended',
-                ],
-                answerExitCodes: [1],
-              },
-            );
-          } catch {
-            answers.push({ matches: [], capped: false, refused: true });
-            continue;
-          }
-          const { matches, cut } = parseGrepOutput(out, commit, left);
-          left -= matches.length;
-          answers.push({ matches, capped: cut, refused: false });
+      const at = observed(
+        realpathSync((await git(observed(path), ['rev-parse', '--show-toplevel'])).trim()),
+      );
+      if ((await partialClone(at)) !== 'whole') return none(GREP_PARTIAL_REFUSAL);
+      const commit = (
+        await git(at, ['rev-parse', '-q', '--verify', `${rev}^{commit}`], {
+          answerExitCodes: [1],
+        })
+      ).trim();
+      if (!OBJECT_ID.test(commit)) return none(null);
+      const answers: GrepAnswer[] = [];
+      let left = maxMatches;
+      for (const query of queries) {
+        if (left <= 0) {
+          answers.push({ matches: [], capped: true, refused: false });
+          continue;
         }
-        return { answers, refused: null };
-      } catch {
-        return none(null);
+        let out: Buffer;
+        try {
+          out = await gitCapped(
+            at,
+            [
+              'grep',
+              '-n',
+              '-z',
+              '-I',
+              '-E',
+              '--full-name',
+              '--no-color',
+              '--no-textconv',
+              '-e',
+              query.regex,
+              commit,
+              '--',
+              ...query.globs.map((g) => `:(glob)${g}`),
+            ],
+            left * GREP_BYTES_PER_MATCH,
+            {
+              env: { GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: 'none' },
+              // The repository's grep config would change what is printed or how the regex reads.
+              config: [
+                ...NO_TRANSPORT,
+                '-c',
+                'grep.column=false',
+                '-c',
+                'grep.patternType=extended',
+              ],
+              answerExitCodes: [1],
+            },
+          );
+        } catch (error) {
+          // Git exits 128 on a pattern it can't compile; a timeout or anything else is a failed read.
+          if (!(error instanceof GitError) || error.exitCode !== 128) throw error;
+          answers.push({ matches: [], capped: false, refused: true });
+          continue;
+        }
+        const { matches, cut } = parseGrepOutput(out, commit, left);
+        left -= matches.length;
+        answers.push({ matches, capped: cut, refused: false });
       }
+      return { answers, refused: null };
     },
     async ignoredDirectories(repo) {
       const out = await git(await pinned(repo), [

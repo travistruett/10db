@@ -1,5 +1,6 @@
 import type {
   EvalModelDto,
+  EvalModelResultDto,
   EvalModelsDto,
   EvalModelSuiteDto,
   StoredEvalManifest,
@@ -29,21 +30,31 @@ export function buildModels(
     const newestFingerprint = suite.runs.at(-1)?.fingerprint ?? null;
     const seen = new Set<string>();
     for (const run of [...suite.runs].reverse()) {
+      // A run may bind one model in several slots (`FAST`, `STANDARD`): it passed only if every slot did.
+      const inRun = new Map<string, EvalModelResultDto[]>();
       for (const result of run.models) {
         const entry = byModel.get(result.model) ?? { slots: new Set<string>(), suites: [] };
         byModel.set(result.model, entry);
         if (result.slot !== null) entry.slots.add(result.slot);
-        if (seen.has(result.model)) continue;
-        seen.add(result.model);
-        entry.suites.push({
+        if (!seen.has(result.model))
+          inRun.set(result.model, [...(inRun.get(result.model) ?? []), result]);
+      }
+      for (const [model, results] of inRun) {
+        seen.add(model);
+        const latencies = results.flatMap((r) => (r.latencyP50Ms === null ? [] : [r.latencyP50Ms]));
+        byModel.get(model)?.suites.push({
           key: suite.key,
           label,
           path: run.path,
           at: run.at,
-          passed: result.passed,
-          failedGates: result.gates.filter((g) => !g.passed).map((g) => g.name),
-          costUsd: result.costUsd,
-          latencyP50Ms: result.latencyP50Ms,
+          passed: results.every((r) => r.passed),
+          failedGates: [
+            ...new Set(results.flatMap((r) => r.gates.filter((g) => !g.passed).map((g) => g.name))),
+          ],
+          costUsd: results.some((r) => r.costUsd === null)
+            ? null
+            : results.reduce((sum, r) => sum + (r.costUsd ?? 0), 0),
+          latencyP50Ms: latencies.length === 0 ? null : Math.max(...latencies),
           olderEval:
             run.fingerprint !== null &&
             newestFingerprint !== null &&

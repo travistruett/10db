@@ -322,6 +322,17 @@ export const EvalManifest = z
       }
       seen.add(suite.key);
     }
+    const labels = new Set<string>();
+    for (const [index, pattern] of m.callPatterns.entries()) {
+      if (labels.has(pattern.label)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `the call pattern ${pattern.label} is named twice`,
+          path: ['callPatterns', index, 'label'],
+        });
+      }
+      labels.add(pattern.label);
+    }
   })
   .refine((m) => m.suites.reduce((n, s) => n + s.coveredPaths.length, 0) <= 200, {
     message: 'a manifest covers at most 200 globs in all',

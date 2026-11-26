@@ -11,7 +11,7 @@ export interface DriftInput {
   readonly filesThen: ReadonlySet<string> | null;
   /** HEAD's sites no suite covers. */
   readonly uncoveredNow: readonly CallSite[];
-  /** Every site the assessed commit's patterns found; null when it can't be read. */
+  /** Every site the assessed commit's patterns found; null when it can't be read or a read was capped. */
   readonly sitesThen: readonly CallSite[] | null;
   /** What the manifest names that HEAD doesn't track. */
   readonly missingPaths: readonly string[];
@@ -23,7 +23,7 @@ const siteKey = (s: CallSite): string => `${s.label}\0${s.path}\0${s.text}`;
 /**
  * What changed since the assessment that the manifest doesn't account for: eval files and uncovered call
  * sites that weren't there, and paths it names that are gone. Null when nothing has. A commit that can't be
- * read any more counts every unlinked file as new and no site as new, since neither can be told apart.
+ * read any more counts every unlinked file as new, and no site is new when the sites can't be compared.
  */
 export function evalDrift(input: DriftInput): EvalDriftDto | null {
   const newEvalFiles = input.unlinked.filter((p) => input.filesThen?.has(p) !== true);

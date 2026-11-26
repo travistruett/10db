@@ -59,13 +59,16 @@ export interface CallSite {
   readonly text: string;
 }
 
-/** What a project's call patterns found at one commit; null when git read nothing there. */
+/** What a project's call patterns found at one commit. */
 export interface FoundCallSites {
   readonly counts: readonly EvalCallSiteCountDto[];
   readonly sites: readonly CallSite[];
 }
 
-/** Every line `patterns` match at `rev`, capped at `MAX_CALL_SITES` across them. */
+/**
+ * Every line `patterns` match at `rev`, capped at `MAX_CALL_SITES` across them; null when git answered that
+ * it reads nothing there (a partial clone, a commit that is gone). A failed read rejects.
+ */
 export async function findCallSites(
   git: Pick<Git, 'grepAt'>,
   repoPath: string,
