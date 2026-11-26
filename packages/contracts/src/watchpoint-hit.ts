@@ -103,3 +103,16 @@ export const WatchpointHitsDto = z.object({
   canOpenDiff: z.boolean(),
 });
 export type WatchpointHitsDto = z.infer<typeof WatchpointHitsDto>;
+
+/** What the builder answers on a Look card. */
+export const WatchpointChoice = { LooksRight: 'looks_right', SendBack: 'send_back' } as const;
+export type WatchpointChoice = (typeof WatchpointChoice)[keyof typeof WatchpointChoice];
+
+/**
+ * What a Look card keeps: which watchpoints the change hit. The card holds no hunks; it reads them live from
+ * `GET /workstreams/:id/watchpoint-hits`.
+ */
+export const WatchpointCardDetail = z.object({
+  watchpoints: z.array(z.object({ key: z.string(), label: z.string() })),
+});
+export type WatchpointCardDetail = z.infer<typeof WatchpointCardDetail>;

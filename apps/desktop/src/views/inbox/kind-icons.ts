@@ -3,6 +3,7 @@ import {
   IconBulb,
   IconChecklist,
   IconEye,
+  IconEyeCheck,
   IconFlag,
   IconListDetails,
   IconMessageQuestion,
@@ -22,4 +23,5 @@ export const KIND_ICONS: Readonly<Record<InboxKind, Icon>> = {
   [InboxKind.Plan]: IconListDetails,
   [InboxKind.PlaybookMoveReport]: IconSettings,
   [InboxKind.Acceptance]: IconChecklist,
+  [InboxKind.Watchpoint]: IconEyeCheck,
 };

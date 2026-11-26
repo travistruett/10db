@@ -8,6 +8,7 @@ import {
   CARD_RESOLUTION,
   ReleasedWorkstreams,
   AcceptanceChoice,
+  WatchpointChoice,
   CheckChoice,
   PlanChoice,
   ConflictError,
@@ -589,6 +590,8 @@ export function createInboxService(deps: {
    * task. Throwing keeps the card open. The card never reaches `onParkedAnswer`.
    */
   onAcceptanceAnswer?(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): void;
+  /** Acts on an open Look card's answer as `onAcceptanceAnswer` does an acceptance card's. */
+  onWatchpointAnswer?(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): void;
   /** Acts on an open plan card's answer as `onCheckAnswer` does a check card's, and closes the card the same way. */
   onPlanAnswer?(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): () => void;
   /**
@@ -649,7 +652,8 @@ export function createInboxService(deps: {
     if (
       item.kind === InboxKind.Check ||
       item.kind === InboxKind.Plan ||
-      item.kind === InboxKind.Acceptance
+      item.kind === InboxKind.Acceptance ||
+      item.kind === InboxKind.Watchpoint
     ) {
       return transition(item.id, [InboxState.Delivering], InboxState.Resolved);
     }
@@ -891,6 +895,12 @@ export function createInboxService(deps: {
           throw new InboxAnswerRefused('Send back needs a note saying what to change');
         }
       }
+      if (current.kind === InboxKind.Watchpoint && current.state === InboxState.Open) {
+        assertKnownChoice(current, answer);
+        if (answer.choice === WatchpointChoice.SendBack && (answer.note ?? '').trim() === '') {
+          throw new InboxAnswerRefused('Send back needs a note saying what to change');
+        }
+      }
       if (current.kind === InboxKind.Plan && current.state === InboxState.Open) {
         assertKnownChoice(current, answer);
         if (answer.choice === PlanChoice.SendBack && (answer.note ?? '').trim() === '') {
@@ -916,6 +926,7 @@ export function createInboxService(deps: {
         if (item.kind === InboxKind.Check) afterCommit = deps.onCheckAnswer?.(ctx, item, answer);
         if (item.kind === InboxKind.Plan) afterCommit = deps.onPlanAnswer?.(ctx, item, answer);
         if (item.kind === InboxKind.Acceptance) deps.onAcceptanceAnswer?.(ctx, item, answer);
+        if (item.kind === InboxKind.Watchpoint) deps.onWatchpointAnswer?.(ctx, item, answer);
         // Parking ends the run, so no session is handed the answer: the card closes with it. It is
         // 10db's control over the run, not the builder's answer to the question, so it is no decision
         // either: the question and answer live only on the parked run's notice.

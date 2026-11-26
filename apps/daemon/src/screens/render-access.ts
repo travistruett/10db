@@ -169,6 +169,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/settings/keep-awake': 'No screen draws a setting.',
   '/settings/watchpoints': 'No screen draws a setting.',
   '/projects/:projectId/watchpoints': 'No screen draws a setting.',
+  '/projects/:projectId/watchpoints/stats': 'No screen draws a setting.',
   '/workstreams/:id/watchpoint-hits':
     "A run's hunks and the agent's notes are lane-written text, which no screen draws.",
   '/settings/agent-skill': 'No screen draws a setting.',

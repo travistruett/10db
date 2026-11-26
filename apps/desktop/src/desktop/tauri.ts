@@ -179,6 +179,7 @@ const KIND_TITLES: Readonly<Record<InboxKind, string>> = {
   [InboxKind.Plan]: '10db has a plan for you to approve',
   [InboxKind.PlaybookMoveReport]: '10db could not move every setting',
   [InboxKind.Acceptance]: '10db shipped work with a criterion it could not confirm',
+  [InboxKind.Watchpoint]: '10db has changes for you to look at',
 };
 
 /** What a new card's notification says first: what kind of card waits, so the builder can judge it unopened. */

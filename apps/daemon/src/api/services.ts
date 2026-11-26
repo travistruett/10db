@@ -128,6 +128,7 @@ import type {
   ProjectWatchpointsDto,
   ProjectWatchpoints,
   WatchpointHitsDto,
+  WatchpointStatsDto,
   YourWatchpoints,
   KeepAwakeStatus,
   LanePermissionsDto,
@@ -839,6 +840,8 @@ export interface ApiServices extends PlanRecordServices {
   setProjectWatchpoints(projectId: ProjectId, entries: ProjectWatchpoints): ProjectWatchpointsDto;
   /** The run's newest watchpoint reading with the agent's and reviewer's notes on each file. */
   watchpointHits(id: WorkstreamId): WatchpointHitsDto;
+  /** Each watchpoint's last 30 days in the project: tasks hit, cards raised and waved through. */
+  watchpointStats(projectId: ProjectId): WatchpointStatsDto[];
   /** Settings › Agent skill: the shipped skill's switch, installed copy and links. */
   agentSkill(): AgentSkillStatus;
   setAgentSkill(enabled: boolean): AgentSkillStatus;
