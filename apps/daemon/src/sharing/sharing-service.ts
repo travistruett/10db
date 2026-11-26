@@ -486,7 +486,11 @@ export function createSharingService(deps: {
       listenerFqdn = fqdn;
     }
     const cli = deps.cli();
-    if (cli === null) return;
+    if (cli === null) {
+      // Nothing more can be read without the CLI, but the state has still changed: publish it.
+      publish();
+      return;
+    }
     let status: ServeStatus;
     try {
       status = await readServe(cli);
