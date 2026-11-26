@@ -64,8 +64,17 @@
   bare tokens). It runs by itself once the API listens, when the app address or the dev login command changes (the
   check under way is stopped), and every 24 h, for each live project with both. A failed command or check reports
   through `PicturesDeps.onSignIn`, and `daemon/start.ts` raises the project's one card (`inbox/sign-in-card.ts`), which
-  a check or a picture's sign-in that works closes; an `unchecked` check changes nothing. A project whose address or
-  command is cleared closes its card.
+  a check or a picture's sign-in that works closes; an `unchecked` check changes nothing. A project whose address is
+  cleared closes its card.
+- Setting the sign-in up (`inbox/sign-in-card.ts`, `mcp/sign-in-setup-tool.ts`): the failed card, and the card a
+  change that leaves an app address with no dev login raises (`PicturesDeps.onNoSignIn`, never at start-up, so Not
+  Now holds), offer Set Up Sign-In. Its answer makes a Your-folder task naming one area (`signInSetupTask`) and a
+  setting-up card naming it (`SIGN_IN_SETUP_TASK`), which the failed card leaves alone while the task is open. Only
+  that task's lane is offered `save_dev_login`: a command naming an email off the reserved test domains
+  (`fictional-account.ts`) is refused unrun; any other is checked by `checkDevLogin` (the check, run from the
+  project's folder, never recorded or announced, keeping no state unless it signed in) and saved through
+  `patchProject` only when `signed_in`, whose change checks it again and closes the card. `cannot` rewords the card
+  with the masked words.
 - The broken preview (Workbench spec §8.2, §8.4,
   `decisions/2026-11-10-a-broken-preview-is-read-from-the-page-load-that-takes-the-picture.md`): each capture of
   a pass page judges the load of its page route (`pageRoute`, its viewports and themes as one, `routeLoad`) by
