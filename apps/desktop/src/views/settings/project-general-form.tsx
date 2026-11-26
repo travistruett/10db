@@ -18,6 +18,10 @@ import { SettingRow, SettingsCard } from './setting-row';
 const DEFAULT_CHANGE_NOTE =
   'It applies to tasks made from now on and can change while work runs; tasks that already exist keep their own.';
 
+/** The contract a copy app command keeps, said where the builder sets it. */
+const COPY_APP_HELP =
+  "Starts the copy's own app if it is not running, and prints its address last: an http origin on this Mac, such as http://localhost:9100, never the project's App Address. It runs in the copy's folder under the gate's sandbox with TENDB_COPY_ID set to the copy's id, and it must be safe to repeat. With it, pictures of a copy's work are taken in the copy's app before it lands, and the dev login runs there with TENDB_COPY_ID and TENDB_APP_URL set, so it signs in to the copy's database. Blank, the pictures are taken in the shared app once the copy lands. Stop the copy's app in the Teardown Command.";
+
 const landingChoice = (value: string): ProjectLanding =>
   value === ProjectLanding.Hold
     ? ProjectLanding.Hold
@@ -46,6 +50,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
     'isolate',
     'localCopies',
     'copyTeardownCommand',
+    'copyAppCommand',
   ]);
   const { values, errors, set } = fields;
   const pullRequests = values.delivery === Delivery.PullRequest;
@@ -182,6 +187,23 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
               error={errors.copyTeardownCommand}
               onChange={(e) => {
                 set({ copyTeardownCommand: e.currentTarget.value });
+              }}
+            />
+          </SettingRow>
+        ) : null}
+        {showCopyFields && (values.localCopies || values.copyAppCommand.trim() !== '') ? (
+          <SettingRow
+            label="Copy App Command"
+            description="Prints a copy's own app address, so its pictures are taken before it lands."
+            help={COPY_APP_HELP}
+          >
+            <TextInput
+              aria-label="Copy App Command"
+              styles={MONO_INPUT}
+              value={values.copyAppCommand}
+              placeholder="Blank: pictures are taken after the copy lands"
+              onChange={(e) => {
+                set({ copyAppCommand: e.currentTarget.value });
               }}
             />
           </SettingRow>

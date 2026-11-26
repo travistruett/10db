@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import {
+  APP_URL_VARIABLE,
   PageRoute,
   routeUrl,
   type AppUrl,
@@ -17,6 +18,7 @@ import {
 } from '@10db/contracts';
 import type { GateResult, GateRunner } from '../verify';
 import type { PageCamera } from './camera';
+import type { TaskCopy } from './copy-task';
 import { loginOutputTail } from './sign-in-output';
 import { browserDir, writeStorageState, type StorageState } from './storage-state';
 
@@ -119,13 +121,28 @@ export function devLoginProblem(
   return null;
 }
 
-/** Runs the project's dev login and opens what it printed; keeps the storage state it leads to. */
+/**
+ * Where a picture is taken: the project's shared app, or a separate copy's own app, whose dev login
+ * runs in the copy's folder with the copy's id so it signs in to the copy's databases.
+ */
+export interface PictureSite {
+  readonly appUrl: AppUrl;
+  readonly copy: TaskCopy | null;
+}
+
+/**
+ * Runs the project's dev login and opens what it printed; keeps the storage state it leads to. The
+ * command is told the address it signs in on (`TENDB_APP_URL`), and for a copy the copy's id too.
+ */
 export async function signIn(
   deps: SignInDeps,
   project: SignInProject,
   signal: AbortSignal,
+  site?: PictureSite,
 ): Promise<SignInResult> {
-  const { appUrl, devLoginCommand } = project;
+  const { devLoginCommand } = project;
+  const appUrl = site?.appUrl ?? project.appUrl;
+  const copy = site?.copy ?? null;
   if (appUrl === null) return failed(SignInStep.Setup, 'The project has no app address');
   if (devLoginCommand === null)
     return failed(SignInStep.Setup, 'The project has no dev login command');
@@ -139,16 +156,17 @@ export async function signIn(
   try {
     const result = await deps.gate.run({
       project: {
-        repoPath: project.repoPath,
+        repoPath: copy?.folder ?? project.repoPath,
         sandboxLoopback: project.sandboxLoopback,
         sandboxDocker: project.sandboxDocker,
       },
       command: devLoginCommand,
       logPath,
       timeoutMs: DEV_LOGIN_TIMEOUT_MS,
-      env: deps.sessionEnv(),
+      env: { ...deps.sessionEnv(), [APP_URL_VARIABLE]: appUrl },
       rules: deps.rules(project),
       checkouts: deps.checkouts(),
+      copyId: copy?.copyId ?? null,
       signal,
     });
     const problem = devLoginProblem(result);
@@ -178,7 +196,7 @@ export async function signIn(
       { exitCode: 0, output: '' },
     );
   }
-  writeStorageState(deps.dataDir, project.id, state);
+  writeStorageState(deps.dataDir, project.id, state, copy?.copyId ?? null);
   return { ok: true, state };
 }
 
@@ -190,7 +208,7 @@ export function sweepLoginLogs(dataDir: string): number {
   for (const project of readdirSync(root, { withFileTypes: true })) {
     if (!project.isDirectory()) continue;
     for (const name of readdirSync(join(root, project.name)))
-      if (/^login-\d+\.log$/.test(name)) {
+      if (/^(login|copy-app)-\d+\.log$/.test(name)) {
         rmSync(join(root, project.name, name), { force: true });
         removed += 1;
       }

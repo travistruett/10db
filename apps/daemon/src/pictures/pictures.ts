@@ -82,7 +82,8 @@ import {
   writePicture,
   type ScreenToKeep,
 } from './picture-files';
-import { taskInLocalCopy } from './copy-task';
+import { runCopyApp } from './copy-app';
+import { copyOfTask, taskInLocalCopy } from './copy-task';
 import { keptRoute, pageAreaRoutes } from './kept-route';
 import {
   pageRoute,
@@ -96,6 +97,7 @@ import {
   signIn,
   SignInStep,
   sweepLoginLogs,
+  type PictureSite,
   type SignInDeps,
   type SignInProject,
   type SignInResult,
@@ -146,6 +148,8 @@ export interface ShootNowInput {
   readonly routes: readonly string[];
   /** Why the pictures are wanted, for the log. */
   readonly purpose: DesignCheckPurpose;
+  /** The task the shots are for: a task in a separate copy with its own app is shot there. */
+  readonly taskId?: TaskId;
   /** Told what the preview would show in a pass header, when it starts with no pass open. */
   readonly say?: (line: string) => void;
 }
@@ -277,6 +281,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
   const redirectingRoutes = new Set<string>();
   const appUrls = new Map<ProjectId, AppUrl | null>();
   const devLogins = new Map<ProjectId, string | null>();
+  const copyApps = new Map<ProjectId, string | null>();
   const passStates = new Map<PassId, PassState>();
   /** Starts once the service is built; the checks of the dev login that run by themselves. */
   let schedule: SignInSchedule | null = null;
@@ -490,8 +495,9 @@ export function startPictures(deps: PicturesDeps): Pictures {
   async function signInOnce(
     project: SignInProject,
     signal: AbortSignal,
+    site?: PictureSite,
   ): Promise<SignInResult | null> {
-    const result = await signIn({ ...deps.signIn, camera: deps.camera }, project, signal);
+    const result = await signIn({ ...deps.signIn, camera: deps.camera }, project, signal, site);
     // A login stopped with its capture says nothing of the project's sign-in.
     if (signal.aborted) return null;
     signIns.set(project.id, {
@@ -519,8 +525,9 @@ export function startPictures(deps: PicturesDeps): Pictures {
   async function runSignIn(
     project: SignInProject,
     signal: AbortSignal,
+    site?: PictureSite,
   ): Promise<StorageState | null> {
-    const result = await signInOnce(project, signal);
+    const result = await signInOnce(project, signal, site);
     if (result === null) return null;
     if (result.ok) reportSignIn({ projectId: project.id, problem: null, exitCode: 0, output: '' });
     // A browser that could not open the address may only mean the app is down: it says nothing of the command.
@@ -560,6 +567,47 @@ export function startPictures(deps: PicturesDeps): Pictures {
     }
   }
 
+  /**
+   * Where a task's pictures other than its before are taken: a separate copy's own app when the task
+   * works in one and the project's copy app command prints its address, else the shared app. A before
+   * shows the page before the change, so it is always the shared app's. Null when there is nowhere to
+   * shoot: no shared address, or a copy whose app did not come up (its after comes once it lands).
+   */
+  async function resolveSite(
+    kind: ScreenKind,
+    taskId: TaskId | null,
+    project: ProjectDto,
+    port: number,
+    signal: AbortSignal,
+  ): Promise<PictureSite | null> {
+    const shared = shootableAddress(project.id, port);
+    const sharedSite = shared === null ? null : { appUrl: shared, copy: null };
+    if (kind === ScreenKind.Before || taskId === null || project.copyAppCommand === null)
+      return sharedSite;
+    const copy = copyOfTask(db, taskId);
+    if (copy === null) return sharedSite;
+    const app = await runCopyApp(
+      { ...deps.signIn, camera: deps.camera },
+      project,
+      copy,
+      port,
+      signal,
+    );
+    if (app.ok) return { appUrl: app.appUrl, copy };
+    if (!signal.aborted)
+      log.warn(
+        { taskId, projectId: project.id, problem: app.problem, output: app.output },
+        "could not reach the copy's own app: its after is taken once the copy lands",
+      );
+    return null;
+  }
+
+  /** Whether the site is still where the project's pictures go, read again around each await. */
+  function siteStands(site: PictureSite, projectId: ProjectId, port: number): boolean {
+    if (site.copy === null) return shootableAddress(projectId, port) === site.appUrl;
+    return getProject(db, projectId).copyAppCommand !== null && !onDaemon(site.appUrl, port);
+  }
+
   /** Takes the request's pictures and keeps them; answers how many rows it kept. */
   async function capture(request: CaptureRequest, signal: AbortSignal): Promise<number> {
     // Read as a call: an await may abort it between two reads.
@@ -577,8 +625,14 @@ export function startPictures(deps: PicturesDeps): Pictures {
       }),
     ]);
     if (port === null || stopped()) return 0;
-    const appUrl = shootableAddress(project.id, port);
-    if (appUrl === null) return 0;
+    if (shootableAddress(project.id, port) === null) return 0;
+    // A copy task's after may be asked when it is done and again when its copy ships: one is kept.
+    if (
+      request.kind === ScreenKind.After &&
+      inLocalCopy(task) &&
+      hasTaskScreen(db, task.id, ScreenKind.After)
+    )
+      return 0;
     const inPass = request.passId !== null;
     if (
       request.kind === ScreenKind.Before &&
@@ -591,10 +645,14 @@ export function startPictures(deps: PicturesDeps): Pictures {
       reportedFor(request.kind, task, request.turnId, request.passId !== null),
     );
     if (targets.length === 0) return 0;
-    let storageState = readStorageState(deps.dataDir, project.id);
+    const site = await resolveSite(request.kind, task.id, project, port, signal);
+    if (site === null || stopped()) return 0;
+    const { appUrl } = site;
+    const copyId = site.copy?.copyId ?? null;
+    let storageState = readStorageState(deps.dataDir, project.id, copyId);
     if (storageState === null && project.devLoginCommand !== null) {
-      if (shootableAddress(project.id, port) !== appUrl) return 0;
-      storageState = await runSignIn(project, signal);
+      if (!siteStands(site, project.id, port)) return 0;
+      storageState = await runSignIn(project, signal, site);
       if (storageState === null) return 0;
     }
     let signedInAgain = false;
@@ -604,7 +662,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const devUi = devUiFor(appUrl, port);
     for (const target of targets) {
       const shoot = (state: StorageState | null): Promise<Shot> =>
-        shootableAddress(project.id, port) === appUrl
+        siteStands(site, project.id, port)
           ? deps.camera.shoot({ appUrl, ...target, storageState: state, devUi, signal })
           : Promise.reject(new Error("The app address changed or names 10db's own port"));
       const startedAt = deps.clock.now().getTime();
@@ -617,8 +675,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
         !redirectingRoutes.has(redirects)
       ) {
         signedInAgain = true;
-        if (shootableAddress(project.id, port) !== appUrl) return 0;
-        storageState = await runSignIn(project, signal);
+        if (!siteStands(site, project.id, port)) return 0;
+        storageState = await runSignIn(project, signal, site);
         if (storageState === null) return 0;
         shot = await shoot(storageState);
       }
@@ -734,9 +792,13 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const project = getProject(db, projectId);
     const was = appUrls.get(projectId) ?? null;
     const loginWas = devLogins.get(projectId) ?? null;
+    const copyAppWas = copyApps.get(projectId) ?? null;
     appUrls.set(projectId, project.appUrl);
     devLogins.set(projectId, project.devLoginCommand);
-    // A sign-in kept for another address or another dev login is not this one's.
+    copyApps.set(projectId, project.copyAppCommand);
+    // A sign-in kept for another address or another dev login is not this one's; a copy's sign-in is
+    // not either once its app may be served elsewhere.
+    if (copyAppWas !== project.copyAppCommand) forgetStorageState(deps.dataDir, projectId);
     if (was !== project.appUrl || loginWas !== project.devLoginCommand) {
       forgetStorageState(deps.dataDir, projectId);
       // The new address or command is checked at once, not when a picture is wanted.
@@ -805,9 +867,15 @@ export function startPictures(deps: PicturesDeps): Pictures {
       const runId = WorkstreamId.safeParse(event.entityId);
       if (!runId.success) return;
       const run = getWorkstream(db, runId.data);
-      // A copy task's after waits for its batch to ship: only then is its change in the copy.
-      if (run.batchId !== null && isLocalCopy(db, run.batchId)) return;
       const task = getTask(db, run.taskId);
+      // A copy task's after is taken in the copy's own app when the project serves one per copy; with
+      // none it waits for the batch to ship, when its change is in the shared app.
+      if (
+        run.batchId !== null &&
+        isLocalCopy(db, run.batchId) &&
+        getProject(db, task.projectId).copyAppCommand === null
+      )
+        return;
       if (task.passId == null) askAfter(task, null);
     },
     [EventType.BatchUpdated]: (event) => {
@@ -832,6 +900,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
   for (const project of projects) {
     appUrls.set(project.id, project.appUrl);
     devLogins.set(project.id, project.devLoginCommand);
+    copyApps.set(project.id, project.copyAppCommand);
   }
   if (projects.some((p) => p.archivedAt === null && p.appUrl !== null)) prepareBrowser();
   syncBrowser();
@@ -850,7 +919,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
       if (
         task.status === TaskStatus.Done &&
         task.passId == null &&
-        !inLocalCopy(task) &&
+        (!inLocalCopy(task) || project.copyAppCommand !== null) &&
         Date.parse(task.updatedAt) >= since &&
         !hasTaskScreen(db, task.id, ScreenKind.After)
       )
@@ -947,26 +1016,37 @@ export function startPictures(deps: PicturesDeps): Pictures {
     if (routes.length === 0) return { viewport, theme, shots: [], missing: unloadable };
     if (project.appUrl === null) return none('the project has no app address');
     const port = listenPort ?? (await deps.daemonPort);
-    const appUrl = shootableAddress(project.id, port);
-    if (appUrl === null) return none("the app address is 10db's own port");
+    if (shootableAddress(project.id, port) === null)
+      return none("the app address is 10db's own port");
     const abort = new AbortController();
     nowRuns.add(abort);
     try {
-      if (deps.holdApp) {
-        const held = await deps.holdApp(project.id, input.say);
+      const site = await resolveSite(
+        ScreenKind.After,
+        input.taskId ?? null,
+        project,
+        port,
+        abort.signal,
+      );
+      if (site === null) return none("the separate copy's own app did not come up");
+      const { appUrl } = site;
+      // The preview 10db holds up serves the shared folder; a copy's app is the copy command's own.
+      const holdApp = site.copy === null ? deps.holdApp : undefined;
+      if (holdApp) {
+        const held = await holdApp(project.id, input.say);
         if (!held.up) return none(held.why);
       }
       const devUi = devUiFor(appUrl, port);
-      let storageState = readStorageState(deps.dataDir, project.id);
+      let storageState = readStorageState(deps.dataDir, project.id, site.copy?.copyId ?? null);
       if (storageState === null && project.devLoginCommand !== null)
-        storageState = await runSignIn(project, abort.signal);
+        storageState = await runSignIn(project, abort.signal, site);
       let signedInAgain = false;
       const shots: NowShot[] = [];
       const missing: { route: string | null; reason: string }[] = [...unloadable];
       for (const route of routes) {
         // A long review renews the hold before each shot, so its preview is not taken away part-way.
-        if (deps.holdApp) {
-          const held = await deps.holdApp(project.id, input.say);
+        if (holdApp) {
+          const held = await holdApp(project.id, input.say);
           if (!held.up) {
             missing.push({ route, reason: held.why });
             continue;
@@ -986,7 +1066,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
         let shot = await shoot(storageState);
         if (shot.outcome === 'elsewhere' && project.devLoginCommand !== null && !signedInAgain) {
           signedInAgain = true;
-          storageState = await runSignIn(project, abort.signal);
+          storageState = await runSignIn(project, abort.signal, site);
           if (storageState !== null) shot = await shoot(storageState);
         }
         log.info(

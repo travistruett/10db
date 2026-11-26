@@ -9,7 +9,7 @@ import { SignInCheck } from './sign-in-check';
 
 /** The contract a dev login command keeps, said where the builder sets it. */
 const DEV_LOGIN_HELP =
-  "Prints one address on the app that signs a browser in, for pictures of pages that need a sign-in. It runs under the gate's sandbox, and it must work by itself every time: create its fictional user if that user is missing, run only against the dev database, be safe to repeat, and print one sign-in URL or path. Never sign in as a user your tests or e2e cleanup delete. Check Sign-In runs it now. 10db also checks it when the app address or the command changes, when the daemon starts and once a day, and raises one Inbox card while it fails.";
+  "Prints one address on the app that signs a browser in, for pictures of pages that need a sign-in. It runs under the gate's sandbox, and it must work by itself every time: create its fictional user if that user is missing, run only against the dev database, be safe to repeat, and print one sign-in URL or path. It runs with TENDB_APP_URL set to the address being photographed; for a separate copy's own app it runs in the copy's folder with TENDB_COPY_ID set too, and signs in to that copy's database. Never sign in as a user your tests or e2e cleanup delete. Check Sign-In runs it now. 10db also checks it when the app address or the command changes, when the daemon starts and once a day, and raises one Inbox card while it fails.";
 
 /** Where the app runs and how pictures of its pages are taken, saved as one patch of what changed. */
 export function ProjectPagesForm({ project }: { readonly project: ProjectDto }) {

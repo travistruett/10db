@@ -25,7 +25,7 @@ import {
 } from '@10db/db';
 import { imagesWithinBudget } from '../conversation';
 import type { StateStore } from '../events';
-import { checkShotsOf, missingLines, type Pictures } from '../pictures';
+import { checkShotsOf, copyOfTask, missingLines, type Pictures } from '../pictures';
 import { approvedMockupsOf } from '../plan-record';
 import type { ShapeImage } from '../sessions';
 import { lanePicturesSpent, sessionPictureLimits } from './picture-spend';
@@ -132,7 +132,13 @@ export function checkDesignTool(
         );
         return reason;
       };
-      if (task.workspaceMode !== WorkspaceMode.Shared && passHoldingTask(db, task) === undefined)
+      // A separate copy whose project serves it an app of its own is shot there.
+      const copyServed = project.copyAppCommand !== null && copyOfTask(db, taskId) !== null;
+      if (
+        task.workspaceMode !== WorkspaceMode.Shared &&
+        passHoldingTask(db, task) === undefined &&
+        !copyServed
+      )
         return unshot(WORKTREE_TASK);
       if (routes.length === 0) return unshot(NO_PAGE);
 
@@ -144,6 +150,7 @@ export function checkDesignTool(
         projectId: project.id,
         routes,
         purpose: DesignCheckPurpose.LaneCheck,
+        taskId,
       });
       const drawn = new Map<ApprovedMockup, string | null>();
       const candidates: { label: string; path: string; bytes: number }[] = [];

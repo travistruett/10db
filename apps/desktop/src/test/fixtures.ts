@@ -40,6 +40,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     usageHandoffAt: 0.95,
     localCopies: false,
     copyTeardownCommand: null,
+    copyAppCommand: null,
     handoffPct: 40,
     nudgePct: 50,
     humanWaitMinutes: 10,

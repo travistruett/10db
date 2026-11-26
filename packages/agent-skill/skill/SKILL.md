@@ -163,7 +163,14 @@ When the builder asks you to check a project, or after one is added or changed, 
   user the project's tests or e2e cleanup delete, and never touches a database that is not the dev one. When you
   write or review such a command in the repo, hold it to that. The builder's Check Sign-In button runs it and shows
   the page it signed in to or its error, and 10db checks it again when it changes, at start and once a day, with
-  one Inbox card while it fails.
+  one Inbox card while it fails. It runs with `TENDB_APP_URL` set to the address being photographed; for a
+  separate copy's own app it runs in the copy's folder with `TENDB_COPY_ID` set too, and must then sign in to
+  that copy's database.
+- **copy app command** (Settings › General, under Teardown Command): for a project whose separate copies serve an
+  app of their own. Run in the copy's folder under the gate's sandbox with `TENDB_COPY_ID`, it starts the copy's
+  app if it is not running and prints its address last (an http origin on this Mac, never the shared App
+  Address), safe to repeat. With it, pictures of a copy's work are taken in the copy's app before it lands; blank,
+  they are taken in the shared app after the landing. The Teardown Command stops that app.
 
 Report each value with what you expected and say which differ. Never change a setting from here: hazards are the only
 thing this skill adds to, and the builder changes the rest in Settings.

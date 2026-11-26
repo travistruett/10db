@@ -504,6 +504,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await page
     .getByRole('textbox', { name: 'Teardown Command' })
     .fill('echo torn-down-$TENDB_COPY_ID');
+  // The project has no app address, so the copy's app is never asked for: this saves the field only.
+  await page.getByRole('textbox', { name: 'Copy App Command' }).fill('echo http://localhost:9100');
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   const copyTask = await request.post(`${daemonUrl}/projects/${projectId}/tasks`, {

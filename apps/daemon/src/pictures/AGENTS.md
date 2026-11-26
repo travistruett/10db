@@ -84,6 +84,20 @@
   file only pruned rows name is deleted, a failed removal included; befores and afters are kept. `TaskScreensDto.fromGoal` holds, for a task in
   a goal, the newest after (else before) each other task of the goal kept on its page route.
 - On-demand pictures for a design check (`decisions/2026-11-20-design-review-shows-the-app-to-the-sessions-model.md`): `PageCamera.drawHtml` draws a mock-up's HTML (`mockupDocument` and `MOCKUP_CSP` from `@10db/contracts`, the one copy the window's iframe also reads) in a context with JavaScript off, no proxy reach (`reach` null: only `about:blank` and `data:` pass, the proxy refuses everything) and every other request refused; the live case in `browser.live.test.ts` holds all four layers at once, so no single layer's loss turns it red. `Pictures.shootNow` shoots the routes in the first viewport and theme of the project's matrix, signed in as a capture is, through the host's one-at-a-time `use`, after `holdApp` (the preview's `hold`) says the app answers; it answers `{ shots, missing }` with each missing route's reason, and keeps files only (`writePicture`), no task row. `drawMockup` caches the drawn PNG in memory by the hash of HTML, viewport and theme. `design_checks` rows (`checkShotsOf`, `design-shots.ts`) name their files, so `removeUnnamed` also asks `designCheckNames`; `prune.ts` deletes a check 14 days after its task is done or cancelled, or, with no task (a Design review), 14 days after it was made. `GET /tasks/:taskId/design-checks`, `/design-checks/:checkId/mockup` and `/shots/:index` are refused to screens.
+- A separate copy's own app (`decisions/2026-11-25-a-copys-pictures-come-from-its-own-app.md`): a project whose
+  copies serve an app sets `copyAppCommand`. `resolveSite` (`pictures.ts`) gives every picture but a before of a
+  task whose copy stands (`copyOfTask`, `copy-task.ts`: not Landed, Retiring or Retired, with a worktree) the
+  copy's site: `runCopyApp` (`copy-app.ts`) runs the command in the copy's folder through the gate runner with
+  the copy's id, for at most 120 s, its log `copy-app-<ms>.log` kept as the dev login's is, and `copyAppAddress`
+  takes its last line as a loopback origin off the daemon's port and not the shared address. The dev login then
+  runs in the copy's folder with `TENDB_COPY_ID` and `TENDB_APP_URL` (`signIn`'s `PictureSite`; every dev login
+  gets `TENDB_APP_URL`, which `sandbox/env-allowlist.ts` lets through), and its state is
+  `browser/<project id>/copy-<copy id>.json`; `forgetStorageState` drops every copy's state with the project's,
+  since a localhost cookie is shared by every port, and a changed copy app command forgets them too. With the
+  command set, `workstream.changed` to DONE asks a copy task's after and start-up's catch-up counts copy tasks;
+  a command that fails logs a warning and the after comes at SHIPPED, in the shared app. A copy task keeps one
+  after: a capture of one that has an after does nothing. `shootNow` takes the task's id (`check_design` passes
+  it), shoots a copy task in its copy's app, and holds no preview for it. Befores stay on the shared app.
 - `PicturesDeps.onAfterCapture` is told, for every After capture of a task outside a pass that was not stopped,
   which task it was (what the capture kept is already stored); the pictures module imports nothing of Slack or
   delivery, and `daemon/start.ts` hands the call to `delivery/slack-picture-post.ts`.

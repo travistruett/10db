@@ -168,8 +168,9 @@ describe("a project's sign-in check", () => {
     expect(await signInCards()).toHaveLength(1);
     expect(cam.signIns).toEqual([]);
 
-    // A changed command is checked by itself: the card goes once it signs in.
-    await setLogin(p.id, `echo ${APP}/people?token=abc`);
+    // A changed command is checked by itself: the card goes once it signs in. It is told the address
+    // it signs in on.
+    await setLogin(p.id, `test "$TENDB_APP_URL" = "${APP}" && echo ${APP}/people?token=abc`);
     await waitForAsync(async () => ((await signInCards()).length === 0 ? true : undefined));
     const ok = await check(p.id);
     expect(ok).toMatchObject({ state: 'signed_in', problem: null, route: '/people' });
