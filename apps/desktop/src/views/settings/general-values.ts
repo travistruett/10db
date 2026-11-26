@@ -86,6 +86,8 @@ export interface GeneralValues {
   readonly localCopies: boolean;
   /** Run when a copy is retired; '' means none, which a project with copies on can't save. */
   readonly copyTeardownCommand: string;
+  /** Prints a copy's own app address; '' means copies serve none, so their pictures wait for the landing. */
+  readonly copyAppCommand: string;
   /** Where the dev server answers; '' means none. */
   readonly appUrl: string;
   /** Prints the address that signs the browser for pictures in; '' means none. */
@@ -139,6 +141,7 @@ export function generalValues(project: ProjectDto): GeneralValues {
     isolate: project.isolate,
     localCopies: project.localCopies,
     copyTeardownCommand: project.copyTeardownCommand ?? '',
+    copyAppCommand: project.copyAppCommand ?? '',
     appUrl: project.appUrl ?? '',
     devLoginCommand: project.devLoginCommand ?? '',
     previewCommand: project.previewCommand ?? '',
@@ -289,6 +292,9 @@ export function checkGeneral(
   const copyTeardownCommand = teardown === '' ? null : teardown;
   if (copyTeardownCommand !== project.copyTeardownCommand)
     patch.copyTeardownCommand = copyTeardownCommand;
+  const copyApp = values.copyAppCommand.trim();
+  const copyAppCommand = copyApp === '' ? null : copyApp;
+  if (copyAppCommand !== project.copyAppCommand) patch.copyAppCommand = copyAppCommand;
   const address = appUrl?.success ? appUrl.data : null;
   if (address !== project.appUrl) patch.appUrl = address;
   const devLogin = values.devLoginCommand.trim();

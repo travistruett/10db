@@ -322,6 +322,8 @@ export const projects = sqliteTable('projects', {
   localCopies: integer('local_copies', { mode: 'boolean' }).notNull().default(false),
   /** Run when a copy is retired; required while `local_copies` is on. */
   copyTeardownCommand: text('copy_teardown_command'),
+  /** Run in a copy's folder for the copy's own app address; null when copies serve no app. */
+  copyAppCommand: text('copy_app_command'),
   /** Where the builder's dev server answers, a loopback origin; null when the project has not said. */
   appUrl: text('app_url').$type<AppUrl>(),
   /** Prints the address that signs the browser for pictures in; null when the app needs no sign-in. */

@@ -614,6 +614,8 @@ export const ProjectInput = z
     localCopies: z.boolean().default(false),
     /** Run when a copy is retired; required while `localCopies` is on. */
     copyTeardownCommand: z.string().min(1).max(2000).nullable().default(null),
+    /** Prints a separate copy's own app address; null when copies serve no app of their own. */
+    copyAppCommand: z.string().min(1).max(2000).nullable().default(null),
   })
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
@@ -675,6 +677,9 @@ export const AppUrl = z
     'An app address is an http origin on this Mac, such as http://localhost:8800',
   );
 export type AppUrl = z.infer<typeof AppUrl>;
+
+/** Names the app address a dev login signs in on: the shared app's, or a separate copy's own. */
+export const APP_URL_VARIABLE = 'TENDB_APP_URL';
 
 /** Said when an app address names the daemon's own port: a page loaded there would reach 10db's API. */
 export const APP_URL_IS_DAEMON =
@@ -756,6 +761,11 @@ export const ProjectDto = z.object({
   localCopies: z.boolean(),
   /** Run when a copy is retired; set whenever `localCopies` is on. */
   copyTeardownCommand: z.string().nullable(),
+  /**
+   * Run in a copy's folder with `TENDB_COPY_ID` set: starts the copy's own app if it is not running
+   * and prints its address last. Null when copies serve no app, so their pictures wait for the landing.
+   */
+  copyAppCommand: z.string().nullable(),
   /** Where the builder's dev server answers; null when the project has not said. */
   appUrl: AppUrl.nullable(),
   /** Prints a URL or path on the app's address that signs a browser in; null when the app needs none. */
@@ -829,6 +839,8 @@ export const ProjectPatch = z
     localCopies: z.boolean(),
     /** Blank or null forgets it; a project with `localCopies` on must keep one. */
     copyTeardownCommand: ProjectCommand.nullable(),
+    /** Run under the gate's sandbox in a copy's folder for its app address; blank or null forgets it. */
+    copyAppCommand: ProjectCommand.nullable(),
     /** Where Open Page goes; null forgets it. */
     appUrl: AppUrl.nullable(),
     /** Run under the gate's sandbox before pictures; blank or null forgets it. */

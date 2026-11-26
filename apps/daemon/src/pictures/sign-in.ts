@@ -9,15 +9,17 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import {
+  APP_URL_VARIABLE,
   PageRoute,
   routeUrl,
   type AppUrl,
   type PermissionRuleDto,
   type ProjectDto,
 } from '@10db/contracts';
-import { OUTBOUND_PATTERNS, SECRET_PATTERN_NAMES } from '../stakeholders';
 import type { GateResult, GateRunner } from '../verify';
 import type { PageCamera } from './camera';
+import type { TaskCopy } from './copy-task';
+import { loginOutputTail } from './sign-in-output';
 import { browserDir, writeStorageState, type StorageState } from './storage-state';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §10, §13: signing the
@@ -79,44 +81,30 @@ export interface SignInDeps {
   readonly checkouts: () => readonly string[];
 }
 
-/** What a dev login that ran and failed leaves to show the builder; the output is scrubbed of tokens and addresses. */
-export interface SignInFailure {
-  readonly command: string;
-  /** Null when the command did not exit (a timeout, a stop, a refused Docker). */
-  readonly exitCode: number | null;
-  /** The last lines of the command's output that carry no address or secret; empty when it printed none. */
-  readonly tail: string;
-}
+/** Where a sign-in stopped: before the command ran, in the command, or in the browser opening its address. */
+export const SignInStep = { Setup: 'setup', Command: 'command', Browser: 'browser' } as const;
+export type SignInStep = (typeof SignInStep)[keyof typeof SignInStep];
 
 export type SignInResult =
   | { readonly ok: true; readonly state: StorageState }
-  | { readonly ok: false; readonly problem: string; readonly failure: SignInFailure | null };
+  | {
+      readonly ok: false;
+      readonly problem: string;
+      readonly step: SignInStep;
+      /** The command's exit code; null when it did not run to an end. */
+      readonly exitCode: number | null;
+      /** The last lines the command printed, masked; empty when it printed none. */
+      readonly output: string;
+    };
 
-/** How many lines of the dev login's output a failure shows. */
-const TAIL_LINES = 8;
-const TAIL_LINE_CHARS = 200;
-
-/**
- * The last lines of a dev login's output that are safe to show: a line that holds the app's address (the login
- * prints its token there) or that matches a secret pattern is dropped, the rest are cut short.
- */
-export function loginOutputTail(appUrl: AppUrl, output: string): string {
-  const origin = URL.parse(appUrl)?.origin ?? appUrl;
-  return output
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(
-      (line) =>
-        line !== '' &&
-        !line.includes(origin) &&
-        !OUTBOUND_PATTERNS.some(
-          ({ name, pattern }) => SECRET_PATTERN_NAMES.includes(name) && pattern.test(line),
-        ),
-    )
-    .slice(-TAIL_LINES)
-    .map((line) => (line.length > TAIL_LINE_CHARS ? `${line.slice(0, TAIL_LINE_CHARS)}…` : line))
-    .join('\n');
-}
+const failed = (
+  step: SignInStep,
+  problem: string,
+  run: { readonly exitCode: number | null; readonly output: string } = {
+    exitCode: null,
+    output: '',
+  },
+): SignInResult => ({ ok: false, problem, step, ...run });
 
 const NEEDS_DOCKER = 'The dev login needs Docker: turn on Allow Docker in Settings › Sandbox';
 
@@ -133,72 +121,82 @@ export function devLoginProblem(
   return null;
 }
 
-/** Runs the project's dev login and opens what it printed; keeps the storage state it leads to. */
+/**
+ * Where a picture is taken: the project's shared app, or a separate copy's own app, whose dev login
+ * runs in the copy's folder with the copy's id so it signs in to the copy's databases.
+ */
+export interface PictureSite {
+  readonly appUrl: AppUrl;
+  readonly copy: TaskCopy | null;
+}
+
+/**
+ * Runs the project's dev login and opens what it printed; keeps the storage state it leads to. The
+ * command is told the address it signs in on (`TENDB_APP_URL`), and for a copy the copy's id too.
+ */
 export async function signIn(
   deps: SignInDeps,
   project: SignInProject,
   signal: AbortSignal,
+  site?: PictureSite,
 ): Promise<SignInResult> {
-  const { appUrl, devLoginCommand } = project;
-  if (appUrl === null)
-    return { ok: false, problem: 'The project has no app address', failure: null };
+  const { devLoginCommand } = project;
+  const appUrl = site?.appUrl ?? project.appUrl;
+  const copy = site?.copy ?? null;
+  if (appUrl === null) return failed(SignInStep.Setup, 'The project has no app address');
   if (devLoginCommand === null)
-    return { ok: false, problem: 'The project has no dev login command', failure: null };
+    return failed(SignInStep.Setup, 'The project has no dev login command');
   const dir = browserDir(deps.dataDir, project.id);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const logPath = join(dir, `login-${String(deps.now())}.log`);
   // Made before the command runs, so the runner's write keeps this mode.
   closeSync(openSync(logPath, 'wx', 0o600));
   let url: string | null;
+  let printed: string;
   try {
     const result = await deps.gate.run({
       project: {
-        repoPath: project.repoPath,
+        repoPath: copy?.folder ?? project.repoPath,
         sandboxLoopback: project.sandboxLoopback,
         sandboxDocker: project.sandboxDocker,
       },
       command: devLoginCommand,
       logPath,
       timeoutMs: DEV_LOGIN_TIMEOUT_MS,
-      env: deps.sessionEnv(),
+      env: { ...deps.sessionEnv(), [APP_URL_VARIABLE]: appUrl },
       rules: deps.rules(project),
       checkouts: deps.checkouts(),
+      copyId: copy?.copyId ?? null,
       signal,
     });
-    const output = readFileSync(logPath, 'utf8');
     const problem = devLoginProblem(result);
     if (problem !== null)
-      return {
-        ok: false,
-        problem,
-        failure: {
-          command: devLoginCommand,
-          exitCode: result.timedOut || result.aborted ? null : result.exitCode,
-          tail: loginOutputTail(appUrl, output),
-        },
-      };
-    url = parseLoginUrl(appUrl, output);
+      return failed(SignInStep.Command, problem, {
+        exitCode: result.timedOut || result.aborted ? null : result.exitCode,
+        output: loginOutputTail(result.tail),
+      });
+    printed = readFileSync(logPath, 'utf8');
+    url = parseLoginUrl(appUrl, printed);
   } finally {
     rmSync(logPath, { force: true });
   }
   if (url === null)
-    return {
-      ok: false,
-      problem: `The dev login command printed no address on ${appUrl}`,
-      failure: { command: devLoginCommand, exitCode: 0, tail: '' },
-    };
+    return failed(SignInStep.Command, `The dev login command printed no address on ${appUrl}`, {
+      exitCode: 0,
+      output: loginOutputTail(printed),
+    });
   let state: StorageState;
   try {
     state = await deps.camera.signIn({ appUrl, url, signal });
   } catch {
     // The camera's words may carry the address, and with it the token: none of them is kept.
-    return {
-      ok: false,
-      problem: 'The browser could not sign in at the address the dev login printed',
-      failure: { command: devLoginCommand, exitCode: 0, tail: '' },
-    };
+    return failed(
+      SignInStep.Browser,
+      'The browser could not sign in at the address the dev login printed',
+      { exitCode: 0, output: '' },
+    );
   }
-  writeStorageState(deps.dataDir, project.id, state);
+  writeStorageState(deps.dataDir, project.id, state, copy?.copyId ?? null);
   return { ok: true, state };
 }
 
@@ -210,7 +208,7 @@ export function sweepLoginLogs(dataDir: string): number {
   for (const project of readdirSync(root, { withFileTypes: true })) {
     if (!project.isDirectory()) continue;
     for (const name of readdirSync(join(root, project.name)))
-      if (/^login-\d+\.log$/.test(name)) {
+      if (/^(login|copy-app)-\d+\.log$/.test(name)) {
         rmSync(join(root, project.name, name), { force: true });
         removed += 1;
       }

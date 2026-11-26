@@ -255,6 +255,10 @@ between those two moments is overwritten. This is the same as `git pull`, and no
 - **Stack readiness.** The after can be taken before `make watch` has synced the landed files into the stack.
   Today's Your-folder afters share that risk. The pilot measures it (§13). A fix waits for the numbers.
 - Sharing turned off, no routes, and a failed dev login behave as they do today.
+- **A copy's own app.** A project whose copies serve their own app sets a Copy App Command; the copy's afters,
+  turn pictures and design checks are then taken there before it lands, and the dev login runs with
+  `TENDB_COPY_ID` and `TENDB_APP_URL` (`decisions/2026-11-25-a-copys-pictures-come-from-its-own-app.md`).
+  Without one, the after comes at SHIPPED as above.
 
 ## 7. Dependents
 

@@ -52,12 +52,37 @@
   with `prPictures`), a finished task's pair in its Linear `ended` comment (`linear/reporter-pictures.ts`) and a `lane` screen taken by a lane's own browser, which goes to that
   session's model as an image block when it fits the account's limits
   (`decisions/2026-11-24-lane-screenshots-go-to-the-lanes-model.md`).
-- A failed dev login reaches the builder (`sign-in-record.ts`, `createSignInReporter`, wired in `daemon/start.ts`;
-  `decisions/2026-11-25-the-daemon-uploads-a-tasks-pictures-to-linear-and-says-why-it-has-none.md`): `SignInResult`
-  carries the command, its exit code and `loginOutputTail` (the last eight lines with any line holding the app's
-  address or a secret pattern removed), and `runSignIn` records it per project (`pictures-sign-in.<projectId>`) and
-  raises one card, "Pictures Cannot Sign In", withdrawn with the record when a sign-in succeeds or the app address or
-  dev login command changes. `Pictures.outlook(taskId)` is the one place that says what a task that names a page can expect of
+- The sign-in check (`sign-in-check.ts`, `sign-in-schedule.ts`; `POST /projects/:projectId/pictures/sign-in-check`,
+  Settings › App Preview's Check Sign-In): the dev login is a contract (it creates its fictional user if missing, runs
+  only against the dev database, is safe to repeat and prints one sign-in URL or path), so it is checked and not trusted.
+  A check holds the app up (`holdApp`), runs the saved command, signs the browser in and loads the first page area
+  route that loads (else `/`), only at the project's own address, read again before each step (`shootableAddress`; a
+  printed address off the app's origin is refused by `parseLoginUrl`). It answers a `SignInCheckDto`: `signed_in` with
+  the page as a PNG, `failed` with the exit code and the command's last lines, or `unchecked` when the app, not the
+  login, kept it from telling (no answer, an error overlay, a browser that could not open the address while the app
+  was down). The output is masked (`sign-in-output.ts`: addresses, queries, the outbound scan's secret patterns and long
+  bare tokens). It runs by itself once the API listens, when the app address or the dev login command changes (the
+  check under way is stopped), and every 24 h, for each live project with both. A failed command or check reports
+  through `PicturesDeps.onSignIn`, and `daemon/start.ts` raises the project's one card (`inbox/sign-in-card.ts`), which
+  a check or a picture's sign-in that works closes; an `unchecked` check changes nothing. A project whose address is
+  cleared closes its card.
+- Setting the sign-in up (`inbox/sign-in-card.ts`, `mcp/sign-in-setup-tool.ts`): the failed card, and the card a
+  change that leaves an app address with no dev login raises (`PicturesDeps.onNoSignIn`, never at start-up, so Not
+  Now holds), offer Set Up Sign-In. Its answer makes a Your-folder task naming one area (`signInSetupTask`) and a
+  setting-up card naming it (`SIGN_IN_SETUP_TASK`), which the failed card leaves alone while the task is open. Only
+  that task's lane is offered `save_dev_login`: a command naming an email off the reserved test domains
+  (`fictional-account.ts`) is refused unrun; any other is checked by `checkDevLogin` (the check, run from the
+  project's folder, never recorded or announced, keeping no state unless it signed in) and saved through
+  `patchProject` only when `signed_in`, whose change checks it again and closes the card. `cannot` rewords the card
+  with what was found and what the builder must decide, masked as prose (`maskedProse`: addresses, query strings and
+  secrets, nothing cut), and keeps them in its detail (`SIGN_IN_CANNOT`, with the address and command they held
+  for). A later failed sign-in that rewrites the card keeps those lines until the builder changes either.
+- A failed dev login leaves a record for the task updates (`sign-in-record.ts`, `createSignInReporter`, wired in
+  `daemon/start.ts`;
+  `decisions/2026-11-25-the-daemon-uploads-a-tasks-pictures-to-linear-and-says-why-it-has-none.md`): the command,
+  its exit code and the masked last lines of its output, kept per project (`pictures-sign-in.<projectId>`) and cleared
+  when a sign-in succeeds or the app address or dev login command changes. The builder's card is the sign-in check's
+  (above). `Pictures.outlook(taskId)` is the one place that says what a task that names a page can expect of
   its after: `none`, `wait` (an After capture of it is queued or running), `later` (a local copy not yet shipped) or
   `skipped` with the reason (a separate copy, the recorded sign-in failure, a refused browser); the Linear `ended` and
   landing comments and the Slack post read it, and the Linear reporter waits on `wait`.
@@ -79,6 +104,20 @@
   file only pruned rows name is deleted, a failed removal included; befores and afters are kept. `TaskScreensDto.fromGoal` holds, for a task in
   a goal, the newest after (else before) each other task of the goal kept on its page route.
 - On-demand pictures for a design check (`decisions/2026-11-20-design-review-shows-the-app-to-the-sessions-model.md`): `PageCamera.drawHtml` draws a mock-up's HTML (`mockupDocument` and `MOCKUP_CSP` from `@10db/contracts`, the one copy the window's iframe also reads) in a context with JavaScript off, no proxy reach (`reach` null: only `about:blank` and `data:` pass, the proxy refuses everything) and every other request refused; the live case in `browser.live.test.ts` holds all four layers at once, so no single layer's loss turns it red. `Pictures.shootNow` shoots the routes in the first viewport and theme of the project's matrix, signed in as a capture is, through the host's one-at-a-time `use`, after `holdApp` (the preview's `hold`) says the app answers; it answers `{ shots, missing }` with each missing route's reason, and keeps files only (`writePicture`), no task row. `drawMockup` caches the drawn PNG in memory by the hash of HTML, viewport and theme. `design_checks` rows (`checkShotsOf`, `design-shots.ts`) name their files, so `removeUnnamed` also asks `designCheckNames`; `prune.ts` deletes a check 14 days after its task is done or cancelled, or, with no task (a Design review), 14 days after it was made. `GET /tasks/:taskId/design-checks`, `/design-checks/:checkId/mockup` and `/shots/:index` are refused to screens.
+- A separate copy's own app (`decisions/2026-11-25-a-copys-pictures-come-from-its-own-app.md`): a project whose
+  copies serve an app sets `copyAppCommand`. `resolveSite` (`pictures.ts`) gives every picture but a before of a
+  task whose copy stands (`copyOfTask`, `copy-task.ts`: not Landed, Retiring or Retired, with a worktree) the
+  copy's site: `runCopyApp` (`copy-app.ts`) runs the command in the copy's folder through the gate runner with
+  the copy's id, for at most 120 s, its log `copy-app-<ms>.log` kept as the dev login's is, and `copyAppAddress`
+  takes its last line as a loopback origin off the daemon's port and not the shared address. The dev login then
+  runs in the copy's folder with `TENDB_COPY_ID` and `TENDB_APP_URL` (`signIn`'s `PictureSite`; every dev login
+  gets `TENDB_APP_URL`, which `sandbox/env-allowlist.ts` lets through), and its state is
+  `browser/<project id>/copy-<copy id>.json`; `forgetStorageState` drops every copy's state with the project's,
+  since a localhost cookie is shared by every port, and a changed copy app command forgets them too. With the
+  command set, `workstream.changed` to DONE asks a copy task's after and start-up's catch-up counts copy tasks;
+  a command that fails logs a warning and the after comes at SHIPPED, in the shared app. A copy task keeps one
+  after: a capture of one that has an after does nothing. `shootNow` takes the task's id (`check_design` passes
+  it), shoots a copy task in its copy's app, and holds no preview for it. Befores stay on the shared app.
 - `PicturesDeps.ensureApp` (`app-start/`, `decisions/2026-11-26-10db-brings-the-dev-stack-up-before-a-picture-or-a-sign-in.md`)
   runs before a capture's shots, before each dev login (a failed one sets the status line's sign-in problem) and
   before `shootNow`'s `holdApp`; a stack that will not start skips the capture or sign-in, logs why, and leaves the

@@ -9,6 +9,14 @@ export { leftWithBuilder } from './builder-card';
 export { clearAppStartCard, raiseAppStartCard } from './app-start-card';
 export { clearGateHoldCard, raiseGateHoldCard } from './gate-hold-card';
 export { raiseGateHostCards } from './gate-host-card';
+export {
+  applySignInSetupChoice,
+  cannotSignInCard,
+  clearPictureSignInCard,
+  raiseNoSignInOffer,
+  raisePictureSignInCard,
+  signInSetupTaskOf,
+} from './sign-in-card';
 export { hazardCardFoldKey, hazardRemovalCard, pendingHazardRemovals } from './hazard-card';
 export { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
 export { createRepoMcpServers } from './repo-mcp-servers';
