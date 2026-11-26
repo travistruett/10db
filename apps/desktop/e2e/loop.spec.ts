@@ -110,7 +110,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
       repoPath: E2E_REPO,
       gateCommand:
         "test -f src/greeting/hello.txt && git diff --quiet HEAD && git log -1 --format=%s | grep -qx 'Add the greeting'",
-      areas: [{ name: 'greeting', globs: ['src/greeting/**'] }],
+      // The area covers the eval file too: the run's agent lowers its bar.
+      areas: [{ name: 'greeting', globs: ['src/greeting/**', 'evals/**'] }],
       handoffPct: 40,
       nudgePct: 50,
       delivery: 'local',
@@ -130,11 +131,20 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
         guidance: 'Check the wording is friendly.',
         loudness: 'ask',
       },
+      {
+        key: 'evals',
+        label: 'Evals',
+        why: 'A lowered bar hides a regression.',
+        globs: ['**/evals/**'],
+        guidance: '',
+        loudness: 'show',
+      },
     ],
   });
   expect(watched.ok()).toBe(true);
-  // The project's evals as an assessment records them: one suite covering the greeting folder. The run
-  // snapshots it as it starts, and nothing has run the suite since.
+  // The project's evals as an assessment records them: one suite covering the greeting folder (snapshotted as
+  // the run starts, and nothing has run it since) and one defined by evals/gate.py, so a run that changes
+  // that file is read as an eval change.
   const recorded = await request.put(`${daemonUrl}/projects/${projectId}/evals/manifest`, {
     headers: { Authorization: `Bearer ${E2E_TOKEN}` },
     data: {
@@ -145,6 +155,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
           coveredPaths: ['src/greeting/**'],
           liveCommand: 'make eval-greeting',
         },
+        { key: 'gate', definitionPaths: ['evals/gate.py'] },
       ],
       gaps: [],
     },
@@ -313,6 +324,9 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(evals.getByText('not run', { exact: true })).toBeVisible();
   await expect(evals.getByText('Changes src/greeting/hello.txt')).toBeVisible();
   await expect(evals.getByText('make eval-greeting')).toBeVisible();
+  // The run lowered the eval's bar, and the Evals watchpoint says so, naming the line it read.
+  await forYou.getByRole('button', { name: /Evals/ }).click();
+  await expect(forYou.getByText('bar lowered (GATE = dict(minimum_rate=0.5))')).toBeVisible();
   // A Board task nobody watches is never asked anything: the agent's question was answered at once. The
   // task is done, so the drawer lists it and the Inbox raised no card for it.
   await expect(
