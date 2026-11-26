@@ -52,3 +52,15 @@ model is called.
 - One pure test of the classifier's rule table (a pure rule table), each kind and the unclassified fallback.
 - Extend an e2e flow that already shows a watchpoint in For you (`apps/desktop/e2e`, the task flow added by #881):
   a run that lowers a `minimum_rate=` shows "bar lowered".
+
+## As built
+
+- The event's types live in `packages/contracts/src/eval-definition-change.ts`, not `evals.ts` (`evals.ts` imports
+  `entities`, which imports `watchpoint-hit`: a cycle). The event constant is `EventType.EvalDefinitionChanged`.
+- A manifest `bar` change is not classified: it is an app setting, not a line in the patch.
+- The Evals watchpoint also takes definition files no watchpoint covers. With no `evals` watchpoint and no other
+  covering one there is no hit and no event, because the event rides on the reading.
+- Bars pair a removed line with an added one (same text with the numbers masked, else the next in order), every bar
+  on a line is read, a deleted bar line counts as lowered, and a lowered-then-restored pair cancels. Cases count
+  `Case(` lines or the file's entries by syntax; golden needs a value line on both sides; judges compare counts.
+- The drawer's reason is plain text; the PR body rebuilds it with code spans.
