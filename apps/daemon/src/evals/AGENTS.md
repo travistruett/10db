@@ -21,7 +21,7 @@
 - The manifest is an app setting (`evals-manifest:<project id>`, `manifest-store.ts`), recorded by an agent
   (`evals <projectId> <file>` in the agent skill) and never a file in the repository. `service.ts` records it only
   when every `definitionPaths` entry is tracked at HEAD and every `coveredPaths` glob holds a tracked file (matched as
-  a hazard's glob, `guard`'s `classifyPath`); else it answers the untracked names and keeps nothing. A recording emits
+  a hazard's glob, `guard`'s `classifyPath`); else it answers the untracked names and keeps nothing. A suite's `live.envFiles` entry (untracked by nature: it holds secrets) must be a regular file in the working tree (`lstat`, so no link), else it is refused the same way. `live` (contracts `EvalLiveRun`) is what a suite's Run needs from the gate sandbox (Docker, env files readable never writable, hosts, loopback, a stop command, a time limit); a manifest refuses `live` without `liveCommand`. A recording emits
   the project's change event.
 - It imports `git` (types), `guard`, `events` (types), `log` (types) and `@10db/db`.
 - Availability is kept apart from quality: a gate report's `outcomes` other than `ok` and `validation_failed`

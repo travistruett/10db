@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PathPattern } from './entities';
+import { EvalLiveRunId, ProjectId } from './ids';
 
 /** A result file format 10db reads. 10db defines no eval format of its own; each is a project's. */
 export const EvalResultFormat = {
@@ -246,6 +247,44 @@ export type EvalSuiteDetailDto = z.infer<typeof EvalSuiteDetailDto>;
 export const EvalSuiteQuery = z.strictObject({ run: RepoPath.optional() });
 export type EvalSuiteQuery = z.infer<typeof EvalSuiteQuery>;
 
+/**
+ * A host a non-Docker live run may reach: a domain or a `*.` wildcard with at least two labels, so no
+ * wildcard covers a bare TLD. Stricter than the daemon's `isSandboxDomain` (`apps/daemon/src/sandbox/profile.ts`),
+ * which allows `*.com`; contracts can't import the daemon, so the rule is written again here.
+ */
+export const EvalHost = z
+  .string()
+  .max(253)
+  .regex(/^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$/);
+
+/** An env file a Docker suite's compose reads: a `.env*` file in the checkout, never absolute or above it. */
+export const EvalEnvFile = z
+  .string()
+  .min(1)
+  .max(300)
+  .refine(
+    (p) => /(^|\/)\.env[^/]*$/.test(p) && !p.startsWith('/') && !p.split('/').includes('..'),
+    'a .env file inside the checkout',
+  );
+
+/**
+ * What the live arm of a suite needs from the sandbox. A Docker suite reaches containers through the
+ * socket and opens no host; its env files are readable, never writable. A suite without `live` has no Run.
+ */
+export const EvalLiveRun = z
+  .strictObject({
+    docker: z.boolean().default(false),
+    hosts: z.array(EvalHost).max(10).default([]),
+    envFiles: z.array(EvalEnvFile).max(5).default([]),
+    loopback: z.boolean().default(false),
+    /** Ends the work inside the container when the run is stopped or times out. */
+    stopCommand: z.string().min(1).max(300).optional(),
+    timeoutMinutes: z.number().int().min(1).max(240).default(60),
+  })
+  .refine((l) => !l.docker || l.hosts.length === 0, 'a Docker suite opens no hosts')
+  .refine((l) => l.docker || l.envFiles.length === 0, 'only a Docker suite reads env files');
+export type EvalLiveRun = z.infer<typeof EvalLiveRun>;
+
 /** One suite as an assessment records it. */
 export const EvalManifestSuite = z.strictObject({
   key: EvalSuiteKey,
@@ -257,6 +296,8 @@ export const EvalManifestSuite = z.strictObject({
   freeCommand: z.string().min(1).max(300).optional(),
   /** The paid arm. 10db shows it and never runs it. */
   liveCommand: z.string().min(1).max(300).optional(),
+  /** What the live arm needs, so the builder can run it from 10db; none means no Run. */
+  live: EvalLiveRun.optional(),
 });
 export type EvalManifestSuite = z.infer<typeof EvalManifestSuite>;
 
@@ -321,6 +362,13 @@ export const EvalManifest = z
         });
       }
       seen.add(suite.key);
+      if (suite.live && suite.liveCommand === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `the suite ${suite.key} has live settings and no liveCommand`,
+          path: ['suites', index, 'live'],
+        });
+      }
     }
     const labels = new Set<string>();
     for (const [index, pattern] of m.callPatterns.entries()) {
@@ -408,3 +456,70 @@ export const NewEvalRequest = z.strictObject({
   origin: z.enum([NewEvalOrigin.Page, NewEvalOrigin.Gap, NewEvalOrigin.PlanEval]).default('page'),
 });
 export type NewEvalBody = z.output<typeof NewEvalRequest>;
+
+/** Where a live run is. */
+export const EvalLiveRunState = {
+  Running: 'running',
+  Passed: 'passed',
+  Failed: 'failed',
+  Stopped: 'stopped',
+  TimedOut: 'timed_out',
+  /** The daemon stopped or crashed under it. */
+  Interrupted: 'interrupted',
+} as const;
+export type EvalLiveRunState = (typeof EvalLiveRunState)[keyof typeof EvalLiveRunState];
+
+/** Why a live run is refused before it starts. */
+export const EvalLiveRefusal = {
+  NoLive: 'no_live',
+  NoSandbox: 'no_sandbox',
+  DockerOff: 'docker_off',
+  ManifestChanged: 'manifest_changed',
+  Busy: 'busy',
+} as const;
+export type EvalLiveRefusal = (typeof EvalLiveRefusal)[keyof typeof EvalLiveRefusal];
+
+/** One live run of a suite: its state, exit and the output's last lines. */
+export const EvalLiveRunDto = z.object({
+  id: EvalLiveRunId,
+  projectId: ProjectId,
+  suiteKey: EvalSuiteKey,
+  state: z.enum(EvalLiveRunState),
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+  exitCode: z.number().nullable(),
+  tail: z.string(),
+  costShownUsd: z.number().nullable(),
+  stopRan: z.boolean(),
+});
+export type EvalLiveRunDto = z.infer<typeof EvalLiveRunDto>;
+
+/** What the confirm window shows before a Run: the command and everything it may touch. */
+export const EvalLivePreviewDto = z.object({
+  suiteKey: EvalSuiteKey,
+  command: z.string(),
+  stopCommand: z.string().nullable(),
+  docker: z.boolean(),
+  hosts: z.array(z.string()),
+  envFiles: z.array(z.string()),
+  loopback: z.boolean(),
+  timeoutMinutes: z.number(),
+  lastRunCostUsd: z.number().nullable(),
+  /** Hashes what the window showed; Run refuses when anything it covers changed since. */
+  previewHash: z.string(),
+  refusal: z.enum(EvalLiveRefusal).nullable(),
+  running: EvalLiveRunDto.nullable(),
+});
+export type EvalLivePreviewDto = z.infer<typeof EvalLivePreviewDto>;
+
+export const RunEvalLiveBody = z.strictObject({ previewHash: z.string().min(1).max(128) });
+export type RunEvalLiveBody = z.infer<typeof RunEvalLiveBody>;
+
+/** `eval.live_run_changed`: a live run started or ended. */
+export const EvalLiveRunChangedData = z.object({
+  projectId: ProjectId,
+  suiteKey: EvalSuiteKey,
+  runId: EvalLiveRunId,
+  state: z.enum(EvalLiveRunState),
+});
+export type EvalLiveRunChangedData = z.infer<typeof EvalLiveRunChangedData>;

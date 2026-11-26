@@ -1,3 +1,5 @@
+import { lstat } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   NotFoundError,
   type EvalManifest,
@@ -104,6 +106,23 @@ function untrackedIn(manifest: EvalManifest, found: FoundEvals): string[] {
       checked.add(glob);
       if (!globHolds(glob, found.tracked)) out.add(glob);
       if (out.size >= MAX_REPORTED) return [...out];
+    }
+  }
+  return [...out];
+}
+
+/**
+ * The env files a manifest's live settings name that are not a regular file in the working tree. They are
+ * untracked, so HEAD can't vouch for them; a link is refused so a name can't lead the sandbox's read grant
+ * outside the checkout.
+ */
+async function missingEnvFiles(manifest: EvalManifest, repoPath: string): Promise<string[]> {
+  const out = new Set<string>();
+  for (const suite of manifest.suites) {
+    for (const file of suite.live?.envFiles ?? []) {
+      if (out.has(file)) continue;
+      const stat = await lstat(join(repoPath, file)).catch(() => null);
+      if (!stat?.isFile()) out.add(file);
     }
   }
   return [...out];
@@ -288,6 +307,14 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
           ok: false,
           untracked,
           message: `Not tracked at HEAD, so nothing was recorded: ${untracked.join(', ')}`,
+        };
+      }
+      const missingEnv = await missingEnvFiles(manifest, repoPath);
+      if (missingEnv.length > 0) {
+        return {
+          ok: false,
+          untracked: missingEnv,
+          message: `Not a regular file in the checkout (no link), so nothing was recorded: ${missingEnv.join(', ')}`,
         };
       }
       const stored = { manifest, commit: read.commit, assessedAt: deps.state.now() };
