@@ -93,6 +93,7 @@ import {
   TakeOutRequest,
   PassPullRequestRequest,
 } from './pass-close';
+import { EvalDefinitionChangedData } from './eval-definition-change';
 import { AgentSkillInfo, AgentSkillInput, AgentSkillStatus } from './agent-skill';
 import {
   PassClosedData,
@@ -677,6 +678,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-page-signed-off-data': PassPageSignedOffData,
   'pass-closed-data': PassClosedData,
   'pass-settled-data': PassSettledData,
+  'eval-definition-changed-data': EvalDefinitionChangedData,
   'pass-preview-broken-data': PassPreviewBrokenData,
   'pass-preview-mended-data': PassPreviewMendedData,
   ...mcpSchemas,

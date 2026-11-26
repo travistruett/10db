@@ -33,11 +33,19 @@
         }
       },
       {
+        "do": "tool",
+        "toolName": "Write",
+        "input": {
+          "file_path": "evals/gate.py",
+          "content": "GATE = dict(minimum_rate=0.5)\n"
+        }
+      },
+      {
         "do": "mcp",
         "tool": "commit",
         "args": {
           "opId": "op-e2e-commit1",
-          "paths": ["src/greeting/hello.txt"],
+          "paths": ["src/greeting/hello.txt", "evals/gate.py"],
           "message": "Add the greeting",
           "watchpointNotes": [
             {

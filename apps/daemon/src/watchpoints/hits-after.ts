@@ -36,7 +36,7 @@ export type WatchpointHitSource = (
   watchpoints: readonly Watchpoint[],
 ) => WatchpointHit[];
 
-/** The glob matcher, the one source in use. The Evals session's classified events join it as another. */
+/** The glob matcher; a run adds the eval definition source (`evalDefinitionSource`) to it. */
 export const WATCHPOINT_HIT_SOURCES: readonly WatchpointHitSource[] = [matchWatchpoints];
 
 /** Every source's hits, joined by watchpoint in the order of `watchpoints`, a file once per watchpoint. */
@@ -50,10 +50,15 @@ function joined(
     const had = byKey.get(hit.watchpoint.key);
     if (had === undefined) byKey.set(hit.watchpoint.key, hit);
     else {
+      // A file both sources found keeps the eval source's account of it.
+      const read = new Map(hit.files.map((f) => [f.path, f]));
       const seen = new Set(had.files.map((f) => f.path));
       byKey.set(hit.watchpoint.key, {
         ...had,
-        files: [...had.files, ...hit.files.filter((f) => !seen.has(f.path))],
+        files: [
+          ...had.files.map((f) => (f.evalDefinition === undefined ? (read.get(f.path) ?? f) : f)),
+          ...hit.files.filter((f) => !seen.has(f.path)),
+        ],
       });
     }
   }

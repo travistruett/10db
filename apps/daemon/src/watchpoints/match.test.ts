@@ -10,6 +10,7 @@ import {
   type Watchpoint,
   type WatchpointFileHit,
 } from '@10db/contracts';
+import { evalDefinitionSource } from './eval-definition-source';
 import { matchWatchpoints } from './match';
 import { splitPatch } from './split-patch';
 
@@ -216,5 +217,20 @@ describe('isNoisyWatchpoint', () => {
     expect(isNoisyWatchpoint({ cards: 4, waved: 4 })).toBe(false);
     expect(isNoisyWatchpoint({ cards: 6, waved: 5 })).toBe(true);
     expect(isNoisyWatchpoint({ cards: 5, waved: 3 })).toBe(false);
+  });
+});
+
+describe('evalDefinitionSource', () => {
+  it('shows a definition file no watchpoint covers under the evals watchpoint beside one it covers', () => {
+    const evals = watchpoint('evals', ['**/evals/**']);
+    const source = evalDefinitionSource(
+      new Map([
+        ['evals/gate.py', 'gate'],
+        ['tests/llm/cases.jsonl', 'cases'],
+      ]),
+    );
+    const hits = source([file('evals/gate.py'), file('tests/llm/cases.jsonl')], [evals]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.files.map((f) => f.path)).toEqual(['evals/gate.py', 'tests/llm/cases.jsonl']);
   });
 });

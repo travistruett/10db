@@ -19,6 +19,7 @@ import {
   ConflictError,
   currentStep,
   EventType,
+  type EvalDefinitionChangedData,
   type SessionActivityData,
   findingNotes,
   atRoundLimit,
@@ -381,12 +382,15 @@ import {
   checkAcceptance,
   raiseAcceptanceCard,
 } from '../acceptance';
+import { readEvalManifest } from '../evals';
 import {
   agentNotesOf,
   newestWatchpointRow,
   announceWatchpointReading,
   watchpointReviewReason,
   watchpointBuildBrief,
+  WATCHPOINT_HIT_SOURCES,
+  evalDefinitionSource,
   watchpointHitsAfter,
   watchpointReviewBrief,
   watchpointsForAreas,
@@ -1701,6 +1705,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       detail = await watchpointHitsAfter({
         watchpoints,
         head,
+        sources: [WATCHPOINT_HIT_SOURCES, [evalDefinitionSource(evalDefinitionSuites(row))]].flat(),
         read: (only, maxBytes) =>
           diffOfRanges(opts.git, checkout, ranges, maxBytes, only === null ? undefined : { only }),
       });
@@ -1717,13 +1722,53 @@ export function createRunner(opts: RunnerOptions): Runner {
     return detail.hits.length === 0 && detail.skipped === null && !showed ? null : detail;
   }
 
-  /** Records a watchpoint reading as the run's newest, in the write that moves the run on. */
+  /** The suite each definition path of the project's recorded evals belongs to (the first suite naming it). */
+  function evalDefinitionSuites(row: WorkstreamRow): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const suite of readEvalManifest(db, row.projectId)?.manifest.suites ?? []) {
+      for (const path of suite.definitionPaths) if (!out.has(path)) out.set(path, suite.key);
+    }
+    return out;
+  }
+
+  /**
+   * Records a watchpoint reading as the run's newest, in the write that moves the run on, and says for each
+   * eval definition file whose classification the reading adds or changes that it changed.
+   */
   function recordWatchpointReading(
     ctx: WriteContext,
-    id: WorkstreamId,
+    row: WorkstreamRow,
     detail: WatchpointDetail | null,
   ): void {
     if (detail === null) return;
+    const id = row.id;
+    const earlier = newestWatchpointRow(listEvidence(ctx.tx, id))?.detail;
+    const told = new Set(
+      (earlier?.hits ?? []).flatMap((h) =>
+        h.files.map((f) => `${f.path}:${f.evalDefinition?.reason ?? ''}`),
+      ),
+    );
+    const sent = new Set<string>();
+    for (const file of detail.hits.flatMap((h) => h.files)) {
+      const def = file.evalDefinition;
+      if (def === undefined || sent.has(file.path) || told.has(`${file.path}:${def.reason}`)) {
+        continue;
+      }
+      sent.add(file.path);
+      const data: EvalDefinitionChangedData = {
+        projectId: row.projectId,
+        workstreamId: id,
+        suiteKey: def.suiteKey,
+        path: file.path,
+        kinds: def.changes.map((c) => c.kind),
+      };
+      ctx.emit({
+        type: EventType.EvalDefinitionChanged,
+        entityType: 'workstream',
+        entityId: id,
+        data,
+      });
+    }
     const task = getTask(ctx.tx, getWorkstreamRow(ctx.tx, id).taskId);
     announceWatchpointReading(ctx, {
       workstreamId: id,
@@ -4816,7 +4861,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       return;
     }
     opts.state.write((ctx) => {
-      recordWatchpointReading(ctx, id, watchpoints);
+      recordWatchpointReading(ctx, row, watchpoints);
       countFinished(ctx, step);
       // Planned again first: a rigor changed while the session ran decides whether a step follows.
       const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
@@ -5318,7 +5363,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           )
         )
           return;
-        recordWatchpointReading(ctx, id, watchpoints);
+        recordWatchpointReading(ctx, row, watchpoints);
         const after = moveAfter(steps, current.stepIndex);
         countFinished(ctx, step);
         if (!reviewFollows(net.steps, current.stepIndex))
