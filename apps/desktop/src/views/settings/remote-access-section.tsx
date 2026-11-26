@@ -202,11 +202,7 @@ function PlainStep({
           <DnsLink />
         </StepRow>
       ) : (
-        <StepRow
-          step={step}
-          title="HTTPS is on for your tailnet"
-          lines={[status.certificateExists ? null : publicName(status)]}
-        />
+        <StepRow step={step} title="HTTPS is on for your tailnet" lines={[]} />
       );
     case SharingStep.Certificate:
     case SharingStep.Shared:
