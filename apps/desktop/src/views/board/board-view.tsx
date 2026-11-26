@@ -44,7 +44,6 @@ import { BatchSheet } from './batch/batch-sheet';
 import { closeNote } from './batch/close-note';
 import { batchTaskCount } from './batch/batch-task-count';
 import { TaskExternalLink } from './task-external-link';
-import { AcceptanceLine } from './acceptance-line';
 import { BoardColumn } from './board-column';
 import { BoardScroll } from './board-scroll';
 import { columnHint } from './column-hints';
@@ -616,7 +615,6 @@ export function BoardView() {
         }
       />
       <PageIntro
-        description={project ? <AcceptanceLine projectId={project.id} /> : undefined}
         toolbar={
           filterGoal ? (
             <GoalLine
