@@ -74,6 +74,8 @@ const ID_SCHEMAS = {
   RunHost: idSchema(['rhs'], 'RunHostId'),
   TrustGrant: idSchema(['tgr'], 'TrustGrantId'),
   TrustPrecedent: idSchema(['tpd'], 'TrustPrecedentId'),
+  Device: idSchema(['dev'], 'DeviceId'),
+  PushSubscription: idSchema(['psh'], 'PushSubscriptionId'),
 } as const;
 
 const ID_PREFIX = {
@@ -133,6 +135,8 @@ const ID_PREFIX = {
   RunHost: 'rhs',
   TrustGrant: 'tgr',
   TrustPrecedent: 'tpd',
+  Device: 'dev',
+  PushSubscription: 'psh',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -269,6 +273,10 @@ export const TrustGrantId = ID_SCHEMAS.TrustGrant;
 export type TrustGrantId = IdOf<'TrustGrant'>;
 export const TrustPrecedentId = ID_SCHEMAS.TrustPrecedent;
 export type TrustPrecedentId = IdOf<'TrustPrecedent'>;
+export const DeviceId = ID_SCHEMAS.Device;
+export type DeviceId = IdOf<'Device'>;
+export const PushSubscriptionId = ID_SCHEMAS.PushSubscription;
+export type PushSubscriptionId = IdOf<'PushSubscription'>;
 /** A task's thread message is a conversation item. @alias */
 export const TaskMessageId = ConversationItemId;
 export type TaskMessageId = ConversationItemId;

@@ -206,7 +206,10 @@ import { HumanTouchDayDto, HumanTouchDto } from './human-touch';
 import { CardTypeDto, CardTypesDto, CardTypeWindowDto } from './inbox-card-types';
 import { RigorFiguresDto, RigorFiguresRowDto } from './rigor-figures';
 import { HandoffInput } from './handoff';
-import { HealthResponse } from './health';
+import { HealthPublicResponse, HealthResponse } from './health';
+import { DeviceDto, PairingCodeDto, PairRequest, PairResponse } from './devices';
+import { PutSharingBody, SharingStatusDto } from './sharing';
+import { EventTicketDto } from './stream-ticket';
 import {
   DecisionDto,
   DecisionInput,
@@ -376,6 +379,14 @@ const laneBrowserSchemas: Record<string, z.ZodType> = {
 /** Every schema visible outside the daemon, keyed by the file stem of its generated JSON Schema. */
 export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'health-response': HealthResponse,
+  'health-public-response': HealthPublicResponse,
+  'device-dto': DeviceDto,
+  'pairing-code-dto': PairingCodeDto,
+  'pair-request': PairRequest,
+  'pair-response': PairResponse,
+  'sharing-status-dto': SharingStatusDto,
+  'put-sharing-body': PutSharingBody,
+  'event-ticket-dto': EventTicketDto,
   'agent-capabilities-dto': AgentCapabilitiesDto,
   'agent-command-dto': AgentCommandDto,
   'chat-create-input': ChatCreateInput,
