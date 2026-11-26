@@ -28,6 +28,9 @@ import type {
   ClaimKind,
   DecisionId,
   DeviceId,
+  EvalLiveRunId,
+  EvalLiveRunState,
+  EvalSuiteKey,
   DevicePlatform,
   PushSubscriptionId,
   DesignCheckId,
@@ -2857,3 +2860,40 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * A live run of an eval suite the builder started from 10db: what ran as the confirm window showed it, how it
+ * ended and the output's last lines. The stop command is kept so a run a crash left can still be stopped.
+ */
+export const evalLiveRuns = sqliteTable(
+  'eval_live_runs',
+  {
+    id: text('id').$type<EvalLiveRunId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    suiteKey: text('suite_key').$type<EvalSuiteKey>().notNull(),
+    command: text('command').notNull(),
+    stopCommand: text('stop_command'),
+    previewHash: text('preview_hash').notNull(),
+    docker: integer('docker', { mode: 'boolean' }).notNull(),
+    hostsJson: text('hosts_json').notNull(),
+    envFilesJson: text('env_files_json').notNull(),
+    state: text('state').$type<EvalLiveRunState>().notNull(),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    exitCode: integer('exit_code'),
+    tail: text('tail').notNull().default(''),
+    costShownUsd: real('cost_shown_usd'),
+    stopRan: integer('stop_ran', { mode: 'boolean' }).notNull().default(false),
+    logPath: text('log_path').notNull(),
+  },
+  (t) => [
+    index('eval_live_runs_project_idx').on(t.projectId, t.suiteKey, t.startedAt),
+    check(
+      'eval_live_runs_state',
+      sql`${t.state} IN ('running', 'passed', 'failed', 'stopped', 'timed_out', 'interrupted')`,
+    ),
+  ],
+);
