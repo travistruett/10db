@@ -1,26 +1,17 @@
-import { LinearEventKind } from '@10db/contracts';
+import {
+  LinearEventKind,
+  LinearPostState,
+  LinearStatusType,
+  type LinearPostDto,
+  type LinearTeamStatus,
+} from '@10db/contracts';
 
 // Which Linear status an update moves its issue to, picked from the team's own statuses by type and
 // position, with the name only breaking a tie. Pure: it reads nothing, and it is the one place the
-// default moves are decided, so the brief's wording and any daemon-side write follow the same rule.
+// default moves are decided: the daemon answers the reporter's `pick_linear_status` with it, and the
+// reporter's guard lets only that status be set.
 
-/** The type Linear gives every workflow status of a team. */
-export const LinearStatusType = {
-  Triage: 'triage',
-  Backlog: 'backlog',
-  Unstarted: 'unstarted',
-  Started: 'started',
-  Completed: 'completed',
-  Canceled: 'canceled',
-} as const;
-export type LinearStatusType = (typeof LinearStatusType)[keyof typeof LinearStatusType];
-
-/** One of a team's statuses, as `list_issue_statuses` shows it. */
-export interface TeamStatus {
-  readonly name: string;
-  readonly type: LinearStatusType;
-  readonly position: number;
-}
+type TeamStatus = LinearTeamStatus;
 
 /** What a default move aims at, before the team's statuses say which status that is. */
 export const StatusAim = {
@@ -88,6 +79,19 @@ function reviewLike(current: TeamStatus, statuses: readonly TeamStatus[]): TeamS
   const target = candidates.find((s) => REVIEW_NAME.test(s.name)) ?? candidates[0] ?? null;
   // The review status is the team's, not the issue's: an issue already at or past it stays where it is.
   return target !== null && target.position > current.position ? target : null;
+}
+
+/** The status name 10db last set on the issue: the newest recorded row that set one, or null when none did. */
+export function lastStatusSet(
+  rows: readonly Pick<LinearPostDto, 'state' | 'statusSet' | 'recordedAt'>[],
+): string | null {
+  let newest: { name: string; at: string } | null = null;
+  for (const row of rows) {
+    if (row.state !== LinearPostState.Recorded || row.statusSet === null) continue;
+    const at = row.recordedAt ?? '';
+    if (newest === null || at >= newest.at) newest = { name: row.statusSet, at };
+  }
+  return newest?.name ?? null;
 }
 
 /**

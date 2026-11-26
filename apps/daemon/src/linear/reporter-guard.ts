@@ -1,5 +1,5 @@
 import type { ExternalLink } from '@10db/contracts';
-import { Provider } from '@10db/contracts';
+import { Provider, ReporterToolName } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { mcpToolPrefix } from '../sessions';
 import { OUTBOUND_PATTERNS, SECRET_PATTERN_NAMES } from '../stakeholders';
@@ -8,7 +8,10 @@ import type { ReporterPicture } from './reporter-pictures';
 /** The claude.ai connector's prefix, used whenever the connector list is unread. */
 const CONNECTOR_PREFIX = 'mcp__claude_ai_Linear__';
 
-const REPORT_TOOLS: ReadonlySet<string> = new Set(['mcp__10db__report_linear_post']);
+const REPORT_TOOLS: ReadonlySet<string> = new Set([
+  `mcp__10db__${ReporterToolName.ReportLinearPost}`,
+  `mcp__10db__${ReporterToolName.PickLinearStatus}`,
+]);
 /** The upload tool, allowed only in a run that was offered pictures. */
 const UPLOAD_TOOL = 'mcp__10db__upload_linear_picture';
 
@@ -46,6 +49,10 @@ export interface ReporterRun {
   readonly pictures: readonly ReporterPicture[];
   /** Pattern names refused this run. */
   readonly withheld: Set<string>;
+  /** The project's note steers status choices, so a status set is the agent's to choose, not 10db's pick. */
+  readonly noteSteers: boolean;
+  /** The statuses 10db picked this run (`pick_linear_status`): with no steering note, the only ones that may be set. */
+  readonly pickedStatuses: Set<string>;
 }
 
 const allow = (): GuardVerdict => ({ decision: 'allow' });
@@ -89,6 +96,8 @@ function judgeWrite(
       if (field(input, 'id') !== issueId) return 'wrong issue';
       const state = field(input, 'state');
       if (state !== undefined && typeof state !== 'string') return 'unlisted key';
+      if (typeof state === 'string' && !run.noteSteers && !run.pickedStatuses.has(state))
+        return 'status not picked';
       if ('links' in input) {
         const links = field(input, 'links');
         const entry = Array.isArray(links) && links.length === 1 ? asRecord(links[0]) : null;

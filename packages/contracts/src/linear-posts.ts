@@ -72,6 +72,35 @@ export const LinearReporterSettings = z.strictObject({
 });
 export type LinearReporterSettings = z.infer<typeof LinearReporterSettings>;
 
+/** The type Linear gives every workflow status of a team. */
+export const LinearStatusType = {
+  Triage: 'triage',
+  Backlog: 'backlog',
+  Unstarted: 'unstarted',
+  Started: 'started',
+  Completed: 'completed',
+  Canceled: 'canceled',
+} as const;
+export type LinearStatusType = (typeof LinearStatusType)[keyof typeof LinearStatusType];
+
+/** One of a team's statuses, as Linear's `list_issue_statuses` shows it. */
+export const LinearTeamStatus = z.strictObject({
+  name: z.string().min(1).max(200),
+  type: z.enum(LinearStatusType),
+  position: z.number(),
+});
+export type LinearTeamStatus = z.infer<typeof LinearTeamStatus>;
+
+/** What the reporter reads from Linear for one owed update, so 10db can pick the status move. */
+export const PickLinearStatusInput = z.strictObject({
+  postId: LinearPostId,
+  /** The issue's own status now. */
+  current: LinearTeamStatus,
+  /** Every status of the issue's team. */
+  statuses: z.array(LinearTeamStatus).min(1).max(100),
+});
+export type PickLinearStatusInput = z.infer<typeof PickLinearStatusInput>;
+
 export const ReportLinearPostInput = z.strictObject({
   postIds: z.array(LinearPostId).min(1),
   outcome: z.discriminatedUnion('state', [

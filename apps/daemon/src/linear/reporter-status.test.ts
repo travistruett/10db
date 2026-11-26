@@ -1,6 +1,10 @@
-import { LinearEventKind } from '@10db/contracts';
+import {
+  LinearEventKind,
+  LinearStatusType,
+  type LinearTeamStatus as TeamStatus,
+} from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { LinearStatusType, pickStatusMove, type TeamStatus } from './reporter-status';
+import { pickStatusMove } from './reporter-status';
 
 const status = (name: string, type: LinearStatusType, position: number): TeamStatus => ({
   name,

@@ -9,6 +9,8 @@ import {
   type ConversationId,
   type LinearPostDto,
   type LinearPostId,
+  type PickedLinearStatus,
+  type PickLinearStatusInput,
   type LinearReporterSettings,
   type LinearSignInRowDto,
   type LinearSignInsDto,
@@ -30,6 +32,7 @@ import {
   insertItem,
   lastConversationSessions,
   lastItems,
+  listLinearPosts,
   listItems,
   pendingLinearPosts,
   recordLinearPosts,
@@ -50,6 +53,7 @@ import { refreshReporterCard } from './reporter-inbox';
 import { taskPrUrl } from './reporter-brief';
 import { judgeReporterCall, type ReporterRun } from './reporter-guard';
 import { nothingToReport } from './reporter-needs';
+import { lastStatusSet, pickStatusMove } from './reporter-status';
 import { reporterPictures, uploadPicture } from './reporter-pictures';
 import { accountRunStart, checkSaysSignedOut, reachOutcome } from './reporter-reach';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
@@ -105,6 +109,11 @@ export interface LinearReporter {
   wake(projectId: ProjectId): void;
   /** `report_linear_post`, from a reporter session only. */
   reportPost(sessionId: SessionId, input: ReportLinearPostInput): { ok: true };
+  /**
+   * `pick_linear_status`: picks the status an owed update sets from the team's statuses the session read, by
+   * type and position, and allows the session to set that one. The pick is 10db's, not the agent's.
+   */
+  pickStatus(sessionId: SessionId, input: PickLinearStatusInput): PickedLinearStatus;
   /** `upload_linear_picture`: sends a picture this run was offered to Linear's signed URL. */
   uploadPicture(sessionId: SessionId, input: UploadLinearPictureInput): Promise<{ ok: true }>;
   /**
@@ -706,6 +715,8 @@ export function createLinearReporter(
           prUrl: null,
           pictures: [],
           withheld: new Set(),
+          noteSteers: false,
+          pickedStatuses: new Set(),
         };
         flight.sessionId = input.sessionId;
         flight.accountId = input.accountId;
@@ -732,6 +743,8 @@ export function createLinearReporter(
         prUrl: taskPrUrl(state.db, flight.taskId),
         pictures: reporterPictures(state.db, flight.taskId, posts),
         withheld: new Set(),
+        noteSteers: reporterSettings(state.db, flight.projectId).note.trim() !== '',
+        pickedStatuses: new Set(),
       };
       flight.sessionId = input.sessionId;
       flight.accountId = input.accountId;
@@ -806,11 +819,41 @@ export function createLinearReporter(
         refreshCard(flight.projectId);
         return { ok: true };
       }
+      // Without a steering note a status is 10db's pick, so the row records only one 10db picked this run.
+      if (
+        outcome.state === 'recorded' &&
+        outcome.statusSet !== null &&
+        !guard.noteSteers &&
+        !guard.pickedStatuses.has(outcome.statusSet)
+      )
+        throw new ConflictError('That status was not picked for this run by pick_linear_status.');
       state.write((ctx) => {
         recordLinearPosts(ctx, input.postIds, outcome);
       });
       refreshCard(flight.projectId);
       return { ok: true };
+    },
+
+    pickStatus(sessionId, input) {
+      const { flight, guard } = runOf(sessionId);
+      if (guard.readOnly) throw new ConflictError('A snapshot run sets no status.');
+      if (!flight.taken.has(input.postId))
+        throw new ConflictError('That update was not given to this session.');
+      const post = listLinearPosts(state.db, flight.taskId).find((p) => p.id === input.postId);
+      if (post === undefined) throw new ConflictError('That update is not on this task.');
+      const linked = linearLinkOf(state.db, flight.taskId);
+      // A follow-up's issue is its chain's, so what 10db set there includes every earlier task's rows.
+      const history = [...(linked?.chain ?? [])]
+        .concat(flight.taskId)
+        .flatMap((id) => listLinearPosts(state.db, id));
+      const picked = pickStatusMove({
+        event: post.event,
+        current: input.current,
+        statuses: input.statuses,
+        lastSet: lastStatusSet(history),
+      });
+      if (picked !== null) guard.pickedStatuses.add(picked.name);
+      return { status: picked?.name ?? null };
     },
 
     async uploadPicture(sessionId, input) {

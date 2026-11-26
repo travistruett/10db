@@ -238,6 +238,7 @@ beforeEach(async () => {
       // Reads the reporter at call time: a test swaps it for a new one over the same store.
       reporter: {
         reportPost: (id, input) => reporter.reportPost(id, input),
+        pickStatus: (id, input) => reporter.pickStatus(id, input),
         uploadPicture: (id, input) => reporter.uploadPicture(id, input),
       },
     }),
@@ -295,6 +296,57 @@ describe('the Linear reporter', () => {
     expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(1);
     // A reporter's run never holds an update drain.
     expect(engine.busy()).toEqual([]);
+  });
+
+  it('picks a run start status from the team by type and position, lets only that be set, and records it', async () => {
+    const id = oweOne();
+    const status = (name: string, type: string, position: number) => ({ name, type, position });
+    const statuses = [
+      status('Backlog', 'backlog', 1),
+      status('In Progress', 'started', 3),
+      status('In Review', 'started', 4),
+      status('Done', 'completed', 5),
+    ];
+    const report = (statusSet: string) =>
+      ({
+        do: 'mcp',
+        tool: 'report_linear_post',
+        args: {
+          postIds: [id],
+          outcome: { state: 'recorded', commentIds: [], statusSet, attachmentUrl: null },
+        },
+      }) as const;
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'pick_linear_status',
+          args: { postId: id, current: statuses[0], statuses },
+        },
+        // The agent's own choice, not the pick: refused.
+        {
+          do: 'tool',
+          toolName: `${PREFIX}save_issue`,
+          input: { id: ISSUE, state: 'In Review' },
+        },
+        {
+          do: 'tool',
+          toolName: `${PREFIX}save_issue`,
+          input: { id: ISSUE, state: 'In Progress' },
+          result: '{}',
+        },
+        report('In Review'),
+        report('In Progress'),
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    expect(rows()[0]?.statusSet).toBe('In Progress');
+    const results = adapter.observations.filter((o) => o.kind === 'mcp_result');
+    expect(results.map((o) => o.detail['isError'])).toEqual([false, true, false]);
+    expect(String(results[0]?.detail['text'])).toContain('In Progress');
+    expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(1);
   });
 
   it('keeps a row whose session ended without recording pending, and runs it again at its backoff', async () => {
