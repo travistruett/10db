@@ -59,7 +59,8 @@ const run: TailscaleRun = (args) => {
   return Promise.resolve(ok());
 };
 
-function make() {
+/** `cli` is the Tailscale CLI's path, or null where Tailscale is not installed. */
+function make(cli: string | null = '/usr/local/bin/tailscale') {
   const sockets = createSocketRegistry();
   sockets.add(
     { scope: 'full', deviceId: null, listener: 'share' },
@@ -86,7 +87,7 @@ function make() {
     state,
     clock: new ManualClock(),
     log: silentLogger,
-    cli: () => '/usr/local/bin/tailscale',
+    cli: () => cli,
     run: () => run,
     listen,
     sockets,
@@ -157,6 +158,12 @@ describe('the sharing service', () => {
     expect(calls).toEqual([]);
   });
 
+  it('records no owed unserve when Stop follows a daemon that never shared', async () => {
+    const service = make(null);
+    await service.set({ enabled: false });
+    expect(getAppSetting(state.db, 'sharing.unserveOwed')).toBeUndefined();
+  });
+
   it('retries an unserve that failed on Stop at the next start', async () => {
     const first = make();
     await first.requestCertificate();
@@ -164,11 +171,14 @@ describe('the sharing service', () => {
     failUnserve = true;
     await first.set({ enabled: false });
     expect(serveJson).toEqual(TENDB_SERVE);
-    failUnserve = false;
+    expect(getAppSetting(state.db, 'sharing.unserveOwed')).toEqual([PORT]);
     await first.stop();
+    expect(getAppSetting(state.db, 'sharing.unserveOwed')).toEqual([PORT]);
+    failUnserve = false;
 
     await make().start();
     expect(serveJson).toEqual({});
+    expect(getAppSetting(state.db, 'sharing.unserveOwed')).toBeUndefined();
   });
 
   it('keeps the old port owed when a port change follows a failed unserve', async () => {
