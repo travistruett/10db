@@ -2,7 +2,13 @@
 // `createChatService` keeps its row and its messages; `chatHooks` says what its session is; its tools
 // answer on `/mcp`; the files route reads the project for the screen.
 
-export { chatFolderInUse, judgeChatCall, type ChatPlace } from './confinement';
+export {
+  BRANCH_RUNS_INSIDE,
+  CHAT_TURN_ENDED,
+  chatFolderInUse,
+  judgeChatCall,
+  type ChatPlace,
+} from './confinement';
 export { createConversationFiles } from './conversation-files';
 export { chatFolder, chatHooks, type ChatHooksDeps } from './hooks';
 export { createChatLiveSessions } from './live-sessions';

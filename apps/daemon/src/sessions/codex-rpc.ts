@@ -36,10 +36,24 @@ export interface CodexRpc {
   call<T>(method: string, params: unknown, schema: z.ZodType<T>): Promise<T>;
   notify(method: string, params?: unknown): void;
   onNotification(handler: (n: { method: string; params: unknown }) => void): void;
+  /**
+   * Answers the server's requests for `method` with what `handler` resolves to, or an error when it
+   * throws. A method with no handler is answered -32601, so the server treats it as declined.
+   */
+  onRequest(method: string, handler: (request: ServerRequest) => Promise<unknown>): void;
   readonly exited: Promise<{ readonly code: number | null; readonly stderr: string }>;
   /** Stops the child with `signal`, SIGTERM when none is given. */
   close(signal?: NodeJS.Signals): void;
 }
+
+/** A request the server sent the client: its JSON-RPC id, which `serverRequest/resolved` names, and params. */
+export interface ServerRequest {
+  readonly id: number | string;
+  readonly params: unknown;
+}
+
+/** The code 10db answers a request with when its handler failed. */
+const HANDLER_FAILED = -32603;
 
 const Message = z.looseObject({
   id: z.union([z.number(), z.string()]).optional(),
@@ -58,6 +72,7 @@ interface Pending {
 export function createCodexRpc(child: CodexChild, log: Pick<Logger, 'warn'>): CodexRpc {
   const pending = new Map<number, Pending>();
   const handlers: ((n: { method: string; params: unknown }) => void)[] = [];
+  const requestHandlers = new Map<string, (request: ServerRequest) => Promise<unknown>>();
   let nextId = 1;
   let stderr = '';
   let closed = false;
@@ -93,10 +108,28 @@ export function createCodexRpc(child: CodexChild, log: Pick<Logger, 'warn'>): Co
     }
     const message = parsed.data;
     if (message.method !== undefined && message.id !== undefined) {
-      send({
-        id: message.id,
-        error: { code: METHOD_NOT_FOUND, message: `10db does not answer ${message.method}` },
-      });
+      const id = message.id;
+      const method = message.method;
+      const handler = requestHandlers.get(method);
+      if (handler === undefined) {
+        send({
+          id,
+          error: { code: METHOD_NOT_FOUND, message: `10db does not answer ${method}` },
+        });
+        return;
+      }
+      void handler({ id, params: message.params }).then(
+        (result) => {
+          send({ id, result });
+        },
+        (error: unknown) => {
+          log.warn(
+            { method, errName: error instanceof Error ? error.name : 'unknown' },
+            'a codex app-server request could not be answered',
+          );
+          send({ id, error: { code: HANDLER_FAILED, message: `10db could not answer ${method}` } });
+        },
+      );
       return;
     }
     if (message.method !== undefined) {
@@ -177,6 +210,9 @@ export function createCodexRpc(child: CodexChild, log: Pick<Logger, 'warn'>): Co
     },
     onNotification(handler) {
       handlers.push(handler);
+    },
+    onRequest(method, handler) {
+      requestHandlers.set(method, handler);
     },
     exited,
     close(signal) {

@@ -6,6 +6,7 @@ import type { InitializeResponse as GeneratedInitializeResponse } from './codex-
 import type { AccountRateLimitsUpdatedNotification } from './codex-generated/ts/v2/AccountRateLimitsUpdatedNotification';
 import type { AgentMessageDeltaNotification } from './codex-generated/ts/v2/AgentMessageDeltaNotification';
 import type { CommandExecutionOutputDeltaNotification } from './codex-generated/ts/v2/CommandExecutionOutputDeltaNotification';
+import type { CommandExecutionRequestApprovalParams } from './codex-generated/ts/v2/CommandExecutionRequestApprovalParams';
 import type { ConfigReadResponse as GeneratedConfigReadResponse } from './codex-generated/ts/v2/ConfigReadResponse';
 import type { GetAccountRateLimitsResponse } from './codex-generated/ts/v2/GetAccountRateLimitsResponse';
 import type { GetAccountResponse } from './codex-generated/ts/v2/GetAccountResponse';
@@ -15,6 +16,7 @@ import type { ItemStartedNotification } from './codex-generated/ts/v2/ItemStarte
 import type { ModelListResponse as GeneratedModelListResponse } from './codex-generated/ts/v2/ModelListResponse';
 import type { ReasoningSummaryTextDeltaNotification } from './codex-generated/ts/v2/ReasoningSummaryTextDeltaNotification';
 import type { ReviewStartResponse } from './codex-generated/ts/v2/ReviewStartResponse';
+import type { ServerRequestResolvedNotification } from './codex-generated/ts/v2/ServerRequestResolvedNotification';
 import type { ThreadCompactStartResponse } from './codex-generated/ts/v2/ThreadCompactStartResponse';
 import type { ThreadResumeResponse } from './codex-generated/ts/v2/ThreadResumeResponse';
 import type { ThreadStartResponse } from './codex-generated/ts/v2/ThreadStartResponse';
@@ -48,6 +50,7 @@ import {
   TurnStarted,
   TurnStartResponse,
 } from './codex-protocol';
+import type { CommandApprovalRequest, ServerRequestResolved } from './codex-protocol';
 
 /** JSON carries every integer as a number; ts-rs writes a 64-bit one as bigint. */
 type Wire<T> = T extends bigint
@@ -92,6 +95,12 @@ expectTypeOf<Wire<CommandExecutionOutputDeltaNotification>>().toExtend<
 expectTypeOf<Wire<TurnPlanUpdatedNotification>>().toExtend<z.input<typeof TurnPlanUpdated>>();
 expectTypeOf<Wire<ReviewStartResponse>>().toExtend<z.input<typeof ReviewStarted>>();
 expectTypeOf<Wire<ThreadCompactStartResponse>>().toExtend<z.input<typeof CompactStarted>>();
+expectTypeOf<Wire<CommandExecutionRequestApprovalParams>>().toExtend<
+  z.input<typeof CommandApprovalRequest>
+>();
+expectTypeOf<Wire<ServerRequestResolvedNotification>>().toExtend<
+  z.input<typeof ServerRequestResolved>
+>();
 
 const GENERATED = join(import.meta.dirname, 'codex-generated');
 

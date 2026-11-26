@@ -9,6 +9,7 @@ import {
   type JudgeKind,
   DeniedBy,
   PermissionChoice,
+  Provider,
   MCP_TOOL_GRANT_DETAIL,
   QuestionCategory,
   Urgency,
@@ -146,9 +147,14 @@ type BrokerContext = BrokerOwner & {
      * the call and again at the builder's yes. Absent, such a call is refused.
      */
     readonly unsandboxed?: {
+      /** The agent that asks, named on the card. */
+      readonly agent: Provider;
       readonly mayRun: () => string | null;
-      /** The session's count of calls that could change something: a remembered command lasts until it moves. */
-      readonly changes: () => number;
+      /**
+       * The session's count of calls that could change something: a remembered command lasts until it moves.
+       * `toolUseId` is the asking call's, whose own sandboxed attempt (a Codex escalation's) does not count.
+       */
+      readonly changes: (toolUseId: string | null) => number;
       /** Counts a command the builder allowed to run outside the sandbox: it may have changed anything. */
       readonly bump: () => void;
       /** Whether a background task or job is running now, which may still write. */
@@ -247,18 +253,24 @@ const ONCE_OPTIONS: readonly InboxOption[] = permissionOptions(false).filter(
   (o) => o.label === PermissionChoice.AllowOnce || o.label === PermissionChoice.Deny,
 );
 
+/** The name a card gives the agent that asks. */
+const AGENT_NAME: Readonly<Record<Provider, string>> = {
+  [Provider.Claude]: 'Claude',
+  [Provider.Codex]: 'Codex',
+};
+
 /** A chat's card for a command outside the sandbox: allow once, for this exact command in this chat, or deny. */
-const CHAT_ONCE_OPTIONS: readonly InboxOption[] = [
+const chatOnceOptions = (agent: string): readonly InboxOption[] => [
   { label: PermissionChoice.AllowOnce, description: 'Run this command outside the sandbox once' },
   {
     label: PermissionChoice.AllowChat,
-    description: 'Again in this chat, until Claude changes a file or runs another command',
+    description: `Again in this chat, until ${agent} changes a file or runs another command`,
   },
   { label: PermissionChoice.Deny, description: 'Deny; your note is passed to the agent' },
 ];
 
 const OUTSIDE_CARD_TITLE = 'Run this outside the sandbox?';
-/** How much of what Claude says a command is for the card quotes. */
+/** How much of what the agent says a command is for the card quotes. */
 const SAID_MAX = 300;
 const OUTSIDE_CARD_WARNING =
   'It runs with your full rights: it can read and write anywhere you can.';
@@ -455,6 +467,8 @@ export function createPermissionBroker(
     const outside = ctx.sandbox?.unsandboxed;
     return outside === undefined ? OUTSIDE_NOT_AVAILABLE : outside.mayRun();
   };
+  /** The agent a chat's card for a command outside the sandbox names. */
+  const agentName = (): string => AGENT_NAME[ctx.sandbox?.unsandboxed?.agent ?? Provider.Claude];
   const denied = (toolName: string, summary: string, note: string | undefined): string =>
     isChat ? chatDenialMessage(toolName, summary, note) : denialMessage(toolName, summary, note);
   const owner: BrokerOwner =
@@ -627,7 +641,7 @@ export function createPermissionBroker(
       const seen = chatAllowed.get(key);
       // Anything that may have changed since (a change, another command allowed to run outside, a job started
       // or still running) makes the same command ask again.
-      const unchanged = remembers && seen !== undefined && seen === outside?.changes();
+      const unchanged = remembers && seen !== undefined && seen === outside?.changes(req.toolUseId);
       const remembered = unchanged && !outside.background();
       const refusal = outsideRefusal();
       if (refusal !== null) return { behavior: 'deny', message: refusal, by: DeniedBy.TenDb };
@@ -680,7 +694,7 @@ export function createPermissionBroker(
     const noteNeeded = judged && !onceOnly && grantTargetOf(null, grantCall, req.toolName) === null;
     // A once-only call offers no rule to store, Always in this project included.
     const options = chatOnce
-      ? CHAT_ONCE_OPTIONS.filter(
+      ? chatOnceOptions(agentName()).filter(
           (o) =>
             o.label !== PermissionChoice.AllowChat ||
             ctx.sandbox?.unsandboxed?.remembers() !== false,
@@ -747,7 +761,7 @@ export function createPermissionBroker(
         )
           chatAllowed.set(
             chatCallKey(req.toolName, summary, req.cwd),
-            ctx.sandbox?.unsandboxed?.changes() ?? 0,
+            ctx.sandbox?.unsandboxed?.changes(req.toolUseId) ?? 0,
           );
       }
       recordAllowedWrite(item.id, req, ask);
@@ -847,14 +861,14 @@ export function createPermissionBroker(
     if (runsOutsideSandbox(req.input)) {
       if (sandbox.unsandboxed === undefined)
         return { behavior: 'deny', message: OUTSIDE_NOT_AVAILABLE, by: DeniedBy.TenDb };
-      // What Claude says the command is for stays one quoted line: a paragraph of its own could pass for 10db's.
+      // What the agent says the command is for stays one quoted line: a paragraph of its own could pass for 10db's.
       const said = (stringField(req.input, 'description') ?? '').replace(/\s+/g, ' ').trim();
       const why = said.length > SAID_MAX ? `${said.slice(0, SAID_MAX)}…` : said;
       return {
         summary: command,
         title: OUTSIDE_CARD_TITLE,
-        // The command first, as the Inbox shows only the body; then what Claude says it is for.
-        body: [command, why === '' ? '' : `Claude says: “${why}”`, OUTSIDE_CARD_WARNING]
+        // The command first, as the Inbox shows only the body; then what the agent says it is for.
+        body: [command, why === '' ? '' : `${agentName()} says: “${why}”`, OUTSIDE_CARD_WARNING]
           .filter((part) => part !== '')
           .join('\n\n'),
         chatOnce: true,
