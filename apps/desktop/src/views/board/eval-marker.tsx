@@ -3,10 +3,12 @@ import {
   type EvalCoverageSideDto,
   type EvalCoverageSuiteDto,
   type EvalMarkerDto,
+  type ProjectId,
   type TaskId,
 } from '@10db/contracts';
 import { Code, Group, Stack, Text } from '@mantine/core';
 import { useTaskEvalCoverage } from '../../daemon/evals-queries';
+import { LiveRunControls } from '../evals/live-run-modal';
 
 // A task whose change touched a suite's covered code says where that suite stands: "not run" until the builder
 // runs the suite's live command in their checkout after the task lands, then passing, failing or regressed. The
@@ -56,7 +58,13 @@ function resultWords(side: EvalCoverageSideDto | null, none: string): string {
   return `${verdict}, ${side.at.slice(0, 10)}`;
 }
 
-function Suite({ suite }: { readonly suite: EvalCoverageSuiteDto }) {
+function Suite({
+  suite,
+  projectId,
+}: {
+  readonly suite: EvalCoverageSuiteDto;
+  readonly projectId: ProjectId;
+}) {
   return (
     <Stack gap={4} data-testid="eval-coverage-suite">
       <Group gap="xs" wrap="nowrap" align="baseline">
@@ -75,12 +83,21 @@ function Suite({ suite }: { readonly suite: EvalCoverageSuiteDto }) {
         {`After: ${resultWords(suite.after, 'none yet; run the live command in your checkout once it lands')}`}
       </Text>
       {suite.liveCommand === null ? null : <Code block>{suite.liveCommand}</Code>}
+      {suite.liveCommand === null ? null : (
+        <LiveRunControls projectId={projectId} suiteKey={suite.suiteKey} label="Run now" />
+      )}
     </Stack>
   );
 }
 
 /** The drawer's block, beside For You; nothing when the task touched no covered suite. */
-export function TaskEvalCoverage({ taskId }: { readonly taskId: TaskId | undefined }) {
+export function TaskEvalCoverage({
+  taskId,
+  projectId,
+}: {
+  readonly taskId: TaskId | undefined;
+  readonly projectId: ProjectId;
+}) {
   const coverage = useTaskEvalCoverage(taskId).data;
   if (coverage === undefined || coverage.suites.length === 0) return null;
   return (
@@ -89,7 +106,7 @@ export function TaskEvalCoverage({ taskId }: { readonly taskId: TaskId | undefin
         Evals
       </Text>
       {coverage.suites.map((suite) => (
-        <Suite key={suite.suiteKey} suite={suite} />
+        <Suite key={suite.suiteKey} suite={suite} projectId={projectId} />
       ))}
     </Stack>
   );

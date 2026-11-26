@@ -166,12 +166,35 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   const recorded = await request.put(`${daemonUrl}/projects/${projectId}/evals/manifest`, {
     headers: auth,
     data: {
-      suites: [{ key: 'ingest.mapping', definitionPaths: ['evals/ingest/mapping.py'] }],
+      suites: [
+        {
+          key: 'ingest.mapping',
+          definitionPaths: ['evals/ingest/mapping.py'],
+          liveCommand: 'echo done',
+          live: {},
+        },
+        { key: 'plain', liveCommand: 'echo plain' },
+      ],
       gaps: [{ label: 'Summarizer', where: 'src/summarize.py:12', why: 'No suite covers it' }],
     },
   });
   expect(recorded.ok()).toBe(true);
   await page.goto('/evals');
+  // Run: a suite with live settings offers it, and this daemon has no sandbox, so the window refuses with
+  // no Run; a suite whose assessment said nothing of how its command runs has none.
+  await page.getByRole('table', { name: 'Suites' }).getByText('ingest.mapping').click();
+  const liveDrawer = page.getByRole('dialog', { name: 'Suite' });
+  await liveDrawer.getByRole('button', { name: 'Run', exact: true }).click();
+  const runWindow = page.getByRole('dialog', { name: 'Run live eval' });
+  await expect(runWindow).toContainText('echo done');
+  await expect(runWindow.getByTestId('live-refusal')).toContainText('runs no sandbox');
+  await expect(runWindow.getByRole('button', { name: 'Run', exact: true })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await page.getByRole('table', { name: 'Suites' }).getByText('plain').click();
+  await expect(liveDrawer).toContainText("The assessment hasn't said how this command runs");
+  await expect(liveDrawer.getByRole('button', { name: 'Run', exact: true })).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await page.getByRole('tab', { name: /No Eval/u }).click();
   await page.getByRole('button', { name: 'New Eval for Summarizer' }).click();
   const form = page.getByRole('dialog', { name: 'New Eval' });

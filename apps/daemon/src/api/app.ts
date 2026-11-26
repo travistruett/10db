@@ -1624,15 +1624,19 @@ export function createApp(deps: ApiDeps) {
           201,
         ),
     )
-    .get('/projects/:projectId/evals/live/runs', (c) => {
-      const suite = c.req.query('suite');
-      return c.json(
-        deps.services.evalLiveRuns(
-          ProjectId.parse(c.req.param('projectId')),
-          suite === undefined ? null : EvalSuiteKey.parse(suite),
+    .get(
+      '/projects/:projectId/evals/live/runs',
+      validator('query', (value) =>
+        z.strictObject({ suite: EvalSuiteKey.optional() }).parse(value),
+      ),
+      (c) =>
+        c.json(
+          deps.services.evalLiveRuns(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('query').suite ?? null,
+          ),
         ),
-      );
-    })
+    )
     .post('/projects/:projectId/evals/live/runs/:runId/stop', async (c) => {
       await deps.services.stopEvalLive(
         ProjectId.parse(c.req.param('projectId')),
