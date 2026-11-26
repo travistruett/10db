@@ -68,7 +68,7 @@ import {
 import { judgeReporterCall, secretIn, type ReporterRun } from './reporter-guard';
 import { nothingToReport } from './reporter-needs';
 import { accountRunStart, checkSaysSignedOut, reachOutcome } from './reporter-reach';
-import { lastStatusSet, pickStatusMove, statusAimOf } from './reporter-status';
+import { appliedStatuses, lastStatusSet, pickStatusMove, statusAimOf } from './reporter-status';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
 import { noLinearCall, signInNeeded } from './sign-in-needed';
 import {
@@ -259,8 +259,8 @@ interface Flight {
   readonly written: Set<LinearPostId>;
   /** The status 10db picked for each owed update (`report_linear_post`). */
   readonly picked: Map<LinearPostId, string>;
-  /** The status the run set for each owed update: the one its row records. */
-  readonly statusSet: Map<LinearPostId, string>;
+  /** The run's newest pick, the furthest one: the only status its `save_issue` may set, and where its later updates start from. */
+  runPick: string | null;
   /** Where the run's own conversation items begin: its closing message names the comment ids. */
   readonly afterSeq: number;
   /** A snapshot run's wait: what the lane's start is waiting on, and where the run's own items begin. */
@@ -514,7 +514,7 @@ export function createLinearReporter(
       taken: new Set(),
       written: new Set(),
       picked: new Map(),
-      statusSet: new Map(),
+      runPick: null,
       afterSeq: lastItems(state.db, conversationId, 1)[0]?.seq ?? -1,
       error: null,
       guard: null,
@@ -651,6 +651,30 @@ export function createLinearReporter(
   };
 
   /**
+   * Records the statuses Linear took on the rows 10db picked them for. A `save_issue` the guard allowed says
+   * nothing by itself: only one that came back done moved the issue, and a row that claimed a status Linear
+   * never applied would read every later status as the builder's own move.
+   */
+  const settleStatuses = (flight: Flight): void => {
+    if (flight.picked.size === 0 || flight.guard === null) return;
+    const runCalls = lastItems(state.db, flight.conversationId, CALLS_READ).flatMap((item) => {
+      if (item.kind !== ConversationItemKind.ToolCall || item.seq <= flight.afterSeq) return [];
+      try {
+        return [parseItemBody(ConversationItemKind.ToolCall, item.body)];
+      } catch {
+        // A body that isn't a call's shows no status.
+        return [];
+      }
+    });
+    const applied = appliedStatuses(runCalls, flight.guard.linearPrefixes);
+    const set = [...flight.picked].filter(([, name]) => applied.has(name));
+    if (set.length === 0) return;
+    state.write((ctx) => {
+      for (const [id, name] of set) attachLinearStatusSet(ctx, id, name);
+    });
+  };
+
+  /**
    * The tool calls of the conversation's newest items: the run's own, and those before its starter that sessions
    * on the run's account made. The conversation outlives a move, so another account's answers are left out.
    */
@@ -721,6 +745,14 @@ export function createLinearReporter(
       log.error(
         { err: error, taskId: flight.taskId },
         'a reporter run could not record its comments',
+      );
+    }
+    try {
+      settleStatuses(flight);
+    } catch (error) {
+      log.error(
+        { err: error, taskId: flight.taskId },
+        'a reporter run could not record its statuses',
       );
     }
     try {
@@ -814,6 +846,9 @@ export function createLinearReporter(
     read: LinearIssueStatuses | undefined,
   ): string | null => {
     if (guard.noteSteers || statusAimOf(post.event) === null) return null;
+    // An update handed over again keeps its pick, unless a later update of the run moved the issue past it.
+    const earlier = flight.picked.get(post.id);
+    if (earlier !== undefined) return earlier === flight.runPick ? earlier : null;
     if (read === undefined) throw new InvalidError(STATUS_NEEDED);
     const lower = read.current.toLowerCase();
     const current =
@@ -832,11 +867,17 @@ export function createLinearReporter(
       event: post.event,
       current,
       statuses: read.statuses,
+      // A row records its status when the run settles, so these are the sets of earlier runs.
       lastSet: lastStatusSet(history),
+      runPick: flight.runPick,
     });
     if (picked === null) return null;
+    // One status per run, the furthest: an earlier pick the session has not set yet is no longer allowed, so
+    // the issue never goes back to it.
+    guard.pickedStatuses.clear();
     guard.pickedStatuses.add(picked.name);
     flight.picked.set(post.id, picked.name);
+    flight.runPick = picked.name;
     return picked.name;
   };
 
@@ -1012,7 +1053,7 @@ export function createLinearReporter(
           recordLinearPosts(ctx, [post.id], {
             state: 'recorded',
             commentIds: [],
-            statusSet: flight.statusSet.get(post.id) ?? null,
+            statusSet: null,
             attachmentUrl: null,
           });
         });
@@ -1066,7 +1107,7 @@ export function createLinearReporter(
         recordLinearPosts(ctx, [post.id], {
           state: 'recorded',
           commentIds: [],
-          statusSet: flight.statusSet.get(post.id) ?? null,
+          statusSet: null,
           attachmentUrl: pictures.attachmentUrl,
         });
       });
@@ -1168,7 +1209,7 @@ export function createLinearReporter(
             recordLinearPosts(ctx, [wrote], {
               state: 'recorded',
               commentIds: [],
-              statusSet: flight.statusSet.get(wrote) ?? null,
+              statusSet: null,
               attachmentUrl: null,
             });
           });
@@ -1186,17 +1227,6 @@ export function createLinearReporter(
         if (staged !== undefined) staged.written = true;
         flight.written.add(wrote);
         refreshCard(flight.projectId);
-      }
-      const statusSet = judged.statusSet;
-      if (statusSet !== undefined) {
-        // The rows 10db picked this status for record it: now when already recorded, else when they are.
-        const rows = [...flight.picked].filter(([, name]) => name === statusSet).map(([id]) => id);
-        for (const id of rows) flight.statusSet.set(id, statusSet);
-        if (rows.length > 0) {
-          state.write((ctx) => {
-            for (const id of rows) attachLinearStatusSet(ctx, id, statusSet);
-          });
-        }
       }
       // Only a call the rule allows counts: a signed-out server's sign-in tool is refused, so it does not.
       if (
