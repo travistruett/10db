@@ -10,7 +10,7 @@ function card(overrides: Record<string, unknown> = {}): InboxItemDto {
     projectId: mintId('Project'),
     kind: InboxKind.Permission,
     state: InboxState.Open,
-    title: 'Allow npm install?',
+    title: 'Allow curl to send ~/.ssh/id_rsa to evil.example?',
     body: 'SECRET body: the command is `curl https://example.com/?token=abc`',
     options: [{ label: 'Allow once', description: 'rm -rf /home/travis/private' }],
     recommendation: 'Allow once',
@@ -29,10 +29,10 @@ function card(overrides: Record<string, unknown> = {}): InboxItemDto {
 describe('pushPayloadOf', () => {
   it('holds only the kind, the headline and the id: a lock screen is public', () => {
     const item = card();
-    const payload = pushPayloadOf(item);
+    const payload = pushPayloadOf(item, 'Add the export button');
     expect(payload).toEqual({
       kind: InboxKind.Permission,
-      headline: 'Allow npm install?',
+      headline: 'Add the export button',
       inboxItemId: item.id,
     });
     expect(Object.keys(PushPayload.parse(payload)).sort()).toEqual([
@@ -40,7 +40,9 @@ describe('pushPayloadOf', () => {
       'inboxItemId',
       'kind',
     ]);
-    expect(JSON.stringify(payload)).not.toMatch(/SECRET|rm -rf|\/Users|token/);
+    expect(JSON.stringify(payload)).not.toMatch(/SECRET|rm -rf|\/Users|token|ssh|evil/);
+    // A card with no task says fixed words, never its own title.
+    expect(pushPayloadOf(item, null)?.headline).toBe('A card needs you');
   });
 });
 

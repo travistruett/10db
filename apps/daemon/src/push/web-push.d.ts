@@ -11,6 +11,8 @@ declare module 'web-push' {
       readonly privateKey: string;
     };
     readonly TTL?: number;
+    /** Milliseconds before the request is given up. */
+    readonly timeout?: number;
     readonly urgency?: 'very-low' | 'low' | 'normal' | 'high';
   }
   export class WebPushError extends Error {

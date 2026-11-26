@@ -16,6 +16,7 @@ export function createPushService(deps: {
       // The key exists before the first subscription, so the sender can read it.
       await deps.keys.ensure();
       deps.state.write((ctx) => {
+        // A device revoked a moment ago keeps no subscription; its next call is a 401 anyway.
         upsertPushSubscription(ctx, deviceId, input);
       });
     },

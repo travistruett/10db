@@ -5,10 +5,13 @@ import {
   pushPayloadOf,
   triagedToBuilder,
   type DaemonEvent,
+  type InboxItemDto,
 } from '@10db/contracts';
 import {
   deletePushSubscriptionByEndpoint,
   getInboxItem,
+  getWorkstream,
+  type DbReader,
   listPushSubscriptions,
   type PushSubscriptionRow,
 } from '@10db/db';
@@ -28,6 +31,8 @@ export type PushSend = (
 const VAPID_SUBJECT = 'mailto:noreply@10db.invalid';
 /** Push services keep an undelivered message at most this long; a card that old is stale anyway. */
 const TTL_SECONDS = 60 * 60;
+/** A push service that doesn't answer is given up on, so one slow service never holds the next card's push. */
+const SEND_TIMEOUT_MS = 10_000;
 
 export const sendWebPush: PushSend = async (subscription, payload, vapid) => {
   await sendNotification(
@@ -39,12 +44,24 @@ export const sendWebPush: PushSend = async (subscription, payload, vapid) => {
     {
       vapidDetails: { subject: VAPID_SUBJECT, ...vapid },
       TTL: TTL_SECONDS,
+      timeout: SEND_TIMEOUT_MS,
       urgency: 'high',
     },
   );
 };
 
 /** A push service answers 404 or 410 for a subscription that is gone for good. */
+/** The title of the task a card is about, as the Board shows it; null for a card that names no task. */
+function taskTitleOf(db: DbReader, item: InboxItemDto): string | null {
+  const target = item.targets[0];
+  if (target === undefined) return null;
+  try {
+    return getWorkstream(db, target.workstreamId).taskTitle || null;
+  } catch {
+    return null;
+  }
+}
+
 const GONE = new Set([404, 410]);
 
 /**
@@ -64,7 +81,8 @@ export function startPushSender(deps: {
   async function push(id: InboxItemId): Promise<void> {
     const subscriptions = listPushSubscriptions(deps.state.db);
     if (subscriptions.length === 0) return;
-    const payload = pushPayloadOf(getInboxItem(deps.state.db, id));
+    const item = getInboxItem(deps.state.db, id);
+    const payload = pushPayloadOf(item, taskTitleOf(deps.state.db, item));
     if (payload === null) return;
     const vapid = await deps.keys.read();
     if (vapid === null) return;

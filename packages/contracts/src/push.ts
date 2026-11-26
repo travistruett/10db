@@ -49,7 +49,7 @@ export type PushKeyDto = z.infer<typeof PushKeyDto>;
 export const PUSH_HEADLINE_MAX = 120;
 
 /**
- * Everything a push carries. A lock screen is public, so it is the card's kind and its headline and the id the
+ * Everything a push carries. A lock screen is public, so it is the card's kind and its task's headline and the id the
  * tap opens, and nothing else: no body, no options, no project, no path.
  */
 export const PushPayload = z.strictObject({
@@ -59,16 +59,22 @@ export const PushPayload = z.strictObject({
 });
 export type PushPayload = z.infer<typeof PushPayload>;
 
+/** What a lock screen says for a card that names no task. */
+export const PUSH_FALLBACK_HEADLINE = 'A card needs you';
+
 /**
  * The push for a card that just opened for the builder, or null when it is not an ask worth a buzz: not open,
  * placed elsewhere (the desktop's rule), or a Workbench page-ready card, which is a notice and never pushes.
+ * The headline is the title of the task the card is about, as the Board shows it, never the card's own title,
+ * which an agent wrote; `taskTitle` is null for a card with no task.
  */
-export function pushPayloadOf(item: InboxItemDto): PushPayload | null {
+export function pushPayloadOf(item: InboxItemDto, taskTitle: string | null): PushPayload | null {
   if (item.state !== InboxState.Open || !shouldNotifyOpened(item)) return null;
   if (item.kind === InboxKind.Check && PassCheckDetail.safeParse(item.detail).success) return null;
+  const headline = taskTitle?.trim() ?? '';
   return {
     kind: item.kind,
-    headline: item.title.slice(0, PUSH_HEADLINE_MAX),
+    headline: (headline === '' ? PUSH_FALLBACK_HEADLINE : headline).slice(0, PUSH_HEADLINE_MAX),
     inboxItemId: item.id,
   };
 }

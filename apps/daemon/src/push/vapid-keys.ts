@@ -26,15 +26,23 @@ export function createVapidKeyStore(keychain: Keychain): VapidKeyStore {
     const parsed = VapidKeys.safeParse({ publicKey, privateKey });
     return parsed.success && rest.length === 0 ? parsed.data : null;
   }
+  // Two first calls at once share one making, so they never write two different pairs.
+  let making: Promise<VapidKeys> | null = null;
+  async function make(): Promise<VapidKeys> {
+    const existing = await read();
+    if (existing !== null) return existing;
+    const made = generateVAPIDKeys();
+    const keys = { publicKey: made.publicKey, privateKey: made.privateKey };
+    keychain.write(VAPID_ACCOUNT, `${keys.publicKey}.${keys.privateKey}`);
+    return keys;
+  }
   return {
     read,
-    async ensure() {
-      const existing = await read();
-      if (existing !== null) return existing;
-      const made = generateVAPIDKeys();
-      const keys = { publicKey: made.publicKey, privateKey: made.privateKey };
-      keychain.write(VAPID_ACCOUNT, `${keys.publicKey}.${keys.privateKey}`);
-      return keys;
+    ensure() {
+      making ??= make().finally(() => {
+        making = null;
+      });
+      return making;
     },
   };
 }

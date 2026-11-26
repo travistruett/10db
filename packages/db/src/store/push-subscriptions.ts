@@ -1,5 +1,5 @@
 import { mintId, type DeviceId, type PushSubscriptionId } from '@10db/contracts';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
@@ -17,12 +17,21 @@ export interface PushSubscriptionValues {
   readonly auth: string;
 }
 
-/** Keeps one subscription per endpoint: a browser that subscribes again, as another device, takes it over. */
+/**
+ * Keeps one subscription per endpoint: a browser that subscribes again, as another device, takes it over.
+ * A revoked or unknown device keeps none, so a revoke that races a subscribe leaves no live row; false then.
+ */
 export function upsertPushSubscription(
   ctx: WriteContext,
   deviceId: DeviceId,
   input: PushSubscriptionValues,
-): void {
+): boolean {
+  const active = ctx.tx
+    .select({ id: schema.devices.id })
+    .from(schema.devices)
+    .where(and(eq(schema.devices.id, deviceId), isNull(schema.devices.revokedAt)))
+    .get();
+  if (active === undefined) return false;
   ctx.tx
     .insert(schema.pushSubscriptions)
     .values({
@@ -39,6 +48,7 @@ export function upsertPushSubscription(
       set: { deviceId, p256dh: input.p256dh, auth: input.auth, updatedAt: ctx.now },
     })
     .run();
+  return true;
 }
 
 /** Removes every subscription of one device (it turned push off). */
@@ -57,7 +67,7 @@ export function deletePushSubscriptionByEndpoint(ctx: WriteContext, endpoint: st
     .run();
 }
 
-/** Every subscription of a device that is not revoked (revoking deletes a device's own). */
+/** Every subscription of a device that is not revoked. */
 export function listPushSubscriptions(db: DbReader): PushSubscriptionRow[] {
   return db
     .select({
@@ -68,5 +78,7 @@ export function listPushSubscriptions(db: DbReader): PushSubscriptionRow[] {
       auth: schema.pushSubscriptions.auth,
     })
     .from(schema.pushSubscriptions)
+    .innerJoin(schema.devices, eq(schema.devices.id, schema.pushSubscriptions.deviceId))
+    .where(isNull(schema.devices.revokedAt))
     .all();
 }

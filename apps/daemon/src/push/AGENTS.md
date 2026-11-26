@@ -4,8 +4,9 @@ Web Push to paired phones when a card needs the builder.
 
 - `vapid-keys.ts`: the host's VAPID key pair, one secret (`<public>.<private>`, base64url: the Keychain refuses quotes) in the login Keychain (service `10db`, account
   `web-push-vapid`). `ensure()` makes it on the first subscription or the first `GET /push/key`; `read()` never makes
-  one, so the sender on a Mac nobody subscribed on touches no Keychain item. A new Mac makes its own, and a phone
-  then subscribes again, which pairing does anyway.
+  one, so the sender on a Mac nobody subscribed on touches no Keychain item. A new Mac makes its own; a phone
+  holding a subscription made with another key is replaced when the app starts or This Device opens (`resyncPush`).
+  Pairing does not subscribe: the switch does, and the app puts the browser's subscription again on every start.
 - `push-service.ts` backs `GET /push/key`, `PUT /devices/me/push` and `DELETE /devices/me/push` (`PushRoutes` in
   `api/app.ts`, which the desktop typechecks, so the interface lives there and this module implements it). One
   subscription per endpoint (`upsertPushSubscription`); revoking a device deletes its own (`packages/db`).
@@ -14,8 +15,9 @@ Web Push to paired phones when a card needs the builder.
   `shouldNotifyOpened`, not a Workbench page-ready card) and sends it to every subscription. A 404 or 410 from the
   push service deletes the subscription; any other failure is logged by status only (never the endpoint) and the next
   card tries again. `send` is injected; the default is `web-push`.
-- **The payload is the card's kind, its headline (120 characters) and its id, nothing else** (R9, spec §5.4): a lock
-  screen is public. `PushPayload` is a strict object, and `push.test.ts` in contracts keeps a body, option or path
+- **The payload is the card's kind, its task's headline (120 characters; the title the Board shows, from the
+  workstream the card targets, or "A card needs you" for a card with no task) and its id, nothing else** (R9, spec
+  §1): a lock screen is public, and a card's own title can be an agent's words. `PushPayload` is a strict object, and `push.test.ts` in contracts keeps a body, option or path
   out of it.
 - **Endpoints are allowlisted** (`PUSH_SERVICE_HOSTS`, `isPushServiceEndpoint` in contracts): https on 443 at
   `fcm.googleapis.com`, `updates.push.services.mozilla.com`, `*.push.apple.com` or `*.notify.windows.com`, no
