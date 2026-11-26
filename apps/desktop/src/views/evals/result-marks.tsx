@@ -3,7 +3,7 @@ import type { EvalModelResultDto, EvalTrendPointDto } from '@10db/contracts';
 import { gatesPassed, rateText, unansweredText, worstGate } from './eval-figures';
 
 /** A run's result as a dot: filled green for passed, a red ring for failed. The words beside carry it. */
-function ResultDot({ passed }: { readonly passed: boolean }) {
+export function ResultDot({ passed }: { readonly passed: boolean }) {
   return (
     <Box
       component="span"

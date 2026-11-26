@@ -1485,6 +1485,9 @@ export function createApp(deps: ApiDeps) {
     .get('/projects/:projectId/evals', async (c) =>
       c.json(await deps.services.evals(ProjectId.parse(c.req.param('projectId')))),
     )
+    .get('/projects/:projectId/eval-models', async (c) =>
+      c.json(await deps.services.evalModels(ProjectId.parse(c.req.param('projectId')))),
+    )
     .put(
       '/projects/:projectId/evals/manifest',
       validator('json', (value): EvalManifest => EvalManifest.parse(value)),

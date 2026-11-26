@@ -45,6 +45,7 @@ import {
 import { comparablePath, entryAt, existsAsEntry, foldedName, sameEntry } from './path-entries';
 import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
 import { localRemotePath, parseRemoteUrl } from './remote-url';
+import { parseGrepOutput, type GrepMatch } from './grep-output';
 import { GitError, runGit, runGitCapped, type RunOptions } from './run';
 import { GitTrustError, GitTrustFailure, type GitTrustDetail } from './trust-error';
 import { embeddedRepository, GitMode, isGitComponent } from './worktree-files';
@@ -1197,7 +1198,44 @@ export interface Git extends ChatGit {
     paths: readonly string[],
     options: SurveyTextsOptions,
   ): Promise<SurveyTexts>;
+  /**
+   * The lines of commit `rev` each query's extended regex matches in the files its globs name, read as
+   * `surveyTexts` reads: the object store only, unpinned, nothing written, no textconv, binary files
+   * skipped, and a partial clone not read at all. At most `maxMatches` lines are kept across the queries,
+   * in order; a query past the cap is `capped`. A pattern git can't compile has no matches (`refused`);
+   * a commit that isn't there answers no query. Any other failure, a timeout among them, rejects.
+   */
+  grepAt(
+    path: string,
+    rev: string,
+    queries: readonly GrepQuery[],
+    maxMatches: number,
+  ): Promise<GrepAt>;
 }
+
+/** One regex `grepAt` runs, over the files its globs (git's `:(glob)` pathspec) name. */
+export interface GrepQuery {
+  readonly regex: string;
+  readonly globs: readonly string[];
+}
+
+/** What one query of `grepAt` found. */
+export interface GrepAnswer {
+  readonly matches: readonly GrepMatch[];
+  /** Matches were left out at the cap. */
+  readonly capped: boolean;
+  /** Git refused the pattern. */
+  readonly refused: boolean;
+}
+
+/** What `grepAt` read: an answer per query, in order, or why it read nothing. */
+export interface GrepAt {
+  readonly answers: readonly GrepAnswer[];
+  readonly refused: string | null;
+}
+
+/** The most bytes of `git grep` output one query reads per match it may keep. */
+const GREP_BYTES_PER_MATCH = 1024;
 
 export interface SurveyTextsOptions {
   readonly maxBytes: number;
@@ -1219,6 +1257,8 @@ export const OVER_BUDGET_REFUSAL =
   'the source is over what one read may take: page code is not read';
 /** Said when `surveyTexts` can't read the repository's config to tell. */
 const UNREAD_CONFIG_REFUSAL = "the repository's config could not be read: page code is not read";
+/** Said when `grepAt` meets a partial clone. */
+const GREP_PARTIAL_REFUSAL = 'a partial clone: not searched';
 
 export interface GitOptions {
   /** Called with every refusal, so the builder hears of it whoever called. */
@@ -1578,6 +1618,28 @@ export function createGit(opts: GitOptions = {}): Git {
       },
       capBytes,
     );
+  }
+
+  /**
+   * Whether the repository is a partial clone, whose missing blobs a read would fetch, running its remote's
+   * programs (git before 2.45 has no GIT_NO_LAZY_FETCH). Reading config runs no program; a config git can't
+   * read is `unread`, never read past.
+   */
+  async function partialClone(at: Site): Promise<'whole' | 'partial' | 'unread'> {
+    try {
+      // `--get-regexp` prints the key whatever its value: an empty one still names a partial clone.
+      const partial = await git(at, ['config', '--get-regexp', '^extensions\\.partialclone$'], {
+        answerExitCodes: [1],
+      });
+      const promisors = await git(
+        at,
+        ['config', '--type=bool', '--get-regexp', '^remote\\..*\\.promisor$'],
+        { answerExitCodes: [1] },
+      );
+      return partial !== '' || /\strue$/mu.test(promisors) ? 'partial' : 'whole';
+    } catch {
+      return 'unread';
+    }
   }
 
   async function readGitDirs(real: string): Promise<{ gitDir: string; commonDir: string }> {
@@ -5293,24 +5355,9 @@ export function createGit(opts: GitOptions = {}): Git {
         const at = observed(
           realpathSync((await git(observed(path), ['rev-parse', '--show-toplevel'])).trim()),
         );
-        // Git before 2.45 has no GIT_NO_LAZY_FETCH, so a partial clone is not read at all. Reading
-        // config runs no program; a config git can't read refuses too, never reads.
-        let partial: string;
-        let promisors: string;
-        try {
-          // `--get-regexp` prints the key whatever its value: an empty one still names a partial clone.
-          partial = await git(at, ['config', '--get-regexp', '^extensions\\.partialclone$'], {
-            answerExitCodes: [1],
-          });
-          promisors = await git(
-            at,
-            ['config', '--type=bool', '--get-regexp', '^remote\\..*\\.promisor$'],
-            { answerExitCodes: [1] },
-          );
-        } catch {
-          return none(UNREAD_CONFIG_REFUSAL);
-        }
-        if (partial !== '' || /\strue$/mu.test(promisors)) return none(PARTIAL_CLONE_REFUSAL);
+        const partial = await partialClone(at);
+        if (partial === 'unread') return none(UNREAD_CONFIG_REFUSAL);
+        if (partial === 'partial') return none(PARTIAL_CLONE_REFUSAL);
         const head = await git(at, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'], {
           answerExitCodes: [1],
         });
@@ -5368,6 +5415,74 @@ export function createGit(opts: GitOptions = {}): Git {
         if (signal?.aborted === true) throw error;
         return none(null);
       }
+    },
+    async grepAt(path, rev, queries, maxMatches) {
+      const none = (refused: string | null): GrepAt => ({ answers: [], refused });
+      const at = observed(
+        realpathSync((await git(observed(path), ['rev-parse', '--show-toplevel'])).trim()),
+      );
+      const partial = await partialClone(at);
+      // A config read that failed is a failed read, asked again next time; a partial clone is an answer.
+      if (partial === 'unread')
+        throw new GitError(['config'], 'the config could not be read', null);
+      if (partial === 'partial') return none(GREP_PARTIAL_REFUSAL);
+      const commit = (
+        await git(at, ['rev-parse', '-q', '--verify', `${rev}^{commit}`], {
+          answerExitCodes: [1],
+        })
+      ).trim();
+      if (!OBJECT_ID.test(commit)) return none(null);
+      const answers: GrepAnswer[] = [];
+      let left = maxMatches;
+      for (const query of queries) {
+        if (left <= 0) {
+          answers.push({ matches: [], capped: true, refused: false });
+          continue;
+        }
+        let out: Buffer;
+        try {
+          out = await gitCapped(
+            at,
+            [
+              'grep',
+              '-n',
+              '-z',
+              '-I',
+              '-E',
+              '--full-name',
+              '--no-color',
+              '--no-textconv',
+              '-e',
+              query.regex,
+              commit,
+              '--',
+              ...query.globs.map((g) => `:(glob)${g}`),
+            ],
+            left * GREP_BYTES_PER_MATCH,
+            {
+              env: { GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: 'none' },
+              // The repository's grep config would change what is printed or how the regex reads.
+              config: [
+                ...NO_TRANSPORT,
+                '-c',
+                'grep.column=false',
+                '-c',
+                'grep.patternType=extended',
+              ],
+              answerExitCodes: [1],
+            },
+          );
+        } catch (error) {
+          // Git exits 128 on a pattern it can't compile; a timeout or anything else is a failed read.
+          if (!(error instanceof GitError) || error.exitCode !== 128) throw error;
+          answers.push({ matches: [], capped: false, refused: true });
+          continue;
+        }
+        const { matches, cut } = parseGrepOutput(out, commit, left);
+        left -= matches.length;
+        answers.push({ matches, capped: cut, refused: false });
+      }
+      return { answers, refused: null };
     },
     async ignoredDirectories(repo) {
       const out = await git(await pinned(repo), [

@@ -1,4 +1,10 @@
-import { EvalManifest, EvalManifestResult, EvalsDto, type EvalSuiteDto } from '@10db/contracts';
+import {
+  EvalManifest,
+  EvalManifestResult,
+  EvalsDto,
+  type EvalDriftDto,
+  type EvalSuiteDto,
+} from '@10db/contracts';
 import { TendbError } from './errors';
 import type { CommandDeps } from './commands';
 
@@ -29,7 +35,21 @@ function summary(evals: EvalsDto): string[] {
     `Unlinked eval files: ${String(evals.unlinked.length)}${evals.unlinked.length === 0 ? '' : `\n${evals.unlinked.map((p) => `  ${p}`).join('\n')}`}`,
     evals.gaps === null
       ? 'Gaps: unknown until a manifest is recorded.'
-      : `Gaps (LLM work with no eval): ${String(evals.gaps.length)}${evals.gaps.map((g) => `\n  ${g.label} (${g.where})`).join('')}`,
+      : `Gaps (LLM work with no eval): ${String(evals.gaps.length)}${evals.gaps.map((g) => `\n  ${g.label} (${g.where}, ${g.source})`).join('')}`,
+    ...evals.callSites.map(
+      (c) =>
+        `Call pattern ${c.label}: ${c.count === null ? 'refused by git grep' : `${String(c.count)}${c.capped ? '+' : ''} sites`}`,
+    ),
+    ...(evals.drift === null ? [] : driftLines(evals.drift)),
+  ];
+}
+
+function driftLines(drift: EvalDriftDto): string[] {
+  return [
+    `Since the assessment (${drift.since.slice(0, 12)}):`,
+    ...drift.newEvalFiles.map((p) => `  new eval file no suite links: ${p}`),
+    ...drift.newGaps.map((g) => `  new LLM work with no eval: ${g.label} (${g.where})`),
+    ...drift.missingPaths.map((p) => `  no longer tracked: ${p}`),
   ];
 }
 
@@ -72,7 +92,7 @@ export async function evalsCommand(args: readonly string[], deps: CommandDeps): 
   const result = parse(EvalManifestResult, answer, `PUT ${base}/manifest`);
   if (!result.ok) throw new TendbError(`Refused, nothing recorded. ${result.message}`);
   deps.out(
-    `Recorded ${String(manifest.data.suites.length)} suites and ${String(manifest.data.gaps.length)} gaps.`,
+    `Recorded ${String(manifest.data.suites.length)} suites, ${String(manifest.data.gaps.length)} gaps and ${String(manifest.data.callPatterns.length)} call patterns.`,
   );
   for (const line of summary(result.evals)) deps.out(line);
 }
