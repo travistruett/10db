@@ -81,6 +81,23 @@
   writes and the card closes) or, with none open, records the same verdict itself. A hash that is no longer current is
   a `ConflictError`.
 - A skipped-calls card (`closeFinishedSkippedCards`) closes when its task is done or abandoned; a later run of the task finishing makes it done. The calls it listed stay in the task's drawer, whose Run These Now (`POST /workstreams/:id/skips/run`, `runSkippedCalls`) makes the follow-up the card's answer makes. A finished task's run raises no card for its skips alone; a card that lists config the run wrote (`detail.listsConfig`) is raised and stays after the task is done, since that config waits on the builder's approval. It keeps Dismiss, also when it rides on a failed run's card.
+- The precedent card (`precedent-card.ts`) is one card per project (`precedentFoldKey`). `refreshPrecedentCard`
+  raises, rewords or resolves it, dropping every candidate whose key and scope have a `trust_precedents` row in any
+  state, read inside its write. `applyPrecedentAnswer`: Approve writes `active`, Keep Skipping writes `declined`,
+  Report writes nothing (the desktop copies the report); a kind that already has a row is left alone, and an
+  unknown kind is a `ConflictError`. `precedent-service.ts` computes the candidates before it writes, so a slow
+  refresh never re-offers an answered kind; it refreshes at start, open cards hourly, and on a doubt skip. Its
+  routes are `GET /projects/:id/precedents`, `POST /projects/:id/precedents/answer` and
+  `PATCH /projects/:id/precedents/:pid` (`daemon/trust-services.ts`). Run and Make Routine
+  (`delivery/skipped-card.ts`) is offered only when every skip is a keyed doubt; it approves each kind in the
+  follow-up's write, and `settleHashes` stores the runs hash after the commit. Nothing here writes a trust grant
+  (`trust/AGENTS.md` says what a precedent can and can't do).
+- Uses and conflicts (`hook-judge.ts`) count only a fresh verdict, never a cached one. An allow by precedent adds
+  a use; a limit with `precedentConflict` adds a conflict, and at `PRECEDENT_CONFLICTS_MAX` (3) the row is paused
+  and `onPrecedentPaused` raises the conflict card (`precedent-conflict:<id>`, with Keep, Edit and Remove; answered
+  by `applyPrecedentConflictAnswer` in `onFlagAnswerInWrite`). A shown precedent whose runs changed since it was
+  approved (`changedSince`) posts one notice per id and hash per session. The counts never fail the call. The shown
+  precedent is in the verdict key, so approving, pausing or editing one judges its calls again.
 - A stray-write card could still be owned by a Failed run whose task is open (Retry), so it stays until the task finishes or is abandoned.
 - A chat's command outside the sandbox (`judgeBash` with `sandbox.unsandboxed`) is a `chatOnce` ask: no stored rule, carried allowance or project grant answers it, and the card offers Allow once, `allow_chat` and Deny. `allow_chat` remembers the exact tool and command in the broker's closure, so it ends with the session and is never a rule or a decision. Every yes calls `mayRun` again; a refusal denies. A conversation's denial text (`chatDenialMessage`) invites another way instead of saying not to retry. `withdrawStaleConversationCards` withdraws every open conversation permission and question card at start, before any session starts, since the call that raised each ended with the daemon.
 - A remembered `allow_chat` call lasts only until the chat changes something: the broker stores the session's change count (`sandbox.unsandboxed.changes`, from `chat/hooks.ts`) and the call's cwd with the key, and a changed count asks again.

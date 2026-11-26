@@ -1,6 +1,7 @@
 # A failed run reaches the builder only when they're the one who can act
 
-**Status:** revision 2, 2026-11-25; designed, not built. **Size: Core.** It changes how the judge reads a call,
+**Status:** revision 2, 2026-11-25; P1's standing approvals (plan tasks 2–7) are built, its Makefile reader fix
+is tsk_01a2149e; the rest is designed, not built. **Size: Core.** It changes how the judge reads a call,
 retries, recovery and what a skip leads to. Plan review, then one plan per milestone (index and cards for the Core
 ones). The first plan is `docs/superpowers/plans/2026-11-25-approvals-become-precedent.md`.
 
