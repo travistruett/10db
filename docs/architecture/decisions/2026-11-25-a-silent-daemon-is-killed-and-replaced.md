@@ -17,7 +17,9 @@ reports, and an answer from `GET /health` on the port in `daemon.json`.
    the lock.
 4. Silent throughout: the holder's start time is read from `ps`. Later than `daemon.json`'s `startedAt`
    (compared at whole seconds; equal counts as the daemon's own) means another process reused the pid, and the
-   lock is taken over with no signal. Otherwise the holder is sent SIGKILL and gets 5 s to leave.
+   lock is taken over with no signal. Otherwise the holder is sent SIGKILL and gets 5 s to leave. `ps` prints
+   the start time as local time with no zone, so it runs with the daemon's own `TZ` when one is set: the zone
+   it prints in is the zone the daemon parses in.
 
 A `ps` that cannot run, prints nothing or prints something else is "unknown", never "dead": the holder keeps
 the lock and nothing is killed. This is the rule recovery already follows in

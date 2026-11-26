@@ -60,8 +60,11 @@ type HolderState = z.infer<typeof HolderState>;
  */
 async function holderState(pid: number): Promise<HolderState | null> {
   try {
+    // ps prints the start time as local time with no zone, and the caller parses it with `Date`, so
+    // ps must print in the zone this process parses in: its `TZ` when set, the system's otherwise.
+    const zone = process.env['TZ'];
     const { stdout } = await run('/bin/ps', ['-o', 'stat=', '-o', 'lstart=', '-p', String(pid)], {
-      env: { LC_ALL: 'C' },
+      env: zone === undefined ? { LC_ALL: 'C' } : { LC_ALL: 'C', TZ: zone },
     });
     const row = stdout.trim();
     const split = row.search(/\s/);
