@@ -864,14 +864,8 @@ export function createPermissionBroker(
     if (runsOutsideSandbox(req.input)) {
       if (sandbox.unsandboxed === undefined)
         return { behavior: 'deny', message: OUTSIDE_NOT_AVAILABLE, by: DeniedBy.TenDb };
-<<<<<<< af060706f03bc053659f438997431f9766ecba1b
-      // What the agent says the command is for stays one quoted line: a paragraph of its own could pass for 10db's.
-||||||| 34d2260c3
-      // What Claude says the command is for stays one quoted line: a paragraph of its own could pass for 10db's.
-=======
-      // What Claude says the command is for stays one quoted line with its hidden characters shown: a paragraph
+      // What the agent says the command is for stays one quoted line with its hidden characters shown: a paragraph
       // of its own, or a bidi or format character, could pass for 10db's words.
->>>>>>> c746645dc6691d7780757e4c03566868fde3664a
       const said = (stringField(req.input, 'description') ?? '').replace(/\s+/g, ' ').trim();
       const why = visibleLine(said.length > SAID_MAX ? `${said.slice(0, SAID_MAX)}…` : said);
       return {
