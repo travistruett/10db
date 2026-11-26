@@ -10,7 +10,6 @@ import {
 import {
   Alert,
   Box,
-  Button,
   Code,
   Paper,
   SegmentedControl,
@@ -265,18 +264,18 @@ export function PrecedentCard({
               ))}
             </>
           )}
-          {answer.isError ? (
-            <Alert color="red" variant="light">
-              {answer.error.message}
-            </Alert>
-          ) : null}
         </Stack>
       </Box>
-      <CardActions framed={framed}>
-        <Button loading={answer.isPending} disabled={chosen.length === 0 || invalid} onClick={save}>
-          Save Answers
-        </Button>
-      </CardActions>
+      <CardActions
+        framed={framed}
+        error={answer.isError ? answer.error.message : null}
+        primary={{
+          label: 'Save Answers',
+          loading: answer.isPending,
+          disabled: chosen.length === 0 || invalid,
+          onClick: save,
+        }}
+      />
     </CardSurface>
   );
 }
