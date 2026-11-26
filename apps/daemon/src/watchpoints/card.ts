@@ -1,9 +1,11 @@
 import {
+  CARD_RESOLUTION,
   InboxKind,
   InboxState,
   WatchpointChoice,
   WatchpointCardDetail,
   WatchpointLoudness,
+  type CardResolution,
   type InboxAnswer,
   type InboxItemDto,
   type ProjectId,
@@ -50,6 +52,7 @@ export function announceWatchpointReading(
 ): void {
   const asks = hitsAt(input.detail, WatchpointLoudness.Ask);
   if (asks.length > 0) raiseWatchpointCard(ctx, { ...input, asks });
+  else if (input.detail?.skipped === null) withdrawLiveCard(ctx, input.workstreamId);
   const shows = hitsAt(input.detail, WatchpointLoudness.Show);
   if (shows.length > 0)
     postNotice(ctx, {
@@ -63,6 +66,19 @@ export function announceWatchpointReading(
         .map((h) => `${h.watchpoint.label}: ${h.files.map((f) => f.path).join(', ')}`)
         .join('\n'),
     });
+}
+
+/** A later reading with nothing to ask about closes the card the earlier one left, as 10db's own withdrawal. */
+function withdrawLiveCard(ctx: WriteContext, workstreamId: WorkstreamId): void {
+  const live = openItemsForWorkstream(ctx.tx, workstreamId).find(
+    (item) => item.kind === InboxKind.Watchpoint && item.state === InboxState.Open,
+  );
+  if (live === undefined) return;
+  const resolution: CardResolution = { by: '10db', reason: 'The change no longer touches it.' };
+  updateInboxItem(ctx, live.id, {
+    state: InboxState.Resolved,
+    detail: { ...live.detail, [CARD_RESOLUTION]: resolution },
+  });
 }
 
 function raiseWatchpointCard(

@@ -192,7 +192,7 @@ describe('revisedWatchpoints', () => {
     return { ...starter, loudness: WatchpointLoudness.Show, ...over };
   };
 
-  it('moves an unchanged S1 starter to ask and leaves an edited one, and every other watchpoint, alone', () => {
+  it('moves a starter unchanged since first shipped to ask and leaves an edited one, and every other watchpoint, alone', () => {
     const edited = s1Migrations({ guidance: 'my own check' });
     const other = watchpoint('mine', ['**/mine/**']);
     const [unchanged, kept, untouched] = revisedWatchpoints([s1Migrations(), edited, other]);

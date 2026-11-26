@@ -182,16 +182,47 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
 export const STARTER_REVISION = 2;
 
 /**
- * The S1 versions of the starters whose loudness later changed. A builder's copy that still equals the old version
- * field for field takes the starter's new loudness; an edited copy is left as the builder made it.
+ * The starters as first shipped, at show, for those whose loudness later changed. A builder's copy that still equals
+ * the old version field for field takes the starter's new loudness; an edited copy is left as the builder made it.
+ * The old versions are literals: a later edit to a starter must not stop the upgrade.
  */
 export const STARTER_WATCHPOINT_REVISIONS: readonly {
   readonly since: number;
   readonly was: Watchpoint;
-}[] = STARTER_WATCHPOINTS.filter((w) => w.loudness === WatchpointLoudness.Ask).map((w) => ({
-  since: STARTER_REVISION,
-  was: { ...w, globs: [...w.globs], loudness: WatchpointLoudness.Show },
-}));
+}[] = [
+  {
+    since: STARTER_REVISION,
+    was: {
+      key: 'migrations',
+      label: 'Migrations',
+      why: "A revert can't undo a migration that ran.",
+      globs: [
+        '**/migrations/**',
+        '**/drizzle/**',
+        '**/alembic/versions/**',
+        '**/db/migrate/**',
+        '**/prisma/migrations/**',
+      ],
+      guidance:
+        'Check that the migration can run on existing data, that it is safe to apply while the old code still runs, and that nothing depends on a rollback.',
+      loudness: WatchpointLoudness.Show,
+      starter: 'migrations',
+    },
+  },
+  {
+    since: STARTER_REVISION,
+    was: {
+      key: 'contracts',
+      label: 'Contracts and API',
+      why: 'Other code and other people depend on these shapes, and a break reaches them late.',
+      globs: ['**/contracts/**', '**/*.proto', '**/openapi*.{yaml,json}', '**/schema.graphql'],
+      guidance:
+        'Check that every change is additive, that nothing is removed or narrowed, and that callers are updated.',
+      loudness: WatchpointLoudness.Show,
+      starter: 'contracts',
+    },
+  },
+];
 
 const sameWatchpoint = (a: Watchpoint, b: Watchpoint): boolean =>
   a.key === b.key &&

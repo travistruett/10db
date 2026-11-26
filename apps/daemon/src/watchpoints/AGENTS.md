@@ -3,7 +3,7 @@
 - `watchpoints/` matches a finished run's change against the builder's watchpoints
   (`docs/superpowers/specs/2026-11-25-watchpoints-design.md`). The shapes, `effectiveWatchpoints` and the starters are
   in `@10db/contracts` (`watchpoints.ts`, `watchpoint-hit.ts`); the lists are app settings read through
-  `readYourWatchpoints` and `readProjectWatchpoints` (`packages/db`). Loudness `show` and `ask` act; `hold` is not offered yet. Migrations and Contracts start at ask: `readYourWatchpoints` applies `revisedWatchpoints`, which moves a stored copy still equal to the S1 starter's old version (and no edited one) to the starter's loudness.
+  `readYourWatchpoints` and `readProjectWatchpoints` (`packages/db`). Loudness `show` and `ask` act; `hold` is not offered yet. Migrations and Contracts start at ask: `readYourWatchpoints` applies `revisedWatchpoints`, which moves a stored copy still equal to the starter as first shipped (and no edited one) to the starter's loudness.
 - `match.ts` is the pure rule table: `matchWatchpoints(files, watchpoints)` with `areaMatches`, so a dot folder matches.
   A file under two watchpoints is in both hits; the hit keeps a snapshot, never the globs.
 - `hits-after.ts` (`watchpointHitsAfter`) reads the whole change's file counts first (a zero-byte read), matches on

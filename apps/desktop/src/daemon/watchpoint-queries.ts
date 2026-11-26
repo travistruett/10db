@@ -16,8 +16,10 @@ export const watchpointKeys = {
   all: ['watchpoints'],
   yours: ['watchpoints', 'yours'],
   project: (id: ProjectId) => ['watchpoints', 'project', id] as const,
-  /** Every run's reading: a new evidence row for any run refetches the open ones. */
+  /** Every project's last 30 days: a run's reading or a card's answer refetches them. */
+  allStats: ['watchpoints', 'stats'],
   stats: (id: ProjectId) => ['watchpoints', 'stats', id] as const,
+  /** Every run's reading: a new evidence row for any run refetches the open ones. */
   hits: ['watchpoint-hits'],
   hitsOf: (id: WorkstreamId) => ['watchpoint-hits', id] as const,
 } as const;
