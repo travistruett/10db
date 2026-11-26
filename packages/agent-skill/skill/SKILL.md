@@ -223,13 +223,29 @@ replaces the one 10db recorded, and 10db's own scheduled assessment never replac
    - How the repo marks one unit of LLM work: a decorator or base class of its task registry (`@register_task`),
      a workflow spec, or failing those an SDK call. That becomes a call pattern, which 10db `git grep`s at every
      HEAD, so a new task with no eval shows the commit it lands, with no new assessment.
-3. **Never run a live eval.** Designing an eval doesn't grant paid calls. Read results; run nothing.
+3. **Never run a live eval.** Designing an eval doesn't grant paid calls. Read results; run nothing. The builder
+   runs a suite's live arm with Run in 10db, only for a suite whose manifest entry has `live` (step 4).
 4. **Write the manifest JSON** in the scratchpad: `{ "suites": [{ key, label?, bar?, definitionPaths, coveredPaths,
-freeCommand?, liveCommand? }], "gaps": [{ label, where, why }], "callPatterns": [{ label, regex, globs }] }`. A
+freeCommand?, liveCommand?, live? }], "gaps": [{ label, where, why }], "callPatterns": [{ label, regex, globs }] }`. A
    suite `key` is a result file's task (as `evals <projectId>` shows it) or a new key for a suite with no results
    yet. A `regex` is what `git grep -E` reads (POSIX extended: `[0-9]`, `[[:space:]]`, no `\d`, `\b` or `(?:`);
    `globs` are git pathspec globs, one per extension (`**/*.py`; no `{a,b}`). At most 20 patterns. With none,
    10db searches for the model SDKs' own calls, which in most repos are plumbing, not units of work.
+
+   **`live`** (only with a `liveCommand`) is what the live arm needs from 10db's sandbox, so Run can offer it:
+   `{ docker?, hosts?, envFiles?, loopback?, stopCommand?, timeoutMinutes? }` (default 60, at most 240).
+   - `docker: true` when the command reaches containers (`docker compose exec …`). Its `envFiles` are the files
+     compose reads under 10db's sandbox (`TENDB_SANDBOX=1`): the `env_file:` entries of its compose files and the
+     project's `.env`, each a `.env*` path inside the checkout that exists as a regular file. Name only what
+     compose needs there: ampsio's Makefile switches to `.env.example` under the sandbox, so it names none;
+     orgtools names `.env`, `orgtools/backend/.env.dev` and `orgtools/frontend/.env`. A Docker suite opens no
+     `hosts`: the containers keep their own network and their own keys. 10db passes the command no key.
+   - `stopCommand` ends the work inside the container (ampsio: a `docker compose exec -T backend python -c …`
+     that signals the `manage.py run_eval` process), because stopping 10db's side leaves it running.
+   - `hosts` (domains, `*.example.com` at most; never a bare `*.com`) only for a suite that is not Docker and
+     calls a provider from the Mac. `loopback: true` only for a command that calls a local server.
+   - When unsure, leave `live` out: a suite without it has no Run.
+
 5. **Apply** with `evals <projectId> <file>`. It refuses, and keeps nothing, when a `definitionPaths` entry is not a
    tracked file or a `coveredPaths` glob matches no tracked file; fix those and rerun until it refuses nothing.
 6. **Check each call pattern's count** in the output against the registry's own count (the tasks it registers).

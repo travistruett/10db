@@ -92,6 +92,9 @@ import {
   type NewEvalBody,
   NewEvalRequest,
   EvalSuiteKey,
+  EvalLiveRunId,
+  EvalLiveRefused,
+  RunEvalLiveBody,
   EvalSuiteQuery,
   PersonInput,
   PickSize,
@@ -1678,6 +1681,52 @@ export function createApp(deps: ApiDeps) {
           ),
           201,
         ),
+    )
+    .get(
+      '/projects/:projectId/evals/live/runs',
+      validator('query', (value) =>
+        z.strictObject({ suite: EvalSuiteKey.optional() }).parse(value),
+      ),
+      (c) =>
+        c.json(
+          deps.services.evalLiveRuns(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('query').suite ?? null,
+          ),
+        ),
+    )
+    .post('/projects/:projectId/evals/live/runs/:runId/stop', async (c) => {
+      await deps.services.stopEvalLive(
+        ProjectId.parse(c.req.param('projectId')),
+        EvalLiveRunId.parse(c.req.param('runId')),
+      );
+      return c.body(null, 204);
+    })
+    .get('/projects/:projectId/evals/:suiteKey/live', async (c) =>
+      c.json(
+        await deps.services.evalLivePreview(
+          ProjectId.parse(c.req.param('projectId')),
+          EvalSuiteKey.parse(c.req.param('suiteKey')),
+        ),
+      ),
+    )
+    .post(
+      '/projects/:projectId/evals/:suiteKey/live/runs',
+      validator('json', (value): RunEvalLiveBody => RunEvalLiveBody.parse(value)),
+      async (c) => {
+        try {
+          const run = await deps.services.startEvalLive(
+            ProjectId.parse(c.req.param('projectId')),
+            EvalSuiteKey.parse(c.req.param('suiteKey')),
+            c.req.valid('json').previewHash,
+          );
+          return c.json(run, 201);
+        } catch (error) {
+          if (error instanceof EvalLiveRefused)
+            return c.json({ refusal: error.refusal, message: error.message }, 409);
+          throw error;
+        }
+      },
     )
     .get(
       '/projects/:projectId/evals/:suiteKey',

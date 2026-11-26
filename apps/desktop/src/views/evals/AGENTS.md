@@ -26,8 +26,7 @@
 - A row opens `SuiteDrawer` (`suite-drawer.tsx`, `GET /projects/:id/evals/:suiteKey?run=`): the bar; the gates
   of one run, failing first, with a model switch when the run has several (the failing model first); every run
   (newest first, eight shown), where a click shows that run whole; flaky cases across the last runs; and what
-  the manifest says it covers, its definition and its free and live commands. The live command is shown, never
-  run. A run picked in one suite is dropped when another opens.
+  the manifest says it covers, its definition and its free and live commands. The live command is shown, and its Run is the one place 10db runs it (below). A run picked in one suite is dropped when another opens.
 - A `project` event refetches every evals query (`INVALIDATIONS`), since recording a manifest is the project's.
 - A model's line says the trials that got no answer apart from its gates ("1 provider error · 2 timeouts",
   `unansweredText`): availability is not quality, though those trials stay in every gate's denominator. When a
@@ -49,3 +48,16 @@
   Documents tab (objective, decision, oracle, models and baseline prefill it). The modal files a task through
   `POST /projects/:id/evals/tasks` and then links to it on the Board; the lane drafts the eval and never runs
   the live arm.
+- Run (`live-run-modal.tsx`, `LiveRunControls`): beside a suite's live command in the drawer ("Run") and in a covered
+  task's Evals block ("Run now"). The window (`GET .../evals/:suiteKey/live`) shows the command as stored, whether it
+  runs in the builder's containers (and which env files compose may read) or which hosts it may reach, how Stop
+  ends it, its time limit and the last run's cost ("unknown" when none). A refusal shows its reason and no Run
+  (`docker_off` links to Settings › Allow Docker; `busy` with no running run means a stop command left by an
+  interrupted run is still going). Run posts the hash the window showed; a `manifest_changed` 409 reloads the
+  preview and says the window now shows what changed. A running run shows elapsed time and Stop; Stop answers at
+  once and the run reads "Stopping" until its row settles. The end shows the state in words (text, never a pill),
+  the exit code and the output's tail; an interrupted run whose stop command didn't run says the work in the
+  containers may still be running. The window can close while a run goes: the drawer lists the last five runs, and
+  a running one keeps its Stop. A suite whose manifest entry has no `live` says 10db doesn't know how the
+  command runs yet and offers Assess Now (or the prompt to paste where 10db can't assess), no Run. `eval.live_run_changed` refetches the evals queries and the covered
+  tasks' markers.

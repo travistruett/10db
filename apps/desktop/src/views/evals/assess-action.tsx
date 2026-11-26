@@ -5,7 +5,7 @@ import { IconCopy, IconSparkles } from '@tabler/icons-react';
 import { useAssessEvals } from '../../daemon/evals-queries';
 
 /** What to paste in a Claude Code or Codex session to have it assess the project's evals itself. */
-function assessAsk(project: ProjectViewDto): string {
+function assessAsk(project: Pick<ProjectViewDto, 'id' | 'name'>): string {
   return `Use the 10db-task skill to assess the evals of the 10db project ${project.name} (${project.id}).`;
 }
 
@@ -41,7 +41,7 @@ export function AssessAction({
   variant = 'default',
 }: {
   readonly assessment: EvalAssessment;
-  readonly project: ProjectViewDto;
+  readonly project: Pick<ProjectViewDto, 'id' | 'name'>;
   readonly variant?: 'default' | 'light';
 }) {
   const clipboard = useClipboard({ timeout: 1500 });
