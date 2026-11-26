@@ -55,7 +55,8 @@
   (the fingerprints differ). `GET /projects/:id/eval-markers` (card markers) and `GET /tasks/:id/eval-coverage`
   (the drawer) read the newest row per task and the results as they are now, so a result that lands later changes
   the marker with no event. The run's one Inbox card, the acceptance card when one is raised, gains a line per
-  touched suite with the live command; no card is made for a suite alone. Not built: a lane's manifest write held
-  as a proposal. The HTTP API carries one token for the builder's UI and every agent's CLI, so a lane's `PUT
-/projects/:id/evals/manifest` can't be told from the builder's; the snapshot is what keeps a lane from dropping
-  its own marker.
+  touched suite with the live command; no card is made for a suite alone. The manifest is written only by the builder and their own sessions: the daemon's data dir, which holds the
+  UI token the CLI needs, is a protected read for lanes (`sandbox/protected-reads.ts`), so a lane can't reach the
+  route; the snapshot additionally keeps the globs fixed for the run. A snapshot's `baseAt` is the time it is taken
+  (the run's start), not the base commit's time, so a result written after earlier work landed counts as before. The
+  same lines close the no-gate check card, the pass check card and the skipped/config card.

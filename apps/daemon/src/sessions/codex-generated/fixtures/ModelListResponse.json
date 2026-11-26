@@ -19,9 +19,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",
@@ -56,9 +54,7 @@
         ],
         "availabilityNux": null,
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",
@@ -95,9 +91,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "daybreakBlue"
-          ]
+          "cyber": ["daybreakBlue"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",
@@ -134,9 +128,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "daybreakRed"
-          ]
+          "cyber": ["daybreakRed"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",
@@ -208,9 +200,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": null,
         "modelSpecialty": "x",
@@ -247,9 +237,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": null,
@@ -286,9 +274,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",
@@ -325,9 +311,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",
@@ -364,9 +348,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",
@@ -403,9 +385,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",
@@ -442,9 +422,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",
@@ -481,9 +459,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",
@@ -520,9 +496,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",
@@ -559,9 +533,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",
@@ -598,9 +570,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",
@@ -631,9 +601,7 @@
           "message": "x"
         },
         "availableAccessPrograms": {
-          "cyber": [
-            "standard"
-          ]
+          "cyber": ["standard"]
         },
         "defaultServiceTier": "x",
         "modelSpecialty": "x",

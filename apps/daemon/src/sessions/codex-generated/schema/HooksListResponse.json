@@ -14,10 +14,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "message",
-        "path"
-      ],
+      "required": ["message", "path"],
       "type": "object"
     },
     "HookEventName": {
@@ -51,24 +48,17 @@
               "type": "string"
             },
             "handlerType": {
-              "enum": [
-                "command"
-              ],
+              "enum": ["command"],
               "type": "string"
             }
           },
-          "required": [
-            "command",
-            "handlerType"
-          ],
+          "required": ["command", "handlerType"],
           "type": "object"
         },
         {
           "properties": {
             "handlerType": {
-              "enum": [
-                "mcpTool"
-              ],
+              "enum": ["mcpTool"],
               "type": "string"
             },
             "server": {
@@ -78,40 +68,28 @@
               "type": "string"
             }
           },
-          "required": [
-            "handlerType",
-            "server",
-            "tool"
-          ],
+          "required": ["handlerType", "server", "tool"],
           "type": "object"
         },
         {
           "properties": {
             "handlerType": {
-              "enum": [
-                "prompt"
-              ],
+              "enum": ["prompt"],
               "type": "string"
             }
           },
-          "required": [
-            "handlerType"
-          ],
+          "required": ["handlerType"],
           "title": "PromptHookMetadata",
           "type": "object"
         },
         {
           "properties": {
             "handlerType": {
-              "enum": [
-                "agent"
-              ],
+              "enum": ["agent"],
               "type": "string"
             }
           },
-          "required": [
-            "handlerType"
-          ],
+          "required": ["handlerType"],
           "title": "AgentHookMetadata",
           "type": "object"
         }
@@ -121,10 +99,7 @@
           "description": "Configured `additionalContext` spill threshold. `null` uses 2,500 tokens; `0` disables spilling.",
           "format": "uint",
           "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "currentHash": {
           "type": "string"
@@ -138,10 +113,7 @@
         },
         "environmentId": {
           "description": "The owning execution environment, if this hook came from its requirements.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "eventName": {
           "$ref": "#/definitions/HookEventName"
@@ -153,16 +125,10 @@
           "type": "string"
         },
         "matcher": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "pluginId": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "source": {
           "$ref": "#/definitions/HookSource"
@@ -171,10 +137,7 @@
           "$ref": "#/definitions/AbsolutePathBuf"
         },
         "statusMessage": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "timeoutSec": {
           "format": "uint64",
@@ -216,12 +179,7 @@
       "type": "string"
     },
     "HookTrustStatus": {
-      "enum": [
-        "managed",
-        "untrusted",
-        "trusted",
-        "modified"
-      ],
+      "enum": ["managed", "untrusted", "trusted", "modified"],
       "type": "string"
     },
     "HooksListEntry": {
@@ -248,12 +206,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "cwd",
-        "errors",
-        "hooks",
-        "warnings"
-      ],
+      "required": ["cwd", "errors", "hooks", "warnings"],
       "type": "object"
     }
   },
@@ -265,9 +218,7 @@
       "type": "array"
     }
   },
-  "required": [
-    "data"
-  ],
+  "required": ["data"],
   "title": "HooksListResponse",
   "type": "object"
 }

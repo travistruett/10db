@@ -11,7 +11,7 @@ import {
   type TaskScreenId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
@@ -127,4 +127,28 @@ export function newestEvidenceOfKind(
     .orderBy(desc(schema.evidence.id))
     .get();
   return row === undefined ? null : parseRow(row);
+}
+
+/** The newest evidence row of one kind for each of the workstreams, in one read; a workstream with none is absent. */
+export function newestEvidenceOfKindIn(
+  db: DbReader,
+  workstreamIds: readonly WorkstreamId[],
+  kind: EvidenceKind,
+): Map<WorkstreamId, EvidenceDto> {
+  const out = new Map<WorkstreamId, EvidenceDto>();
+  if (workstreamIds.length === 0) return out;
+  const rows = db
+    .select()
+    .from(schema.evidence)
+    .where(
+      and(
+        inArray(schema.evidence.workstreamId, [...workstreamIds]),
+        eq(schema.evidence.kind, kind),
+      ),
+    )
+    .orderBy(asc(schema.evidence.id))
+    .all();
+  // Oldest first, so the last of each workstream wins.
+  for (const row of rows) out.set(row.workstreamId, parseRow(row));
+  return out;
 }

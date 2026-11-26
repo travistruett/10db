@@ -56,3 +56,25 @@ Codex plan. The live command runs on the project's own key, by the builder; 10db
   (permissions).
 - Extend the evals e2e flow (`apps/desktop/e2e/project-trust.spec.ts`): a task whose change touches a covered path
   shows "not run" on its card and drawer.
+
+## As built
+
+What moved from the plan, and why:
+
+- **Snapshot and match:** an `eval_coverage` evidence row (no migration) is written as a run's first session starts, holding
+  each suite's covered globs and the time the snapshot was taken; the row after the gate adds the matched files, the
+  last commit's time and what each suite last showed. The snapshot's time, not the base commit's, is the branch point,
+  so a result the builder wrote after earlier work landed counts as before.
+- **Marker states:** a fifth, `failing`, for a failed result no earlier passing model preceded. Fingerprints are
+  compared only when both results record one.
+- **Routes:** the markers are not on the task DTO (`listTasks` is synchronous and database-only; the markers read result
+  files). They come from `GET /projects/:id/eval-markers` (one query for the project's rows) and
+  `GET /tasks/:id/eval-coverage`.
+- **Inbox:** the run's existing cards carry the lines (the acceptance card, the no-gate check card, the pass check card
+  and the skipped/config card); no card is made for a suite alone.
+- **Proposal hold (part 6) is not built; it moves to slice 5.** A lane can't reach the manifest route at all: the data
+  dir holding the UI token is a protected read for lanes, so only the builder and their own sessions write it.
+- **After** is the first result newer than the task's last commit; a landing time isn't on the workstream or batch, so
+  a result written while the task waits on review or CI still counts as after.
+- **e2e:** the flow is extended in `loop.spec.ts` (the first test), whose real task changes covered files; the e2e
+  repo gained a tracked `src/greeting/README.md` because `**` never matches a dot file.

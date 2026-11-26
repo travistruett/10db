@@ -75,7 +75,12 @@ export function coverageOf(input: {
   const before = base === null ? null : (ordered.filter((r) => timeOf(r.at) < base).at(-1) ?? null);
   const after = head === null ? null : (ordered.find((r) => timeOf(r.at) > head) ?? null);
   if (after === null) return { state: EvalCoverageState.NotRun, before, after };
-  if (before !== null && before.fingerprint !== after.fingerprint)
+  // Only two recorded fingerprints can differ: a report that records none says nothing of the dataset.
+  if (
+    before?.fingerprint != null &&
+    after.fingerprint !== null &&
+    before.fingerprint !== after.fingerprint
+  )
     return { state: EvalCoverageState.EvalChanged, before, after };
   if (after.passed) return { state: EvalCoverageState.Passing, before, after };
   const passedBefore = new Set(before?.models.filter((m) => m.passed).map((m) => m.model));
@@ -105,4 +110,9 @@ export function coverageLines(detail: EvalCoverageDetail): string[] {
     const command = suite?.liveCommand ?? null;
     return `Changes ${files}${more}; ${suite?.label ?? m.key} hasn't run on this; last before: ${m.lastBefore ?? 'no result'}.${command === null ? '' : ` Run: ${command}`}`;
   });
+}
+
+/** The lines as a card body's closing section; nothing when there are none. */
+export function coverageSection(lines: readonly string[]): string[] {
+  return lines.length === 0 ? [] : ['', 'Evals:', ...lines.map((l) => `- ${l}`)];
 }

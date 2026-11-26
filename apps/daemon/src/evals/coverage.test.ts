@@ -61,6 +61,10 @@ describe('a covered suite against a task', () => {
     expect(stateOf([run('2026-11-13T00:00:00Z', { a: false })]).state).toBe(
       EvalCoverageState.Failing,
     );
+    // A report that records no fingerprint says nothing of the dataset, so it never reads as the eval changing.
+    expect(stateOf([before, run('2026-11-13T00:00:00Z', { a: true, b: false }, null)]).state).toBe(
+      EvalCoverageState.Regressed,
+    );
     // A different dataset is the eval changing, never a regression.
     expect(stateOf([before, run('2026-11-13T00:00:00Z', { a: false, b: false }, 'f2')]).state).toBe(
       EvalCoverageState.EvalChanged,

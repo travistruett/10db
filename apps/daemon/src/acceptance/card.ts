@@ -1,3 +1,4 @@
+import { coverageSection } from '../evals';
 import {
   AcceptanceChoice,
   AcceptanceDetail,
@@ -37,7 +38,7 @@ function bodyOf(
     ...(detail.unasked === null
       ? []
       : ['', `It may also do something the task didn't ask for: ${detail.unasked}`]),
-    ...(evalLines.length === 0 ? [] : ['', 'Evals:', ...evalLines.map((l) => `- ${l}`)]),
+    ...coverageSection(evalLines),
     '',
     'Accept the work as it is, or send it back with a note.',
   ].join('\n');

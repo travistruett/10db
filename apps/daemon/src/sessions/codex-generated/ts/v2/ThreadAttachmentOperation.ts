@@ -5,4 +5,4 @@
 /**
  * The persisted attachment change represented by a notification.
  */
-export type ThreadAttachmentOperation = "created" | "deleted";
+export type ThreadAttachmentOperation = 'created' | 'deleted';

@@ -5,4 +5,8 @@
 /**
  * Parameters for listing attachments from one thread.
  */
-export type ThreadAttachmentListParams = { threadId: string, cursor?: string | null, limit?: number | null, };
+export type ThreadAttachmentListParams = {
+  threadId: string;
+  cursor?: string | null;
+  limit?: number | null;
+};

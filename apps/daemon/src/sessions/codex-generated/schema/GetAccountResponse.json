@@ -6,59 +6,41 @@
         {
           "properties": {
             "type": {
-              "enum": [
-                "apiKey"
-              ],
+              "enum": ["apiKey"],
               "title": "ApiKeyAccountType",
               "type": "string"
             }
           },
-          "required": [
-            "type"
-          ],
+          "required": ["type"],
           "title": "ApiKeyAccount",
           "type": "object"
         },
         {
           "properties": {
             "email": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             },
             "planType": {
               "$ref": "#/definitions/PlanType"
             },
             "type": {
-              "enum": [
-                "chatgpt"
-              ],
+              "enum": ["chatgpt"],
               "title": "ChatgptAccountType",
               "type": "string"
             },
             "workspaceName": {
               "description": "Display name of the selected ChatGPT workspace, when available.",
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": ["string", "null"]
             }
           },
-          "required": [
-            "email",
-            "planType",
-            "type"
-          ],
+          "required": ["email", "planType", "type"],
           "title": "ChatgptAccount",
           "type": "object"
         },
         {
           "properties": {
             "type": {
-              "enum": [
-                "amazonBedrock"
-              ],
+              "enum": ["amazonBedrock"],
               "title": "AmazonBedrockAccountType",
               "type": "string"
             },
@@ -67,9 +49,7 @@
               "type": "boolean"
             }
           },
-          "required": [
-            "type"
-          ],
+          "required": ["type"],
           "title": "AmazonBedrockAccount",
           "type": "object"
         },
@@ -77,16 +57,12 @@
           "description": "Google Cloud Vertex AI with externally managed credentials.",
           "properties": {
             "type": {
-              "enum": [
-                "gcp"
-              ],
+              "enum": ["gcp"],
               "title": "GcpAccountType",
               "type": "string"
             }
           },
-          "required": [
-            "type"
-          ],
+          "required": ["type"],
           "title": "GcpAccount",
           "type": "object"
         }
@@ -94,11 +70,7 @@
     },
     "AccountRoutingOverride": {
       "description": "Backend routing policy. Wire values match the accounts/check contract.",
-      "enum": [
-        "NO_CONSTRAINT",
-        "us",
-        "us_cr"
-      ],
+      "enum": ["NO_CONSTRAINT", "us", "us_cr"],
       "type": "string"
     },
     "PlanType": {
@@ -138,11 +110,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "accountRoutingOverride",
-        "backendOrigin",
-        "chatgptAccountId"
-      ],
+      "required": ["accountRoutingOverride", "backendOrigin", "chatgptAccountId"],
       "type": "object"
     }
   },
@@ -161,9 +129,7 @@
       "type": "boolean"
     }
   },
-  "required": [
-    "requiresOpenaiAuth"
-  ],
+  "required": ["requiresOpenaiAuth"],
   "title": "GetAccountResponse",
   "type": "object"
 }

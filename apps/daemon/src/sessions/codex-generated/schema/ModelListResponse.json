@@ -3,11 +3,7 @@
   "definitions": {
     "CyberAccessProgram": {
       "description": "Requested cyber treatment for an OpenAI model turn. Authorization and model-tier restrictions remain server-owned.",
-      "enum": [
-        "standard",
-        "daybreakBlue",
-        "daybreakRed"
-      ],
+      "enum": ["standard", "daybreakBlue", "daybreakRed"],
       "type": "string"
     },
     "InputModality": {
@@ -15,23 +11,17 @@
       "oneOf": [
         {
           "description": "Plain text turns and tool payloads.",
-          "enum": [
-            "text"
-          ],
+          "enum": ["text"],
           "type": "string"
         },
         {
           "description": "Image attachments included in user turns.",
-          "enum": [
-            "image"
-          ],
+          "enum": ["image"],
           "type": "string"
         },
         {
           "description": "Audio attachments included in user turns.",
-          "enum": [
-            "audio"
-          ],
+          "enum": ["audio"],
           "type": "string"
         }
       ]
@@ -74,10 +64,7 @@
         "defaultServiceTier": {
           "default": null,
           "description": "Catalog default service tier id for this model, when one is configured.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "description": {
           "type": "string"
@@ -92,10 +79,7 @@
           "type": "string"
         },
         "inputModalities": {
-          "default": [
-            "text",
-            "image"
-          ],
+          "default": ["text", "image"],
           "items": {
             "$ref": "#/definitions/InputModality"
           },
@@ -109,10 +93,7 @@
         },
         "modelSpecialty": {
           "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "multiAgentVersion": {
           "anyOf": [
@@ -144,10 +125,7 @@
           "type": "boolean"
         },
         "upgrade": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "upgradeInfo": {
           "anyOf": [
@@ -183,9 +161,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "cyber"
-      ],
+      "required": ["cyber"],
       "type": "object"
     },
     "ModelAvailabilityNux": {
@@ -194,9 +170,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "message"
-      ],
+      "required": ["message"],
       "type": "object"
     },
     "ModelServiceTier": {
@@ -211,57 +185,35 @@
           "type": "string"
         }
       },
-      "required": [
-        "description",
-        "id",
-        "name"
-      ],
+      "required": ["description", "id", "name"],
       "type": "object"
     },
     "ModelUpgradeInfo": {
       "properties": {
         "migrationMarkdown": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "model": {
           "type": "string"
         },
         "modelLink": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         },
         "retirementAt": {
           "description": "Informational Unix timestamp for this upgrade's scheduled retirement, if known.",
           "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+          "type": ["integer", "null"]
         },
         "upgradeCopy": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": ["string", "null"]
         }
       },
-      "required": [
-        "model"
-      ],
+      "required": ["model"],
       "type": "object"
     },
     "MultiAgentVersion": {
       "description": "Multi-agent runtime supported by a model.",
-      "enum": [
-        "disabled",
-        "v1",
-        "v2"
-      ],
+      "enum": ["disabled", "v1", "v2"],
       "type": "string"
     },
     "ReasoningEffort": {
@@ -278,10 +230,7 @@
           "$ref": "#/definitions/ReasoningEffort"
         }
       },
-      "required": [
-        "description",
-        "reasoningEffort"
-      ],
+      "required": ["description", "reasoningEffort"],
       "type": "object"
     }
   },
@@ -294,15 +243,10 @@
     },
     "nextCursor": {
       "description": "Opaque cursor to pass to the next call to continue after the last item. If None, there are no more items to return.",
-      "type": [
-        "string",
-        "null"
-      ]
+      "type": ["string", "null"]
     }
   },
-  "required": [
-    "data"
-  ],
+  "required": ["data"],
   "title": "ModelListResponse",
   "type": "object"
 }

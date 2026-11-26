@@ -8,6 +8,7 @@ import {
   type NextAction,
   type WorkstreamId,
 } from '@10db/contracts';
+import { coverageLinesOf } from '../evals';
 import {
   clearLease,
   endSession,
@@ -163,6 +164,7 @@ export async function recoverOnStartup(opts: {
             projectId: project.id,
             taskTitle: getTask(ctx.tx, row.taskId).title,
             ...(facts ?? unreadCheckFacts(row)),
+            evalLines: coverageLinesOf(ctx.tx, ws.id),
           });
         patchWorkstream(ctx, ws.id, null, {
           nextAction: { kind: 'builder_review', inboxId: kept.id },

@@ -4,7 +4,8 @@ import {
   type EvalCoverageSuiteDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { newestEvidenceOfKind, type DbReader } from '@10db/db';
+import { newestEvidenceOfKind, newestEvidenceOfKindIn, type DbReader } from '@10db/db';
+import { coverageLines } from './coverage';
 import type { CoverageQuery, EvalsService } from './service';
 
 /**
@@ -26,9 +27,14 @@ export async function suitesOfTasks(
     liveCommand: string | null;
   }[] = [];
   const queries: CoverageQuery[] = [];
+  const rows = newestEvidenceOfKindIn(
+    db,
+    tasks.flatMap((t) => (t.workstreamId === null ? [] : [t.workstreamId])),
+    EvidenceKind.EvalCoverage,
+  );
   for (const task of tasks) {
     if (task.workstreamId === null) continue;
-    const row = newestEvidenceOfKind(db, task.workstreamId, EvidenceKind.EvalCoverage);
+    const row = rows.get(task.workstreamId);
     if (row?.kind !== EvidenceKind.EvalCoverage) continue;
     const { suites, matched, baseAt, headAt } = row.detail;
     for (const m of matched ?? []) {
@@ -60,4 +66,10 @@ export async function suitesOfTasks(
     out.set(f.taskId, [...(out.get(f.taskId) ?? []), dto]);
   });
   return out;
+}
+
+/** The lines a run's Inbox cards add for the eval suites its change touched; none when it touched none. */
+export function coverageLinesOf(db: DbReader, workstreamId: WorkstreamId): string[] {
+  const held = newestEvidenceOfKind(db, workstreamId, EvidenceKind.EvalCoverage);
+  return held?.kind === EvidenceKind.EvalCoverage ? coverageLines(held.detail) : [];
 }

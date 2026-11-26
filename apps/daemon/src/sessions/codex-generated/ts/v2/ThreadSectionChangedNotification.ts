@@ -5,8 +5,10 @@
 /**
  * Broadcast after a successful move into, within, or out of a section.
  */
-export type ThreadSectionChangedNotification = { threadId: string,
-/**
- * Destination section, or `null` when the thread was removed from its section.
- */
-sectionId: string | null, };
+export type ThreadSectionChangedNotification = {
+  threadId: string;
+  /**
+   * Destination section, or `null` when the thread was removed from its section.
+   */
+  sectionId: string | null;
+};

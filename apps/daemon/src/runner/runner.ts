@@ -384,7 +384,7 @@ import {
   raiseAcceptanceCard,
 } from '../acceptance';
 import {
-  coverageLines,
+  coverageLinesOf,
   matchedSuites,
   readEvalManifest,
   snapshotsOf,
@@ -1764,15 +1764,13 @@ export function createRunner(opts: RunnerOptions): Runner {
    * commit the run branched from: the globs a later edit of the manifest by the run cannot change. Null when
    * the run already holds one, or no suite names a covered path.
    */
-  async function evalSnapshotAt(
-    row: WorkstreamRow,
-    checkout: string,
-    baseHead: string,
-  ): Promise<EvalCoverageDetail | null> {
+  function evalSnapshotAt(row: WorkstreamRow): EvalCoverageDetail | null {
     if (newestEvidenceOfKind(db, row.id, EvidenceKind.EvalCoverage) !== null) return null;
     const suites = snapshotsOf(readEvalManifest(db, row.projectId)?.manifest.suites ?? []);
     if (suites.length === 0) return null;
-    const baseAt = await opts.git.commitTimeOf(checkout, baseHead).catch(() => null);
+    // The run's branch point is when it starts: a result the builder wrote since the base commit landed is
+    // already before the task, whatever the base commit's own time.
+    const baseAt = opts.clock.now().toISOString();
     return { suites, matched: null, baseAt, headAt: null, skipped: null };
   }
 
@@ -1829,7 +1827,12 @@ export function createRunner(opts: RunnerOptions): Runner {
         { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
         'the changes could not be read for the eval suites; the run goes on',
       );
-      detail = { ...snapshot, matched: [], skipped: 'the changes could not be read' };
+      // An earlier reading of the change stands: a failed read must not retire its marker.
+      detail = {
+        ...snapshot,
+        matched: snapshot.matched ?? [],
+        skipped: 'the changes could not be read',
+      };
     }
     return (detail.matched ?? []).length === 0 && !touchedBefore ? null : detail;
   }
@@ -1894,12 +1897,6 @@ export function createRunner(opts: RunnerOptions): Runner {
       );
       return detail;
     }
-  }
-
-  /** The lines the run's one Inbox card adds for the eval suites its change touched; none when it touched none. */
-  function evalCardLines(tx: DbReader, id: WorkstreamId): string[] {
-    const held = newestEvidenceOfKind(tx, id, EvidenceKind.EvalCoverage);
-    return held?.kind === EvidenceKind.EvalCoverage ? coverageLines(held.detail) : [];
   }
 
   function reviewFollows(steps: readonly WorkstreamStep[], at: number): boolean {
@@ -2850,7 +2847,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
     }
     const baseHead = row.baseHead ?? (await opts.git.head(checkout));
-    const evalSnapshot = await evalSnapshotAt(row, checkout, baseHead);
+    const evalSnapshot = evalSnapshotAt(row);
     // The task's cited plan anchors are checked against this base before the pack reads them; a
     // failure leaves them "not checked yet" in the brief and never stops the session.
     await checkTaskAnchors(
@@ -4937,6 +4934,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       projectId: row.projectId,
       taskTitle: getTask(ctx.tx, row.taskId).title,
       ...facts,
+      evalLines: coverageLinesOf(ctx.tx, id),
     });
     if (getWorkstreamRow(ctx.tx, id).state !== S.Verifying)
       transitionWorkstream(ctx, id, { to: S.Verifying, fence, reason: 'steps complete' });
@@ -5077,7 +5075,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         taskTitle: task.title,
         detail,
         reviewFollows: reviewFollows(plan, current.stepIndex),
-        evalLines: evalCardLines(ctx.tx, id),
+        evalLines: coverageLinesOf(ctx.tx, id),
       });
     if (!sentBack) return false;
     // The fix resumes the step's own session when the rigor fixes in it; otherwise it runs fresh, a rung up.

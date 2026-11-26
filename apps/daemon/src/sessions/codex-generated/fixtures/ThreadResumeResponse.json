@@ -2603,9 +2603,7 @@
       "sessionId": "x",
       "source": "cli",
       "status": {
-        "activeFlags": [
-          "waitingOnApproval"
-        ],
+        "activeFlags": ["waitingOnApproval"],
         "type": "active"
       },
       "turns": [
@@ -2707,9 +2705,7 @@
       "sessionId": "x",
       "source": "cli",
       "status": {
-        "activeFlags": [
-          "waitingOnUserInput"
-        ],
+        "activeFlags": ["waitingOnUserInput"],
         "type": "active"
       },
       "turns": [
@@ -5473,17 +5469,13 @@
                     "path": "x"
                   }
                 ],
-                "threadIds": [
-                  "x"
-                ]
+                "threadIds": ["x"]
               },
               "phase": "commentary",
               "questions": [
                 {
                   "title": "x",
-                  "options": [
-                    "x"
-                  ]
+                  "options": ["x"]
                 }
               ]
             }
@@ -5591,17 +5583,13 @@
                     "path": "x"
                   }
                 ],
-                "threadIds": [
-                  "x"
-                ]
+                "threadIds": ["x"]
               },
               "phase": "commentary",
               "questions": [
                 {
                   "title": "x",
-                  "options": [
-                    "x"
-                  ]
+                  "options": ["x"]
                 }
               ]
             }
@@ -5709,17 +5697,13 @@
                     "path": "x"
                   }
                 ],
-                "threadIds": [
-                  "x"
-                ]
+                "threadIds": ["x"]
               },
               "phase": "commentary",
               "questions": [
                 {
                   "title": "x",
-                  "options": [
-                    "x"
-                  ]
+                  "options": ["x"]
                 }
               ]
             }
@@ -5827,17 +5811,13 @@
                     "path": "x"
                   }
                 ],
-                "threadIds": [
-                  "x"
-                ]
+                "threadIds": ["x"]
               },
               "phase": "commentary",
               "questions": [
                 {
                   "title": "x",
-                  "options": [
-                    "x"
-                  ]
+                  "options": ["x"]
                 }
               ]
             }
@@ -5941,9 +5921,7 @@
               "questions": [
                 {
                   "title": "x",
-                  "options": [
-                    "x"
-                  ]
+                  "options": ["x"]
                 }
               ]
             }
@@ -6051,17 +6029,13 @@
                     "path": "x"
                   }
                 ],
-                "threadIds": [
-                  "x"
-                ]
+                "threadIds": ["x"]
               },
               "phase": "partial_answer",
               "questions": [
                 {
                   "title": "x",
-                  "options": [
-                    "x"
-                  ]
+                  "options": ["x"]
                 }
               ]
             }
@@ -6169,17 +6143,13 @@
                     "path": "x"
                   }
                 ],
-                "threadIds": [
-                  "x"
-                ]
+                "threadIds": ["x"]
               },
               "phase": "final_answer",
               "questions": [
                 {
                   "title": "x",
-                  "options": [
-                    "x"
-                  ]
+                  "options": ["x"]
                 }
               ]
             }
@@ -6287,17 +6257,13 @@
                     "path": "x"
                   }
                 ],
-                "threadIds": [
-                  "x"
-                ]
+                "threadIds": ["x"]
               },
               "phase": null,
               "questions": [
                 {
                   "title": "x",
-                  "options": [
-                    "x"
-                  ]
+                  "options": ["x"]
                 }
               ]
             }
@@ -6405,9 +6371,7 @@
                     "path": "x"
                   }
                 ],
-                "threadIds": [
-                  "x"
-                ]
+                "threadIds": ["x"]
               },
               "phase": "commentary",
               "questions": [
@@ -6521,9 +6485,7 @@
                     "path": "x"
                   }
                 ],
-                "threadIds": [
-                  "x"
-                ]
+                "threadIds": ["x"]
               },
               "phase": "commentary",
               "questions": null
@@ -11867,9 +11829,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -11988,9 +11948,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -12109,9 +12067,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -12230,9 +12186,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -12351,9 +12305,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -12472,9 +12424,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -12593,9 +12543,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -12714,9 +12662,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -12835,9 +12781,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -12950,9 +12894,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -13071,9 +13013,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -13190,9 +13130,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -13311,9 +13249,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -13432,9 +13368,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -13550,9 +13484,7 @@
               "pluginId": "x",
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -13671,9 +13603,7 @@
               "pluginId": null,
               "readOnlyHint": false,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -13792,9 +13722,7 @@
               "pluginId": "x",
               "readOnlyHint": null,
               "result": {
-                "content": [
-                  null
-                ]
+                "content": [null]
               }
             }
           ],
@@ -15168,9 +15096,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "spawnAgent",
@@ -15272,9 +15198,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "spawnAgent",
@@ -15376,9 +15300,7 @@
               "startedAtMs": null,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "spawnAgent",
@@ -15480,9 +15402,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "completed",
               "tool": "spawnAgent",
@@ -15584,9 +15504,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "failed",
               "tool": "spawnAgent",
@@ -15688,9 +15606,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "interrupted",
               "tool": "spawnAgent",
@@ -15792,9 +15708,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "sendInput",
@@ -15896,9 +15810,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "resumeAgent",
@@ -16000,9 +15912,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "wait",
@@ -16104,9 +16014,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "closeAgent",
@@ -16208,9 +16116,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "sendMessage",
@@ -16312,9 +16218,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "followupTask",
@@ -16416,9 +16320,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "interruptAgent",
@@ -16520,9 +16422,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "listAgents",
@@ -16624,9 +16524,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "spawnAgent",
@@ -16728,9 +16626,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "spawnAgent",
@@ -16832,9 +16728,7 @@
               "startedAtMs": 0,
               "agentsStates": {},
               "id": "x",
-              "receiverThreadIds": [
-                "x"
-              ],
+              "receiverThreadIds": ["x"],
               "senderThreadId": "x",
               "status": "inProgress",
               "tool": "spawnAgent",
@@ -17731,14 +17625,10 @@
               "type": "webSearch",
               "action": {
                 "type": "search",
-                "queries": [
-                  "x"
-                ],
+                "queries": ["x"],
                 "query": "x"
               },
-              "results": [
-                null
-              ]
+              "results": [null]
             }
           ],
           "status": "completed",
@@ -17836,14 +17726,10 @@
               "type": "webSearch",
               "action": {
                 "type": "search",
-                "queries": [
-                  "x"
-                ],
+                "queries": ["x"],
                 "query": "x"
               },
-              "results": [
-                null
-              ]
+              "results": [null]
             }
           ],
           "status": "completed",
@@ -17941,14 +17827,10 @@
               "type": "webSearch",
               "action": {
                 "type": "search",
-                "queries": [
-                  "x"
-                ],
+                "queries": ["x"],
                 "query": "x"
               },
-              "results": [
-                null
-              ]
+              "results": [null]
             }
           ],
           "status": "completed",
@@ -18049,9 +17931,7 @@
                 "queries": null,
                 "query": "x"
               },
-              "results": [
-                null
-              ]
+              "results": [null]
             }
           ],
           "status": "completed",
@@ -18149,14 +18029,10 @@
               "type": "webSearch",
               "action": {
                 "type": "search",
-                "queries": [
-                  "x"
-                ],
+                "queries": ["x"],
                 "query": null
               },
-              "results": [
-                null
-              ]
+              "results": [null]
             }
           ],
           "status": "completed",
@@ -18256,9 +18132,7 @@
                 "type": "openPage",
                 "url": "x"
               },
-              "results": [
-                null
-              ]
+              "results": [null]
             }
           ],
           "status": "completed",
@@ -18358,9 +18232,7 @@
                 "type": "openPage",
                 "url": null
               },
-              "results": [
-                null
-              ]
+              "results": [null]
             }
           ],
           "status": "completed",
@@ -18461,9 +18333,7 @@
                 "pattern": "x",
                 "url": "x"
               },
-              "results": [
-                null
-              ]
+              "results": [null]
             }
           ],
           "status": "completed",
@@ -18564,9 +18434,7 @@
                 "pattern": null,
                 "url": "x"
               },
-              "results": [
-                null
-              ]
+              "results": [null]
             }
           ],
           "status": "completed",
@@ -18667,9 +18535,7 @@
                 "pattern": "x",
                 "url": null
               },
-              "results": [
-                null
-              ]
+              "results": [null]
             }
           ],
           "status": "completed",
@@ -18768,9 +18634,7 @@
               "action": {
                 "type": "other"
               },
-              "results": [
-                null
-              ]
+              "results": [null]
             }
           ],
           "status": "completed",
@@ -18867,9 +18731,7 @@
               "query": "x",
               "type": "webSearch",
               "action": null,
-              "results": [
-                null
-              ]
+              "results": [null]
             }
           ],
           "status": "completed",
@@ -18967,9 +18829,7 @@
               "type": "webSearch",
               "action": {
                 "type": "search",
-                "queries": [
-                  "x"
-                ],
+                "queries": ["x"],
                 "query": "x"
               },
               "results": null

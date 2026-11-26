@@ -6,4 +6,4 @@
  * Requested cyber treatment for an OpenAI model turn.
  * Authorization and model-tier restrictions remain server-owned.
  */
-export type CyberAccessProgram = "standard" | "daybreakBlue" | "daybreakRed";
+export type CyberAccessProgram = 'standard' | 'daybreakBlue' | 'daybreakRed';
