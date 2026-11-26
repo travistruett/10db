@@ -516,9 +516,10 @@ test('a pick from the Preview becomes a chip, and Send makes one message with it
   const titleRow = page.locator('[data-title-row]');
   await expect(titleRow.getByRole('button', { name: 'Mark Up Page' })).toBeVisible();
   await titleRow.getByRole('button', { name: 'More ways to open' }).click();
-  await expect(page.getByRole('menuitem', { name: /^Open in Browser/ })).toContainText(
-    'your own session',
+  await expect(page.getByRole('menuitem', { name: /^Mark Up Page/ })).toContainText(
+    'A 10db window',
   );
+  await expect(page.getByRole('menuitem', { name: 'Open in Browser' })).toBeVisible();
   await page.keyboard.press('Escape');
 
   const live = await request.get(`${daemonUrl}/passes?live=true`, { headers: auth });
