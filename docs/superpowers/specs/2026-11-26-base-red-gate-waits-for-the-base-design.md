@@ -1,6 +1,6 @@
 # A task's gate that fails on its base's own failures waits for the base
 
-**Status:** revision 1, 2026-11-26; designed, not built. **Size: Core** (recovery, a migration, a new
+**Status:** revision 2, 2026-11-26; designed, not built. **Size: Core** (recovery, a migration, a new
 `NextAction` kind). This pull request is the spec and
 `decisions/2026-11-26-a-gate-failure-the-base-has-holds-the-task.md`; the code is three follow-up tasks (§12).
 
@@ -93,7 +93,9 @@ Sources, each written by the daemon, never by an agent:
   base: green at C.
 - **(iii) Two unrelated tasks agree.** When runs of two unrelated tasks (no dependency either way, different
   batches) gated against the same base B fail with overlapping keys, a derived red record at B holds the
-  overlap. This is direction (c) of the task.
+  overlap. This is direction (c) of the task. In a shared folder two runs rarely start at the same head, so
+  "the same B" also covers two bases where one is an ancestor of the other: the record is written at the newer
+  of the two, where both runs' history meets. Two bases on diverged lines give no record.
 
 Rejected, with reasons:
 
@@ -200,3 +202,14 @@ its card can name that task.
 - **F3** Gate failure keys parse pytest and mypy output.
 
 Gating the base tip (b) is not filed.
+
+## Appendix: round-1 review and what revision 2 did
+
+The plan-reviewer was dispatched twice on revision 1 and neither run returned a report, so revision 2 rests on
+the author's own check, and 10db's review step on this pull request is the independent review before code.
+
+- §1's code references were checked against `apps/daemon/src`: `readGateFailures`, `failingTests`,
+  `failureKey` and `touchedBy` in `delivery/gate-failures.ts`, and the `baseHead` move at `base-update.ts:477`.
+- Source (iii) asked for "the same B", which a shared folder almost never gives, since each run starts at the
+  head of its own moment. Revision 2 lets one base be an ancestor of the other and writes the record at the
+  newer one.
