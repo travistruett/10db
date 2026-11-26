@@ -72,6 +72,7 @@ const TAURI_ORIGINS = ['tauri://localhost', 'http://tauri.localhost'] as const;
 const EnabledSetting = z.boolean();
 const PortSetting = z.int().min(1024).max(65535);
 const HashSetting = z.string();
+const OwedSetting = z.array(PortSetting);
 
 /** Why the listener is down: `retry` may clear on its own, `blocked` needs the builder. */
 type PauseKind = 'retry' | 'blocked';
@@ -136,9 +137,9 @@ export function createSharingService(deps: {
     const parsed = PortSetting.safeParse(getAppSetting(deps.state.db, KEY_PORT));
     return parsed.success ? parsed.data : SHARE_PORT_DEFAULT;
   }
-  function readUnserveOwed(): number | null {
-    const parsed = PortSetting.safeParse(getAppSetting(deps.state.db, KEY_UNSERVE_OWED));
-    return parsed.success ? parsed.data : null;
+  function readUnserveOwed(): number[] {
+    const parsed = OwedSetting.safeParse(getAppSetting(deps.state.db, KEY_UNSERVE_OWED));
+    return parsed.success ? parsed.data : [];
   }
   function readCertificateFor(): string | null {
     const parsed = HashSetting.safeParse(getAppSetting(deps.state.db, KEY_CERTIFICATE_FOR));
@@ -339,18 +340,22 @@ export function createSharingService(deps: {
     }
   }
 
-  function writeUnserveOwed(port: number | null): void {
+  function writeUnserveOwed(ports: readonly number[]): void {
     deps.state.write((ctx) => {
-      if (port === null) deleteAppSetting(ctx, KEY_UNSERVE_OWED);
-      else setAppSetting(ctx, KEY_UNSERVE_OWED, port);
+      if (ports.length === 0) deleteAppSetting(ctx, KEY_UNSERVE_OWED);
+      else setAppSetting(ctx, KEY_UNSERVE_OWED, [...ports]);
     });
   }
 
   /** Retries a removal an earlier Stop could not finish, enabled or not. */
   async function settleOwed(): Promise<void> {
     const owed = readUnserveOwed();
-    if (owed === null) return;
-    if (await removeOwnMapping(owed)) writeUnserveOwed(null);
+    if (owed.length === 0) return;
+    const left: number[] = [];
+    for (const port of owed) {
+      if (!(await removeOwnMapping(port))) left.push(port);
+    }
+    if (left.length !== owed.length) writeUnserveOwed(left);
   }
 
   async function closeListener(): Promise<void> {
@@ -387,7 +392,7 @@ export function createSharingService(deps: {
           deps.log.warn({ error: String(error) }, 'sharing: monitor tick failed');
         })
         .finally(() => {
-          if (!closed && (readEnabled() || readUnserveOwed() !== null)) scheduleMonitor();
+          if (!closed && (readEnabled() || readUnserveOwed().length > 0)) scheduleMonitor();
         });
     }, MONITOR_MS);
   }
@@ -512,8 +517,8 @@ export function createSharingService(deps: {
     const settled = await unshare(port);
     deps.state.write((ctx) => {
       setAppSetting(ctx, KEY_ENABLED, false);
-      if (!settled) setAppSetting(ctx, KEY_UNSERVE_OWED, port);
     });
+    if (!settled) writeUnserveOwed([...new Set([...readUnserveOwed(), port])]);
     pausedReason = null;
     portHolder = null;
     if (!settled) scheduleMonitor();
@@ -521,6 +526,7 @@ export function createSharingService(deps: {
 
   async function share(port: number): Promise<void> {
     await refresh();
+    await settleOwed();
     const cli = deps.cli();
     if (cli === null) throw new SharingRefusedError('Tailscale is not installed');
     const failing = failingPrerequisite();
@@ -555,8 +561,8 @@ export function createSharingService(deps: {
       deps.state.write((ctx) => {
         setAppSetting(ctx, KEY_ENABLED, true);
         setAppSetting(ctx, KEY_PORT, port);
-        deleteAppSetting(ctx, KEY_UNSERVE_OWED);
       });
+      writeUnserveOwed(readUnserveOwed().filter((owed) => owed !== port));
     } catch (error) {
       await closeListener();
       throw error;
@@ -646,7 +652,7 @@ export function createSharingService(deps: {
     start() {
       return enqueue(async () => {
         await settleOwed();
-        if (readUnserveOwed() !== null) scheduleMonitor();
+        if (readUnserveOwed().length > 0) scheduleMonitor();
         if (!readEnabled()) return;
         await startSharing();
         scheduleMonitor();
@@ -660,10 +666,10 @@ export function createSharingService(deps: {
         closed = true;
         stopMonitor();
         // A daemon that never shared leaves the mapping alone: it may be another daemon's.
-        const owed = readUnserveOwed();
-        if (listener === null && !readEnabled() && owed === null) return;
-        const port = owed ?? readPort();
-        if (!(await unshare(port)) && owed === null) writeUnserveOwed(port);
+        await settleOwed();
+        if (listener === null && !readEnabled()) return;
+        const port = readPort();
+        if (!(await unshare(port))) writeUnserveOwed([...new Set([...readUnserveOwed(), port])]);
       }).catch((error: unknown) => {
         deps.log.warn({ error: String(error) }, 'sharing: stop failed');
       });

@@ -1,4 +1,4 @@
-import { createTestStore, setAppSetting } from '@10db/db';
+import { createTestStore, getAppSetting, setAppSetting } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { createSocketRegistry } from '../devices';
@@ -169,6 +169,15 @@ describe('the sharing service', () => {
 
     await make().start();
     expect(serveJson).toEqual({});
+  });
+
+  it('keeps the old port owed when a port change follows a failed unserve', async () => {
+    const service = make();
+    await service.requestCertificate();
+    await service.set({ enabled: true, port: PORT });
+    failUnserve = true;
+    await service.set({ enabled: true, port: PORT + 1 });
+    expect(getAppSetting(state.db, 'sharing.unserveOwed')).toEqual([PORT]);
   });
 
   it('restores a lost mapping when Share is pressed again', async () => {
