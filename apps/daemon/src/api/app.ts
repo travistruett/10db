@@ -98,6 +98,7 @@ import {
   EvalSuiteQuery,
   PersonInput,
   PickSize,
+  PreviewSignInDto,
   ProjectId,
   TrustGrantId,
   ProjectInput,
@@ -196,7 +197,13 @@ import type { SocketRegistry, Tickets } from '../devices';
 import { Listener, listenerOf } from '../listeners';
 import { ticketScopeOf } from './principal';
 import type { ApiEnv } from './request-context';
-import { hostGuard, originGuard, remoteMark, type RequestGuardDeps } from './request-guards';
+import {
+  hostGuard,
+  originGuard,
+  remoteMark,
+  requestAllowlists,
+  type RequestGuardDeps,
+} from './request-guards';
 import type { ListenerAllowlists } from '../listeners';
 import { streamEvents } from './stream';
 
@@ -477,7 +484,9 @@ export function createApp(deps: ApiDeps) {
         const env: unknown = c.env;
         const bound = typeof env === 'object' && env !== null && 'listener' in env;
         const listener = bound && env.listener === Listener.Share ? Listener.Share : Listener.Main;
-        return guards.allowlists(listener)?.origins.includes(origin) === true ? origin : null;
+        return requestAllowlists(guards, c.req.raw, listener)?.origins.includes(origin) === true
+          ? origin
+          : null;
       },
       allowHeaders: ['Authorization', 'Content-Type'],
     }),
@@ -2267,6 +2276,13 @@ export function createApp(deps: ApiDeps) {
     )
     .get('/projects/:projectId/pictures', (c) =>
       c.json(deps.services.picturesStatus(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post('/projects/:projectId/preview/sign-in', async (c) =>
+      c.json(
+        PreviewSignInDto.parse(
+          await deps.services.previewSignIn(ProjectId.parse(c.req.param('projectId'))),
+        ),
+      ),
     )
     .post('/projects/:projectId/preview/restart', async (c) => {
       await deps.services.restartPreview(ProjectId.parse(c.req.param('projectId')));

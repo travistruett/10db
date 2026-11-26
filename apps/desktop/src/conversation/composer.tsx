@@ -86,6 +86,8 @@ export interface ComposerProps {
   readonly actions?: ReactNode;
   /** The model chip and the context ring, beside Attach. */
   readonly modelControl?: ReactNode;
+  /** The screen's own items waiting to go, drawn above the input (a page's picks). */
+  readonly pending?: ReactNode;
 }
 
 /** Whether the input's suggestion list is open: the list it controls is in the page only then. */
@@ -162,6 +164,7 @@ export function Composer({
   uploads,
   notes,
   onFailure,
+  pending,
 }: ComposerProps) {
   // A send and a Stop are on their way on their own: each clears only its own mark. The refs answer a
   // second press before the screen has drawn the first.
@@ -339,6 +342,7 @@ export function Composer({
             </Text>
           </Center>
         ) : null}
+        {pending}
         <ComposerInput
           value={draft.text}
           onValue={(text) => {

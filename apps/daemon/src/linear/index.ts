@@ -4,7 +4,7 @@ export { reporterSettings } from './reporter-settings';
 export { createLinearReporter, type LinearReporter } from './reporter';
 export { reporterHooks, type ReporterLaunch, type ReporterPrepared } from './reporter-owner';
 export { reporterConversations } from './reporter-conversation';
-export { dismissReporterPosts } from './reporter-inbox';
+export { answerReporterCard } from './reporter-inbox';
 export { snapshotSection, type LinearSnapshot } from './snapshot';
 export { linearLinkOf } from './task-link';
 export { isLaneLinearRead, isLinearServer, laneLinearPrefixes } from './lane-reads';

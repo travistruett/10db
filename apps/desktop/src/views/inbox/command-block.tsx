@@ -1,3 +1,4 @@
+import { visibleBlock } from '@10db/contracts';
 import { Box, Stack, Text } from '@mantine/core';
 import { useElementSize, useMergedRef } from '@mantine/hooks';
 import { useLayoutEffect, useRef, useState } from 'react';
@@ -7,8 +8,9 @@ const COMMAND_BLOCK_LINES = 8;
 
 /**
  * A command an agent asks to run, on its own in a monospace block, so no line of it reads as 10db's text or
- * Claude's. It is untrusted, so it is only ever rendered as text. When it is taller than the block, a caption
- * says how many lines it has, so a long tail can't scroll by unnoticed.
+ * Claude's. It is untrusted, so it is only ever rendered as text, with its line breaks kept and every other
+ * hidden character (a tab, ESC, a bidi or zero-width character) shown as `\u{hex}`. When it is taller than the
+ * block, a caption says how many lines it has, so a long tail can't scroll by unnoticed.
  */
 export function CommandBlock({ command }: { readonly command: string }) {
   const { ref: sizeRef, width, height } = useElementSize<HTMLPreElement>();
@@ -41,7 +43,7 @@ export function CommandBlock({ command }: { readonly command: string }) {
           overflowY: 'auto',
         }}
       >
-        {command}
+        {visibleBlock(command)}
       </Box>
       {overflows ? (
         <Text size="xs" c="dimmed">

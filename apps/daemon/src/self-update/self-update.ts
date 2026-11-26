@@ -25,6 +25,12 @@ import type { Logger } from '../log';
 import type { StatusService } from '../status';
 import { GATE_TIMEOUT_CAP_MS } from '../verify';
 import { CardTier } from '../inbox';
+import {
+  DRAIN_HOLD_CAP_MS,
+  drainNotBefore,
+  SELF_UPDATE_INSTALLED_AT_KEY,
+  UPDATE_WAIT_STATUS_KEY,
+} from './update-window';
 
 /**
  * How long a drain may be held by shaping conversations alone before the builder is told. A turn
@@ -437,11 +443,57 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   /** The builder chose Install Now: the wait limit has run out, whatever the clock says. */
   let forced = false;
 
+  /** When a drain was last let go at its cap: the next one waits a window from then. */
+  let releasedAt: number | null = null;
+  /** Whether the status line says the update waits for its window or its wait limit. */
+  let waitHold = false;
+
+  function lastInstallAt(): number | null {
+    const stored = getAppSetting(state.db, SELF_UPDATE_INSTALLED_AT_KEY);
+    return typeof stored === 'number' ? stored : null;
+  }
+
+  /** The earliest moment the factory may be drained for the staged update. */
+  function drainAt(): number {
+    return drainNotBefore({
+      stagedAt: (waitingSince ?? deps.clock.now()).getTime(),
+      waitLimitMs: deps.waitLimitMs(),
+      lastInstallAt: lastInstallAt(),
+      releasedAt,
+    });
+  }
+
+  function releaseWaitHold(): void {
+    if (!waitHold) return;
+    waitHold = false;
+    deps.status.release(UPDATE_WAIT_STATUS_KEY);
+  }
+
+  /** Says on the status line that the update waits for a quiet moment, and until when. */
+  function holdWaitLine(until: Date): void {
+    waitHold = true;
+    const at = until.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    deps.status.hold(UPDATE_WAIT_STATUS_KEY, {
+      kind: StatusKind.UpdateHold,
+      label: 'Update waiting for a quiet moment',
+      line: `An update waits for a quiet moment until ${at}; then new lanes are held so it can install`,
+      details: `An update to ${short(available ?? '')} installs the moment nothing is running. Until ${at} nothing is held back: its merges come in one install, and lanes keep starting. After that, new lanes, sessions, gates and ships wait until what runs has finished, for at most ${String(DRAIN_HOLD_CAP_MS / 60_000)} minutes at a time.`,
+      busiest: [],
+      culprits: [],
+    });
+  }
+
   function startDrain(): void {
     if (drainingSince !== null) return;
+    releaseWaitHold();
     drainingSince = deps.clock.now();
     logger.info(
-      { available, waitedSince: waitingSince?.toISOString() ?? null, forced },
+      {
+        available,
+        waitedSince: waitingSince?.toISOString() ?? null,
+        waitedMs: waitingSince === null ? 0 : drainingSince.getTime() - waitingSince.getTime(),
+        forced,
+      },
       'an update is waiting: holding new lanes, sessions, gates and ships until it installs',
     );
     deps.drain.begin(drainingSince);
@@ -563,10 +615,43 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   function endDrain(): void {
     releaseShapeHold();
     releaseGateHold();
+    releaseWaitHold();
     if (drainingSince === null) return;
+    const heldMs = deps.clock.now().getTime() - drainingSince.getTime();
     drainingSince = null;
-    logger.info({}, 'the update no longer waits: lanes start again');
+    logger.info({ heldMs }, 'the update no longer waits: lanes start again');
     deps.drain.end();
+  }
+
+  /**
+   * Whether a running gate has kept the install waiting for the whole of the drain's cap: past it the
+   * hold is let go instead of waiting out the gate.
+   */
+  function gateHoldCapped(): boolean {
+    return (
+      drainingSince !== null &&
+      deps.gates().length > 0 &&
+      deps.clock.now().getTime() - drainingSince.getTime() >= DRAIN_HOLD_CAP_MS
+    );
+  }
+
+  /**
+   * Work goes on: the drain ends, and the update waits for a quiet moment or for a window after now.
+   * Install Now is spent, so the builder's ask does not start the drain again at once.
+   */
+  function releaseCappedDrain(): TickResult {
+    logger.warn(
+      {
+        gates: deps.gates().map((gate) => gate.label),
+        capMs: DRAIN_HOLD_CAP_MS,
+        waitedSince: waitingSince?.toISOString() ?? null,
+      },
+      'the update held new work for its cap and a gate still runs: releasing the hold, and trying again at a quiet moment or the next window',
+    );
+    releasedAt = deps.clock.now().getTime();
+    forced = false;
+    endDrain();
+    return TickResult.Busy;
   }
 
   /**
@@ -838,9 +923,11 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return TickResult.Off;
     }
     if (deps.midSession() > 0 && !drainedPastLimit()) return waitOrDrain();
+    if (deps.midSession() > 0 && gateHoldCapped()) return releaseCappedDrain();
     if (deps.midSession() > 0 && gateHoldsInstall()) return TickResult.Draining;
     releaseShapeHold();
     releaseGateHold();
+    releaseWaitHold();
     return install(runningCommit, { head: build.head, commit: build.commit }, build);
   }
 
@@ -856,8 +943,13 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   }
 
   function waitOrDrain(): TickResult {
-    const waited = waitingSince === null ? 0 : deps.clock.now().getTime() - waitingSince.getTime();
-    if (drainingSince === null && !forced && waited < deps.waitLimitMs()) return TickResult.Busy;
+    if (drainingSince === null && !forced) {
+      const at = drainAt();
+      if (deps.clock.now().getTime() < at) {
+        holdWaitLine(new Date(at));
+        return TickResult.Busy;
+      }
+    }
     startDrain();
     watchShapeHold();
     return TickResult.Draining;
@@ -891,10 +983,22 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
         deps.resume();
         return TickResult.Busy;
       }
+      if (running > 0 && gateHoldCapped()) {
+        deps.resume();
+        return releaseCappedDrain();
+      }
       if (running > 0 && gateHoldsInstall()) {
         deps.resume();
         return TickResult.Draining;
       }
+      const now = deps.clock.now().getTime();
+      logger.info(
+        {
+          waitedMs: waitingSince === null ? 0 : now - waitingSince.getTime(),
+          drainedMs: drainingSince === null ? 0 : now - drainingSince.getTime(),
+        },
+        'the update waited before it installed',
+      );
       if (running > 0) {
         logger.info(
           { running, drainingSince: drainingSince?.toISOString() ?? null },
@@ -1047,6 +1151,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       });
       if (marker.commit === deps.runningCommit) {
         logger.info({ commit: marker.commit }, 'updated the app');
+        // The merges of the next window come in one install, counted from this one.
+        state.write((ctx) => {
+          setAppSetting(ctx, SELF_UPDATE_INSTALLED_AT_KEY, deps.clock.now().getTime());
+        });
         // An install that took leaves every earlier failure behind, whichever build it was for.
         resolveStaleCards(state.db, inbox, null, (when) =>
           when.event === 'update_installed' ? `10db ${short(marker.commit)} is installed` : null,

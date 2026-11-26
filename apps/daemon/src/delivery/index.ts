@@ -52,6 +52,7 @@ export {
   type PassPullRequests,
 } from './pass-pr';
 export { createSlackPicturePost, type SlackPicturePost } from './slack-picture-post';
+export { picturePlan } from './pr-pictures';
 export { createKeptWorkGate, subscribeKeptWorkLanding, type KeptWorkGate } from './kept-work-start';
 export { answerPassMoveCard, resumePassSettles, subscribePassSettles } from './pass-settle';
 export { createFailedRestarts } from './restart';
@@ -106,4 +107,3 @@ export {
   sweepUnlistedRuns,
 } from './skipped-card';
 export { skipFollowUpStarter } from './skip-follow-up';
-export { picturePlan } from './pr-pictures';

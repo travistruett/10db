@@ -68,6 +68,8 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
 - Listen on `127.0.0.1` only. The share listener is a second `127.0.0.1` port behind `tailscale serve`, tailnet only;
   `api/auth-matrix.ts` says which credential each route takes on each listener
   (`decisions/2026-11-25-a-shared-mac-answers-on-its-tailnet-address.md`).
+- A bearer secret is never compared with `===`: the UI, dev-UI and render tokens go through `same-token/`
+  (SHA-256 digests and `timingSafeEqual`), and device tokens through `devices/tokens.ts`.
 - `api/app-static.ts` serves the phone's app (`apps/desktop/dist-app/`, built by `pnpm --filter @10db/desktop
 build:app`) for `GET /app/*` on the share listener: a file the build made, else `app.html` for an address with no
   extension, with the CSP (no inline script, `connect-src` the request's own Host over `wss`). The bundle carries it

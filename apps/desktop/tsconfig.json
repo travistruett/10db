@@ -10,6 +10,7 @@
   "include": [
     "src",
     "vite.config.ts",
+    "picker-source.ts",
     "vite.app.config.ts",
     "vitest.config.ts",
     "window-csp.ts",

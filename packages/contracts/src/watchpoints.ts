@@ -234,7 +234,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
   },
 ];
 
-/** The starters a new install begins with; the rest wait in the library, under "Add from library". */
+/** The starters a new install begins with; the rest wait in the library, in Add Watchpoint's menu. */
 const INITIAL_KEYS: readonly string[] = [
   'migrations',
   'contracts',

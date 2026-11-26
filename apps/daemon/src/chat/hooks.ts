@@ -614,14 +614,17 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         checkout: launch.cwd,
         firstChange: () => deps.firstChange?.(chat.id),
       };
-      // A Claude chat's sandbox lets one command ask to run outside it, each judged by the hook and then the
-      // builder; Full access has no sandbox, and Codex runs with approvals off.
+      // A chat's sandbox lets one command ask to run outside it, each judged by the hook and then the builder:
+      // Claude's flagged command, or Codex's sandbox escalation. Full access has no sandbox.
       const codexChat = launch.account.harness === Provider.Codex;
       // How many calls that could change something this session has let through: a command the builder allowed
       // to run again outside the sandbox lasts only until this moves, or a background task runs.
       let changes = 0;
+      // The call behind the latest count, if one was: a Codex escalation follows its own sandboxed attempt, which
+      // the hook counted, so that one count is not held against the command it escalates.
+      let lastChangeBy: string | null = null;
       let backgrounded = false;
-      const asksOutside = full === null && !fullCodex && launch.account.harness === Provider.Claude;
+      const asksOutside = full === null && !fullCodex;
       const shapeId = planOfConversation(state.db, conv.id);
       const plan = deps.plan;
       // Every chat has its plan's folder, derived from the chat until a plan exists. Made before the sandbox,
@@ -648,9 +651,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           ? {
               unsandboxedAsk: {
                 mayRun: () => outsideSandboxRefusal(folder),
-                changes: () => changes,
+                changes: (toolUseId) =>
+                  toolUseId !== null && toolUseId === lastChangeBy ? changes - 1 : changes,
                 bump: () => {
                   changes += 1;
+                  lastChangeBy = null;
                 },
                 background: () => runningNow(),
                 remembers: () => !backgrounded,
@@ -940,7 +945,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             );
             const settled = readsNow()?.preToolUse(req, verdict) ?? verdict;
             if (settled.decision !== 'deny') {
-              if (couldChange(chatCallOf(req))) changes += 1;
+              if (couldChange(chatCallOf(req))) {
+                changes += 1;
+                lastChangeBy = req.toolUseId ?? null;
+              }
               // From a background start on, the session can change things unseen: nothing is remembered.
               if (startsBackground(chatCallOf(req))) backgrounded = true;
             }

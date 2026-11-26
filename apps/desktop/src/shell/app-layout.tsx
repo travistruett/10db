@@ -6,6 +6,7 @@ import { useRenderMode } from '../screens/render-context';
 import { RenderLayout } from '../screens/render-layout';
 import { ScreenRenderHost } from '../screens/screen-render-host';
 import { FirstRun } from '../views/first-run/first-run';
+import { usePreviewPicks } from '../views/workbench/use-preview-picks';
 import { AppFrame } from './app-frame';
 import { useSelectedProject } from './selected-project';
 
@@ -17,6 +18,7 @@ export function AppLayout() {
 function FullLayout() {
   useDesktopSync();
   useNewSessionKey();
+  usePreviewPicks();
   const status = useDaemonStatus();
   const { projects, select } = useSelectedProject();
   const navigate = useNavigate();

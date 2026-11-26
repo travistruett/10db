@@ -93,11 +93,8 @@ function raiseWatchpointCard(
   const detail = {
     watchpoints: input.asks.map((h) => ({ key: h.watchpoint.key, label: h.watchpoint.label })),
   };
-  const body = [
-    `The change touched ${labelsOf(input.asks)}, which you asked to look at yourself.`,
-    '',
-    'Looks right closes this card. Send it back with a note to file a follow-up task.',
-  ].join('\n');
+  // The card's bar offers Looks Right and Send Back, so the summary says only what the change touched.
+  const body = `The change touched ${labelsOf(input.asks)}, which you asked to look at yourself.`;
   const live = openItemsForWorkstream(ctx.tx, input.workstreamId).find(
     (item) => item.kind === InboxKind.Watchpoint && item.state === InboxState.Open,
   );
