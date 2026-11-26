@@ -1,10 +1,12 @@
 import {
   LinearEventKind,
   LinearStatusType,
+  ToolCallStatus,
   type LinearTeamStatus as TeamStatus,
+  type ToolCallView,
 } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { pickStatusMove } from './reporter-status';
+import { appliedStatuses, pickStatusMove } from './reporter-status';
 
 const status = (name: string, type: LinearStatusType, position: number): TeamStatus => ({
   name,
@@ -54,6 +56,18 @@ describe('pickStatusMove', () => {
     expect(pick(LinearEventKind.Landed, 'In Progress')).toBe('In Review');
     expect(pick(LinearEventKind.Landed, 'In Review')).toBeNull();
     expect(pick(LinearEventKind.Landed, 'Duplicate')).toBeNull();
+    // Two started statuses whose names say neither progress nor review: either would be a guess.
+    const unnamed: TeamStatus[] = [
+      { name: 'Building', type: LinearStatusType.Started },
+      { name: 'Checking', type: LinearStatusType.Started },
+      { name: 'Backlog', type: LinearStatusType.Backlog },
+    ];
+    const backlog = unnamed[2];
+    if (backlog === undefined) throw new Error('team');
+    for (const event of [LinearEventKind.RunStarted, LinearEventKind.Landed])
+      expect(
+        pickStatusMove({ event, current: backlog, statuses: unnamed, lastSet: null }),
+      ).toBeNull();
   });
 
   it('leaves a started, completed or canceled issue alone when the run starts', () => {
@@ -118,6 +132,53 @@ describe('pickStatusMove', () => {
     expect(move(LinearEventKind.PrOpened, 'In Progress', 'In Progress')).toBe('In Review');
     expect(move(LinearEventKind.PrOpened, 'Backlog', 'In Progress')).toBeNull();
     expect(move(LinearEventKind.RunStarted, 'Todo', 'In Review')).toBeNull();
+  });
+
+  it("measures a run's later update from the status the run already picked, not from the status it read", () => {
+    const inRun = (event: LinearEventKind, runPick: string, lastSet: string | null = null) =>
+      pickStatusMove({ event, current: at('Backlog'), statuses: TEAM, lastSet, runPick })?.name ??
+      null;
+    // A start then a landing, both carrying the one read of Backlog: the landing goes on from In Progress.
+    expect(inRun(LinearEventKind.Landed, 'In Progress')).toBe('In Review');
+    // The landing reported first: the start never takes the issue back.
+    expect(inRun(LinearEventKind.RunStarted, 'In Review')).toBeNull();
+    expect(inRun(LinearEventKind.Landed, 'In Review')).toBeNull();
+    // The run's first pick already found the issue where 10db left it.
+    expect(inRun(LinearEventKind.Landed, 'In Progress', 'Backlog')).toBe('In Review');
+  });
+
+  it('counts a status as set only when its save_issue came back done', () => {
+    const saveIssue = (status: ToolCallStatus, state: string, server = 'linear'): ToolCallView => ({
+      id: `${server}-${state}-${status}`,
+      harnessTool: `${server}.save_issue`,
+      status,
+      title: 'save_issue',
+      startedAt: '2026-11-26T20:46:00.000Z',
+      durationMs: 10,
+      parentId: null,
+      refusal: null,
+      deniedBy: null,
+      limit: null,
+      soft: null,
+      kind: 'mcp',
+      server,
+      tool: 'save_issue',
+      argumentsPreview: JSON.stringify({ id: 'issue-uuid-1', state }),
+      resultTail: null,
+      error: status === ToolCallStatus.Failed ? 'Linear answered 500' : null,
+    });
+    const applied = appliedStatuses(
+      [
+        saveIssue(ToolCallStatus.Failed, 'In Progress'),
+        saveIssue(ToolCallStatus.Running, 'Todo'),
+        saveIssue(ToolCallStatus.Denied, 'Done'),
+        saveIssue(ToolCallStatus.Done, 'In Review'),
+        // Another server's tool of the same name is not Linear's.
+        saveIssue(ToolCallStatus.Done, 'Canceled', 'tracker'),
+      ],
+      ['mcp__linear__'],
+    );
+    expect([...applied]).toEqual(['In Review']);
   });
 
   it('moves nothing for events that report no progress to the status', () => {

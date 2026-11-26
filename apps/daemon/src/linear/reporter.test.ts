@@ -440,6 +440,60 @@ describe('the Linear reporter', () => {
     expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(1);
   });
 
+  it('ends a run that owes a start and a landing at the review status, from the one status read both carry', async () => {
+    const started = oweOne();
+    const landed = oweOne('landed:bat-1', LinearEventKind.Landed, {
+      detail: { baseBranch: 'build', commit: 'a'.repeat(40), localCopy: true },
+    });
+    const write = (state: string): FakeStep[] => [
+      {
+        do: 'tool',
+        toolName: `${PREFIX}save_comment`,
+        input: { issueId: ISSUE, body: '$comment.body' },
+        result: JSON.stringify({ id: 'comment-1' }),
+      },
+      {
+        do: 'tool',
+        toolName: `${PREFIX}save_issue`,
+        input: { id: ISSUE, state },
+        result: '{}',
+      },
+    ];
+    book[KEY] = [
+      [
+        // The agent read the issue once, before either write: both updates say Backlog.
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: started, body: BODY, status: STATUS },
+        },
+        ...write('In Progress'),
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: landed, body: BODY, status: STATUS },
+        },
+        ...write('In Review'),
+        // The run's earlier pick is behind the issue now: setting it again would move the issue backwards.
+        { do: 'tool', toolName: `${PREFIX}save_issue`, input: { id: ISSUE, state: 'In Progress' } },
+        { do: 'say', text: `${started}: comment-1\n${landed}: comment-1` },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    const set = () => Object.fromEntries(rows().map((r) => [r.event, r.statusSet]));
+    await expect
+      .poll(set, { timeout: 10_000 })
+      .toEqual({ run_started: 'In Progress', landed: 'In Review' });
+    expect(rows().map((r) => r.state)).toEqual([
+      LinearPostState.Recorded,
+      LinearPostState.Recorded,
+    ]);
+    const denied = adapter.observations.filter((o) => o.kind === 'denied_by_guard');
+    expect(denied).toHaveLength(1);
+    expect(String(denied[0]?.detail['reason'])).toContain('not a status 10db picked');
+  });
+
   it('keeps a row whose session ended without recording pending, and runs it again at its backoff', async () => {
     const id = oweOne();
     book[KEY] = [

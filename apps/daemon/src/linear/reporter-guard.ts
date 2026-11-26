@@ -53,7 +53,7 @@ export interface ReporterRun {
   readonly comments: Map<LinearPostId, StagedComment>;
   /** The project's note steers status choices, so a status set is the agent's to choose, not 10db's pick. */
   readonly noteSteers: boolean;
-  /** The statuses 10db picked this run (`report_linear_post`): with no steering note, the only ones that may be set. */
+  /** The status 10db picked this run (`report_linear_post`), its newest pick alone: with no steering note, the only one that may be set. */
   readonly pickedStatuses: Set<string>;
 }
 
@@ -84,10 +84,9 @@ function* stringsIn(value: unknown): Generator<string> {
     for (const item of Object.values(value)) yield* stringsIn(item);
 }
 
-/** What a write that passed names: the post whose comment it carries, or the status it sets. */
+/** What a write that passed names: the post whose comment it carries, when it carries one. */
 interface WriteJudged {
   readonly wrote?: LinearPostId;
-  readonly statusSet?: string;
 }
 
 /**
@@ -120,7 +119,7 @@ function judgeWrite(
         return refuse(
           "state is not a status 10db picked for this run. Only the save_issue in report_linear_post's next can be set.",
         );
-      return { statusSet: state };
+      return {};
     }
     case 'save_comment': {
       if (run.direct)
@@ -175,8 +174,6 @@ export function judgeReporterCall(
   verdict: GuardVerdict;
   withheld?: { readonly postId: LinearPostId; readonly pattern: string };
   wrote?: LinearPostId;
-  /** The status an allowed `save_issue` sets. */
-  statusSet?: string;
 } {
   const { toolName } = call;
   if (toolName.startsWith('mcp__10db__')) {
@@ -233,7 +230,6 @@ export function judgeReporterCall(
   return {
     verdict: allow(),
     ...(judged.wrote === undefined ? {} : { wrote: judged.wrote }),
-    ...(judged.statusSet === undefined ? {} : { statusSet: judged.statusSet }),
   };
 }
 
