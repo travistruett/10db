@@ -317,6 +317,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
     done: Promise<void>;
   } | null = null;
   let watchingFetch = false;
+  /** The browser was refused since the missed afters were last asked. */
+  let missedWhileRefused = false;
   /** A task's first launch waiting on its before. */
   const beforeWaiters = new Map<TaskId, (() => void)[]>();
   const signIns = new Map<ProjectId, { problem: string | null; at: string }>();
@@ -331,6 +333,13 @@ export function startPictures(deps: PicturesDeps): Pictures {
 
   function apply(event: CaptureEvent): void {
     const s = captureStep(queue, event);
+    if (event.kind === 'shutdown' || (event.kind === 'browser' && event.state === 'refused'))
+      for (const r of [...queue.waiting, ...queue.deferred])
+        if (r.kind === ScreenKind.After)
+          log.warn(
+            { taskId: r.taskId, browser: event.kind === 'browser' ? event.state : 'stopping' },
+            'an after picture was dropped: the browser is not available or the daemon is stopping',
+          );
     queue = s.queue;
     if (s.abort) current?.abort.abort();
     releaseBeforeWaiters();
@@ -354,6 +363,12 @@ export function startPictures(deps: PicturesDeps): Pictures {
   function syncBrowser(): void {
     const status = deps.camera.status();
     if (status.state !== queue.browser) apply({ kind: 'browser', state: status.state });
+    if (status.state === BrowserState.Refused) missedWhileRefused = true;
+    // A refusal dropped the afters asked meanwhile: once a later fetch works, they are asked again.
+    if (status.state === BrowserState.Ready && missedWhileRefused) {
+      missedWhileRefused = false;
+      askMissedAfters();
+    }
     if (status.state === BrowserState.Fetching && !watchingFetch) {
       watchingFetch = true;
       void status.ready.then(() => {
@@ -469,6 +484,26 @@ export function startPictures(deps: PicturesDeps): Pictures {
   });
 
   const inLocalCopy = (task: TaskDto): boolean => taskInLocalCopy(db, task.id);
+
+  /** Asks the afters of the last hour that have none: tasks done outside a pass, and shipped local copies'. */
+  function askMissedAfters(): void {
+    const since = deps.clock.now().getTime() - MISSED_AFTER_MS;
+    for (const project of listProjects(db)) {
+      if (project.appUrl === null) continue;
+      for (const task of listTasks(db, project.id))
+        if (
+          task.status === TaskStatus.Done &&
+          task.passId == null &&
+          (!inLocalCopy(task) || project.copyAppCommand !== null) &&
+          Date.parse(task.updatedAt) >= since &&
+          !hasTaskScreen(db, task.id, ScreenKind.After)
+        )
+          askAfter(task, null);
+    }
+    for (const batch of listBatches(db, { states: [BatchState.Shipped] }))
+      if (Date.parse(batch.updatedAt) >= since && isLocalCopy(db, batch.id))
+        askCopyAfters(batch.id);
+  }
 
   /** Asks an after for each task a shipped local copy finished that has none. */
   function askCopyAfters(batchId: BatchId): void {
@@ -1035,21 +1070,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
   for (const pass of listLivePasses(db))
     if (pass.state === PassState.Open)
       for (const task of listPassTasks(db, pass.id)) askBefore(task, pass.id);
-  const since = deps.clock.now().getTime() - MISSED_AFTER_MS;
-  for (const project of projects) {
-    if (project.appUrl === null) continue;
-    for (const task of listTasks(db, project.id))
-      if (
-        task.status === TaskStatus.Done &&
-        task.passId == null &&
-        (!inLocalCopy(task) || project.copyAppCommand !== null) &&
-        Date.parse(task.updatedAt) >= since &&
-        !hasTaskScreen(db, task.id, ScreenKind.After)
-      )
-        askAfter(task, null);
-  }
-  for (const batch of listBatches(db, { states: [BatchState.Shipped] }))
-    if (Date.parse(batch.updatedAt) >= since && isLocalCopy(db, batch.id)) askCopyAfters(batch.id);
+  askMissedAfters();
   const unsubscribe = deps.bus.subscribe((event) => {
     handlers[event.type]?.(event);
   });

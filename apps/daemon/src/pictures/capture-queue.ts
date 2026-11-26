@@ -76,6 +76,7 @@ export interface CaptureStep {
 
 const isTurn = (r: CaptureRequest): boolean => r.kind === ScreenKind.Turn;
 const isAfter = (r: CaptureRequest): boolean => r.kind === ScreenKind.After;
+const isBefore = (r: CaptureRequest): boolean => r.kind === ScreenKind.Before;
 const ofPass = (passId: PassId) => (r: CaptureRequest) => r.passId === passId;
 
 function step(
@@ -191,7 +192,8 @@ export function captureStep(queue: CaptureQueue, event: CaptureEvent): CaptureSt
     case 'shutdown':
       return step({ ...queue, closed: true, waiting: [], deferred: [] }, loading !== null);
     case 'start': {
-      const next = queue.waiting[0];
+      // A before has a deadline (its task's launch waits for it only so long), so it goes first.
+      const next = queue.waiting.find(isBefore) ?? queue.waiting[0];
       if (
         queue.closed ||
         loading !== null ||
@@ -201,7 +203,12 @@ export function captureStep(queue: CaptureQueue, event: CaptureEvent): CaptureSt
       )
         return step(queue);
       return step(
-        { ...queue, loading: next, loadingAborted: false, waiting: queue.waiting.slice(1) },
+        {
+          ...queue,
+          loading: next,
+          loadingAborted: false,
+          waiting: queue.waiting.filter((r) => r !== next),
+        },
         false,
         next,
       );

@@ -20,8 +20,11 @@
   one capture queue (`capture-queue.ts`, a pure step over §3.2 of the plan: one load at a time; a newer turn
   picture replaces the waiting one; the page's next turn, a take-out, a pass entering CLOSING or ABANDONING and a
   changed app address abort a load, and nothing of an aborted load is written; a closing or abandoning pass's
-  afters wait until it leaves that state; while the browser is fetched or checked, which start-up always does,
-  befores and afters wait and a turn picture is not asked,
+  afters wait until it leaves that state; while the browser is fetched or checked, as start-up does when a live
+  project has an app address, befores and afters wait and a turn picture is not asked; the first waiting before
+  starts ahead of every other request, since its task's launch waits on it only so long; an after dropped by a
+  refused browser or a stop is logged, and once a fetch works after a refusal the last hour's missed afters are
+  asked again,
   `decisions/2026-11-26-an-after-picture-waits-for-the-browser-fetch.md`). It follows the bus:
   `pass.opened` and `pass.changed` (befores for open pages with none; the pass's state), `pass.turn_started` and a
   turn that ended not Ready (abort), `pass.page_ready` (a turn picture when `turnChangedSomething`: a new kept

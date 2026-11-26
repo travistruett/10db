@@ -6,13 +6,15 @@
 ## Decision
 
 While the pictures browser is being fetched or checked, befores and afters wait in the capture queue and start
-once it is ready; only a turn picture is not asked, and a waiting one is dropped when a fetch begins. A capture
-that keeps nothing without being stopped logs why, and an after the queue does not take (a refused browser, a
-daemon stopping) is logged.
+once it is ready; only a turn picture is not asked, and a waiting one is dropped when a fetch begins. The
+first waiting before starts ahead of every other request, since its task's launch waits on it only so long.
+Once a fetch works after a refusal, the missed afters of the last hour are asked again, as start-up asks them. A capture
+that keeps nothing without being stopped logs why, and an after the queue does not take or drops (a refused
+browser, a daemon stopping) is logged.
 
 ## Why
 
-The earlier record dropped turn and after pictures during a download. Every start-up checks the pinned build,
+The earlier record dropped turn and after pictures during a download. Start-up checks the pinned build whenever a live project has an app address,
 so the browser is `fetching` for its first seconds, exactly when start-up's catch-up asks the afters a restart
 missed. Every one of those asks was dropped, silently. A self-update installs as soon as a local copy's landing
 ends its drain, so the restart usually comes seconds after the copy ships and aborts the afters it asked; the
