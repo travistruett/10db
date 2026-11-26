@@ -1,4 +1,5 @@
 import type { DaemonEnv } from '../env';
+import { outboundFetch } from '../outbound';
 import { slackApiAt } from '../slack';
 import type { DaemonOptions } from './start';
 
@@ -62,7 +63,7 @@ export function daemonOptionsFromEnv(env: DaemonEnv): EnvDaemonOptions {
     slack: slackOnFromEnv(env),
     ...(env.TENDB_SLACK_API === undefined
       ? {}
-      : { fetch: slackApiAt(env.TENDB_SLACK_API, globalThis.fetch) }),
+      : { fetch: slackApiAt(env.TENDB_SLACK_API, outboundFetch) }),
     ...(env.TENDB_DISK === 'off' ? {} : { disk: {} }),
     catalogueSync: env.TENDB_CATALOGUE !== 'off',
     pictures: { kind: 'pinned' },

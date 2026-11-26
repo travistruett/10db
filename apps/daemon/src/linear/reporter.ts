@@ -40,6 +40,7 @@ import { BUSY, type ExploreEngine, type TurnEnd } from '../conversation';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
+import { outboundFetch } from '../outbound';
 import type { ShapeToolRequest, ShapeVerdict } from '../sessions';
 import { reporterBlockedBy } from './reporter-events';
 import { refreshReporterCard } from './reporter-inbox';
@@ -716,7 +717,7 @@ export function createLinearReporter(
       const { guard } = runOf(sessionId);
       if (!guard.pictures.some((p) => p.id === input.pictureId))
         throw new ConflictError('That picture was not offered to this run.');
-      await uploadPicture(state.db, input, deps.fetch ?? fetch);
+      await uploadPicture(state.db, input, deps.fetch ?? outboundFetch);
       return { ok: true };
     },
 
