@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import type { ApprovalsReviewer } from './codex-generated/ts/v2/ApprovalsReviewer';
+import type { AskForApproval } from './codex-generated/ts/v2/AskForApproval';
 
 /**
  * What 10db reads from `codex app-server`. Every schema names only the fields 10db uses and
@@ -105,6 +107,73 @@ export const ThreadResponse = z.looseObject({
     .looseObject({ id: z.string(), extends: z.string().nullable().optional() })
     .nullable()
     .optional(),
+  /** Who answers the thread's approval requests; read back so no model reviewer answers an escape. */
+  approvalsReviewer: z.string().optional(),
+  approvalPolicy: z.unknown().optional(),
+});
+
+/**
+ * The approval policy of a chat that may run a command outside its sandbox: Codex asks only about a
+ * sandbox escalation, and every other prompt (exec-policy rules, skills, permission requests, MCP
+ * elicitations) stays declined as under `never`.
+ */
+export const ESCALATIONS_TO_BUILDER = {
+  granular: {
+    sandbox_approval: true,
+    rules: false,
+    skill_approval: false,
+    request_permissions: false,
+    mcp_elicitations: false,
+  },
+} as const satisfies AskForApproval;
+
+/** The approval policy of every other session: Codex never asks. */
+export const NO_APPROVALS = 'never' as const satisfies AskForApproval;
+
+/** The reviewer the escalations go to: 10db, which asks the builder, never Codex's own reviewer model. */
+export const BUILDER_REVIEWS = 'user' as const satisfies ApprovalsReviewer;
+
+/** The server request that asks to run a command, here one its sandbox blocked, outside the sandbox. */
+export const COMMAND_APPROVAL_METHOD = 'item/commandExecution/requestApproval';
+
+/** The notification that says the server no longer waits on a request it sent. */
+export const SERVER_REQUEST_RESOLVED = 'serverRequest/resolved';
+
+/** The kinds of command approval Codex names. */
+export const CommandApprovalKind = {
+  Command: 'command',
+  HumanCommand: 'humanCommand',
+  WriteStdin: 'writeStdin',
+} as const;
+
+/** What `item/commandExecution/requestApproval` carries, as far as 10db reads it. */
+export const CommandApprovalRequest = z.looseObject({
+  threadId: z.string(),
+  turnId: z.string(),
+  itemId: z.string(),
+  kind: z
+    .enum([
+      CommandApprovalKind.Command,
+      CommandApprovalKind.HumanCommand,
+      CommandApprovalKind.WriteStdin,
+    ])
+    .optional(),
+  approvalId: z.string().nullish(),
+  reason: z.string().nullish(),
+  command: z.string().nullish(),
+  cwd: z.string().nullish(),
+  networkApprovalContext: z.unknown().nullish(),
+});
+export type CommandApprovalRequest = z.infer<typeof CommandApprovalRequest>;
+
+/** How 10db answers a command approval: run it once outside the sandbox, or not at all. */
+export const CodexApprovalDecision = { Accept: 'accept', Decline: 'decline' } as const;
+export type CodexApprovalDecision =
+  (typeof CodexApprovalDecision)[keyof typeof CodexApprovalDecision];
+
+export const ServerRequestResolved = z.looseObject({
+  threadId: z.string(),
+  requestId: z.union([z.string(), z.number()]),
 });
 
 const TurnStatus = z.enum(['completed', 'interrupted', 'failed', 'inProgress']);
