@@ -581,7 +581,7 @@ describe('permission broker in a sandboxed lane', () => {
     const ws = seedWorkstream(base);
     void sandboxed(ws)(request('Bash', { command: 'pnpm add zod' })).catch(() => undefined);
     const card = onlyOpenCard();
-    expect(card.body).toBe(`pnpm add zod\n\n${PNPM_BODY}`);
+    expect(card.body).toBe(`${PNPM_BODY}\n\nCommand: pnpm add zod`);
     expect(card.detail).toEqual({ toolName: 'Bash', summary: 'pnpm add zod' });
   });
 

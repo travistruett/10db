@@ -399,6 +399,7 @@ export function createShapePreparer(
               ? {}
               : {
                   unsandboxed: {
+                    agent: input.harness,
                     mayRun: input.unsandboxedAsk.mayRun,
                     changes: input.unsandboxedAsk.changes,
                     bump: input.unsandboxedAsk.bump,

@@ -8,6 +8,7 @@ import {
   McpSignInChangedData,
   McpSignInState,
   PullRequestState,
+  StepRole,
   WorkstreamId,
   WorkstreamState,
   type DaemonEvent,
@@ -22,10 +23,10 @@ import {
   getTask,
   getWorkstream,
   getWorkstreamRow,
+  isLocalCopy,
   listActiveProjects,
   listLinearPosts,
   listWorkstreams,
-  pendingLinearPosts,
   type DbReader,
   type Json,
 } from '@10db/db';
@@ -38,6 +39,9 @@ import { reporterSettings } from './reporter-settings';
 
 /** How long an event waits before it is posted, so a burst becomes one update. */
 export const REPORT_DELAY_MS = 30_000;
+
+/** The detail key of a landing comment of a local copy's task: its change landed in the project, with no pull request. */
+export const LOCAL_LANDING = 'localCopy';
 
 /** One update an event makes: the row's task, kind, key and what it was. */
 export interface LinearRowDraft {
@@ -56,18 +60,23 @@ export interface LinearEventRead {
     readonly taskId: TaskId;
     readonly failureKind: string | null;
     readonly ends: number;
-    /** The `at` of the result the step recorded. */
-    readonly stepResultAt: string | null;
   };
   /** The Inbox item an `inbox.opened` names, with the workstreams its targets point at. */
   readonly inbox?: {
     readonly title: string;
-    readonly workstreams: readonly { readonly id: WorkstreamId; readonly taskId: TaskId }[];
+    readonly workstreams: readonly {
+      readonly id: WorkstreamId;
+      readonly taskId: TaskId;
+      /** How many Ended rows the workstream already has, as in `workstream`. */
+      readonly ends: number;
+    }[];
   };
   /** The batch a `batch.updated` names, its workstreams, its pull request and where it landed. */
   readonly batch?: {
     readonly prUrl: string | null;
     readonly prState: string | null;
+    /** The batch is a local copy and has shipped: its finished runs landed in the project. */
+    readonly shippedLocalCopy: boolean;
     readonly baseBranch: string;
     /** The commit a local copy promoted onto the base; null for a batch that is not one. */
     readonly landedSha: string | null;
@@ -129,23 +138,26 @@ export function linearRowOf(event: DaemonEvent, read: LinearEventRead): LinearRo
       taskId: w.taskId,
       workstreamId: w.id,
       event: LinearEventKind.Waiting,
-      dedupeKey: `waiting:${event.entityId}`,
+      // One update per run phase: a burst of Inbox items is a single "waiting" comment.
+      dedupeKey: `waiting:${w.id}:${String(w.ends)}`,
       detail: { workstreamId: w.id, title, kind: text(data['kind']) },
     }));
   }
   if (event.type === EventType.StepChanged) {
     const verdict = data['verdict'];
     if (ws === undefined || typeof verdict !== 'string') return [];
-    const stepIndex = data['stepIndex'];
+    // A plan review has no comment of its own: the run's one verdict comment tells it with the reviews and
+    // checks of the work, since the brief reads every verdict the run has.
+    if (data['role'] === StepRole.PlanReview) return [];
     return [
       {
         taskId: ws.taskId,
         workstreamId: ws.id,
         event: LinearEventKind.Verdict,
-        dedupeKey: `verdict:${ws.id}:${String(typeof stepIndex === 'number' ? stepIndex : -1)}:${ws.stepResultAt ?? event.at}`,
+        // One verdict comment per run phase: a send-back and a second round are told in the end's words.
+        dedupeKey: `verdict:${ws.id}:${String(ws.ends)}`,
         detail: {
           workstreamId: ws.id,
-          stepIndex: typeof stepIndex === 'number' ? stepIndex : null,
           role: text(data['role']),
           verdict,
         },
@@ -156,25 +168,32 @@ export function linearRowOf(event: DaemonEvent, read: LinearEventRead): LinearRo
     const batch = read.batch;
     if (batch === undefined) return [];
     const changed = data['changed'];
+    // A separate copy that lands in the project has no pull request: its change landing is the landing, and the
+    // comment its pictures ride in (they are taken once it has landed).
+    if (data['to'] === BatchState.Shipped && batch.shippedLocalCopy)
+      return batch.workstreams.map((w) => ({
+        taskId: w.taskId,
+        workstreamId: w.id,
+        event: LinearEventKind.Landed,
+        dedupeKey: `landed:${event.entityId}`,
+        detail: {
+          workstreamId: w.id,
+          baseBranch: batch.baseBranch,
+          commit: batch.landedSha,
+          [LOCAL_LANDING]: true,
+        },
+      }));
     const merged =
       Array.isArray(changed) && changed.includes('pr') && batch.prState === PullRequestState.Merged;
-    const shipped = data['to'] === BatchState.Shipped;
-    if (!merged && !shipped) return [];
-    // A batch that shipped with no pull request landed on its base: there is no pull request to name.
-    const landed = !merged && batch.prUrl === null;
-    const kind = merged
-      ? LinearEventKind.PrMerged
-      : landed
-        ? LinearEventKind.Landed
-        : LinearEventKind.PrOpened;
+    // The landing is the merge, the one comment of that phase. A pull request that is only opened is told in the
+    // end's comment, which names it and what waits on it.
+    if (!merged) return [];
     return batch.workstreams.map((w) => ({
       taskId: w.taskId,
       workstreamId: w.id,
-      event: kind,
-      dedupeKey: `${kind}:${event.entityId}`,
-      detail: landed
-        ? { workstreamId: w.id, baseBranch: batch.baseBranch, commit: batch.landedSha }
-        : { workstreamId: w.id, prUrl: batch.prUrl },
+      event: LinearEventKind.PrMerged,
+      dedupeKey: `pr_merged:${event.entityId}`,
+      detail: { workstreamId: w.id, prUrl: batch.prUrl },
     }));
   }
   return [];
@@ -209,15 +228,12 @@ function readFor(db: DbReader, event: DaemonEvent): LinearEventRead {
     const id = WorkstreamId.safeParse(event.entityId);
     if (!id.success) return {};
     const ws = getWorkstream(db, id.data);
-    const stepIndex = event.data['stepIndex'];
-    const result = typeof stepIndex === 'number' ? ws.steps[stepIndex]?.result : undefined;
     return {
       workstream: {
         id: ws.id,
         taskId: ws.taskId,
         failureKind: ws.failureKind,
         ends: endsOf(db, ws.taskId, ws.id),
-        stepResultAt: result?.at ?? null,
       },
     };
   }
@@ -230,30 +246,31 @@ function readFor(db: DbReader, event: DaemonEvent): LinearEventRead {
         title: item.title,
         workstreams: item.targets.flatMap((t) => {
           const ws = getWorkstream(db, t.workstreamId);
-          return [{ id: ws.id, taskId: ws.taskId }];
+          return [{ id: ws.id, taskId: ws.taskId, ends: endsOf(db, ws.taskId, ws.id) }];
         }),
       },
     };
   }
   if (event.type === EventType.BatchUpdated) {
     const changed = event.data['changed'];
-    const relevant =
-      event.data['to'] === BatchState.Shipped || (Array.isArray(changed) && changed.includes('pr'));
-    if (!relevant) return {};
+    const shipped = event.data['to'] === BatchState.Shipped;
+    if (!shipped && (!Array.isArray(changed) || !changed.includes('pr'))) return {};
     const parsed = BatchId.safeParse(event.entityId);
     if (!parsed.success) return {};
     const batchId = parsed.data;
     const batch = getBatch(db, batchId);
+    const shippedLocalCopy = shipped && isLocalCopy(db, batchId);
     return {
       batch: {
         prUrl: batch.prUrl,
         prState: batch.pr?.state ?? null,
+        shippedLocalCopy,
         baseBranch: batch.baseBranch,
         landedSha: getLocalCopy(db, batchId)?.candidate ?? null,
-        workstreams: listWorkstreams(db, { batchId }).map((w) => ({
-          id: w.id,
-          taskId: w.taskId,
-        })),
+        workstreams: listWorkstreams(db, { batchId })
+          // Only a run that finished landed; a failed or cancelled one did not.
+          .filter((w) => !shippedLocalCopy || w.state === WorkstreamState.Done)
+          .map((w) => ({ id: w.id, taskId: w.taskId })),
       },
     };
   }
@@ -303,7 +320,8 @@ export function subscribeLinearEvents(
             dedupeKey: draft.dedupeKey,
             attempt: attemptOf(ctx.tx, draft.workstreamId),
             detail: draft.detail,
-            dueAt: dueAtFor(ctx.tx, draft.taskId, clock.now().getTime()),
+            // A new update is never held behind an older row's backoff on the task.
+            dueAt: new Date(clock.now().getTime() + REPORT_DELAY_MS).toISOString(),
           });
           if (row !== null) made.add(draft.taskId);
         }
@@ -314,14 +332,4 @@ export function subscribeLinearEvents(
       log.warn({ err: error, type: event.type }, 'a Linear update was not queued');
     }
   });
-}
-
-/** A new event waits the report delay, or until a backoff already pending on the task ends, whichever is later. */
-function dueAtFor(db: DbReader, taskId: TaskId, nowMs: number): string {
-  let due = nowMs + REPORT_DELAY_MS;
-  for (const row of pendingLinearPosts(db, { taskId })) {
-    const at = row.dueAt === null ? Number.NaN : Date.parse(row.dueAt);
-    if (at > due) due = at;
-  }
-  return new Date(due).toISOString();
 }

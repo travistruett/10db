@@ -217,13 +217,19 @@ field on every provider.
 
 ## Surfaces
 
-**Settings › Watchpoints** (mock-ups 1 and 1b). A project section under Planning, after Areas and Hazards.
-- One table, in two groups: "Yours, in every project" and "This project".
-- Each row has a segmented loudness control. Hold is greyed out until S5, and Ask until S2.
-- The row's drawer edits the name, why, globs (with a matching-file count read from the checkout), guidance,
-  loudness, and **Applies to**: every project or this one.
-- An override carries a cyan tag, and "Use yours" drops it.
-- The last-30-days column arrives in S2.
+**Settings › Watchpoints** follows Trust's two scopes: All Projects owns the list, and a project follows it.
+- **All Projects › Watchpoints** (under Agents, after Trust) edits your list (`/settings/watchpoints`): Watchpoint,
+  Matches, When It Matches (Show or Ask) and Edit and Remove. Add Watchpoint's menu adds a library starter.
+- **This Project › Watchpoints** (under Planning, after Areas and Hazards) is one table: yours first, as the project
+  has them, then the project's own, marked This Project. Its scope line links to All Projects › Watchpoints.
+  - Yours have When It Matches **Default · <yours>** / Show / Ask / Off: Default drops the project's entry, Show or
+    Ask writes a copy at that loudness, Off writes `{ key, off: true }`. A copy shows a dimmed "set here".
+  - Editing one of yours saves a copy for this project only; the drawer says so, and offers Use Default on a copy.
+  - The project's own have Show or Ask, and only they can be removed here. A project page never writes your list.
+  - The paths sit under the name, so the table fits the 1200 px window; Last 30 Days is the project's counts.
+- Hold is not offered in either control until S5; the type keeps it.
+- The drawer edits Name, Why It Matters, Matches These Paths, Lines, What to Check and When It Matches. The
+  matching-file count read from the checkout is not built: no route counts a glob's files yet.
 
 **For You** (mock-up 2). It is the first section of the drawer's Overview when the newest watchpoint row has hits, and
 it is absent otherwise. It mirrors `TaskSkips`: it fetches `/workstreams/:id/watchpoint-hits` itself and returns null

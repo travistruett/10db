@@ -9,6 +9,10 @@ import { expectAccessible } from './expect-accessible';
 
 const Runs = z.array(z.object({ id: z.string(), taskTitle: z.string() }));
 const Changes = z.object({ commits: z.array(z.string()) });
+const YourWatchpoints = z.array(z.looseObject({ key: z.string(), loudness: z.string() }));
+const ProjectEntries = z.object({
+  entries: z.array(z.looseObject({ key: z.string(), off: z.literal(true).optional() })),
+});
 const Batches = z.array(
   z.object({
     id: z.string(),
@@ -101,6 +105,9 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   page,
   request,
 }) => {
+  // The whole journey, from a task through review, the Inbox and both watchpoint scopes to a reload, runs
+  // past the default two minutes on CI's WebKit.
+  test.setTimeout(240_000);
   // The window opens on the first run while there is no project (first-run.spec.ts covers it), so
   // the project on the disposable repo is created through the API before the page loads.
   const created = await request.post(`${daemonUrl}/projects`, {
@@ -372,7 +379,64 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // A switch with no visible label has its track over the input: click the label that holds both, as a person does.
   await reportSwitch.locator('xpath=..').click();
   await expect(reportSwitch).not.toBeChecked();
-  await open(page, 'Board');
+
+  // Settings › Watchpoints: All Projects holds your list; a project page follows it, sets one here or turns it off
+  // here, and never writes your list.
+  const watchAuth = { Authorization: `Bearer ${E2E_TOKEN}` };
+  const readYours = async () =>
+    YourWatchpoints.parse(
+      await (
+        await request.get(`${daemonUrl}/settings/watchpoints`, {
+          headers: watchAuth,
+          maxRetries: 2,
+        })
+      ).json(),
+    );
+  const readHere = async () =>
+    ProjectEntries.parse(
+      await (
+        await request.get(`${daemonUrl}/projects/${projectId}/watchpoints`, {
+          headers: watchAuth,
+          maxRetries: 2,
+        })
+      ).json(),
+    ).entries;
+  const yoursBefore = await readYours();
+  await page.goto('/settings/all-watchpoints');
+  await page
+    .getByRole('radiogroup', { name: 'When Prompts matches' })
+    .getByText('Ask', { exact: true })
+    .click();
+  await expect
+    .poll(async () => (await readYours()).find((w) => w.key === 'prompts')?.loudness)
+    .toBe('ask');
+  await chooseScope(page, 'This Project');
+  await page
+    .getByRole('navigation', { name: 'Settings sections' })
+    .getByRole('link', { name: 'Watchpoints', exact: true })
+    .click();
+  const promptsHere = page.getByRole('radiogroup', { name: 'When Prompts matches' });
+  // Default names what All Projects has now.
+  await expect(promptsHere.getByText('Default · Ask', { exact: true })).toBeVisible();
+  await expectAccessible(page, 'project watchpoints, dark');
+  await promptsHere.getByText('Off', { exact: true }).click();
+  await expect
+    .poll(async () => (await readHere()).find((e) => e.key === 'prompts'))
+    .toEqual({ key: 'prompts', off: true });
+  await promptsHere.getByText('Default · Ask', { exact: true }).click();
+  await expect.poll(async () => (await readHere()).some((e) => e.key === 'prompts')).toBe(false);
+  // The project page changed only the project's entries: your list is as All Projects left it.
+  expect((await readYours()).find((w) => w.key === 'prompts')?.loudness).toBe('ask');
+  expect((await readHere()).map((e) => e.key)).toEqual(['greetings', 'evals']);
+  // Later specs run under your list, so it goes back to how it was.
+  const restored = await request.put(`${daemonUrl}/settings/watchpoints`, {
+    headers: watchAuth,
+    data: yoursBefore,
+  });
+  expect(restored.ok()).toBe(true);
+  // The project's settings list Board Columns, which the rail's Board link would also match.
+  await page.goto('/board');
+  await expectView(page, 'Board');
   // The Board's card for the finished task carries the same marker.
   await expect(
     page.getByTestId('task-card').filter({ hasText: TASK }).getByTestId('eval-marker'),
@@ -468,17 +532,30 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(page.getByText(`Review: ${TASK}`)).toHaveCount(0);
   await expect(page.getByText(QUESTION)).toHaveCount(0);
   // The ask watchpoint left one Look card for the task, written as the run moved on. It shows the same hunk and
-  // notes as For You, and Looks right closes it.
+  // notes as For You, and Looks Right closes it.
   const lookTitle = page.getByText(`Look at these changes: ${TASK}`);
   await lookTitle.first().click();
-  // The detail pane beside the list is the Look card itself: its folds, a way back to the task and a note box.
-  await expect(page.getByRole('button', { name: 'Open the task' })).toBeVisible();
-  await page.getByRole('button', { name: 'Send back with a note' }).click();
-  await expect(page.getByRole('textbox', { name: 'What Needs to Change' })).toBeVisible();
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  // View Task, in the card's bar, opens the task's drawer over the Inbox; Back closes it and the card is still there.
+  await page.getByRole('button', { name: 'View Task', exact: true }).click();
+  await expect(taskDrawer).toBeVisible();
+  await expect(page).toHaveURL(/\/inbox\?.*task=/);
+  await expectView(page, 'Inbox');
+  await page.goBack();
+  await expect(taskDrawer).toBeHidden();
+  // Send Back turns the bar into a composer: its note is focused and required, and Esc cancels it.
+  await page.getByRole('button', { name: 'Send Back', exact: true }).click();
+  const whatToChange = page.getByRole('textbox', { name: 'What Needs to Change' });
+  await expect(whatToChange).toBeFocused();
+  const sendItBack = page.getByRole('button', { name: 'Send It Back' });
+  await expect(sendItBack).toBeDisabled();
+  await whatToChange.fill('Say where the greeting is read.');
+  await expect(sendItBack).toBeEnabled();
+  await whatToChange.press('Escape');
+  await expect(whatToChange).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Send Back', exact: true })).toBeFocused();
   await expect(page.getByText('Adds the greeting file the gate looks for.')).toBeVisible();
   await expect(page.getByText('added line 1: hello')).toBeAttached();
-  await page.getByRole('button', { name: 'Looks right' }).click();
+  await page.getByRole('button', { name: 'Looks Right', exact: true }).click();
   await expect(lookTitle).toHaveCount(0);
 
   // A locked card's reason is reachable from the keyboard, not only on hover.

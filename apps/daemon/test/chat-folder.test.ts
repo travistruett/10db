@@ -112,7 +112,9 @@ function brokerPrepare(input: ShapePrepareInput): Promise<ShapePrepared> {
         fileAccess: FILE_ACCESS,
         hazards: [],
         commandsAsk: true,
-        ...(input.unsandboxedAsk === undefined ? {} : { unsandboxed: input.unsandboxedAsk }),
+        ...(input.unsandboxedAsk === undefined
+          ? {}
+          : { unsandboxed: { agent: input.harness, ...input.unsandboxedAsk } }),
       },
     },
   );

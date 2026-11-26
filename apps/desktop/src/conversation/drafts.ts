@@ -1,4 +1,11 @@
+import type { PagePick } from '@10db/contracts';
 import { mentionText } from './mention-text';
+
+/** A pick from a page's Preview waiting in its draft (Pick on Page spec §4), with its crop. */
+export interface DraftPick {
+  readonly pick: PagePick;
+  readonly crop: File | null;
+}
 
 /** What the builder has typed, mentioned and pasted into a conversation's composer and not sent yet. */
 export interface Draft {
@@ -6,6 +13,8 @@ export interface Draft {
   /** The paths the text's `@` mentions name. */
   readonly mentions: readonly string[];
   readonly pictures: readonly File[];
+  /** Picks from the page's Preview; only a Workbench page's draft holds any. */
+  readonly picks?: readonly DraftPick[];
 }
 
 export const EMPTY_DRAFT: Draft = { text: '', mentions: [], pictures: [] };
@@ -21,9 +30,14 @@ export function applyDraftChange(now: Draft, change: DraftChange): Draft {
   return typeof change === 'function' ? change(now) : change;
 }
 
-/** Whether the draft holds anything to send: words or a picture. */
-export function hasContent(draft: Draft): boolean {
+/** Whether the draft holds anything the builder typed or pasted: words or a picture. */
+export function hasTyped(draft: Draft): boolean {
   return draft.text.trim() !== '' || draft.pictures.length > 0;
+}
+
+/** Whether the draft holds anything to send: words, a picture or a pick. */
+export function hasContent(draft: Draft): boolean {
+  return hasTyped(draft) || (draft.picks?.length ?? 0) > 0;
 }
 
 /**
@@ -42,8 +56,15 @@ export function withoutSent(typed: string, sent: string): string {
 export function afterSend(now: Draft, sent: Draft): Draft {
   const text = withoutSent(now.text, sent.text.trim());
   const pictures = now.pictures.filter((picture) => !sent.pictures.includes(picture));
-  if (text.trim() === '' && pictures.length === 0) return EMPTY_DRAFT;
-  return { text, mentions: mentionText(text).mentions, pictures };
+  const sentPicks = new Set((sent.picks ?? []).map((p) => p.pick.id));
+  const picks = (now.picks ?? []).filter((p) => !sentPicks.has(p.pick.id));
+  if (text.trim() === '' && pictures.length === 0 && picks.length === 0) return EMPTY_DRAFT;
+  return {
+    text,
+    mentions: mentionText(text).mentions,
+    pictures,
+    ...(picks.length === 0 ? {} : { picks }),
+  };
 }
 
 /**
@@ -64,5 +85,13 @@ export function afterFailedSend(now: Draft, sent: Draft): Draft {
     ...sent.pictures,
     ...now.pictures.filter((picture) => !sent.pictures.includes(picture)),
   ];
-  return { text, mentions: mentionText(text).mentions, pictures };
+  const sentPicks = sent.picks ?? [];
+  const sentIds = new Set(sentPicks.map((p) => p.pick.id));
+  const picks = [...sentPicks, ...(now.picks ?? []).filter((p) => !sentIds.has(p.pick.id))];
+  return {
+    text,
+    mentions: mentionText(text).mentions,
+    pictures,
+    ...(picks.length === 0 ? {} : { picks }),
+  };
 }

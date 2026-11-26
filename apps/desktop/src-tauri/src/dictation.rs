@@ -17,7 +17,7 @@ pub fn start_dictation(app: tauri::AppHandle) -> Result<(), String> {
 // The one call into AppKit the shell makes; `sendAction:to:from:` is unsafe only because its
 // selector is unchecked, and `startDictation:` is the selector AppKit's own Edit menu sends.
 #[allow(unsafe_code)]
-fn send_start_dictation() {
+pub(crate) fn send_start_dictation() {
     use objc2::{MainThreadMarker, sel};
     use objc2_app_kit::NSApplication;
 
@@ -33,4 +33,4 @@ fn send_start_dictation() {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn send_start_dictation() {}
+pub(crate) fn send_start_dictation() {}
