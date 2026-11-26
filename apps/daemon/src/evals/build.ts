@@ -2,16 +2,15 @@ import { EvalSuiteKey } from '@10db/contracts';
 import type {
   EvalFlakyCaseDto,
   EvalManifestSuite,
-  EvalModelResultDto,
   EvalResultFormat,
-  EvalRunSummaryDto,
   EvalsDto,
   EvalSuiteDetailDto,
   EvalSuiteDto,
+  EvalTrendPointDto,
   StoredEvalManifest,
 } from '@10db/contracts';
 import type { FoundEvals } from './read-results';
-import { runCost, type ParsedRun } from './run-summary';
+import { runSummary, type ParsedRun } from './run-summary';
 
 /** Runs a trend and the flaky-case count look back over. */
 const RECENT_RUNS = 8;
@@ -48,7 +47,33 @@ const manifestSuite = (
   key: string,
 ): EvalManifestSuite | undefined => manifest?.manifest.suites.find((s) => s.key === key);
 
-function suiteDto(c: Candidate, manifest: StoredEvalManifest | null): EvalSuiteDto {
+/** The last runs as trend points: a run whose fingerprint differs from the run before it graded another eval. */
+function trendOf(runs: readonly ParsedRun[]): EvalTrendPointDto[] {
+  return runs.map((run, i) => {
+    const before = runs[i - 1]?.fingerprint ?? null;
+    return {
+      passed: run.passed,
+      evalChanged: before !== null && run.fingerprint !== null && before !== run.fingerprint,
+    };
+  });
+}
+
+/** When each suite's definition was last committed, by key, as the service read it. */
+export type DefinitionTimes = ReadonlyMap<string, string>;
+
+/** How long after a run its definition may be committed and still count as the eval that ran: run, then commit. */
+const COMMIT_GRACE_MS = 12 * 60 * 60 * 1000;
+
+function changedSince(latest: string | undefined, committed: string | undefined): string | null {
+  if (latest === undefined || committed === undefined) return null;
+  return Date.parse(committed) - Date.parse(latest) > COMMIT_GRACE_MS ? committed : null;
+}
+
+function suiteDto(
+  c: Candidate,
+  manifest: StoredEvalManifest | null,
+  times: DefinitionTimes,
+): EvalSuiteDto {
   const named = manifestSuite(manifest, c.key);
   const newest = c.runs.at(-1);
   return {
@@ -62,7 +87,8 @@ function suiteDto(c: Candidate, manifest: StoredEvalManifest | null): EvalSuiteD
       newest === undefined
         ? null
         : { path: newest.path, at: newest.at, passed: newest.passed, models: [...newest.models] },
-    trend: c.runs.slice(-RECENT_RUNS).map((r) => r.passed),
+    trend: trendOf(c.runs).slice(-RECENT_RUNS),
+    definitionChangedAt: changedSince(newest?.at, times.get(c.key)),
   };
 }
 
@@ -73,9 +99,10 @@ const rank = (s: EvalSuiteDto): number => (s.latest === null ? 2 : s.latest.pass
 export function buildEvals(
   found: FoundEvals | null,
   manifest: StoredEvalManifest | null,
+  times: DefinitionTimes = new Map(),
 ): EvalsDto {
   const suites = (found === null ? [] : candidates(found, manifest))
-    .map((c) => suiteDto(c, manifest))
+    .map((c) => suiteDto(c, manifest, times))
     .sort((a, b) => rank(a) - rank(b) || a.key.localeCompare(b.key));
   const linked = new Set(suites.flatMap((s) => s.definitionPaths));
   return {
@@ -86,14 +113,6 @@ export function buildEvals(
     gaps: manifest?.manifest.gaps ?? null,
   };
 }
-
-const summary = (run: ParsedRun): EvalRunSummaryDto => ({
-  path: run.path,
-  at: run.at,
-  passed: run.passed,
-  costUsd: runCost(run.models),
-  models: run.models.map((m: EvalModelResultDto) => m.model),
-});
 
 /** Cases that both passed and failed a trial across the recent runs, the most failed first. */
 function flakyCases(runs: readonly ParsedRun[]): EvalFlakyCaseDto[] {
@@ -124,6 +143,7 @@ export function buildSuiteDetail(
   manifest: StoredEvalManifest | null,
   key: string,
   runPath: string | undefined,
+  times: DefinitionTimes = new Map(),
 ): SuiteDetailResult {
   const c = found === null ? undefined : candidates(found, manifest).find((s) => s.key === key);
   if (c === undefined) return { kind: 'no_suite' };
@@ -133,8 +153,8 @@ export function buildSuiteDetail(
   return {
     kind: 'ok',
     detail: {
-      suite: suiteDto(c, manifest),
-      runs: [...c.runs].reverse().map(summary),
+      suite: suiteDto(c, manifest, times),
+      runs: [...c.runs].reverse().map(runSummary),
       run:
         shown === undefined
           ? null

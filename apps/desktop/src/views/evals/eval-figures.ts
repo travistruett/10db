@@ -48,6 +48,20 @@ export function gatesPassed(model: EvalModelResultDto): string {
   return `${String(passed)}/${String(model.gates.length)}`;
 }
 
+/**
+ * Trials that got no answer, in words ("3 provider errors · 1 timeout"), apart from the gates; null when
+ * every trial was answered.
+ */
+export function unansweredText(unanswered: Readonly<Record<string, number>>): string | null {
+  const parts = Object.entries(unanswered)
+    .filter(([, n]) => n > 0)
+    .map(([kind, n]) => {
+      const words = kind.replaceAll('_', ' ');
+      return `${String(n)} ${n === 1 ? words : `${words}s`}`;
+    });
+  return parts.length === 0 ? null : parts.join(' · ');
+}
+
 /** A rate as the report gives it, to at most three places. */
 export function rateText(rate: number): string {
   return String(Math.round(rate * 1000) / 1000);

@@ -22,6 +22,12 @@ function Section({ title, children }: { readonly title: string; readonly childre
 /** A model's binding in a run: two slots may name one model. */
 const bindingOf = (m: EvalModelResultDto): string => `${m.slot ?? ''}|${m.model}`;
 
+/** A model's name in the switch: the model, and its slot only when two bindings share the model. */
+function switchName(m: EvalModelResultDto, models: readonly EvalModelResultDto[]): string {
+  const shared = models.filter((other) => other.model === m.model).length > 1;
+  return shared && m.slot !== null ? `${m.model} (${m.slot})` : m.model;
+}
+
 /** One model's gates, failing first, each rate against its minimum. */
 function Gates({ model }: { readonly model: EvalModelResultDto }) {
   const gates = [...model.gates].sort((a, b) => Number(a.passed) - Number(b.passed));
@@ -72,12 +78,23 @@ function RunGates({ detail }: { readonly detail: EvalSuiteDetailDto }) {
           onChange={setChosen}
           data={models.map((m) => ({
             value: bindingOf(m),
-            label: `${m.slot ?? m.model} · ${gatesPassed(m)}`,
+            label: `${switchName(m, models)} · ${gatesPassed(m)}`,
           }))}
         />
       ) : null}
       <Gates model={shown} />
     </Section>
+  );
+}
+
+/** Whether a run (newest first) graded a different eval than the run before it. */
+function newEval(runs: EvalSuiteDetailDto['runs'], place: number): boolean {
+  const run = runs[place];
+  const before = runs[place + 1];
+  return (
+    run?.fingerprint != null &&
+    before?.fingerprint != null &&
+    run.fingerprint !== before.fingerprint
   );
 }
 
@@ -94,7 +111,7 @@ function Runs({
     <Section title="Runs">
       <Table highlightOnHover verticalSpacing={6} fz="sm">
         <Table.Tbody>
-          {detail.runs.slice(0, RUNS_SHOWN).map((run) => (
+          {detail.runs.slice(0, RUNS_SHOWN).map((run, place) => (
             <Table.Tr
               key={run.path}
               onClick={() => {
@@ -113,6 +130,7 @@ function Runs({
               </Table.Td>
               <Table.Td c="dimmed">
                 {run.models.length === 1 ? run.models[0] : `${String(run.models.length)} models`}
+                {newEval(detail.runs, place) ? ' · new eval' : ''}
               </Table.Td>
               <Table.Td ta="right">{costText(run.costUsd)}</Table.Td>
             </Table.Tr>
@@ -180,6 +198,11 @@ function SuiteBody({
     run?.repeat ? `${String(run.repeat)} trials a case` : null,
     run ? `run ${dayTimeText(run.at)}` : 'no results found',
   ].filter((part): part is string => part !== null);
+  // The latest run no longer measures the eval as written once its definition was committed well after it.
+  const changedAfter =
+    suite.definitionChangedAt !== null && run !== null && run.path === suite.latest?.path
+      ? `The eval's definition was committed ${dayTimeText(suite.definitionChangedAt)}, after this run, so this result may not measure the eval as it is now.`
+      : null;
   return (
     <Stack gap="lg">
       <Stack gap={4}>
@@ -190,6 +213,11 @@ function SuiteBody({
           {meta.join(' · ')}
         </Text>
         {suite.bar === null ? null : <Text size="sm">{suite.bar}</Text>}
+        {changedAfter === null ? null : (
+          <Text size="xs" c="dimmed">
+            {changedAfter}
+          </Text>
+        )}
       </Stack>
       <RunGates key={run?.path ?? ''} detail={detail} />
       {detail.runs.length > 0 ? <Runs detail={detail} onPick={onPick} /> : null}
