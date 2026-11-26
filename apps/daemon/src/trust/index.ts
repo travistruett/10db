@@ -23,6 +23,7 @@ export {
   parseRules,
   within,
   withoutComments,
+  withoutDirectives,
   type MakeRule,
   type ReadRepoFile,
 } from './make-rules';

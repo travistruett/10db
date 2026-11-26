@@ -7,7 +7,7 @@ import { E2E_REPO, E2E_TOKEN } from './paths';
 
 async function ensureProject(request: APIRequestContext) {
   const headers = { Authorization: `Bearer ${E2E_TOKEN}` };
-  const listed = await request.get(`${daemonUrl}/projects`, { headers });
+  const listed = await request.get(`${daemonUrl}/projects`, { headers, maxRetries: 2 });
   const projects: unknown = await listed.json();
   if (Array.isArray(projects) && projects.length > 0) return;
   const created = await request.post(`${daemonUrl}/projects`, {

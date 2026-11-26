@@ -4,18 +4,22 @@ import {
   ConversationItemKind,
   ConversationState,
   harnessOf,
-  LinearVia,
+  LinearWithheldPattern,
   type AccountId,
   type ConversationId,
   type LinearPostDto,
   type LinearPostId,
+  type PickedLinearStatus,
+  type PickLinearStatusInput,
   type LinearReporterSettings,
+  type LinearSignInRowDto,
   type LinearSignInsDto,
   type ProjectId,
   parseItemBody,
   type ReportLinearPostInput,
   type SessionId,
   type TaskId,
+  type ToolCallView,
   type UploadLinearPictureInput,
 } from '@10db/contracts';
 import {
@@ -26,7 +30,9 @@ import {
   getTask,
   holdLinearPosts,
   insertItem,
+  lastConversationSessions,
   lastItems,
+  listLinearPosts,
   listItems,
   pendingLinearPosts,
   recordLinearPosts,
@@ -46,9 +52,12 @@ import { reporterBlockedBy } from './reporter-events';
 import { refreshReporterCard } from './reporter-inbox';
 import { taskPrUrl } from './reporter-brief';
 import { judgeReporterCall, type ReporterRun } from './reporter-guard';
+import { nothingToReport } from './reporter-needs';
+import { lastStatusSet, pickStatusMove } from './reporter-status';
 import { reporterPictures, uploadPicture } from './reporter-pictures';
+import { accountRunStart, checkSaysSignedOut, reachOutcome } from './reporter-reach';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
-import { signInNeeded } from './sign-in-needed';
+import { noLinearCall, signInNeeded } from './sign-in-needed';
 import {
   SNAPSHOT_FIRST_LINE,
   SNAPSHOT_MAX_READS,
@@ -78,6 +87,11 @@ export const HOLD_RETRY_MS = 30 * 60_000;
 /** The line that starts a run; only a trigger, the brief carries what to do. */
 export const REPORTER_STARTER = 'Report the pending Linear updates.';
 
+/** How many of the conversation's newest items a settle reads for the run's and the earlier Linear calls. */
+const CALLS_READ = 200;
+/** How many of the conversation's newest sessions a settle reads for where its account's own run began. */
+const SESSIONS_READ = 50;
+
 const ALLOWED_BY_RULE = "10db's reporter rule allows this call.";
 const SESSION_OVER = 'This reporter run is over; nothing it calls is recorded.';
 
@@ -95,6 +109,11 @@ export interface LinearReporter {
   wake(projectId: ProjectId): void;
   /** `report_linear_post`, from a reporter session only. */
   reportPost(sessionId: SessionId, input: ReportLinearPostInput): { ok: true };
+  /**
+   * `pick_linear_status`: picks the status an owed update sets from the team's statuses the session read, by
+   * type and position, and allows the session to set that one. The pick is 10db's, not the agent's.
+   */
+  pickStatus(sessionId: SessionId, input: PickLinearStatusInput): PickedLinearStatus;
   /** `upload_linear_picture`: sends a picture this run was offered to Linear's signed URL. */
   uploadPicture(sessionId: SessionId, input: UploadLinearPictureInput): Promise<{ ok: true }>;
   /**
@@ -154,6 +173,10 @@ interface Flight {
   accountId: AccountId | null;
   /** An allowed Linear call was made: the session's agent is signed in to Linear. */
   reachedLinear: boolean;
+  /** The account's Linear sign-in check, as the trigger read it; null when it has no row. */
+  readonly signIn: LinearSignInRowDto | null;
+  /** The conversation's last item before the run's starter: what came after it is the run's own. */
+  readonly afterSeq: number;
   /** The rows due when the run was triggered: what fails when the session never takes any. */
   readonly due: ReadonlySet<LinearPostId>;
   taken: ReadonlySet<LinearPostId>;
@@ -311,18 +334,38 @@ export function createLinearReporter(
     const row = (await deps.signIns.list()).rows.find((r) => r.accountId === accountId);
     if (halted() || flights.has(taskId)) return;
     const now = clock.now().getTime();
-    const due = pendingLinearPosts(state.db, { taskId }).filter((p) => dueAtMs(p) <= now);
+    const owed = pendingLinearPosts(state.db, { taskId }).filter((p) => dueAtMs(p) <= now);
+    // A row with nothing to report is withheld here, seen at once: no session, no hold and no card.
+    const empty = owed.filter(nothingToReport);
+    if (empty.length > 0) {
+      state.write((ctx) => {
+        recordLinearPosts(
+          ctx,
+          empty.map((p) => p.id),
+          { state: 'withheld', pattern: LinearWithheldPattern.NothingToReport },
+          { dismissed: true },
+        );
+      });
+      log.info(
+        { taskId, events: empty.map((p) => p.event) },
+        'Linear updates with nothing to report were withheld',
+      );
+      refreshCard(task.projectId);
+    }
+    const due = owed.filter((p) => !nothingToReport(p));
     if (due.length === 0) {
       arm(taskId);
       return;
     }
-    // An account a run lately found signed out holds without a session; an unchecked row is a maybe (after a
-    // restart) and goes ahead.
+    // A check that says signed in outweighs what an earlier run found.
+    if (row?.signedIn === true) signedOut.delete(accountId);
+    // An account a run lately found signed out holds without a session, as does one whose check says signed out;
+    // an unchecked or unread row is a maybe (after a restart) and goes ahead.
     const known = signedOut.get(accountId);
     const found =
       known !== undefined && known.until > now
         ? known
-        : row?.via === LinearVia.None && !row.unchecked
+        : checkSaysSignedOut(row)
           ? foundSignedOut(accountId)
           : null;
     if (found !== null) {
@@ -331,7 +374,7 @@ export function createLinearReporter(
       arm(taskId);
       return;
     }
-    trigger(taskId, task.projectId, due, null);
+    trigger(taskId, task.projectId, due, null, row ?? null);
   };
 
   const trigger = (
@@ -339,6 +382,7 @@ export function createLinearReporter(
     projectId: ProjectId,
     due: readonly LinearPostDto[],
     snapshot: Flight['snapshot'],
+    signIn: LinearSignInRowDto | null,
   ): void => {
     const conversationId = deps.conversations.reporterOf(taskId, projectId);
     const flight: Flight = {
@@ -348,6 +392,8 @@ export function createLinearReporter(
       sessionId: null,
       accountId: null,
       reachedLinear: false,
+      signIn,
+      afterSeq: lastItems(state.db, conversationId, 1)[0]?.seq ?? -1,
       due: new Set(due.map((p) => p.id)),
       snapshot,
       reads: 0,
@@ -446,9 +492,71 @@ export function createLinearReporter(
     return { kind: 'missing', reason };
   };
 
-  /** The run's session never reached Linear: its account's agent is taken as not signed in to it. */
-  const missedLinear = (flight: Flight): flight is Flight & { accountId: AccountId } =>
-    flight.guard !== null && flight.accountId !== null && !flight.reachedLinear;
+  /**
+   * The tool calls of the conversation's newest items: the run's own, and those before its starter that sessions
+   * on the run's account made. The conversation outlives a move, so another account's answers are left out.
+   */
+  const callsOf = (
+    flight: Flight & { accountId: AccountId },
+  ): { runCalls: ToolCallView[]; earlierCalls: ToolCallView[] } => {
+    const runCalls: ToolCallView[] = [];
+    const earlierCalls: ToolCallView[] = [];
+    const since = accountRunStart(
+      lastConversationSessions(state.db, flight.conversationId, SESSIONS_READ),
+      flight.accountId,
+    );
+    for (const item of lastItems(state.db, flight.conversationId, CALLS_READ)) {
+      if (item.kind !== ConversationItemKind.ToolCall) continue;
+      const own = item.seq > flight.afterSeq;
+      // Items and sessions are stamped by the store's one clock, in the same form.
+      if (!own && (since === null || item.createdAt < since)) continue;
+      try {
+        const call = parseItemBody(ConversationItemKind.ToolCall, item.body);
+        (own ? runCalls : earlierCalls).push(call);
+      } catch {
+        // A body that isn't a call's shows nothing either way.
+      }
+    }
+    return { runCalls, earlierCalls };
+  };
+
+  /**
+   * Settles rows a begun run left open without recording them: held for a sign-in only on evidence that the
+   * account's Linear needs one (`reachOutcome`), failed with `reason` when the run reached Linear, and failed with
+   * why it isn't a sign-in when the account's Linear works but the run never called it. That last one never takes
+   * the account as signed out, so the other tasks on it still run.
+   */
+  const settleUnreported = (
+    flight: Flight & { accountId: AccountId; guard: ReporterRun },
+    rows: readonly LinearPostDto[],
+    reason: string,
+    /** The reason the session gave when it reported the rows failed itself. */
+    said: string | null = null,
+  ): void => {
+    const reach = reachOutcome({
+      reachedLinear: flight.reachedLinear,
+      linearPrefixes: flight.guard.linearPrefixes,
+      signIn: flight.signIn,
+      ...callsOf(flight),
+    });
+    switch (reach.kind) {
+      case 'sign_in':
+        hold(rows, foundSignedOut(flight.accountId));
+        return;
+      case 'retry': {
+        const why = noLinearCall(getAccount(state.db, flight.accountId).label, reach.evidence);
+        fail(rows, said === null ? why : `${why} The session said: ${said}`);
+        return;
+      }
+      case 'reached':
+        fail(rows, reason);
+        return;
+    }
+  };
+
+  /** The run's session began: it has an account and a guard. */
+  const begun = (flight: Flight): flight is Flight & { accountId: AccountId; guard: ReporterRun } =>
+    flight.guard !== null && flight.accountId !== null;
 
   const settleRows = (flight: Flight, reason: string, complete: boolean): void => {
     try {
@@ -467,10 +575,10 @@ export function createLinearReporter(
             { state: 'withheld', pattern },
           );
         });
-      // A session whose turn completed without one Linear call had no Linear: a sign-in, not a retry, fixes it.
-      // A run that left no row open (it recorded them all) shows nothing about the account.
-      else if (complete && open.length > 0 && missedLinear(flight))
-        hold(open, foundSignedOut(flight.accountId));
+      // A completed turn that left rows open is held only on evidence of a missing sign-in. A run that left no
+      // row open (it recorded them all) shows nothing about the account.
+      else if (complete && open.length > 0 && begun(flight))
+        settleUnreported(flight, open, flight.error ?? reason);
       else fail(open, flight.error ?? reason);
       refreshCard(flight.projectId);
     } catch (error) {
@@ -572,7 +680,7 @@ export function createLinearReporter(
         const accountId = getProject(state.db, task.projectId).accountId;
         const row = (await deps.signIns.list()).rows.find((r) => r.accountId === accountId);
         // An unchecked row is a maybe and goes ahead.
-        if (row?.via === LinearVia.None && !row.unchecked)
+        if (row !== undefined && checkSaysSignedOut(row))
           return missing(
             row.note ??
               "This account's agent has no Linear. Connect Linear under Settings › Integrations.",
@@ -585,7 +693,7 @@ export function createLinearReporter(
         const conversationId = deps.conversations.reporterOf(taskId, task.projectId);
         const afterSeq = lastItems(state.db, conversationId, 1)[0]?.seq ?? -1;
         return await new Promise<LinearSnapshot>((resolve) => {
-          trigger(taskId, task.projectId, [], { resolve, afterSeq });
+          trigger(taskId, task.projectId, [], { resolve, afterSeq }, row ?? null);
         });
       } catch (error) {
         log.warn({ err: error, taskId }, 'the Linear snapshot could not be read');
@@ -607,6 +715,8 @@ export function createLinearReporter(
           prUrl: null,
           pictures: [],
           withheld: new Set(),
+          noteSteers: false,
+          pickedStatuses: new Set(),
         };
         flight.sessionId = input.sessionId;
         flight.accountId = input.accountId;
@@ -633,6 +743,8 @@ export function createLinearReporter(
         prUrl: taskPrUrl(state.db, flight.taskId),
         pictures: reporterPictures(state.db, flight.taskId, posts),
         withheld: new Set(),
+        noteSteers: reporterSettings(state.db, flight.projectId).note.trim() !== '',
+        pickedStatuses: new Set(),
       };
       flight.sessionId = input.sessionId;
       flight.accountId = input.accountId;
@@ -694,23 +806,54 @@ export function createLinearReporter(
         const rows = pendingLinearPosts(state.db, { taskId: flight.taskId }).filter(
           (p) => input.postIds.includes(p.id) && !flight.failedByAgent.has(p.id),
         );
-        // A session that never reached Linear is reporting that it has none: the rows wait for a sign-in.
-        if (rows.length > 0 && missedLinear(flight)) {
+        // A session that never reached Linear may be reporting that it has none: the rule decides whether the
+        // rows wait for a sign-in.
+        if (rows.length > 0 && begun(flight)) {
           log.info(
             { taskId: flight.taskId, reason: outcome.reason },
-            'a reporter run without Linear held its updates',
+            'a reporter run reported its updates failed',
           );
-          hold(rows, foundSignedOut(flight.accountId));
+          settleUnreported(flight, rows, outcome.reason, outcome.reason);
         } else fail(rows, outcome.reason);
         for (const row of rows) flight.failedByAgent.add(row.id);
         refreshCard(flight.projectId);
         return { ok: true };
       }
+      // Without a steering note a status is 10db's pick, so the row records only one 10db picked this run.
+      if (
+        outcome.state === 'recorded' &&
+        outcome.statusSet !== null &&
+        !guard.noteSteers &&
+        !guard.pickedStatuses.has(outcome.statusSet)
+      )
+        throw new ConflictError('That status was not picked for this run by pick_linear_status.');
       state.write((ctx) => {
         recordLinearPosts(ctx, input.postIds, outcome);
       });
       refreshCard(flight.projectId);
       return { ok: true };
+    },
+
+    pickStatus(sessionId, input) {
+      const { flight, guard } = runOf(sessionId);
+      if (guard.readOnly) throw new ConflictError('A snapshot run sets no status.');
+      if (!flight.taken.has(input.postId))
+        throw new ConflictError('That update was not given to this session.');
+      const post = listLinearPosts(state.db, flight.taskId).find((p) => p.id === input.postId);
+      if (post === undefined) throw new ConflictError('That update is not on this task.');
+      const linked = linearLinkOf(state.db, flight.taskId);
+      // A follow-up's issue is its chain's, so what 10db set there includes every earlier task's rows.
+      const history = [...(linked?.chain ?? [])]
+        .concat(flight.taskId)
+        .flatMap((id) => listLinearPosts(state.db, id));
+      const picked = pickStatusMove({
+        event: post.event,
+        current: input.current,
+        statuses: input.statuses,
+        lastSet: lastStatusSet(history),
+      });
+      if (picked !== null) guard.pickedStatuses.add(picked.name);
+      return { status: picked?.name ?? null };
     },
 
     async uploadPicture(sessionId, input) {
@@ -739,8 +882,11 @@ export function createLinearReporter(
       if (
         judged.verdict.decision === 'allow' &&
         flight.guard.linearPrefixes.some((prefix) => req.toolName.startsWith(prefix))
-      )
+      ) {
         flight.reachedLinear = true;
+        // The account reached Linear: an earlier finding that it was signed out no longer holds its other tasks.
+        if (flight.accountId !== null) signedOut.delete(flight.accountId);
+      }
       // An allowed call is an explicit allow, so neither auto mode's classifier nor a judge sees it.
       return judged.verdict.decision === 'allow'
         ? { decision: 'allow', settled: ALLOWED_BY_RULE }

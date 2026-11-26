@@ -1,0 +1,122 @@
+/* The phone's frame: one bar, the content, and the three places. The views draw into it through the same slots
+   as the window's frame (shell/frame-slots.ts). */
+.root {
+  --shell-bar-height: 44px;
+  --nav-height: 56px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  background: var(--mantine-color-default);
+  padding-top: env(safe-area-inset-top);
+}
+
+.bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--shell-bar-height);
+  padding: 0 12px;
+  min-width: 0;
+}
+
+/* The view's title-row parts are the bar's own flex items, as in the window. */
+.titleHost {
+  display: contents;
+}
+
+.bar [data-title-actions] {
+  order: 2;
+}
+
+.content {
+  position: relative;
+  isolation: isolate;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--mantine-color-body);
+  border-radius: 10px 10px 0 0;
+}
+
+.main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  --shell-content-padding-block: 12px;
+  --shell-content-padding-inline: 16px;
+  padding: var(--shell-content-padding-block) var(--shell-content-padding-inline);
+}
+
+.drawerLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* The panel (a list of cards) stands over the content, the whole width, while it is shown. */
+.panel {
+  position: absolute;
+  inset: calc(var(--shell-bar-height) + env(safe-area-inset-top)) 0
+    calc(var(--nav-height) + env(safe-area-inset-bottom));
+  z-index: 20;
+  display: none;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--mantine-color-default);
+  --shell-panel-tone: color-mix(
+    in srgb,
+    var(--mantine-color-default) 50%,
+    var(--mantine-color-body)
+  );
+  --shell-bar-start: 16px;
+  --shell-panel-head-rule: none;
+}
+
+.panel[data-shown] {
+  display: flex;
+}
+
+.nav {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  height: calc(var(--nav-height) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-default);
+  position: relative;
+  z-index: 21;
+}
+
+.place {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--mantine-color-dimmed);
+  text-decoration: none;
+}
+
+.place[data-active] {
+  color: var(--mantine-color-bright);
+}
+
+.placeIcon {
+  position: relative;
+  display: inline-flex;
+}
+
+.placeCount {
+  position: absolute;
+  top: -6px;
+  left: 14px;
+}
