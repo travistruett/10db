@@ -12,6 +12,18 @@
   `watchpointCovers` (`covers.ts`) is the one covers rule, shared by `matchWatchpoints` and `evalDefinitionSource`; `lineChecks` names the (watchpoint, file) pairs to test; `watchpointHitsAfter` reads the files' text
   once, up to `WATCHPOINT_LINE_SCAN_BYTES` (512 KB), splits it at the per-file cap, matches on it and reuses those sections as
   the matched files' hunks. A file the scan didn't reach, or cut with no matching line in the text read, is clipped: an ask or hold watchpoint counts it (fail closed, so a huge change can't slip past a watchpoint the builder asked to judge), a show watchpoint doesn't (Model choice on `**` would flag every file of a big change). A file of an ask or hold watchpoint that the scan didn't reach or cut is read again at its own cap and judged on that read. The patterns run in `line-worker.ts` (bundled as `line-worker.mjs` beside the daemon, like `extract-worker`), killed at 5 s (`line-reading.ts`); the pure matcher consumes its verdicts, and with none (timeout, death) no line is cleared and the runner logs the watchpoint keys. Which files are hits is decided before the hunks are read and a later read never drops one: a file with no verdict (unread), cut, clipped or with no hunk (a binary or `-diff` file with changes) stays a hit of an ask or hold watchpoint, marked `clipped`. A file first read in the hunk loop gets its verdict from a second worker call. The sources run again on the hunks only to classify an eval definition on its patch.
+- A watchpoint's `question` (S3b, in shadow) is a yes/no 10db's judge asks; it never makes a hit. A question watchpoint
+  hits only through its globs plus lines, so one with no lines makes no rule hit (`watchpointCovers`). Its question
+  candidates are the files its globs cover that no line matched (`questionCandidates`, pure, in `covers.ts` beside
+  `lineChecks`). `watchpointHitsAfter` hands them to its `ask` once the rules are done, and keeps the answers as
+  `WatchpointDetail.shadow` (`{ key, label, asked, yes }`, optional, so an old row reads as none). `question.ts`
+  (`askWatchpointQuestions`) is the one place that asks: nothing when `judge.ready(watchpoint_question)` is false (off
+  by default) or there are no candidates, else one `judge.assess` per watchpoint with one `NoulQuestion`, the
+  candidates' hunks fenced as data and capped at `WATCHPOINT_QUESTION_DIFF_CAP` (each file's first hunks past it), a
+  20 s timeout, and the call logged as `JudgeOutcome.Shadow`. It never throws: no answer leaves `yes` null. The
+  runner keeps a reading that holds only shadow answers (no hits), and retires it like any other. Nothing on the task,
+  the card, the PR body, the forced review or the stats reads `shadow`: they read `hits` only.
+  `scripts/watchpoint-question-replay.ts` asks the questions over a project's Done runs for hand labelling.
 - `hits-after.ts` (`watchpointHitsAfter`) reads the whole change's file counts first (a zero-byte read), matches on
   those (and, for line watchpoints, on the scan above), then reads only the matched files' text (`diffOfRanges` with `paths.only`) and splits it per file
   (`split-patch.ts`, which reads git's headers; diffs here are read without renames). It matches on the

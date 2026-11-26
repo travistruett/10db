@@ -21,6 +21,9 @@ export const WatchpointLinePattern = z
   );
 export type WatchpointLinePattern = z.infer<typeof WatchpointLinePattern>;
 
+/** The longest question a watchpoint asks. */
+export const MAX_WATCHPOINT_QUESTION_LENGTH = 400;
+
 /**
  * A kind of change the builder wants to judge themselves: the files it covers, why it matters and what to check.
  * `key` is unique within a list; a project's watchpoint with a key from the builder's list overrides that one.
@@ -32,6 +35,11 @@ export const Watchpoint = z.object({
   globs: z.array(PathPattern).min(1).max(64),
   /** With patterns, a file the globs cover counts only when one of its added or removed lines matches. */
   lines: z.array(WatchpointLinePattern).max(16).default([]),
+  /**
+   * A yes/no the judge asks of the covered files no line pattern settled. It never makes a hit: a watchpoint with a
+   * question hits only through its globs and lines, and one with no lines hits nothing by rule.
+   */
+  question: z.string().trim().min(1).max(MAX_WATCHPOINT_QUESTION_LENGTH).nullable().default(null),
   guidance: z.string().max(2000),
   loudness: z.enum(WatchpointLoudness),
   /** The library key it came from, so a starter's later revision knows which watchpoints to touch. */
@@ -140,6 +148,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     why: "A revert can't undo a migration that ran.",
     globs: hazardGlobs('migrations'),
     lines: [],
+    question: null,
     guidance:
       'Check that the migration can run on existing data, that it is safe to apply while the old code still runs, and that nothing depends on a rollback.',
     loudness: WatchpointLoudness.Ask,
@@ -151,6 +160,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     why: 'Other code and other people depend on these shapes, and a break reaches them late.',
     globs: ['**/contracts/**', '**/*.proto', '**/openapi*.{yaml,json}', '**/schema.graphql'],
     lines: [],
+    question: null,
     guidance:
       'Check that every change is additive, that nothing is removed or narrowed, and that callers are updated.',
     loudness: WatchpointLoudness.Ask,
@@ -162,6 +172,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     why: 'A prompt change shifts behavior in ways tests rarely catch.',
     globs: ['**/prompts/**', '**/*prompt*.*'],
     lines: [],
+    question: null,
     guidance:
       'Check the new wording against what it should make the model do, and look for instructions that now conflict.',
     loudness: WatchpointLoudness.Show,
@@ -173,6 +184,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     why: 'A lowered bar or a changed golden hides a regression.',
     globs: ['**/evals/**', '**/*.eval.*'],
     lines: [],
+    question: null,
     guidance: 'Check that no bar was lowered and no golden changed without a reason.',
     loudness: WatchpointLoudness.Show,
     starter: 'evals',
@@ -183,6 +195,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     why: 'These files steer every later session.',
     globs: ['**/AGENTS.md', '**/CLAUDE.md', '.claude/**', '.codex/**'],
     lines: [],
+    question: null,
     guidance:
       'Check that the rule is true, that it belongs there, and that it does not widen what agents may do.',
     loudness: WatchpointLoudness.Show,
@@ -194,6 +207,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     why: 'A new dependency is code nobody here reviewed.',
     globs: hazardGlobs(DEPS_HAZARD),
     lines: [],
+    question: null,
     guidance:
       'Check that each new or changed dependency is needed, pinned, and from a source you trust.',
     loudness: WatchpointLoudness.Show,
@@ -209,6 +223,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
       '\\bdrop\\s+index\\b',
       '\\b(unique)?index\\s*\\(',
     ],
+    question: null,
     guidance:
       'Check whether the index locks or rebuilds a big table, and that it can be built while the old code still runs.',
     loudness: WatchpointLoudness.Show,
@@ -227,10 +242,37 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
       '\\bgemini-\\d[\\w.-]*',
       'typesafe/jev',
     ],
+    question: null,
     guidance:
       'Check that the model is the one intended, that it works on every provider the feature supports, and what it costs.',
     loudness: WatchpointLoudness.Show,
     starter: 'model-choice',
+  },
+  {
+    key: 'design-principles',
+    label: 'Design principles',
+    why: 'How the interface looks and behaves is a call you make, and tests rarely say whether it was made well.',
+    globs: ['**/*.{tsx,jsx,vue,svelte}', '**/*.{css,scss}', '**/components/**'],
+    lines: [],
+    question:
+      'Does this change how the interface looks or behaves for the user: layout, wording, colours, controls or flows?',
+    guidance:
+      'Check the change against how you want the interface to look and behave, and that it matches the screens around it.',
+    loudness: WatchpointLoudness.Show,
+    starter: 'design-principles',
+  },
+  {
+    key: 'auth-and-permissions',
+    label: 'Auth and permissions',
+    why: 'A change to who can do what can open a door no test was written for.',
+    globs: ['**'],
+    lines: [],
+    question:
+      'Does this change who can do what: sign-in, sessions, tokens, roles, or permission checks?',
+    guidance:
+      'Check who can now do what they could not before, and that every path to the action still checks it.',
+    loudness: WatchpointLoudness.Show,
+    starter: 'auth-and-permissions',
   },
 ];
 
@@ -276,6 +318,7 @@ export const STARTER_WATCHPOINT_REVISIONS: readonly {
         '**/prisma/migrations/**',
       ],
       lines: [],
+      question: null,
       guidance:
         'Check that the migration can run on existing data, that it is safe to apply while the old code still runs, and that nothing depends on a rollback.',
       loudness: WatchpointLoudness.Show,
@@ -290,6 +333,7 @@ export const STARTER_WATCHPOINT_REVISIONS: readonly {
       why: 'Other code and other people depend on these shapes, and a break reaches them late.',
       globs: ['**/contracts/**', '**/*.proto', '**/openapi*.{yaml,json}', '**/schema.graphql'],
       lines: [],
+      question: null,
       guidance:
         'Check that every change is additive, that nothing is removed or narrowed, and that callers are updated.',
       loudness: WatchpointLoudness.Show,
@@ -308,7 +352,8 @@ const sameWatchpoint = (a: Watchpoint, b: Watchpoint): boolean =>
   a.globs.length === b.globs.length &&
   a.globs.every((g, i) => g === b.globs[i]) &&
   a.lines.length === b.lines.length &&
-  a.lines.every((l, i) => l === b.lines[i]);
+  a.lines.every((l, i) => l === b.lines[i]) &&
+  a.question === b.question;
 
 /**
  * The stored list with each unedited copy of a starter moved to the starter's current loudness, for the revisions

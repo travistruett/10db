@@ -1,4 +1,5 @@
 import {
+  MAX_WATCHPOINT_QUESTION_LENGTH,
   Watchpoint,
   WatchpointLinePattern,
   WatchpointLoudness,
@@ -6,6 +7,7 @@ import {
 } from '@10db/contracts';
 import { Alert, Button, Group, Input, Stack, Text, Textarea, TextInput } from '@mantine/core';
 import { useEffect, useState } from 'react';
+import { useJudgeStatus } from '../../daemon/judge-queries';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { LoudnessControl } from './watchpoint-loudness';
 import { lines } from './list-drafts';
@@ -17,6 +19,7 @@ interface Draft {
   readonly why: string;
   readonly paths: string;
   readonly lines: string;
+  readonly question: string;
   readonly guidance: string;
   readonly loudness: WatchpointLoudness;
 }
@@ -26,6 +29,7 @@ const EMPTY: Draft = {
   why: '',
   paths: '',
   lines: '',
+  question: '',
   guidance: '',
   loudness: WatchpointLoudness.Show,
 };
@@ -36,6 +40,7 @@ function draftOf(watchpoint: WatchpointValue): Draft {
     why: watchpoint.why,
     paths: watchpoint.globs.join('\n'),
     lines: watchpoint.lines.join('\n'),
+    question: watchpoint.question ?? '',
     guidance: watchpoint.guidance,
     loudness: watchpoint.loudness,
   };
@@ -88,6 +93,9 @@ export function WatchpointDrawer({
     setInvalid(null);
     setDraft((d) => ({ ...d, ...next }));
   };
+  const judge = useJudgeStatus().data;
+  // The question is asked only on an account that can answer decisions.
+  const unasked = judge !== undefined && judge.account?.secretSet !== true;
   const badPattern = lines(draft.lines).find((p) => !WatchpointLinePattern.safeParse(p).success);
   const submit = () => {
     if (watchpoint !== null && !dirty) {
@@ -100,6 +108,7 @@ export function WatchpointDrawer({
       why: draft.why.trim(),
       globs: lines(draft.paths),
       lines: lines(draft.lines),
+      question: draft.question.trim() === '' ? null : draft.question.trim(),
       guidance: draft.guidance.trim(),
       loudness: draft.loudness,
       starter: watchpoint?.starter ?? null,
@@ -111,7 +120,7 @@ export function WatchpointDrawer({
       const at = field === 'lines' && typeof issue?.path[1] === 'number' ? issue.path[1] : null;
       const pattern = at === null ? '' : ` "${lines(draft.lines)[at] ?? ''}"`;
       setInvalid(
-        `${field === 'lines' ? 'Lines' : field}${pattern}: ${issue?.message ?? 'is not valid'}`,
+        `${field === 'lines' ? 'Lines' : field === 'question' ? 'Question' : field}${pattern}: ${issue?.message ?? 'is not valid'}`,
       );
       return;
     }
@@ -204,6 +213,24 @@ export function WatchpointDrawer({
             change({ lines: e.currentTarget.value });
           }}
         />
+        <Stack gap={6}>
+          <TextInput
+            label="Question"
+            aria-label="Watchpoint question"
+            placeholder="Does this change who can do what: sign-in, sessions, tokens, roles or permission checks?"
+            description="Optional. A yes or no 10db's judge asks of the files these paths cover that no line settled. With a question and no lines, the paths alone match nothing. For now the answer is only logged, in Settings › Decisions."
+            maxLength={MAX_WATCHPOINT_QUESTION_LENGTH}
+            value={draft.question}
+            onChange={(e) => {
+              change({ question: e.currentTarget.value });
+            }}
+          />
+          {unasked ? (
+            <Text size="xs" c="dimmed">
+              Judge questions aren&apos;t checked: no account can answer decisions.
+            </Text>
+          ) : null}
+        </Stack>
         <Textarea
           label="What to Check"
           aria-label="What to check"

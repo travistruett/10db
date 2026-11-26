@@ -62,7 +62,7 @@ you as screenshots of the running app.
 | S1 | Feature | Watchpoints with globs, `why` and `guidance`; the glob starters; Settings › Watchpoints; matching after the gate; hits kept as evidence; `watchpointNotes` from the build and review steps; the reviewer's Watchpoint section; For You; the PR body's For you section. Loudness **show** only (Ask is disabled with "next"). |
 | S2 | Feature | **Ask**: the one-per-task Look card, Looks right and Send back. An ask hit forces a review on a Light task. A show hit posts an Activity notice. Per-watchpoint hit counts and the noisy flag. |
 | S3a | Feature | `match.lines` (regexes over changed lines), and the Indexes and Model choice starters. Built. |
-| S3b | Feature | `match.question`, a new `JudgeDecision` that is off and replayed in Shadow first; the Design principles and Auth starters. |
+| S3b | Feature | `match.question`, a new `JudgeDecision` that is off and replayed in Shadow first; the Design principles and Auth starters. Built, in Shadow: the answer goes to the call log and the reading's `shadow`, and nothing acts on it. |
 | S4 | Feature | Assessing the starters against the repo, with evidence and a covered-file count, as hazards are. Agent proposals for watchpoint edits. Knowledge links (principle topics join the guidance) and "Looks right" saving a decision. |
 | S5 | Core | **Hold**: auto-merge off for a held run, Merge on the card, a goal's shared PR, recovery. Built only on your go. |
 

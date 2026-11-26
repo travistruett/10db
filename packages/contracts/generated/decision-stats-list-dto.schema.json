@@ -30,7 +30,8 @@
               "crosses_limit_second",
               "test_value",
               "acceptance",
-              "acceptance_second"
+              "acceptance_second",
+              "watchpoint_question"
             ]
           },
           "calls": {

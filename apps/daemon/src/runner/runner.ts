@@ -398,6 +398,7 @@ import {
 } from '../evals';
 import {
   agentNotesOf,
+  askWatchpointQuestions,
   newestWatchpointRow,
   announceWatchpointReading,
   watchpointReviewReason,
@@ -407,6 +408,7 @@ import {
   watchpointHitsAfter,
   watchpointReviewBrief,
   watchpointsForAreas,
+  type WatchpointChangeReader,
 } from '../watchpoints';
 import { FORCED_REVIEW_DIFF_BYTES, forcedReview } from './forced-review';
 import {
@@ -1744,6 +1746,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       const base = getWorkstreamRow(db, id).baseHead;
       if (base === null) throw new Error('the task has no base to read its changes from');
       const { head, ranges } = await ownWork(row, checkout, base);
+      const read: WatchpointChangeReader = (only, maxBytes) =>
+        diffOfRanges(opts.git, checkout, ranges, maxBytes, only === null ? undefined : { only });
       detail = await watchpointHitsAfter({
         watchpoints,
         head,
@@ -1754,8 +1758,13 @@ export function createRunner(opts: RunnerOptions): Runner {
             'the line patterns of these watchpoints did not finish; no line was cleared',
           );
         },
-        read: (only, maxBytes) =>
-          diffOfRanges(opts.git, checkout, ranges, maxBytes, only === null ? undefined : { only }),
+        read,
+        // In shadow: the answers are kept on the reading and logged, and nothing reads them to act.
+        ask: (candidates) =>
+          askWatchpointQuestions({ judge: opts.judge, read }, candidates, {
+            workstreamId: id,
+            taskId: row.taskId,
+          }),
       });
     } catch (error) {
       opts.logger.warn(
@@ -1764,10 +1773,12 @@ export function createRunner(opts: RunnerOptions): Runner {
       );
       detail = { hits: [], head: '', skipped: 'the changes could not be read' };
     }
-    // An empty reading is written only to retire an earlier one that showed something: hits or a skip.
+    // An empty reading is written only to retire an earlier one that showed something: hits, a skip or a
+    // question's shadow answer. One with only shadow answers is written to keep them; it hits nothing.
+    const holds = (d: WatchpointDetail): boolean =>
+      d.hits.length > 0 || d.skipped !== null || (d.shadow?.length ?? 0) > 0;
     const earlier = newestWatchpointRow(listEvidence(db, id))?.detail;
-    const showed = earlier !== undefined && (earlier.hits.length > 0 || earlier.skipped !== null);
-    return detail.hits.length === 0 && detail.skipped === null && !showed ? null : detail;
+    return !holds(detail) && (earlier === undefined || !holds(earlier)) ? null : detail;
   }
 
   /** The suite each definition path of the project's recorded evals belongs to (the first suite naming it). */

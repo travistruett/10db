@@ -8,8 +8,9 @@ import {
   type WatchpointDetail,
   type WatchpointFileHit,
   type WatchpointHit,
+  type WatchpointShadow,
 } from '@10db/contracts';
-import { lineChecks } from './covers';
+import { lineChecks, questionCandidates, type QuestionCandidates } from './covers';
 import { readLineVerdicts } from './line-reading';
 import { verdictKey, type LineCheck, type LineVerdict, type LineVerdicts } from './line-verdicts';
 import { matchWatchpoints } from './match';
@@ -112,7 +113,8 @@ function withinRowBudget(hits: readonly WatchpointHit[]): WatchpointHit[] {
  * `WATCHPOINT_LINE_SCAN_BYTES`; a file of an ask or hold watchpoint that the scan didn't reach or cut is read again at its
  * own cap, and stays a hit, clipped, if it still can't be cleared. The patterns run in a worker under a deadline
  * (`readLines`); when it fails nothing is cleared and `onLinesUnread` names the watchpoints. Which files are hits is
- * decided on that text alone; the hunks read afterwards only fill in each hit's patch.
+ * decided on that text alone; the hunks read afterwards only fill in each hit's patch. The files each question
+ * watchpoint's rules left open go to `ask` last, and its answers are kept as `shadow`, never as hits.
  * A change git can't read is the caller's to turn into a row with `skipped` set.
  */
 export async function watchpointHitsAfter(input: {
@@ -122,6 +124,9 @@ export async function watchpointHitsAfter(input: {
   readonly sources?: readonly WatchpointHitSource[];
   readonly readLines?: (checks: readonly LineCheck[]) => Promise<LineVerdicts | null>;
   readonly onLinesUnread?: (keys: readonly string[]) => void;
+  readonly ask?: (
+    candidates: readonly QuestionCandidates[],
+  ) => Promise<readonly WatchpointShadow[]>;
 }): Promise<WatchpointDetail> {
   const sources = input.sources ?? WATCHPOINT_HIT_SOURCES;
   const readLines = input.readLines ?? readLineVerdicts;
@@ -180,7 +185,14 @@ export async function watchpointHitsAfter(input: {
   // Which files are hits is decided here; the hunks read below never drop one.
   const first = joined(sources, read, input.watchpoints, verdicts);
   const matched = new Set(first.flatMap((hit) => hit.files.map((f) => f.path)));
-  if (matched.size === 0) return { hits: [], head: input.head, skipped: null };
+  // The questions are asked once the rules are done: a file a line settled is a hit, and is not asked about.
+  const withShadow = async (detail: WatchpointDetail): Promise<WatchpointDetail> => {
+    const candidates = questionCandidates(listed, input.watchpoints, verdicts);
+    if (input.ask === undefined || candidates.length === 0) return detail;
+    const shadow = await input.ask(candidates);
+    return shadow.length === 0 ? detail : { ...detail, shadow: [...shadow] };
+  };
+  if (matched.size === 0) return withShadow({ hits: [], head: input.head, skipped: null });
   // Each file is read at its own cap, so one huge file cannot starve the files after it; reading stops
   // once the row's budget is spent, and the rest keep their counts, clipped. A file already read is not read again.
   let spent = 0;
@@ -219,5 +231,5 @@ export async function watchpointHitsAfter(input: {
       return evalDefinition === undefined ? out : { ...out, evalDefinition };
     }),
   }));
-  return { hits: withinRowBudget(final), head: input.head, skipped: null };
+  return withShadow({ hits: withinRowBudget(final), head: input.head, skipped: null });
 }
