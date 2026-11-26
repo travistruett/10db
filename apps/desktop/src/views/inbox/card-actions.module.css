@@ -11,6 +11,12 @@
   background: var(--mantine-color-body);
 }
 
+/* The bar's auto margin is nothing on a long card, so this keeps the card's last line off the bar. */
+.gap {
+  flex: none;
+  height: var(--mantine-spacing-lg);
+}
+
 /* A field taken into view (the note's `n`, a Tab, a growing line) stops above the bar, not under it. */
 main:has(.bar) {
   scroll-padding-bottom: 72px;
@@ -43,5 +49,17 @@ main:has(.bar) {
   .note {
     order: -1;
     flex-basis: 100%;
+  }
+
+  /* The buttons stand in one line and share it, the answer last; more than fit wrap into full lines, never a
+     ragged edge. */
+  .row .ways,
+  .row .answers {
+    display: contents;
+  }
+
+  .row .ways > *,
+  .row .answers > * {
+    flex: 1 1 auto;
   }
 }

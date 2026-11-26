@@ -270,7 +270,7 @@ export function CardActions({
       <div className={classes['fit']}>
         <div className={classes['row']}>
           {ways.length === 0 ? null : (
-            <Group gap="sm">
+            <Group gap="sm" className={classes['ways']}>
               {ways.map((node, place) => (
                 // Each card lists its ways in a fixed order, so a place names one.
                 <Fragment key={place}>{node}</Fragment>
@@ -286,5 +286,10 @@ export function CardActions({
     </Stack>
   );
   if (framed) return <div style={{ marginTop: 'var(--mantine-spacing-sm)' }}>{bar}</div>;
-  return <div className={classes['bar']}>{bar}</div>;
+  return (
+    <>
+      <div className={classes['gap']} aria-hidden />
+      <div className={classes['bar']}>{bar}</div>
+    </>
+  );
 }
