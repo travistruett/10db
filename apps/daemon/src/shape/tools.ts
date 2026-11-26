@@ -21,6 +21,7 @@ import {
 } from '@10db/db';
 import type { StateStore } from '../events';
 import type { ShapeToolHandlers } from '../mcp';
+import { outboundFetch } from '../outbound';
 import type { ScreenService } from '../screens';
 import { attach } from './attach';
 import { createFigmaTools, type FigmaPresses } from './figma';
@@ -118,7 +119,7 @@ export function createShapeToolHandlers(
 ): ShapeToolHandlers {
   const { screens } = deps;
   const figma = createFigmaTools(
-    { state: deps.state, fetch: deps.figmaFetch ?? fetch, presses: deps.figmaPresses },
+    { state: deps.state, fetch: deps.figmaFetch ?? outboundFetch, presses: deps.figmaPresses },
     chat.projectId,
   );
   const planNow = (): ShapeId | null => planOfChat(deps.state.db, chat.chatId);

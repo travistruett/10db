@@ -252,6 +252,7 @@ import {
   type ResolvedTools,
   accountAgentOf,
 } from '../environment';
+import { outboundFetch } from '../outbound';
 import {
   createEventBus,
   createLiveFrames,
@@ -735,6 +736,8 @@ function noSystemCheck(): Promise<SystemCheckDto> {
 }
 
 export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
+  // Every outbound call the daemon makes goes through this one fetch.
+  const outbound = opts.fetch ?? outboundFetch;
   // Before anything runs git: the one git every daemon git call runs, from a fixed install prefix,
   // never a PATH, and only one that can be told to read no attributes.
   const gitBin = await resolveGit();
@@ -879,7 +882,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const benchmarks = createBenchmarkSync({
     state,
     clock,
-    fetch: opts.fetch ?? fetch,
+    fetch: outbound,
     readKey: opts.aaKey ?? (() => null),
     logger: logger.child({ component: 'benchmarks' }),
   });
@@ -890,7 +893,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const catalogue = createCatalogueSync({
     state,
     clock,
-    fetch: opts.fetch ?? fetch,
+    fetch: outbound,
     logger: logger.child({ component: 'catalogue' }),
     snapshot: () => {
       // The file is part of the install and does not change while the process runs.
@@ -911,7 +914,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'catalogue' }),
   });
   const judgeKeychain = opts.keychain ?? unavailableKeychain;
-  const decisionModels = createDecisionModelList({ fetch: opts.fetch ?? fetch, clock });
+  const decisionModels = createDecisionModelList({ fetch: outbound, clock });
   const readJudgeCredential = createJudgeCredentialReader({
     state,
     keychain: judgeKeychain,
@@ -923,7 +926,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     clock,
     onCallHealth: (health) => watchJudgeOutage?.(health),
-    fetch: opts.fetch ?? fetch,
+    fetch: outbound,
     decisionModelIds: () => decisionModels.ids(),
     readCredential: readJudgeCredential,
     off: opts.judgeOff === true,
@@ -943,7 +946,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ? createOpenRouterSync({
           state,
           clock,
-          fetch: opts.fetch ?? fetch,
+          fetch: outbound,
           readKey: async () => {
             // The Decisions account's key when it is an OpenRouter account, else any live OpenRouter account's; an
             // Anthropic key or a Bedrock token must never go to openrouter.ai.
@@ -1082,7 +1085,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ? createSlackClients({
           state,
           keychain: judgeKeychain,
-          fetch: opts.fetch ?? fetch,
+          fetch: outbound,
           clock,
           timeoutMs: SLACK_TIMEOUT_MS,
         })
@@ -1833,7 +1836,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     startGate,
     lists: accountLists,
     dataDir: opts.dataDir,
-    fetch: opts.fetch ?? fetch,
+    fetch: outbound,
     logger: logger.child({ component: 'catalogue' }),
   });
   // What runs after every fetch of the catalogue: each account's list is read again through the identity probe, then
@@ -2038,7 +2041,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     joiningProblem: (taskId) => starter.joiningProblem(taskId),
     screens,
     pictures: picturesNow,
-    ...(opts.figmaFetch === undefined ? {} : { figmaFetch: opts.figmaFetch }),
+    figmaFetch: opts.figmaFetch ?? outbound,
     jev: createShapeJev({
       state,
       judge,
@@ -2861,6 +2864,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // The Linear reporter: one short session of its own per task with updates owed, on the explore engine.
   const linearReporter = createLinearReporter({
+    fetch: outbound,
     state,
     clock,
     log: logger.child({ component: 'linear-reporter' }),
@@ -3020,7 +3024,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       sends,
       connections: slackConnections,
       clock,
-      fetch: opts.fetch ?? fetch,
+      fetch: outbound,
       watches: replyWatches,
       draftOpts,
       githubLogin: () => Promise.resolve(github.cachedLogin()),
