@@ -91,6 +91,7 @@ import {
   NewEvalRequest,
   EvalSuiteKey,
   EvalLiveRunId,
+  EvalLiveRefused,
   RunEvalLiveBody,
   EvalSuiteQuery,
   PersonInput,
@@ -186,7 +187,6 @@ import type { UpgradeWebSocket } from 'hono/ws';
 import { z } from 'zod';
 import type { ApiServices } from './services';
 import type { SelfUpdateServices, TaskRemovalServices } from './services';
-import { EvalLiveRefused } from '../evals';
 import { PairingRefusedError, SharingNotReadyError, type DeviceService } from '../devices';
 import { credentialMiddleware, type CredentialDeps } from './credential';
 import type { SocketRegistry, Tickets } from '../devices';

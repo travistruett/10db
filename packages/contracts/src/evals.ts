@@ -479,6 +479,16 @@ export const EvalLiveRefusal = {
 } as const;
 export type EvalLiveRefusal = (typeof EvalLiveRefusal)[keyof typeof EvalLiveRefusal];
 
+/** A live run the daemon will not start, with the reason the confirm window words. */
+export class EvalLiveRefused extends Error {
+  override readonly name = 'EvalLiveRefused';
+  readonly refusal: EvalLiveRefusal;
+  constructor(refusal: EvalLiveRefusal, message: string) {
+    super(message);
+    this.refusal = refusal;
+  }
+}
+
 /** One live run of a suite: its state, exit and the output's last lines. */
 export const EvalLiveRunDto = z.object({
   id: EvalLiveRunId,

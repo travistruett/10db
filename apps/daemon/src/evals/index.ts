@@ -3,4 +3,4 @@ export { classifyDefinitionChange, definitionHit, definitionReason } from './def
 export { coverageSection, matchedSuites, snapshotsOf } from './coverage';
 export { readEvalManifest } from './manifest-store';
 export { coverageLinesOf, suitesOfTasks } from './task-coverage';
-export { createEvalLiveRuns, EvalLiveRefused, type EvalLiveRuns } from './live-runs';
+export { createEvalLiveRuns, type EvalLiveRuns } from './live-runs';

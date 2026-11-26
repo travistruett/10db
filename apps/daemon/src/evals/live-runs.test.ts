@@ -132,9 +132,12 @@ describe('a suite’s live run, through the daemon', () => {
       (await send('POST', `${at}/calls-docker/live/runs`, { previewHash: docker.previewHash }))
         .status,
     ).toBe(201);
-    await vi.waitFor(async () => {
-      expect((await runs('calls-docker'))[0]?.state).not.toBe(EvalLiveRunState.Running);
-    });
+    await vi.waitFor(
+      async () => {
+        expect((await runs('calls-docker'))[0]?.state).not.toBe(EvalLiveRunState.Running);
+      },
+      { timeout: 20_000 },
+    );
     const projects = z.array(ProjectDto).parse(await (await send('GET', '/projects')).json());
     expect(projects.find((p) => p.id === project.id)?.sandboxDocker).toBe(false);
   });

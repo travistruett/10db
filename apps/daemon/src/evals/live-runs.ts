@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import {
   EvalLiveRefusal,
+  EvalLiveRefused,
   EvalLiveRunState,
   EventType,
   mintId,
@@ -31,16 +32,6 @@ import { openPreviewLedger, type PreviewLedger, type PreviewLedgers } from '../p
 import type { GateRequest, GateResult, GateRunner } from '../verify';
 import { readEvalManifest } from './manifest-store';
 import type { EvalsService } from './service';
-
-/** A live run the daemon will not start, with the reason the confirm window words. */
-export class EvalLiveRefused extends Error {
-  override readonly name = 'EvalLiveRefused';
-  readonly refusal: EvalLiveRefusal;
-  constructor(refusal: EvalLiveRefusal, message: string) {
-    super(message);
-    this.refusal = refusal;
-  }
-}
 
 const REFUSAL_TEXT: Readonly<Record<EvalLiveRefusal, string>> = {
   [EvalLiveRefusal.NoLive]: 'This suite records no live run settings, so 10db has no Run for it.',
@@ -105,7 +96,7 @@ export interface EvalLiveRuns {
   /** Stops a running run and settles it; throws NotFoundError for one that is not running. */
   stop(projectId: ProjectId, runId: EvalLiveRunId): Promise<void>;
   list(projectId: ProjectId, suiteKey: EvalSuiteKey | null): EvalLiveRunDto[];
-  /** Marks the runs a crash left `interrupted` and runs their stop commands; never starts a run. */
+  /** Marks the runs a crash left `interrupted` at once and runs their stop commands in the background (a Run waits for them); never starts a run. */
   recoverAtStart(): Promise<void>;
   /** Ends every run as the daemon stops: `interrupted`. */
   stopAll(): Promise<void>;
@@ -139,6 +130,10 @@ const dtoOf = (row: EvalLiveRunRow): EvalLiveRunDto => ({
 export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
   const { state } = deps;
   const active = new Map<EvalLiveRunId, ActiveRun>();
+  /** Stop commands of interrupted runs still running after a start, by project: a new Run waits for them. */
+  const recovering = new Map<EvalLiveRunId, { projectId: ProjectId; done: Promise<void> }>();
+  const recoveringIn = (projectId: ProjectId): boolean =>
+    [...recovering.values()].some((r) => r.projectId === projectId);
 
   function suiteOf(projectId: ProjectId, suiteKey: EvalSuiteKey): EvalManifestSuite {
     const suite = readEvalManifest(state.db, projectId)?.manifest.suites.find(
@@ -159,7 +154,8 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
     if (suite.live.docker && !project.sandboxDocker)
       return { refusal: EvalLiveRefusal.DockerOff, running: null };
     const running = runningEvalLiveRun(state.db, project.id);
-    return running === null ? null : { refusal: EvalLiveRefusal.Busy, running };
+    if (running !== null) return { refusal: EvalLiveRefusal.Busy, running };
+    return recoveringIn(project.id) ? { refusal: EvalLiveRefusal.Busy, running: null } : null;
   }
 
   async function lastCostUsd(project: ProjectDto, suiteKey: EvalSuiteKey): Promise<number | null> {
@@ -325,13 +321,33 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
     active.delete(row.id);
   }
 
-  function endAll(by: EndedBy, only: ProjectId | null): Promise<void> {
+  /** Runs the stop command of a run a crash left, when its suite still hashes as the run did. */
+  async function stopLeftBy(row: EvalLiveRunRow): Promise<void> {
+    const project = getProject(state.db, row.projectId);
+    const suite = readEvalManifest(state.db, row.projectId)?.manifest.suites.find(
+      (s) => s.key === row.suiteKey,
+    );
+    // A suite that changed since the run began may stop something else: its stop command stays unrun.
+    if (suite === undefined || previewHash(suite, project) !== row.previewHash) return;
+    const ledger = openLedger();
+    if (ledger === null) return;
+    const ran = await runStop(project, suite, row.id, ledger);
+    await ledger.end();
+    if (!ran) return;
+    state.write((ctx) => {
+      markEvalLiveRunStopRan(ctx, row.id);
+      ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: row.projectId });
+    });
+  }
+
+  async function endAll(by: EndedBy, only: ProjectId | null): Promise<void> {
     const runs = [...active.values()].filter((r) => only === null || r.projectId === only);
     for (const r of runs) {
       r.endedBy ??= by;
       r.abort.abort();
     }
-    return Promise.all(runs.map((r) => r.settled)).then(() => undefined);
+    const left = [...recovering.values()].filter((r) => only === null || r.projectId === only);
+    await Promise.all([...runs.map((r) => r.settled), ...left.map((r) => r.done)]);
   }
 
   return {
@@ -438,7 +454,7 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
       return listEvalLiveRuns(state.db, projectId, suiteKey, RECENT_RUNS).map(dtoOf);
     },
 
-    async recoverAtStart() {
+    recoverAtStart() {
       const rows = state.write((ctx) => {
         const interrupted = interruptRunningEvalLiveRuns(ctx);
         for (const row of interrupted) {
@@ -451,36 +467,22 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
         }
         return interrupted;
       });
+      // The stop commands can take minutes: they run after start, tracked, and a new Run waits for them.
       for (const row of rows) {
         if (row.stopCommand === null) continue;
-        try {
-          const project = getProject(state.db, row.projectId);
-          const suite = readEvalManifest(state.db, row.projectId)?.manifest.suites.find(
-            (s) => s.key === row.suiteKey,
-          );
-          // A suite that changed since the run began may stop something else: its stop command stays unrun.
-          if (suite === undefined || previewHash(suite, project) !== row.previewHash) continue;
-          const ledger = openLedger();
-          if (ledger === null) continue;
-          const ran = await runStop(project, suite, row.id, ledger);
-          await ledger.end();
-          if (ran) {
-            state.write((ctx) => {
-              markEvalLiveRunStopRan(ctx, row.id);
-              ctx.emit({
-                type: EventType.ProjectChanged,
-                entityType: 'project',
-                entityId: row.projectId,
-              });
-            });
-          }
-        } catch (error) {
-          deps.logger.warn(
-            { runId: row.id, err: error instanceof Error ? error.message : String(error) },
-            'could not stop what an interrupted live eval left running',
-          );
-        }
+        const done = stopLeftBy(row)
+          .catch((error: unknown) => {
+            deps.logger.warn(
+              { runId: row.id, err: error instanceof Error ? error.message : String(error) },
+              'could not stop what an interrupted live eval left running',
+            );
+          })
+          .finally(() => {
+            recovering.delete(row.id);
+          });
+        recovering.set(row.id, { projectId: row.projectId, done });
       }
+      return Promise.resolve();
     },
 
     stopAll: () => endAll(EvalLiveRunState.Interrupted, null),
