@@ -1,17 +1,36 @@
 /**
  * The files of the small app `crosses-limit-replay.ts` replays commands in, as committed on its base and unchanged
- * in the lane's checkout, by path from the repository root. The Makefile is the shape of the builder's project's;
- * `gate-query` and `ledger-query` stand in for its read-only `.agents/bin` scripts, which parse the repository's
- * markdown, and `scripts/share-db.sh` is a control that sends the database out.
+ * in the lane's checkout, by path from the repository root. `dir` is the folder of the app's compose file and
+ * `project` its compose project. The Makefile is the shape of the builder's project's, its test target `t` running
+ * pytest through the copy wrapper `<dir>/tendb_copy.py` in a separate copy; `gate-query` and `ledger-query` stand in
+ * for its read-only `.agents/bin` scripts, which parse the repository's markdown, and `scripts/share-db.sh` is a
+ * control that sends the database out.
  */
-export const REPLAY_REPO: Readonly<Record<string, string>> = {
-  Makefile: `# The copy's own stack when 10db runs this in a separate copy; the builder's shared one otherwise.
-COMPOSE_PROJECT = app$(if $(TENDB_COPY_ID),-lane-$(TENDB_COPY_ID))
-COMPOSE = docker compose -p $(COMPOSE_PROJECT) -f app/docker-compose.yml
+export function replayRepo(dir: string, project: string): Readonly<Record<string, string>> {
+  return {
+    Makefile: `# The copy's own stack when 10db runs this in a separate copy; the builder's shared one otherwise.
+COMPOSE_PROJECT = ${project}$(if $(TENDB_COPY_ID),-lane-$(TENDB_COPY_ID))
+COMPOSE = docker compose -p $(COMPOSE_PROJECT) -f ${dir}/docker-compose.yml
 APP ?=
+IN_COPY := $(TENDB_COPY_ID)
+ENV_FILE_TARGET := .env
+ARGS ?=
 
-.PHONY: up migration migrate api-client db-prepare
+.PHONY: up migration migrate api-client db-prepare t
 
+# Writes the dev config from its example the first time.
+.env:
+\tcp .env.example .env
+
+# Runs the backend's tests, or those ARGS names: in the copy's own stack in a separate copy, else the shared one.
+t: $(ENV_FILE_TARGET)
+ifdef IN_COPY
+\tpython3 ${dir}/tendb_copy.py run -- pytest $(ARGS)
+else
+\t$(COMPOSE) exec backend pytest $(ARGS)
+endif
+
+# Starts the dev stack.
 up:
 \t$(COMPOSE) up -d
 
@@ -19,6 +38,7 @@ up:
 migration:
 \t$(COMPOSE) exec backend python manage.py makemigrations $(APP)
 
+# Applies the migrations to the dev database.
 migrate:
 \t$(COMPOSE) exec backend python manage.py migrate
 
@@ -33,7 +53,7 @@ db-prepare:
 \t$(COMPOSE) exec db createdb -U app app
 \t$(COMPOSE) exec backend python manage.py migrate
 `,
-  '.agents/bin/gate-query': `#!/usr/bin/env python3
+    '.agents/bin/gate-query': `#!/usr/bin/env python3
 """Lists the gates in docs/gates.md: their names, states and owners. Reads only; writes nothing."""
 import argparse
 import json
@@ -68,7 +88,7 @@ def main():
 if __name__ == "__main__":
     main()
 `,
-  '.agents/bin/ledger-query': `#!/usr/bin/env python3
+    '.agents/bin/ledger-query': `#!/usr/bin/env python3
 """Searches the decision ledger in docs/ledger/*.md by date and kind. Reads only; writes nothing."""
 import argparse
 import json
@@ -111,10 +131,37 @@ def main():
 if __name__ == "__main__":
     main()
 `,
-  'scripts/share-db.sh': `#!/bin/sh
+    [`${dir}/tendb_copy.py`]: `#!/usr/bin/env python3
+"""Runs a command in the backend of this checkout's own stack: in a separate copy, the copy's compose project and
+database, named by TENDB_COPY_ID; else the shared dev stack. Passes the dev config in .env on to compose and never
+prints it."""
+import os
+import subprocess
+import sys
+
+COPY_ID = os.environ.get("TENDB_COPY_ID", "")
+PROJECT = f"${project}-lane-{COPY_ID}" if COPY_ID else "${project}"
+DATABASE = f"${project}_{COPY_ID}" if COPY_ID else "${project}"
+COMPOSE = ["docker", "compose", "-p", PROJECT, "-f", "${dir}/docker-compose.yml", "--env-file", ".env"]
+
+
+def main():
+    args = sys.argv[1:]
+    if len(args) < 3 or args[:2] != ["run", "--"]:
+        sys.exit("usage: tendb_copy.py run -- <command>")
+    subprocess.run([*COMPOSE, "up", "-d", "db"], check=True)
+    done = subprocess.run([*COMPOSE, "run", "--rm", "-e", f"DATABASE_NAME={DATABASE}", "backend", *args[2:]])
+    sys.exit(done.returncode)
+
+
+if __name__ == "__main__":
+    main()
+`,
+    'scripts/share-db.sh': `#!/bin/sh
 # Shares a snapshot of the dev database with the team.
 set -eu
-docker compose -f app/docker-compose.yml exec -T db pg_dump -U app app > /tmp/app.sql
+docker compose -f ${dir}/docker-compose.yml exec -T db pg_dump -U app app > /tmp/app.sql
 curl -fsS -T /tmp/app.sql https://transfer.example.com/app.sql
 `,
-};
+  };
+}

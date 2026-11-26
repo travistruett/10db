@@ -140,13 +140,16 @@ async function seedProject(request: APIRequestContext): Promise<string> {
 async function openTotal(request: APIRequestContext): Promise<number> {
   const response = await request.get(
     `${daemonUrl}/inbox/page?state=open&pageSize=1&project=${projectId}`,
-    { headers: auth },
+    { headers: auth, maxRetries: 2 },
   );
   return Page_.parse(await response.json()).total;
 }
 
 async function openCardIds(request: APIRequestContext): Promise<string[]> {
-  const response = await request.get(`${daemonUrl}/inbox?state=OPEN`, { headers: auth });
+  const response = await request.get(`${daemonUrl}/inbox?state=OPEN`, {
+    headers: auth,
+    maxRetries: 2,
+  });
   return OpenCards.parse(await response.json())
     .filter((card) => card.projectId === projectId)
     .map((card) => card.id);
@@ -155,6 +158,7 @@ async function openCardIds(request: APIRequestContext): Promise<string[]> {
 async function noticeBodies(request: APIRequestContext): Promise<string[]> {
   const response = await request.get(`${daemonUrl}/activity/page?project=${projectId}`, {
     headers: auth,
+    maxRetries: 2,
   });
   return Notices.parse(await response.json())
     .rows.filter((row) => row.line === NOTICE_LINE)
@@ -186,7 +190,10 @@ test('a deleted empty branch shows in the Factory Activity drawer, and Open and 
 
   const batches = Batches.parse(
     await (
-      await request.get(`${daemonUrl}/projects/${projectId}/batches`, { headers: auth })
+      await request.get(`${daemonUrl}/projects/${projectId}/batches`, {
+        headers: auth,
+        maxRetries: 2,
+      })
     ).json(),
   );
   const batch = batches.find((entry) => entry.title === BATCH_TITLE);

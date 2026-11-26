@@ -5,6 +5,7 @@ import {
   type ProjectId,
   type WorkstreamId,
 } from '@10db/contracts';
+import { coverageSection } from '../evals';
 import {
   insertInboxItem,
   openItemsForWorkstream,
@@ -22,6 +23,8 @@ export interface BuilderCheck {
   readonly baseHead: string;
   readonly head: string;
   readonly commits: readonly string[];
+  /** What the eval suites the change touched have to say; the card is never raised for them alone. */
+  readonly evalLines: readonly string[];
 }
 
 function commitsReady(count: number): string {
@@ -35,7 +38,10 @@ export function liveCheckCard(db: DbReader, workstreamId: WorkstreamId): InboxIt
 }
 
 function checkBody(check: BuilderCheck): string {
-  return `${commitsReady(check.commits.length)} Approve to finish the task, or send it back with a note.`;
+  return [
+    `${commitsReady(check.commits.length)} Approve to finish the task, or send it back with a note.`,
+    ...coverageSection(check.evalLines),
+  ].join('\n');
 }
 
 function checkDetail(check: BuilderCheck): Record<string, string | string[]> {

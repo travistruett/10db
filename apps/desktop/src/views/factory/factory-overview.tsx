@@ -34,13 +34,10 @@ import { CancelRunModal } from '../board/cancel-run-modal';
 import { ProjectTaskDrawer } from '../board/project-task-drawer';
 import { canCloseRun, canRetryRun } from '../board/task-state';
 import { useNewPlan } from '../sessions/start-fresh-tab';
-import { pageStatus } from '../workbench/page-status';
-import { passTitle } from '../workbench/pass-title';
-import { waitingCount } from '../workbench/queue-order';
-import { medianTurnMinutes } from '../workbench/timing';
 import { failureCauses, flatRows, waitsOnSomeoneElse } from './factory-summary';
 import { GlanceTiles } from './glance-tiles';
 import { LiveGroup, liveGroups } from './live-groups';
+import { livePassesOf } from './live-passes';
 import { NeedsYouPanel, type WaitingPass } from './needs-you-panel';
 import { ProjectList, type BusyPass } from './project-list';
 
@@ -96,23 +93,7 @@ export function FactoryOverview({
       now,
     ),
   );
-  const livePasses = passes
-    .filter((view) => passHoldsTasks(view.pass.state) && inView(view.pass.projectId))
-    .map((view) => {
-      const clock = { now, medianTurnMinutes: medianTurnMinutes(view.turns) };
-      const waiting = waitingCount(
-        view.pages.map((page) => ({
-          status: pageStatus(page, inbox, clock, view).status,
-          readyAt: page.turn?.readyAt ?? null,
-        })),
-      );
-      return {
-        key: view.pass.id,
-        projectId: view.pass.projectId,
-        title: passTitle(view.pages, view.pass.name),
-        waiting,
-      };
-    });
+  const livePasses = livePassesOf(passes, inbox, now, inView);
   const waitingPasses: WaitingPass[] = livePasses
     .filter((p) => p.waiting > 0)
     .map((p) => ({ key: p.key, projectId: p.projectId, title: p.title, pages: p.waiting }));

@@ -35,12 +35,16 @@ function emitCopy(ctx: WriteContext, copy: LocalCopyDto): void {
 
 export function insertLocalCopy(
   w: WriteContext,
-  row: { batchId: BatchId; teardownCommand: string },
+  row: {
+    batchId: BatchId;
+    teardownCommand: string;
+    step?: typeof CopyStep.Open | typeof CopyStep.Queued;
+  },
 ): LocalCopyDto {
   const copy = toLocalCopy({
     batchId: row.batchId,
     copyId: copyIdOf(row.batchId),
-    step: CopyStep.Open,
+    step: row.step ?? CopyStep.Open,
     baseTip: null,
     candidate: null,
     attempt: 0,
@@ -76,7 +80,15 @@ export function isLocalCopy(db: DbReader, batchId: BatchId): boolean {
 export type LocalCopyPatch = Partial<
   Pick<
     LocalCopyDto,
-    'step' | 'baseTip' | 'candidate' | 'attempt' | 'wait' | 'waitDetail' | 'retryAt' | 'teardownSha'
+    | 'step'
+    | 'baseTip'
+    | 'candidate'
+    | 'attempt'
+    | 'wait'
+    | 'waitDetail'
+    | 'retryAt'
+    | 'teardownSha'
+    | 'teardownCommand'
   >
 >;
 
@@ -138,7 +150,37 @@ export function listOpenLocalCopies(db: DbReader): LocalCopyDto[] {
     .map(toLocalCopy);
 }
 
-/** The project's copy batch in CUTTING, OPEN, SHIPPING or FAILED, if any. */
+/**
+ * The project's copy batch in CUTTING, OPEN, SHIPPING or FAILED, if any, one waiting its turn
+ * included: a copy that has been started is unfinished until it ships or is abandoned.
+ */
 export function unfinishedCopyOf(db: DbReader, projectId: ProjectId): BatchDto | null {
   return listUnfinishedBatches(db, projectId).find((b) => isLocalCopy(db, b.id)) ?? null;
+}
+
+/** The project's unfinished copy that has been cut, or is being cut: the one the others wait for. */
+export function copyInProgressOf(db: DbReader, projectId: ProjectId): BatchDto | null {
+  return (
+    listUnfinishedBatches(db, projectId).find((b) => {
+      const copy = getLocalCopy(db, b.id);
+      return copy !== null && copy.step !== CopyStep.Queued;
+    }) ?? null
+  );
+}
+
+/** The project's copy batches still waiting for their turn, the one started first leading. */
+export function queuedCopiesOf(db: DbReader, projectId: ProjectId): BatchDto[] {
+  return listUnfinishedBatches(db, projectId)
+    .filter((b) => getLocalCopy(db, b.id)?.step === CopyStep.Queued)
+    .reverse();
+}
+
+/** Every batch, of any project, whose copy waits for its turn: no cut has begun for it. */
+export function queuedCopyBatchIds(db: DbReader): BatchId[] {
+  return db
+    .select({ batchId: schema.localCopies.batchId })
+    .from(schema.localCopies)
+    .where(eq(schema.localCopies.step, CopyStep.Queued))
+    .all()
+    .map((row) => row.batchId);
 }

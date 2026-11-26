@@ -1,6 +1,10 @@
+import { lstat, realpath } from 'node:fs/promises';
+import { join, sep } from 'node:path';
 import {
   NotFoundError,
   type EvalManifest,
+  type EvalCoverageSideDto,
+  type EvalCoverageState,
   type EvalManifestResult,
   type EvalModelsDto,
   type EvalsDto,
@@ -22,11 +26,26 @@ import {
   type CallSite,
   type FoundCallSites,
 } from './call-sites';
+import { coverageOf, sideOf } from './coverage';
 import { evalDrift } from './drift';
 import { evalTaskDraft, findEvalSkills, type EvalTaskDraft } from './new-eval-task';
 import { readEvalManifest, writeEvalManifest } from './manifest-store';
 import { buildModels } from './models';
 import { createEvalsCache, readEvals, type FoundEvals } from './read-results';
+
+/** A suite and the times a task's branch point and last commit were committed. */
+export interface CoverageQuery {
+  readonly key: string;
+  readonly baseAt: string | null;
+  readonly headAt: string | null;
+}
+
+/** A covered suite's results on either side of a task, as the checkout holds them now. */
+export interface CoverageStanding {
+  readonly state: EvalCoverageState;
+  readonly before: EvalCoverageSideDto | null;
+  readonly after: EvalCoverageSideDto | null;
+}
 
 export interface EvalsService {
   read(projectId: ProjectId, repoPath: string): Promise<EvalsDto>;
@@ -43,6 +62,8 @@ export interface EvalsService {
     repoPath: string,
     manifest: EvalManifest,
   ): Promise<EvalManifestResult>;
+  /** Where each queried suite stands against its task's times, in the checkout's results as read now. */
+  standing(repoPath: string, queries: readonly CoverageQuery[]): Promise<CoverageStanding[]>;
   /** The task that drafts an eval for `request`: the project's eval skill and suites read at HEAD, never run. */
   draftTask(projectId: ProjectId, repoPath: string, request: NewEvalBody): Promise<EvalTaskDraft>;
 }
@@ -85,6 +106,27 @@ function untrackedIn(manifest: EvalManifest, found: FoundEvals): string[] {
       checked.add(glob);
       if (!globHolds(glob, found.tracked)) out.add(glob);
       if (out.size >= MAX_REPORTED) return [...out];
+    }
+  }
+  return [...out];
+}
+
+/**
+ * The env files a manifest's live settings name that are not a regular file in the working tree. They are
+ * untracked, so HEAD can't vouch for them; a link, or a name that resolves outside the checkout, is refused so
+ * the sandbox's read grant can't be led out of it.
+ */
+async function missingEnvFiles(manifest: EvalManifest, repoPath: string): Promise<string[]> {
+  const out = new Set<string>();
+  const root = await realpath(repoPath).catch(() => '');
+  for (const suite of manifest.suites) {
+    for (const file of suite.live?.envFiles ?? []) {
+      if (out.has(file)) continue;
+      const path = join(repoPath, file);
+      const stat = await lstat(path).catch(() => null);
+      // A linked directory in the name can lead outside the checkout, so the resolved path must stay inside it.
+      const real = stat?.isFile() ? await realpath(path).catch(() => '') : '';
+      if (root === '' || !real.startsWith(root + sep)) out.add(file);
     }
   }
   return [...out];
@@ -239,6 +281,18 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
       if (result.kind === 'no_run') throw new NotFoundError('Eval run', run ?? '');
       return result.detail;
     },
+    async standing(repoPath, queries) {
+      const read = await found(repoPath);
+      return queries.map((q) => {
+        const runs = read?.suites.find((s) => s.key === q.key)?.runs ?? [];
+        const { state, before, after } = coverageOf({ runs, baseAt: q.baseAt, headAt: q.headAt });
+        return {
+          state,
+          before: before === null ? null : sideOf(before),
+          after: after === null ? null : sideOf(after),
+        };
+      });
+    },
     async draftTask(projectId, repoPath, request) {
       const read = await found(repoPath);
       const manifest = readEvalManifest(deps.state.db, projectId);
@@ -257,6 +311,14 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
           ok: false,
           untracked,
           message: `Not tracked at HEAD, so nothing was recorded: ${untracked.join(', ')}`,
+        };
+      }
+      const missingEnv = await missingEnvFiles(manifest, repoPath);
+      if (missingEnv.length > 0) {
+        return {
+          ok: false,
+          untracked: missingEnv,
+          message: `Not a regular file in the checkout (no link), so nothing was recorded: ${missingEnv.join(', ')}`,
         };
       }
       const stored = { manifest, commit: read.commit, assessedAt: deps.state.now() };

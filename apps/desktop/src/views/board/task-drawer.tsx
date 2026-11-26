@@ -79,6 +79,7 @@ import { LinearTab } from './linear-tab';
 import { TaskPictures } from './task-pictures';
 import { TaskPlan } from './task-plan';
 import { TaskReport } from './task-report';
+import { TaskEvalCoverage } from './eval-marker';
 import { TaskForYou } from './task-for-you';
 import { TaskSkips } from './task-skips';
 import { LandingField } from './landing-field';
@@ -411,6 +412,7 @@ export function TaskDrawer({
           <Tabs.Panel value="overview" pt="lg">
             <Stack gap="xl">
               <TaskForYou workstreamId={workstream?.id} />
+              <TaskEvalCoverage taskId={task.id} projectId={task.projectId} />
               {task.acceptanceCriteria.length > 0 ? (
                 <Stack gap="xs">
                   <SectionLabel>What It Promises</SectionLabel>

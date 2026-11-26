@@ -19,7 +19,10 @@ added inside a migration.
 
 **What could go wrong, and how we'd know.**
 - *A slow or runaway pattern.* Each line is cut at 2,000 characters before it is tested, and the scan reads at most
-  512 KB of a change. A pattern that doesn't compile is refused when it is saved.
+  512 KB of a change. A pattern that doesn't compile is refused when it is saved. A pattern that compiles can still
+  backtrack for minutes, so the patterns run in a worker thread with a 5 s deadline for the whole reading. If it
+  times out or dies, no line is cleared (ask and hold keep the file as a clipped hit, show doesn't count it) and the
+  log names the watchpoints.
 - *A missed line in a huge change.* A file past the scan budget, or cut by the per-file cap with no matching line in
   the text read, can't be shown clear. For an **ask** or **hold** watchpoint it counts as a hit, kept clipped, so a
   huge change can't slip an index or a model id past a watchpoint you asked to judge. A **show** watchpoint doesn't

@@ -50,6 +50,9 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/projects/:projectId/evals' },
   { route: '/projects/:projectId/evals/:suiteKey' },
   { route: '/projects/:projectId/eval-models' },
+  // Evals draws a suite's Run window and its recent live runs: a database read and the manifest's own fields.
+  { route: '/projects/:projectId/evals/:suiteKey/live' },
+  { route: '/projects/:projectId/evals/live/runs' },
 ];
 
 /** A GET a screen may not read, with why. A route nothing draws is refused as well: less to reach. */
@@ -75,6 +78,9 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/health': 'Open to every caller; it needs no token.',
   '/sharing': "Sharing's status names the tailnet name and the host's login, kept to the 10db app.",
   '/devices': 'The paired devices are kept to the 10db app.',
+  '/push/key': "The host's push key is for a paired phone's subscribe, not for a screen.",
+  '/app': "The phone app's page is served to the share listener's devices, not to a screen.",
+  '/app/*': "The phone app's files are served to the share listener's devices, not to a screen.",
   '/shapes/:shapeId/screens/:name':
     "A kept screenshot is for the conversation's transcript, not for a screen.",
   '/tasks/:taskId/linear-posts':
@@ -169,6 +175,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/settings/keep-awake': 'No screen draws a setting.',
   '/settings/watchpoints': 'No screen draws a setting.',
   '/projects/:projectId/watchpoints': 'No screen draws a setting.',
+  '/projects/:projectId/eval-markers': 'No screen draws a task marker.',
+  '/tasks/:taskId/eval-coverage': 'No screen draws a task marker.',
   '/projects/:projectId/watchpoints/stats': 'No screen draws a setting.',
   '/workstreams/:id/watchpoint-hits':
     "A run's hunks and the agent's notes are lane-written text, which no screen draws.",

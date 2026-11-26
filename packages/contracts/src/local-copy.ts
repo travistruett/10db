@@ -8,6 +8,8 @@ const Timestamp = z.iso.datetime();
 
 /** Where a separate copy's landing stands; the journal row writes each step before it acts. */
 export const CopyStep = {
+  /** Started but not cut: another copy of the project is unfinished, so this one waits its turn. */
+  Queued: 'queued',
   Open: 'open',
   Merging: 'merging',
   Gating: 'gating',

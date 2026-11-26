@@ -125,7 +125,9 @@ Being honest about the edges is part of the design:
 - **One macOS user.** 10db, the agents and you share a user account, so anything already running as you
   (malware, say) is out of scope. When you share the Mac, other devices on your tailnet reach it through
   `tailscale serve` with device tokens only; the daemon still binds only `127.0.0.1`, and a device token never
-  expires until you revoke it.
+  expires until you revoke it. A phone's push carries only a card's kind and its task's headline (and the id a tap
+  opens), never its body, options or paths, because a lock screen is public; the daemon posts only to the
+  browsers' own push services (Google, Mozilla, Apple, Microsoft), never to an address a device names.
 - **Merged code is yours to review.** Once you merge an agent's pull request, its code runs wherever your
   code runs. Review and CI before merge are that boundary.
 - **New and unaudited.** This is young software built by one person with AI help, without an outside audit.

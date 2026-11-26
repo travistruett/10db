@@ -28,7 +28,13 @@ import { closedTabs, useClosedTabs } from './closed-tabs';
 import { usePlanOpen } from './plan/plan-choice';
 import { useSessionClosing } from './use-session-closing';
 import { openCardsByConversation } from './needs-you';
-import { panelGroups, panelOrder, topPosition, type PanelRow } from './panel-order';
+import {
+  panelGroups,
+  panelOrder,
+  panelRowProject,
+  topPosition,
+  type PanelRow,
+} from './panel-order';
 import { rowState, type RowState } from './row-state';
 import { markSeen, readSeen } from './seen';
 import { sessionAnnouncement } from './session-announcements';
@@ -173,11 +179,35 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     }
   };
 
+  /** A new session starts where the builder is reading: the row's project while it still exists, else the rail's. */
+  const readingProject = (row: PanelRow | null): ProjectId | null => {
+    const reading = row === null ? null : panelRowProject(row);
+    return list.some((p) => p.id === reading) ? reading : (selectedProject?.id ?? null);
+  };
+
+  /**
+   * The session on screen left and nothing else is left to show: a fresh tab opens where it was read, and the
+   * address takes it. It is set here, on the removal, rather than when the list comes up empty: a chat just made
+   * or reopened is not in the list until it is fetched, and an empty list would take the address from it.
+   */
+  const openFreshAfter = (gone: PanelRow): void => {
+    const made = openFreshTab(
+      gone.kind === 'fresh' ? removeFreshTab(fresh, gone.tab.id) : fresh,
+      list,
+      readingProject(gone),
+      -1,
+    );
+    if (made === null) return;
+    setFresh(made.tabs);
+    onSearch({ fresh: made.opened.id }, true);
+  };
+
   const closing = useSessionClosing({
     rows,
     selected,
     chatCount: chats.length,
     onSelect: select_,
+    onNoneLeft: openFreshAfter,
     onOpenChat: (chatId) => {
       onSearch({ chat: chatId }, false);
     },
@@ -198,16 +228,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   const closed = useClosedTabs();
 
   const newTab = (plan = false): void => {
-    // A new session starts where the builder is reading: the open session's project while it still exists,
-    // else the rail's.
-    const reading =
-      selected === null
-        ? null
-        : selected.kind === 'chat'
-          ? selected.chat.projectId
-          : selected.tab.projectId;
-    const here = list.some((p) => p.id === reading) ? reading : (selectedProject?.id ?? null);
-    const made = openFreshTab(fresh, list, here, -1, undefined, plan);
+    const made = openFreshTab(fresh, list, readingProject(selected), -1, undefined, plan);
     if (made === null) return;
     setFresh(made.tabs);
     onSearch({ fresh: made.opened.id }, false);

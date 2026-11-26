@@ -1,9 +1,11 @@
-import { DevicePlatform, type DeviceDto } from '@10db/contracts';
+import { DevicePlatform, SharingState, type DeviceDto } from '@10db/contracts';
 import { Alert, Button, Loader, Stack, Table, Text } from '@mantine/core';
 import { IconDeviceMobile } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { useDevices, useRevokeDevice } from '../../daemon/device-queries';
+import { useSharing } from '../../daemon/sharing-queries';
+import { PairDeviceModal } from './pair-device-modal';
 import { ConfirmModal } from '../../shell/confirm-modal';
 import { EmptyState } from '../../shell/empty-state';
 import { RaisedPanel } from '../../shell/raised-panel';
@@ -22,12 +24,30 @@ export function DevicesSection() {
   const devices = useDevices();
   const revoke = useRevokeDevice();
   const [revoking, setRevoking] = useState<DeviceDto | null>(null);
+  const [pairing, setPairing] = useState(false);
+  const ready = useSharing().data?.state === SharingState.Ready;
   const rows = devices.data ?? [];
   return (
     <Stack gap="md">
       <SectionHeading
         title="Devices"
         line="Phones and Macs that can use this Mac's 10db. Each has full access. Revoke cuts one off at once."
+        action={
+          <Button
+            disabled={!ready}
+            onClick={() => {
+              setPairing(true);
+            }}
+          >
+            {ready ? 'Pair a Device' : 'Finish Remote Access first'}
+          </Button>
+        }
+      />
+      <PairDeviceModal
+        opened={pairing}
+        onClose={() => {
+          setPairing(false);
+        }}
       />
       {devices.isPending ? <Loader size="sm" /> : null}
       {devices.isError ? (

@@ -142,10 +142,23 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     ],
   });
   expect(watched.ok()).toBe(true);
-  // The project's eval suite is defined by evals/gate.py, so a run that changes it is read as an eval change.
+  // The project's evals as an assessment records them: one suite covering the greeting folder (snapshotted as
+  // the run starts, and nothing has run it since) and one defined by evals/gate.py, so a run that changes
+  // that file is read as an eval change.
   const recorded = await request.put(`${daemonUrl}/projects/${projectId}/evals/manifest`, {
     headers: { Authorization: `Bearer ${E2E_TOKEN}` },
-    data: { suites: [{ key: 'gate', definitionPaths: ['evals/gate.py'] }], gaps: [] },
+    data: {
+      suites: [
+        {
+          key: 'greeting.tone',
+          label: 'Greeting tone',
+          coveredPaths: ['src/greeting/**'],
+          liveCommand: 'make eval-greeting',
+        },
+        { key: 'gate', definitionPaths: ['evals/gate.py'] },
+      ],
+      gaps: [],
+    },
   });
   expect(recorded.ok()).toBe(true);
   await page.goto('/board');
@@ -188,19 +201,29 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const card = ready.getByRole('button', { name: TASK, exact: true });
   await card.focus();
   await expect(card).toBeFocused();
-  // Each key waits for the drag to take the last one: an arrow before the pick-up lands is lost.
+  // The pick-up is handled on the card itself, not by the sensor's timed listener, so it is sent once.
   await page.keyboard.press('Space');
   await expect(ready.getByRole('listitem').nth(1)).toHaveCSS('opacity', '0.3');
   // The drop targets are measured after the pick-up renders; the card is announced over itself once
-  // they are. An arrow before that finds no target to move to and is lost.
+  // they are.
   await expect(
     page.getByRole('status').filter({ hasText: `${TASK} is over ${TASK}.` }),
   ).toHaveCount(1);
-  await page.keyboard.press('ArrowUp');
-  await expect(
-    page.getByRole('status').filter({ hasText: `${TASK} is over ${OTHER}.` }),
-  ).toHaveCount(1);
-  await page.keyboard.press('Space');
+  // dnd-kit's sensor listens for the move and drop keys only from a timer the pick-up starts, so a key
+  // sent before the timer fires is lost. Each such key is sent again until its effect shows.
+  await expect(async () => {
+    await page.keyboard.press('ArrowUp');
+    await expect(
+      page.getByRole('status').filter({ hasText: `${TASK} is over ${OTHER}.` }),
+    ).toHaveCount(1, { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+  // A drop shows as the card turning solid. Space on a card that has dropped would pick it up again, so
+  // the drop is sent again only while the card is still faded.
+  const inFlight = ready.getByRole('listitem', { name: TASK, exact: true });
+  await expect(async () => {
+    await page.keyboard.press('Space');
+    await expect(inFlight).toHaveCSS('opacity', '1', { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
   await expect(ready.getByRole('listitem').nth(0)).toHaveAccessibleName(TASK);
   await page.reload();
   await expect(
@@ -216,8 +239,12 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // The card in flight is faded in its list; it is solid again once dropped.
   const slot = page.getByRole('list', { name: 'Ready tasks' }).getByRole('listitem').first();
   await expect(slot).toHaveCSS('opacity', '0.3');
-  await page.keyboard.press('Enter');
-  await expect(slot).toHaveCSS('opacity', '1');
+  // Enter opens the card only when no drag is under way, so an Enter sent again while the card is still
+  // faded ends the drag and leaves its details closed.
+  await expect(async () => {
+    await page.keyboard.press('Enter');
+    await expect(slot).toHaveCSS('opacity', '1', { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
   await expect(page.getByRole('dialog', { name: 'Task' })).toBeHidden();
 
   // Park the other task from its menu and plan it again; parking survives a reload.
@@ -305,6 +332,12 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(forYou.getByText('✓ A plain text file, as the gate expects.')).toBeVisible();
   await expect(forYou.getByText('src/greeting/hello.txt')).toBeVisible();
   await expect(forYou.getByText('added line 1: hello')).toBeAttached();
+  // Evals sits beside it: the suite the change touched hasn't run since, with its live command to copy.
+  const evals = taskDrawer.getByTestId('eval-coverage');
+  await expect(evals.getByText('Greeting tone')).toBeVisible();
+  await expect(evals.getByText('not run', { exact: true })).toBeVisible();
+  await expect(evals.getByText('Changes src/greeting/hello.txt')).toBeVisible();
+  await expect(evals.getByText('make eval-greeting')).toBeVisible();
   // The run lowered the eval's bar, and the Evals watchpoint says so, naming the line it read.
   await forYou.getByRole('button', { name: /Evals/ }).click();
   await expect(forYou.getByText('bar lowered (GATE = dict(minimum_rate=0.5))')).toBeVisible();
@@ -341,6 +374,10 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await reportSwitch.locator('xpath=..').click();
   await expect(reportSwitch).not.toBeChecked();
   await open(page, 'Board');
+  // The Board's card for the finished task carries the same marker.
+  await expect(
+    page.getByTestId('task-card').filter({ hasText: TASK }).getByTestId('eval-marker'),
+  ).toHaveText('Greeting tone · not run');
 
   // Knowledge: a decision written through the API (as Claude Code would) appears in the open view
   // without a reload, with where it came from.
@@ -370,11 +407,15 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
 
   // The MCP commit really landed: the finished run's changes hold the one commit it made.
   const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
-  const runs = await request.get(`${daemonUrl}/workstreams?active=false`, { headers: auth });
+  const runs = await request.get(`${daemonUrl}/workstreams?active=false`, {
+    headers: auth,
+    maxRetries: 2,
+  });
   const run = Runs.parse(await runs.json()).find((w) => w.taskTitle === TASK);
   expect(run).toBeDefined();
   const changes = await request.get(`${daemonUrl}/workstreams/${run?.id ?? ''}/changes`, {
     headers: auth,
+    maxRetries: 2,
   });
   expect(changes.ok()).toBe(true);
   expect(Changes.parse(await changes.json()).commits).toHaveLength(1);
@@ -496,6 +537,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const copyBatch = async () => {
     const response = await request.get(`${daemonUrl}/projects/${projectId}/batches`, {
       headers: authHeader,
+      maxRetries: 2,
     });
     return Batches.parse(await response.json()).find((b) => b.title.includes(COPY_TASK));
   };
