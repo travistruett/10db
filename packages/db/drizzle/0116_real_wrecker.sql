@@ -1,1 +1,0 @@
-ALTER TABLE `judge_calls` ADD `attempts` integer DEFAULT 1 NOT NULL;

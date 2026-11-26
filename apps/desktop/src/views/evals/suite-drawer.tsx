@@ -3,6 +3,7 @@ import { Code, Group, Loader, SegmentedControl, Stack, Table, Text, Title } from
 import { useState, type ReactNode } from 'react';
 import { useEvalSuite } from '../../daemon/evals-queries';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
+import { LiveRunControls } from './live-run-modal';
 import { costText, dayTimeText, gatesPassed, rateText } from './eval-figures';
 
 /** How many runs the drawer lists before "n older runs". */
@@ -143,24 +144,22 @@ function Runs({
   );
 }
 
-function Manifest({ detail }: { readonly detail: EvalSuiteDetailDto }) {
+function Manifest({
+  detail,
+  projectId,
+}: {
+  readonly detail: EvalSuiteDetailDto;
+  readonly projectId: ProjectId;
+}) {
   const rows: [string, ReactNode][] = [];
   if (detail.coveredPaths.length > 0)
     rows.push(['Covers', detail.coveredPaths.map((p) => <Code key={p}>{p}</Code>)]);
   if (detail.suite.definitionPaths.length > 0)
     rows.push(['Definition', detail.suite.definitionPaths.map((p) => <Code key={p}>{p}</Code>)]);
   if (detail.freeCommand !== null) rows.push(['Free Check', <Code>{detail.freeCommand}</Code>]);
+  if (detail.liveCommand !== null) rows.push(['Live Run', <Code>{detail.liveCommand}</Code>]);
   if (detail.liveCommand !== null)
-    rows.push([
-      'Live Run',
-      <>
-        <Code>{detail.liveCommand}</Code>
-        <Text span size="xs" c="dimmed">
-          {' '}
-          spends money; you run it
-        </Text>
-      </>,
-    ]);
+    rows.push(['', <LiveRunControls projectId={projectId} suiteKey={detail.suite.key} />]);
   if (rows.length === 0) return null;
   return (
     <Section title="What It Covers">
@@ -184,9 +183,11 @@ function Manifest({ detail }: { readonly detail: EvalSuiteDetailDto }) {
 
 function SuiteBody({
   detail,
+  projectId,
   onPick,
 }: {
   readonly detail: EvalSuiteDetailDto;
+  readonly projectId: ProjectId;
   readonly onPick: (path: string) => void;
 }) {
   const { suite, run } = detail;
@@ -230,7 +231,7 @@ function SuiteBody({
           ))}
         </Section>
       ) : null}
-      <Manifest detail={detail} />
+      <Manifest detail={detail} projectId={projectId} />
     </Stack>
   );
 }
@@ -267,7 +268,7 @@ export function SuiteDrawer({
       {...(suiteKey === null ? {} : { showing: suiteKey })}
     >
       {detail.data ? (
-        <SuiteBody detail={detail.data} onPick={pick} />
+        <SuiteBody detail={detail.data} projectId={projectId} onPick={pick} />
       ) : detail.isError ? (
         <Text size="sm" c="red">
           {detail.error.message}

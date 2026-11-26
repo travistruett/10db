@@ -86,6 +86,8 @@ export const StoredWatchpointDetail = WatchpointDetail.catch(UNREADABLE_WATCHPOI
 /** The most patch text one file keeps, and one row keeps in all. */
 export const WATCHPOINT_FILE_PATCH_BYTES = 24 * 1024;
 export const WATCHPOINT_ROW_PATCH_BYTES = 128 * 1024;
+/** The most patch text read, in all, to test the line patterns of the watchpoints that have them. */
+export const WATCHPOINT_LINE_SCAN_BYTES = 512 * 1024;
 
 /** A matched file with the notes written about it: the agent's reason and the reviewer's check. */
 export const WatchpointFileView = WatchpointFileHit.extend({

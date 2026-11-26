@@ -136,3 +136,12 @@ these stores. Add a line here when a migration adds or changes a store.
   `revokeDevice` answers false, and emits nothing, for an unknown or already revoked device.
 - `push_subscriptions`: a device's Web Push subscriptions (unique `endpoint`, `p256dh`, `auth`), deleted with the
   device row and, since a revoke keeps the row, deleted explicitly by `revokeDevice` in the same write.
+
+## Live eval runs
+
+- Live eval runs, migration 0116 (generated): `eval_live_runs` (`store/eval-live-runs.ts`), one row per run of a
+  suite's live command the builder started with Run: the command, stop command, preview hash, Docker, hosts and env
+  files as the confirm window showed them, then `state` (`running`, `passed`, `failed`, `stopped`, `timed_out`,
+  `interrupted`), exit code, the output's tail, the cost the window showed and whether the stop command ran. Gone
+  with its project. `insertEvalLiveRun` inserts only when the project has no `running` row (one write, so two clicks
+  can't both start); `finishEvalLiveRun` ends a row once; `interruptRunningEvalLiveRuns` is the start's recovery.
