@@ -1,1 +1,1 @@
-export { startWatchdog, type WatchdogOptions } from './start';
+export { startWatchdog } from './start';
