@@ -63,6 +63,21 @@ export const WatchpointHit = z.object({
 });
 export type WatchpointHit = z.infer<typeof WatchpointHit>;
 
+/**
+ * A watchpoint's question as the judge answered it in shadow: the files whose hunks it read (of those its globs cover
+ * and no line settled), how many more it was not shown, and the probability of yes, null when no answer came.
+ * Nothing acts on it.
+ */
+export const WatchpointShadow = z.object({
+  key: z.string(),
+  label: z.string(),
+  asked: z.array(z.string()),
+  /** The files left open past what the judge could read. */
+  more: z.int().nonnegative().default(0),
+  yes: z.number().min(0).max(1).nullable(),
+});
+export type WatchpointShadow = z.infer<typeof WatchpointShadow>;
+
 /** What a watchpoint evidence row keeps. Changes to it stay backward compatible: stored rows are never rewritten. */
 export const WatchpointDetail = z.object({
   hits: z.array(WatchpointHit),
@@ -70,6 +85,8 @@ export const WatchpointDetail = z.object({
   head: z.string(),
   /** Set when the diff could not be read in full. */
   skipped: z.string().nullable(),
+  /** The questions asked in shadow; absent when none was. Never a hit, and nothing reads it to act. */
+  shadow: z.array(WatchpointShadow).optional(),
 });
 export type WatchpointDetail = z.infer<typeof WatchpointDetail>;
 

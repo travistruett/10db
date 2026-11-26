@@ -53,6 +53,8 @@ export const JudgeDecision = {
   Acceptance: 'acceptance',
   /** Acceptance: the same questions, asked of a stronger model, for a criterion the first call left unclear or not met. */
   AcceptanceSecond: 'acceptance_second',
+  /** Watchpoints: does a run's change do what a watchpoint's question asks about, in the files its rules left open? */
+  WatchpointQuestion: 'watchpoint_question',
 } as const;
 export type JudgeDecision = (typeof JudgeDecision)[keyof typeof JudgeDecision];
 
@@ -66,7 +68,7 @@ export const JudgeOutcome = {
   FallbackError: 'fallback_error',
   /** A cancel or a shutdown cut the call short: there is no answer, and the call did not fail. */
   Stopped: 'stopped',
-  /** A Shape decision in shadow (spec §9): the answer was logged to be scored, and nothing was shown. */
+  /** A decision in shadow (a Shape decision, a watchpoint's question): the answer was logged to be scored, and nothing acted on it. */
   Shadow: 'shadow',
   /** The builder changed the value the judge set, so the call is counted as wrong. */
   Overridden: 'overridden',
@@ -122,6 +124,9 @@ const ACCEPTANCE_SECOND_DECISION: JudgeDecisionConfig = {
   floor: 0.7,
 };
 
+/** A watchpoint's question ships switched off and in shadow: its answer is logged and kept, and acts on nothing. */
+const WATCHPOINT_QUESTION_DECISION: JudgeDecisionConfig = { ...DEFAULT_DECISION, enabled: false };
+
 export const JudgeConfig = z.object({
   enabled: z.boolean(),
   /** The OpenRouter, Anthropic API key or Bedrock account decisions run on; null until the builder picks one. */
@@ -142,6 +147,9 @@ export const JudgeConfig = z.object({
     [JudgeDecision.Acceptance]: JudgeDecisionConfig.default({ ...ACCEPTANCE_DECISION }),
     [JudgeDecision.AcceptanceSecond]: JudgeDecisionConfig.default({
       ...ACCEPTANCE_SECOND_DECISION,
+    }),
+    [JudgeDecision.WatchpointQuestion]: JudgeDecisionConfig.default({
+      ...WATCHPOINT_QUESTION_DECISION,
     }),
   }),
 });
@@ -168,6 +176,7 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
     [JudgeDecision.TestValue]: { ...DEFAULT_DECISION },
     [JudgeDecision.Acceptance]: { ...ACCEPTANCE_DECISION },
     [JudgeDecision.AcceptanceSecond]: { ...ACCEPTANCE_SECOND_DECISION },
+    [JudgeDecision.WatchpointQuestion]: { ...WATCHPOINT_QUESTION_DECISION },
   },
 };
 
@@ -221,6 +230,7 @@ export const JudgeConfigPatch = z
         [JudgeDecision.TestValue]: JudgeDecisionConfigPatch,
         [JudgeDecision.Acceptance]: JudgeDecisionConfigPatch,
         [JudgeDecision.AcceptanceSecond]: JudgeDecisionConfigPatch,
+        [JudgeDecision.WatchpointQuestion]: JudgeDecisionConfigPatch,
       })
       .partial()
       .strict(),

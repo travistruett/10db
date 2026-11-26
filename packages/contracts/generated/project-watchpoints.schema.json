@@ -39,6 +39,19 @@
               "maxLength": 200
             }
           },
+          "question": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 400
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "guidance": {
             "type": "string",
             "maxLength": 2000
