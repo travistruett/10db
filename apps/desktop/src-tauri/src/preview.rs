@@ -33,6 +33,8 @@ const CROP_MAX_BYTES: usize = 6 * 1024 * 1024;
 const TARGETS_MAX: usize = 64;
 /// The least time between two `show_composer` calls a window makes.
 const SHOW_EVERY: Duration = Duration::from_secs(1);
+/// The least time between two `preview_dictation` calls a window makes, so a page can't keep restarting it.
+const DICTATE_EVERY: Duration = Duration::from_secs(3);
 
 struct Preview {
     project_id: String,
@@ -45,6 +47,7 @@ struct Preview {
     targets: HashMap<String, String>,
     made: VecDeque<String>,
     last_show: Option<Instant>,
+    last_dictation: Option<Instant>,
 }
 
 impl Preview {
@@ -195,6 +198,7 @@ pub async fn open_preview(
                 targets: HashMap::new(),
                 made: VecDeque::new(),
                 last_show: None,
+                last_dictation: None,
             },
         );
         reuse
@@ -479,7 +483,8 @@ pub fn show_composer(
 }
 
 /// Starts macOS Dictation in the note the builder is typing. Only while the preview is in front, so
-/// the page can't start it in a window the builder is using.
+/// the page can't start it in a window the builder is using, and at most once every three seconds.
+/// The page can still start it unasked while it is in front; macOS shows its microphone indicator then.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 pub fn preview_dictation(
@@ -492,7 +497,15 @@ pub fn preview_dictation(
     }
     {
         let mut map = previews.windows.lock().map_err(|e| e.to_string())?;
-        checked(&mut map, &webview).map_err(|r| r.to_string())?;
+        let preview = checked(&mut map, &webview).map_err(|r| r.to_string())?;
+        let now = Instant::now();
+        if preview
+            .last_dictation
+            .is_some_and(|last| now.duration_since(last) < DICTATE_EVERY)
+        {
+            return Err("dictation was just started".into());
+        }
+        preview.last_dictation = Some(now);
     }
     crate::dictation::start_dictation(app)
 }

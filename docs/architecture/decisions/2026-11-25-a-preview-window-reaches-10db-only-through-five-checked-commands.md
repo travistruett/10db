@@ -19,8 +19,10 @@
 - The main window parses it again (`PickArrived`) and only adds it to that page's draft as a chip. Nothing from
   the page sends, answers, approves or starts anything. `show_composer` works only while the preview is
   focused, at most once a second, and the main window then focuses the page's picks, not its input.
-  `preview_dictation` also works only while the preview is focused, so the page can start macOS Dictation
-  only in its own window, in the field the builder is in.
+  `preview_dictation` also works only while the preview is focused, at most once every three seconds, so the
+  page can start macOS Dictation only in its own window. The shell can't tell the picker's Dictate button from
+  the page's own call, so a page can start it unasked while the builder is in the preview; macOS shows its
+  microphone indicator, and the words land in the page, which could already read anything typed there.
 - The crop is the shell's `WKWebView takeSnapshot` of the pick's box (`snapshot.rs`), not a script in the page.
 
 ## Why
