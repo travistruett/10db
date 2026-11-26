@@ -1577,6 +1577,8 @@ export const judgeCalls = sqliteTable(
     >(),
     outcome: text('outcome').$type<JudgeOutcome>().notNull(),
     latencyMs: integer('latency_ms'),
+    /** How many tries the call took; an unattended call that timed out once is tried again. */
+    attempts: integer('attempts').notNull().default(1),
     costUsd: real('cost_usd'),
     workstreamId: text('workstream_id').$type<WorkstreamId>(),
     taskId: text('task_id').$type<TaskId>(),

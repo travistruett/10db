@@ -1,11 +1,16 @@
-import type { TaskId, WorkstreamId } from '@10db/contracts';
+import { AccountKind, type TaskId, type WorkstreamId } from '@10db/contracts';
 import type { Clock } from '../clock';
 import type { Logger } from '../log';
+import type { JudgeCredential } from './credential';
 
-/** Failures in a row, with no answer between, that make a flaky provider an outage: a blip is one or two. */
+/** How far back the failure rate is read: a slow tail is a few calls in it, an outage most of them. */
+export const OUTAGE_WINDOW_MS = 5 * 60 * 1000;
+/** The fewest failures in the window that can make an outage, so two or three slow answers never do. */
 export const OUTAGE_FAILURES = 5;
-/** Failing this long with no answer is an outage however few calls were made. */
-export const OUTAGE_DURATION_MS = 10 * 60 * 1000;
+/** Failing this long with no answer between is an outage however few calls were made. */
+export const OUTAGE_SILENCE_MS = 2 * 60 * 1000;
+/** The most calls the window keeps; the oldest is dropped first. */
+const WINDOW_CALLS_MAX = 512;
 /** Answers in a row that must follow a raised outage before its card closes, so a half-down provider doesn't flap it. */
 export const OUTAGE_RECOVERY_ANSWERS = 3;
 /** A cause that may clear alone is not raised again this soon after the card closed. */
@@ -20,14 +25,20 @@ export type JudgeCallHealth =
       readonly kind: 'failed';
       readonly reason: 'no_key' | 'timeout' | 'error';
       readonly detail: string;
+      /** The model the call asked. */
+      readonly model: string;
+      /** The kind of account the call ran on; null when no credential was read. */
+      readonly accountKind: JudgeCredential['kind'] | null;
       readonly taskId?: TaskId;
       readonly workstreamId?: WorkstreamId;
     };
 
 /** Why the judge is down, in words a card can use. */
 export interface JudgeOutage {
-  /** The provider's name, or "the provider" when the error text names none. */
+  /** The provider's name, or "the provider" when neither the account nor the error text names one. */
   readonly provider: string;
+  /** The model the failing call asked. */
+  readonly model: string;
   /** What is wrong, as a clause: "says the account has no credits". */
   readonly cause: string;
   /** What clears it, as a clause: "add credits or check the key on that account". */
@@ -51,8 +62,16 @@ const CREDIT_BALANCE = /credit balance is too low/i;
 /** The SDK's error names for an expired or missing AWS sign-in carry no status. */
 const BEDROCK_SIGN_IN = /CredentialsProviderError|ExpiredToken|SSO session|Token has expired/i;
 
-function providerOf(detail: string): string {
-  return PROVIDERS.find((name) => detail.includes(name)) ?? 'the provider';
+const PROVIDER_NAMES = {
+  [AccountKind.OpenRouter]: 'OpenRouter',
+  [AccountKind.AnthropicApiKey]: 'Anthropic',
+  [AccountKind.Bedrock]: 'Bedrock',
+} as const satisfies Record<JudgeCredential['kind'], (typeof PROVIDERS)[number]>;
+
+/** The account's provider, else the one the error text names. */
+function providerOf(failure: Extract<JudgeCallHealth, { kind: 'failed' }>): string {
+  if (failure.accountKind !== null) return PROVIDER_NAMES[failure.accountKind];
+  return PROVIDERS.find((name) => failure.detail.includes(name)) ?? 'the provider';
 }
 
 /** What a failure says about the provider and what the builder can do; `hard` ones will not fix themselves. */
@@ -63,7 +82,7 @@ function causeOf(failure: Extract<JudgeCallHealth, { kind: 'failed' }>): {
   hard: boolean;
 } {
   const { detail } = failure;
-  const provider = providerOf(detail);
+  const provider = providerOf(failure);
   const fixKey = 'check the key on that account';
   if (failure.reason === 'no_key')
     return {
@@ -107,8 +126,9 @@ function causeOf(failure: Extract<JudgeCallHealth, { kind: 'failed' }>): {
 
 /**
  * Turns the judge's calls into one outage: the first failure of a run is logged at warn, and a failure
- * that won't clear on its own, or `OUTAGE_FAILURES` failures in a row (or failing for `OUTAGE_DURATION_MS`)
- * with no answer between, tells the sink once. The card closes after `OUTAGE_RECOVERY_ANSWERS` answers in a
+ * that won't clear on its own, most calls failing over `OUTAGE_WINDOW_MS` (at least `OUTAGE_FAILURES` of
+ * them), or failing for `OUTAGE_SILENCE_MS` with no answer between, tells the sink once. A tail of slow
+ * answers among many good ones raises nothing. The card closes after `OUTAGE_RECOVERY_ANSWERS` answers in a
  * row; no cause is raised again within `OUTAGE_COOLDOWN_MS` of that.
  */
 export function createJudgeOutageWatch(deps: {
@@ -116,6 +136,17 @@ export function createJudgeOutageWatch(deps: {
   readonly logger: Logger;
   readonly sink: JudgeOutageSink;
 }): (health: JudgeCallHealth) => void {
+  // Each call's time and whether it answered, oldest first, for the window's failure rate.
+  const calls: { readonly at: number; readonly ok: boolean }[] = [];
+  const note = (ok: boolean): void => {
+    const now = deps.clock.now().getTime();
+    calls.push({ at: now, ok });
+    while (
+      calls.length > WINDOW_CALLS_MAX ||
+      (calls[0] !== undefined && now - calls[0].at > OUTAGE_WINDOW_MS)
+    )
+      calls.shift();
+  };
   let failures = 0;
   let failingSince = 0;
   let warned = false;
@@ -137,11 +168,13 @@ export function createJudgeOutageWatch(deps: {
       if (health.kind === 'off') {
         failures = 0;
         warned = false;
+        calls.length = 0;
         if (raised || !checkedAtStart) close();
         checkedAtStart = true;
         return;
       }
       if (health.kind === 'answered') {
+        note(true);
         failures = 0;
         warned = false;
         if (raised) {
@@ -154,6 +187,7 @@ export function createJudgeOutageWatch(deps: {
         return;
       }
       const now = deps.clock.now().getTime();
+      note(false);
       if (failures === 0) failingSince = now;
       failures += 1;
       answersSinceRaise = 0;
@@ -166,12 +200,15 @@ export function createJudgeOutageWatch(deps: {
         );
       }
       if (raised) return;
-      const lasting = failures >= OUTAGE_FAILURES || now - failingSince >= OUTAGE_DURATION_MS;
+      const failed = calls.filter((c) => !c.ok).length;
+      const mostFail = failed >= OUTAGE_FAILURES && failed > calls.length - failed;
+      const lasting = mostFail || now - failingSince >= OUTAGE_SILENCE_MS;
       const cooling = clearedAt !== null && now - clearedAt < OUTAGE_COOLDOWN_MS;
       if (cooling || (!hard && !lasting)) return;
       raised = true;
       deps.sink.raise({
         provider,
+        model: health.model,
         cause,
         fix,
         ...(health.taskId === undefined ? {} : { taskId: health.taskId }),
