@@ -30,6 +30,15 @@ export const commentText = (
   post: { readonly id: string; readonly event: string; readonly attempt: number },
 ): string => `${cleanBody(body)}\n\n${footerOf(post)}`;
 
+/** The line an agent ends with when Linear answered that it is not signed in: its rows are held, not failed. */
+export const SIGNED_OUT_LINE = 'Linear: not signed in';
+
+const SIGNED_OUT = /^\s*[-*]?\s*`?linear:\s*not signed in\.?`?\s*$/i;
+
+/** Whether a message has the signed-out line on a line of its own (a bullet or backticks allowed). */
+export const saysSignedOut = (text: string): boolean =>
+  text.split(/\r?\n/).some((line) => SIGNED_OUT.test(line));
+
 /** What the agent's closing message says of one update: Linear's comment id, or the words Linear failed with. */
 export type WrittenLine =
   | { readonly postId: LinearPostId; readonly commentId: string }

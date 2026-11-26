@@ -5,6 +5,7 @@ import {
   ConversationState,
   harnessOf,
   InvalidError,
+  LinearEventKind,
   LinearVia,
   type AccountId,
   type ConversationId,
@@ -48,7 +49,13 @@ import type { ShapeToolRequest, ShapeVerdict } from '../sessions';
 import { reporterBlockedBy } from './reporter-events';
 import { refreshReporterCard } from './reporter-inbox';
 import { LinearWriteError, type LinearCommentWriter } from './reporter-writer';
-import { cleanBody, commentText, MIN_BODY_CHARS, parseWrittenLines } from './reporter-comment';
+import {
+  cleanBody,
+  commentText,
+  MIN_BODY_CHARS,
+  parseWrittenLines,
+  saysSignedOut,
+} from './reporter-comment';
 import { judgeReporterCall, secretIn, type ReporterRun } from './reporter-guard';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
 import { signInNeeded } from './sign-in-needed';
@@ -70,8 +77,18 @@ export const RUN_DEADLINE_MS = 15 * 60_000;
 export const SNAPSHOT_DEADLINE_MS = 3 * 60_000;
 /** A failed row is due again after `first` times two to the number of earlier failures, at most `max`. */
 export const BACKOFF_MS = { first: 5 * 60_000, max: 6 * 60 * 60_000 } as const;
-/** A row that fails this many times is failed for good. */
+/** A row that fails this many times is failed for good, unless it is one of a run's last updates. */
 export const MAX_TRIES = 5;
+/**
+ * A run's last updates: retried at the backoff cap until they post or the builder dismisses them, since they are
+ * what a reader of the issue needs most.
+ */
+const LASTING: ReadonlySet<LinearEventKind> = new Set([
+  LinearEventKind.Verdict,
+  LinearEventKind.Ended,
+]);
+const maxTriesOf = (event: LinearEventKind): number =>
+  LASTING.has(event) ? Number.POSITIVE_INFINITY : MAX_TRIES;
 /**
  * How long a row held for a Linear sign-in waits before it is tried again, and how long an account a run found
  * signed out is taken as signed out. A wake (a move, a sign-in, Linear switched on) ends the wait at once.
@@ -287,7 +304,7 @@ export function createLinearReporter(
           [row.id],
           error,
           new Date(now + backoffMs(row.tries)).toISOString(),
-          MAX_TRIES,
+          maxTriesOf(row.event),
         );
     });
   };
@@ -444,8 +461,8 @@ export function createLinearReporter(
   };
 
   /**
-   * Ends the run once: its taken rows still pending become withheld when the guard withheld a write, are held
-   * when a completed session never reached Linear, and fail otherwise. The conversation is retired, and the task
+   * Ends the run once: its taken rows still pending are held when a completed session found no Linear sign-in,
+   * and fail otherwise (a row the guard withheld is already settled). The conversation is retired, and the task
    * re-armed, off the engine's effect chain.
    */
   const settle = (flight: Flight, reason: string, complete = false): void => {
@@ -491,13 +508,25 @@ export function createLinearReporter(
     return { kind: 'missing', reason };
   };
 
-  /** The run's session never reached Linear: its account's agent is taken as not signed in to it. */
-  const missedLinear = (flight: Flight): flight is Flight & { accountId: AccountId } =>
-    flight.guard !== null &&
-    // A run 10db writes for makes no Linear call of its own: it shows nothing about the agent's sign-in.
-    !flight.guard.direct &&
-    flight.accountId !== null &&
-    !flight.reachedLinear;
+  /**
+   * The run's agent is taken as not signed in to Linear: it never reached Linear, or it said Linear answered that
+   * it is not signed in (`SIGNED_OUT_LINE`). A wrong claim costs a hold, never a try.
+   */
+  const signedOutRun = (flight: Flight): flight is Flight & { accountId: AccountId } => {
+    if (
+      flight.guard === null ||
+      // A run 10db writes for makes no Linear call of its own: it shows nothing about the agent's sign-in.
+      flight.guard.direct ||
+      flight.accountId === null
+    )
+      return false;
+    if (!flight.reachedLinear) return true;
+    return listItems(state.db, flight.conversationId, { afterSeq: flight.afterSeq })
+      .filter((item) => item.kind === ConversationItemKind.AgentMessage)
+      .some((item) =>
+        saysSignedOut(parseItemBody(ConversationItemKind.AgentMessage, item.body).text),
+      );
+  };
 
   /**
    * What the run's closing message says of the comments the guard let out: the id Linear gave each, which is
@@ -542,24 +571,15 @@ export function createLinearReporter(
       );
     }
     try {
-      const guard = flight.guard;
       // What the session took; when it never got that far, what was due when the run was triggered.
       const owned = flight.taken.size > 0 ? flight.taken : flight.due;
       const open = pendingLinearPosts(state.db, { taskId: flight.taskId }).filter(
         (p) => owned.has(p.id) && !flight.written.has(p.id),
       );
-      const [pattern] = guard === null ? [] : [...guard.withheld];
-      if (pattern !== undefined)
-        state.write((ctx) => {
-          recordLinearPosts(
-            ctx,
-            open.map((p) => p.id),
-            { state: 'withheld', pattern },
-          );
-        });
-      // A session whose turn completed without one Linear call had no Linear: a sign-in, not a retry, fixes it.
-      // A run that left no row open (it recorded them all) shows nothing about the account.
-      else if (complete && open.length > 0 && missedLinear(flight))
+      // A session whose turn completed without Linear (no allowed call, or Linear said it is not signed in): a
+      // sign-in, not a retry, fixes it. A run that left no row open (it recorded them all) shows nothing about
+      // the account.
+      if (complete && open.length > 0 && signedOutRun(flight))
         hold(open, foundSignedOut(flight.accountId));
       else fail(open, flight.error ?? reason);
       refreshCard(flight.projectId);
@@ -616,6 +636,8 @@ export function createLinearReporter(
     });
     const tasks = new Set(pendingLinearPosts(state.db, { projectId }).map((p) => p.taskId));
     for (const taskId of tasks) arm(taskId);
+    // A Retry closed the card; what is still owed or withheld brings it back.
+    refreshCard(projectId);
   };
 
   const runOf = (sessionId: SessionId): { flight: Flight; guard: ReporterRun } => {
@@ -695,7 +717,6 @@ export function createLinearReporter(
           linearPrefixes: input.linearPrefixes,
           link,
           direct: false,
-          withheld: new Set(),
           comments: new Map(),
         };
         flight.sessionId = input.sessionId;
@@ -721,7 +742,6 @@ export function createLinearReporter(
         linearPrefixes: input.linearPrefixes,
         link,
         direct: input.writer !== null,
-        withheld: new Set(),
         comments: new Map(),
       };
       flight.sessionId = input.sessionId;
@@ -847,9 +867,24 @@ export function createLinearReporter(
         const why = error instanceof Error ? error.message : String(error);
         if (error instanceof LinearWriteError && error.refused) {
           log.warn({ err: error, taskId: flight.taskId }, 'Linear refused a reporter comment');
+          if (error.signedOut && flight.accountId !== null) {
+            // Linear turned the sign-in away: the row is held, with no try spent, until the account signs in.
+            const found = foundSignedOut(flight.accountId);
+            state.write((ctx) => {
+              reopenLinearPost(
+                ctx,
+                post.id,
+                found.reason,
+                new Date(found.until).toISOString(),
+                null,
+              );
+            });
+            refreshCard(flight.projectId);
+            return { ok: true, written: false, why: found.reason };
+          }
           const due = new Date(clock.now().getTime() + backoffMs(post.tries)).toISOString();
           state.write((ctx) => {
-            reopenLinearPost(ctx, post.id, why, due, MAX_TRIES);
+            reopenLinearPost(ctx, post.id, why, due, maxTriesOf(post.event));
           });
           refreshCard(flight.projectId);
           return { ok: true, written: false, why };
@@ -886,7 +921,18 @@ export function createLinearReporter(
           return { decision: 'deny', reason: 'A snapshot run has read as much as it may.' };
       }
       const judged = judgeReporterCall(flight.guard, { toolName: req.toolName, input: req.input });
-      if (judged.withheld !== undefined) flight.guard.withheld.add(judged.withheld);
+      const withheld = judged.withheld;
+      if (withheld !== undefined) {
+        // Only the post whose comment carried the secret is withheld; the run's other rows go on.
+        state.write((ctx) => {
+          recordLinearPosts(ctx, [withheld.postId], {
+            state: 'withheld',
+            pattern: withheld.pattern,
+          });
+        });
+        refreshCard(flight.projectId);
+        return judged.verdict;
+      }
       const wrote = judged.wrote;
       if (wrote !== undefined) {
         // The row records the comment before Linear gets it: a crash after this leaves a row with no id, never a

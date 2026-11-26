@@ -46,8 +46,6 @@ export interface ReporterRun {
    * When false, the agent's `save_comment` carries the text 10db built.
    */
   readonly direct: boolean;
-  /** Pattern names refused this run. */
-  readonly withheld: Set<string>;
   /** Per owed update, the comment 10db built from the agent's body: the only comment text the run may write. */
   readonly comments: Map<LinearPostId, StagedComment>;
 }
@@ -141,11 +139,18 @@ export function secretIn(input: unknown): string | null {
   return null;
 }
 
-/** Pure: the rule for one call of the reporter. The caller applies `withheld` to the run. */
+/**
+ * Pure: the rule for one call of the reporter. `withheld` names the one post whose comment carried a secret and
+ * the pattern it matched; the caller withholds that row only.
+ */
 export function judgeReporterCall(
   run: Readonly<ReporterRun>,
   call: { toolName: string; input: unknown },
-): { verdict: GuardVerdict; withheld?: string; wrote?: LinearPostId } {
+): {
+  verdict: GuardVerdict;
+  withheld?: { readonly postId: LinearPostId; readonly pattern: string };
+  wrote?: LinearPostId;
+} {
   const { toolName } = call;
   if (toolName.startsWith('mcp__10db__')) {
     if (run.readOnly) return { verdict: deny('A snapshot run may only read Linear.') };
@@ -193,10 +198,10 @@ export function judgeReporterCall(
   const judged = judgeWrite(run, tool, allowed, input);
   if ('refusal' in judged) return { verdict: deny(judged.refusal) };
   if (secret !== null) {
-    return {
-      verdict: deny(`Withheld: the text matches ${secret}; nothing is written.`),
-      withheld: secret,
-    };
+    const verdict = deny(`Withheld: the text matches ${secret}; nothing is written.`);
+    return judged.wrote === undefined
+      ? { verdict }
+      : { verdict, withheld: { postId: judged.wrote, pattern: secret } };
   }
   return judged.wrote === undefined
     ? { verdict: allow() }

@@ -22,6 +22,7 @@ import {
   listWorkstreams,
   type DbReader,
 } from '@10db/db';
+import { SIGNED_OUT_LINE } from './reporter-comment';
 import { reporterSettings } from './reporter-settings';
 import { linearLinkOf } from './task-link';
 
@@ -200,6 +201,7 @@ const HAND_OVER_AGENT = [
   ...HAND_OVER,
   "10db checks the body and returns the exact arguments for Linear's `save_comment`; call `save_comment` with those arguments unchanged, once. Any other `save_comment` is refused, and the refusal says why.",
   "End your last message with one line per update you handed over: `<post id>: <the comment id save_comment returned>`, or `<post id>: failed: <Linear's words>` when the write failed. 10db records the comment from that line, and never asks for it again.",
+  `If Linear answers that you are not signed in, or asks you to sign in, write nothing more and end your last message with the line \`${SIGNED_OUT_LINE}\`. 10db holds the updates until the account signs in.`,
 ];
 
 const RULES = [

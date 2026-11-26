@@ -3,6 +3,7 @@ import { serve } from '@hono/node-server';
 import {
   AccountKind,
   ConversationOwnerKind,
+  EventType,
   ExternalKind,
   LinearEventKind,
   LinearPostState,
@@ -17,6 +18,7 @@ import {
   enqueueLinearPost,
   findOpenByFoldKey,
   insertTask,
+  insertWorkstream,
   listLinearPosts,
   seedProject,
   setAppSetting,
@@ -26,9 +28,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { createExploreEngine, type ExploreEngine } from '../conversation';
-import { createEventBus, createLiveFrames, createStateStore, type StateStore } from '../events';
+import {
+  createEventBus,
+  createLiveFrames,
+  createStateStore,
+  type EventBus,
+  type StateStore,
+} from '../events';
 import { createGit } from '../git';
-import { createInboxService } from '../inbox';
+import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { createMcpHandler, mintSessionToken } from '../mcp';
 import { FakeAdapter, type FakeScriptBook } from '../sessions';
@@ -39,7 +47,8 @@ import {
   type LinearReporter,
 } from './reporter';
 import { reporterConversations } from './reporter-conversation';
-import { linearReporterFoldKey } from './reporter-inbox';
+import { REPORT_DELAY_MS, subscribeLinearEvents } from './reporter-events';
+import { answerReporterCard, linearReporterFoldKey, ReporterChoice } from './reporter-inbox';
 import { reporterHooks } from './reporter-owner';
 import { LinearWriteError } from './reporter-writer';
 import { SNAPSHOT_FIRST_LINE, SNAPSHOT_STARTER } from './snapshot';
@@ -72,7 +81,10 @@ let launchError: Error | null = null;
 let linearHeaders: Record<string, string> | null = null;
 /** The comments 10db wrote through its own writer, and the refusal its next write gets. */
 let written: { issueId: string; body: string }[] = [];
-let writeError: { message: string; refused: boolean } | null = null;
+let writeError: { message: string; refused: boolean; signedOut?: boolean } | null = null;
+let bus: EventBus;
+/** The world's Inbox, wired as `daemon/start.ts` wires it: a Retry on the reporter's card wakes the reporter. */
+let inbox: InboxService;
 
 const BODY = 'The run started on this task.';
 
@@ -117,7 +129,7 @@ function makeReporter(): LinearReporter {
           ],
         }),
     },
-    inbox: createInboxService({ state, onParkedAnswer: () => undefined }),
+    inbox,
   });
   engine.register(
     ConversationOwnerKind.Reporter,
@@ -147,7 +159,9 @@ function makeReporter(): LinearReporter {
           written.push(comment);
           return writeError === null
             ? Promise.resolve('direct-1')
-            : Promise.reject(new LinearWriteError(writeError.message, writeError.refused));
+            : Promise.reject(
+                new LinearWriteError(writeError.message, writeError.refused, writeError.signedOut),
+              );
         },
       }),
       launch: () => {
@@ -197,11 +211,24 @@ beforeEach(async () => {
   linearHeaders = null;
   written = [];
   writeError = null;
-  ({ store, close: closeStore } = createTestStore());
-  repo = tempDir('reporter');
-  const bus = createEventBus();
-  state = createStateStore(store, bus);
   clock = new ManualClock();
+  // The store writes on the world's clock, as the daemon's does.
+  ({ store, close: closeStore } = createTestStore(() => clock.now()));
+  repo = tempDir('reporter');
+  bus = createEventBus();
+  state = createStateStore(store, bus);
+  inbox = createInboxService({
+    state,
+    onParkedAnswer: () => undefined,
+    onFlagAnswerInWrite: (ctx, item, answer) => {
+      const retried = answerReporterCard(ctx, item, answer);
+      return retried === null
+        ? undefined
+        : () => {
+            reporter.wake(retried);
+          };
+    },
+  });
   book = {};
   adapter = new FakeAdapter(book);
   project = seedProject(store, { name: 'alpha', repoPath: repo.path });
@@ -267,16 +294,20 @@ afterEach(async () => {
   closeStore();
 });
 
-const oweOne = (dedupeKey = 'run_started:1:0'): LinearPostId => {
+const oweOne = (
+  dedupeKey = 'run_started:1:0',
+  event: LinearEventKind = LinearEventKind.RunStarted,
+  dueInMs = 30_000,
+): LinearPostId => {
   const row = store.write((ctx) =>
     enqueueLinearPost(ctx, {
       taskId: task.id,
       projectId: project.id,
-      event: LinearEventKind.RunStarted,
+      event,
       dedupeKey,
       attempt: 1,
       detail: {},
-      dueAt: new Date(clock.now().getTime() + 30_000).toISOString(),
+      dueAt: new Date(clock.now().getTime() + dueInMs).toISOString(),
     }),
   ).value;
   if (row === null) throw new Error('the row was not made');
@@ -504,6 +535,123 @@ describe('the Linear reporter', () => {
       state: LinearPostState.Pending,
       lastError: 'Issue not found',
     });
+  });
+
+  it.each([
+    ['10db’s own write is turned away for its sign-in', 'direct'],
+    ['the agent says Linear answered that it is not signed in', 'agent'],
+  ] as const)('holds an update without spending a try when %s', async (_name, how) => {
+    const id = oweOne();
+    if (how === 'direct') {
+      linearHeaders = { Authorization: 'Bearer lin_api_x' };
+      writeError = { message: 'HTTP 401', refused: true, signedOut: true };
+      book[KEY] = [
+        [
+          { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY } },
+          { do: 'turn_complete' },
+        ],
+      ];
+    } else {
+      book[KEY] = [
+        [
+          // The call reaches Linear, which answers that the session must sign in.
+          { do: 'tool', toolName: `${PREFIX}get_issue`, input: { id: ISSUE }, result: '{}' },
+          { do: 'say', text: 'Linear asked me to sign in.\n\nLinear: not signed in' },
+          { do: 'turn_complete' },
+        ],
+      ];
+    }
+    clock.advance(30_000);
+    await expect
+      .poll(() => rows()[0]?.lastError ?? null, { timeout: 10_000 })
+      .toContain("isn't signed in to Linear");
+    expect(rows()[0]).toMatchObject({ state: LinearPostState.Pending, tries: 0 });
+  });
+
+  it('retries a failed update from the card, and keeps a run’s verdict owed until it is dismissed', async () => {
+    const started = oweOne();
+    const verdict = oweOne('verdict:1:0', LinearEventKind.Verdict);
+    const row = (id: LinearPostId) => rows().find((r) => r.id === id);
+    // Every run fails to start; each settle backs both rows off, and an hour covers every backoff before the cap.
+    launchError = new Error('no model to run');
+    await expect
+      .poll(
+        () => {
+          clock.advance(60 * 60_000);
+          return row(started)?.state;
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(LinearPostState.Failed);
+    expect(row(verdict)).toMatchObject({ state: LinearPostState.Pending, tries: 5 });
+    const card = () => findOpenByFoldKey(store.db, project.id, linearReporterFoldKey(project.id));
+    const answer = (choice: ReporterChoice): void => {
+      const open = card();
+      if (open === undefined) throw new Error('the card is not open');
+      inbox.answer(open.id, { choice });
+    };
+    expect(card()?.options.map((o) => o.label)).toEqual([
+      ReporterChoice.Retry,
+      ReporterChoice.Dismiss,
+    ]);
+    // Retry: the failed row is owed again with no try spent, and both rows are due now.
+    launchError = null;
+    book[KEY] = [recordingScript(started)];
+    answer(ReporterChoice.Retry);
+    const now = clock.now().toISOString();
+    expect(row(started)).toMatchObject({ state: LinearPostState.Pending, tries: 0, dueAt: now });
+    expect(row(verdict)?.dueAt).toBe(now);
+    await expect
+      .poll(
+        () => {
+          clock.advance(0);
+          return row(started)?.state;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(LinearPostState.Recorded);
+    // The run wrote no verdict: it fails again and is still owed.
+    await expect.poll(() => row(verdict)?.tries, { timeout: 10_000 }).toBe(6);
+    expect(row(verdict)?.state).toBe(LinearPostState.Pending);
+    // Dismiss is the only end of a run's last update short of posting it.
+    await expect.poll(() => card()?.id, { timeout: 10_000 }).toBeDefined();
+    answer(ReporterChoice.Dismiss);
+    expect(row(verdict)?.state).toBe(LinearPostState.Failed);
+    expect(row(verdict)?.dismissedAt).not.toBeNull();
+  });
+
+  it('gives a new update the report delay even when an older row of the task is on a long backoff', () => {
+    // AMP-134 got four comments in one second, 47 minutes late: new rows waited behind an older one's backoff.
+    oweOne('run_started:old:0', LinearEventKind.RunStarted, 2 * 60 * 60_000);
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
+    const unsubscribe = subscribeLinearEvents(bus, {
+      state,
+      clock,
+      reporter: {
+        poke: (id) => {
+          reporter.poke(id);
+        },
+        wake: (id) => {
+          reporter.wake(id);
+        },
+      },
+      log: silentLogger,
+    });
+    bus.publish([
+      {
+        seq: 1,
+        type: EventType.WorkstreamChanged,
+        entityType: 'workstream',
+        entityId: ws.id,
+        data: { from: 'QUEUED', to: 'STARTING', reason: null },
+        at: clock.now().toISOString(),
+      },
+    ]);
+    unsubscribe();
+    const made = rows().find((r) => r.detail['workstreamId'] === ws.id);
+    expect(made?.dueAt).toBe(new Date(clock.now().getTime() + REPORT_DELAY_MS).toISOString());
   });
 
   it('never writes a comment again when Linear may have taken it but did not answer', async () => {

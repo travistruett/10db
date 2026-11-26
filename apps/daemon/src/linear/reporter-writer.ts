@@ -1,5 +1,9 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
+import {
+  StreamableHTTPClientTransport,
+  StreamableHTTPError,
+} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { z } from 'zod';
 import type { YourSessionServer } from '../sessions';
 import { isLinearServer } from './lane-reads';
@@ -22,14 +26,22 @@ const WRITE_TIMEOUT_MS = 30_000;
 export class LinearWriteError extends Error {
   override readonly name = 'LinearWriteError';
   readonly refused: boolean;
-  constructor(message: string, refused: boolean) {
+  /** Linear refused 10db's sign-in (401 or 403): a sign-in, not a retry, fixes it. Always refused too. */
+  readonly signedOut: boolean;
+  constructor(message: string, refused: boolean, signedOut = false) {
     super(message);
     this.refused = refused;
+    this.signedOut = signedOut;
   }
 }
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/** Linear turned the sign-in away: an OAuth refusal, or an HTTP 401 or 403 from its server. */
+const signInRefused = (error: unknown): boolean =>
+  error instanceof UnauthorizedError ||
+  (error instanceof StreamableHTTPError && (error.code === 401 || error.code === 403));
 
 /** What Linear answers a written comment with: its id, which 10db records on the row. */
 const SavedComment = z.object({ id: z.string().min(1) });
@@ -77,7 +89,11 @@ export function createLinearCommentWriter(
             }),
           );
         } catch (error) {
-          throw new LinearWriteError(`Could not reach Linear: ${messageOf(error)}`, true);
+          throw new LinearWriteError(
+            `Could not reach Linear: ${messageOf(error)}`,
+            true,
+            signInRefused(error),
+          );
         }
         let result: Awaited<ReturnType<Client['callTool']>>;
         try {
@@ -87,6 +103,8 @@ export function createLinearCommentWriter(
             { timeout: timeoutMs },
           );
         } catch (error) {
+          // A refused sign-in is an answer before the write ran, so Linear certainly wrote nothing.
+          if (signInRefused(error)) throw new LinearWriteError(messageOf(error), true, true);
           throw new LinearWriteError(messageOf(error), false);
         }
         const text = (Array.isArray(result.content) ? result.content : [])

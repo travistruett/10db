@@ -23,7 +23,6 @@ import {
   listActiveProjects,
   listLinearPosts,
   listWorkstreams,
-  pendingLinearPosts,
   type DbReader,
   type Json,
 } from '@10db/db';
@@ -288,7 +287,8 @@ export function subscribeLinearEvents(
             dedupeKey: draft.dedupeKey,
             attempt: attemptOf(ctx.tx, draft.workstreamId),
             detail: draft.detail,
-            dueAt: dueAtFor(ctx.tx, draft.taskId, clock.now().getTime()),
+            // A new update is never held behind an older row's backoff on the task.
+            dueAt: new Date(clock.now().getTime() + REPORT_DELAY_MS).toISOString(),
           });
           if (row !== null) made.add(draft.taskId);
         }
@@ -299,14 +299,4 @@ export function subscribeLinearEvents(
       log.warn({ err: error, type: event.type }, 'a Linear update was not queued');
     }
   });
-}
-
-/** A new event waits the report delay, or until a backoff already pending on the task ends, whichever is later. */
-function dueAtFor(db: DbReader, taskId: TaskId, nowMs: number): string {
-  let due = nowMs + REPORT_DELAY_MS;
-  for (const row of pendingLinearPosts(db, { taskId })) {
-    const at = row.dueAt === null ? Number.NaN : Date.parse(row.dueAt);
-    if (at > due) due = at;
-  }
-  return new Date(due).toISOString();
 }

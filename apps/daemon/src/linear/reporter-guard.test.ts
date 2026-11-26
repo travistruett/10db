@@ -18,7 +18,6 @@ function run(over: Partial<ReporterRun> = {}): ReporterRun {
     linearPrefixes: [L],
     link,
     direct: false,
-    withheld: new Set(),
     comments: new Map(),
     ...over,
   };
@@ -181,7 +180,8 @@ describe('judgeReporterCall', () => {
       call(`${L}save_comment`, { issueId: 'iss-119', body }),
     );
     expect(out.verdict.decision).toBe('deny');
-    expect(out.withheld).toBe('anthropic_key');
+    // Only the post the write carries is withheld, never the run's other open rows.
+    expect(out.withheld).toEqual({ postId: POST, pattern: 'anthropic_key' });
   });
 
   it('names the post whose comment an allowed write carries', () => {
