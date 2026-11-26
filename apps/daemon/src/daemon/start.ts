@@ -93,6 +93,7 @@ import {
   createUsageReports,
   type AccountLimits,
 } from '../accounts';
+import { createPushService, createVapidKeyStore, startPushSender } from '../push';
 import { createApp, type SelfUpdateServices } from '../api';
 import { Listener } from '../listeners';
 import {
@@ -3366,12 +3367,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     sharing: () => sharing.status(),
   });
   const streamTickets = createTickets({ clock });
+  const vapidKeys = createVapidKeyStore(opts.keychain ?? unavailableKeychain);
+  const pushService = createPushService({ state, keys: vapidKeys });
+  const stopPushSender = startPushSender({
+    bus,
+    state,
+    keys: vapidKeys,
+    log: logger.child({ component: 'push' }),
+  });
   const app = createApp({
     commit: build?.commit ?? null,
     listenPort: () => listenPort,
     share: { allowlists: () => sharing.allowlists(), hostLogin: () => sharing.hostLogin() },
     remote: { sharing, devices },
     appDir: opts.appDir ?? null,
+    push: pushService,
     devices,
     tickets: streamTickets,
     sockets: deviceSockets,
@@ -3662,6 +3672,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // but it reads and writes the database until it ends.
       await createdScheduler.idle();
       unsubscribeSettled();
+      stopPushSender();
       unsubscribeSkipped();
       await Promise.all(skippedRaises);
       state.write((ctx) => {

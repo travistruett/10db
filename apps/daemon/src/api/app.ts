@@ -28,6 +28,7 @@ import {
   ProposalVerdictAccept,
   ProposalVerdictReject,
   EventsHead,
+  PushSubscriptionInput,
   FolderInspectInput,
   GoalAdoptInput,
   PlanExportInput,
@@ -173,6 +174,7 @@ import {
   type SharingStatusDto,
   DeviceId,
 } from '@10db/contracts';
+import type { PushService } from '../push';
 import { serveApp } from './app-static';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -265,6 +267,8 @@ export interface ApiDeps {
     readonly token: string;
     mayRead(method: string, path: string): boolean;
   } | null;
+  /** Push for paired devices; its routes answer 501 without it. */
+  readonly push?: PushService;
   /** The built served app (`dist-app/`) that `/app/` serves on the share listener; null or absent when there is none. */
   readonly appDir?: string | null;
   /** The self-update setting; its routes answer 501 without it. */
@@ -281,6 +285,11 @@ export interface ApiDeps {
 }
 
 const STATUS = { not_found: 404, conflict: 409, invalid: 400, upstream: 502 } as const;
+/** What a route made for the calling device says to a client that is not one (the window's own token). */
+const deviceOnly = {
+  error: 'conflict',
+  message: 'This is for a paired device: the 10db window has none',
+} as const;
 const OPEN_PATHS = new Set(['/health', '/mcp']);
 /** A page of a conversation's items starts after this `seq`. */
 const ConversationItemsQuery = z.object({
@@ -1273,6 +1282,35 @@ export function createApp(deps: ApiDeps) {
           ? c.json(deps.remote.devices.pair(c.req.valid('json')))
           : c.json({ error: 'not_implemented' }, 501),
     )
+    // The calling device's own routes come before `/devices/:deviceId`, which would read `me` as an id.
+    .delete('/devices/me', (c) => {
+      const principal = c.var.principal;
+      if (!deps.remote || principal.kind !== 'device') return c.json(deviceOnly, 409);
+      return deps.remote.devices.revoke(principal.deviceId)
+        ? c.body(null, 204)
+        : c.json({ error: 'not_found', message: 'No such device' }, 404);
+    })
+    .get('/push/key', async (c) =>
+      deps.push ? c.json(await deps.push.key()) : c.json({ error: 'not_implemented' }, 501),
+    )
+    .put(
+      '/devices/me/push',
+      validator('json', (value) => PushSubscriptionInput.parse(value)),
+      async (c) => {
+        const principal = c.var.principal;
+        if (!deps.push) return c.json({ error: 'not_implemented' }, 501);
+        if (principal.kind !== 'device') return c.json(deviceOnly, 409);
+        await deps.push.subscribe(principal.deviceId, c.req.valid('json'));
+        return c.body(null, 204);
+      },
+    )
+    .delete('/devices/me/push', (c) => {
+      const principal = c.var.principal;
+      if (!deps.push) return c.json({ error: 'not_implemented' }, 501);
+      if (principal.kind !== 'device') return c.json(deviceOnly, 409);
+      deps.push.unsubscribe(principal.deviceId);
+      return c.body(null, 204);
+    })
     .delete('/devices/:deviceId', (c) => {
       if (!deps.remote) return c.json({ error: 'not_implemented' }, 501);
       return deps.remote.devices.revoke(DeviceId.parse(c.req.param('deviceId')))
