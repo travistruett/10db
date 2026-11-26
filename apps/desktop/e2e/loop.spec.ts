@@ -307,7 +307,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(forYou.getByText('added line 1: hello')).toBeAttached();
   // The run lowered the eval's bar, and the Evals watchpoint says so, naming the line it read.
   await forYou.getByRole('button', { name: /Evals/ }).click();
-  await expect(forYou.getByText('bar lowered (`GATE = dict(minimum_rate=0.5)`)')).toBeVisible();
+  await expect(forYou.getByText('bar lowered (GATE = dict(minimum_rate=0.5))')).toBeVisible();
   // A Board task nobody watches is never asked anything: the agent's question was answered at once. The
   // task is done, so the drawer lists it and the Inbox raised no card for it.
   await expect(
