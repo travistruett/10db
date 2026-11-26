@@ -2,6 +2,7 @@ import {
   ActionIcon,
   Alert,
   Badge,
+  Box,
   Button,
   Code,
   Group,
@@ -94,7 +95,10 @@ export function PathMeanings({ paths }: { readonly paths: readonly string[] }) {
   );
 }
 
-/** Edit and Remove for one row; neither press reaches the row's own click. */
+/**
+ * Edit and Remove for one row; neither press reaches the row's own click. A row with no `onRemove` keeps Remove's
+ * place empty, so every row's Edit lines up.
+ */
 export function RowActions({
   noun,
   name,
@@ -105,7 +109,7 @@ export function RowActions({
   readonly noun: 'area' | 'hazard' | 'watchpoint';
   readonly name: string;
   readonly onEdit: () => void;
-  readonly onRemove: () => void;
+  readonly onRemove?: () => void;
   /** Why Remove is off, when it is. */
   readonly removeBlocked?: string;
 }) {
@@ -124,23 +128,27 @@ export function RowActions({
           <IconPencil size={16} aria-hidden />
         </ActionIcon>
       </Tooltip>
-      <Tooltip label={removeBlocked ?? `Remove ${noun}`}>
-        {/* A disabled button gets no pointer events, so the tooltip hangs on its wrapper. */}
-        <span>
-          <ActionIcon
-            variant="subtle"
-            color="gray"
-            aria-label={`Remove ${noun} ${name}`}
-            disabled={removeBlocked !== undefined}
-            onClick={(e) => {
-              e.stopPropagation();
-              onRemove();
-            }}
-          >
-            <IconTrash size={16} aria-hidden />
-          </ActionIcon>
-        </span>
-      </Tooltip>
+      {onRemove === undefined ? (
+        <Box w="var(--ai-size-md)" aria-hidden />
+      ) : (
+        <Tooltip label={removeBlocked ?? `Remove ${noun}`}>
+          {/* A disabled button gets no pointer events, so the tooltip hangs on its wrapper. */}
+          <span>
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              aria-label={`Remove ${noun} ${name}`}
+              disabled={removeBlocked !== undefined}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove();
+              }}
+            >
+              <IconTrash size={16} aria-hidden />
+            </ActionIcon>
+          </span>
+        </Tooltip>
+      )}
     </Group>
   );
 }
