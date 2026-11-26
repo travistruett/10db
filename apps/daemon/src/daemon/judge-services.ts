@@ -80,13 +80,14 @@ interface ModelTest {
   readonly kind: JudgeTestKind;
 }
 
-/** The limits decisions ask yes/no questions; every other decision asks a choice. */
+/** The limits, acceptance and watchpoint question decisions ask yes/no questions; every other decision asks a choice. */
 function testKind(decision: string): JudgeTestKind {
   switch (decision) {
     case JudgeDecision.CrossesLimit:
     case JudgeDecision.CrossesLimitSecond:
     case JudgeDecision.Acceptance:
     case JudgeDecision.AcceptanceSecond:
+    case JudgeDecision.WatchpointQuestion:
       return JudgeTestKind.Nouls;
     default:
       return JudgeTestKind.Choice;

@@ -12,7 +12,7 @@ import {
   type WatchpointFileHit,
 } from '@10db/contracts';
 import { evalDefinitionSource } from './eval-definition-source';
-import { lineChecks } from './covers';
+import { lineChecks, questionCandidates } from './covers';
 import { runChecks } from './line-verdicts';
 import { watchpointHitsAfter } from './hits-after';
 import { matchWatchpoints } from './match';
@@ -24,6 +24,7 @@ const watchpoint = (key: string, globs: string[], over: Partial<Watchpoint> = {}
   why: `why ${key}`,
   globs,
   lines: [],
+  question: null,
   guidance: `check ${key}`,
   loudness: WatchpointLoudness.Show,
   starter: null,
@@ -170,6 +171,40 @@ describe('matchWatchpoints with line patterns', () => {
     expect(hitPaths([binary], asking)).toEqual(['src/b.bin']);
     expect(hitPaths([binary])).toEqual([]);
     expect(hitPaths([hidden('src/mode.sh', { added: 0, removed: 0 })], asking)).toEqual([]);
+  });
+
+  it('makes no rule hit for a question watchpoint with no lines, and asks about every file its globs cover', () => {
+    const asking = watchpoint('auth', ['src/**'], {
+      question: 'Does this change who can do what?',
+      loudness: WatchpointLoudness.Ask,
+    });
+    const files = [
+      file('src/a.ts', { patch: patch('src/a.ts', ['+bar']) }),
+      file('src/b.ts', { patch: '', clipped: true }),
+      file('docs/c.md'),
+    ];
+    const verdicts = runChecks(lineChecks(files, [asking]));
+    expect(matchWatchpoints(files, [asking], verdicts)).toEqual([]);
+    expect(questionCandidates(files, [asking], verdicts)).toEqual([
+      {
+        key: 'auth',
+        label: 'auth',
+        question: 'Does this change who can do what?',
+        paths: ['src/a.ts', 'src/b.ts'],
+      },
+    ]);
+  });
+
+  it('settles a file a line matched, so only the files no line settled are asked about', () => {
+    const both = watchpoint('both', ['src/**'], { lines: ['\\bfoo\\b'], question: 'Is it risky?' });
+    const files = [
+      file('src/a.ts', { patch: patch('src/a.ts', ['+let foo = 1;']) }),
+      file('src/b.ts', { patch: patch('src/b.ts', ['+bar']) }),
+    ];
+    const verdicts = runChecks(lineChecks(files, [both]));
+    expect(hitPaths(files, both)).toEqual(['src/a.ts']);
+    expect(questionCandidates(files, [both], verdicts).map((c) => c.paths)).toEqual([['src/b.ts']]);
+    expect(questionCandidates(files, [lined], verdicts)).toEqual([]);
   });
 
   it('reads a stored watchpoint with no lines as having none', () => {

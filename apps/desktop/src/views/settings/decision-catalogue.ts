@@ -83,6 +83,18 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
     mode: DecisionMode.Acting,
     note: 'It waits up to 60 seconds. Off, a criterion the first call did not read as met is left unread.',
   },
+  [JudgeDecision.WatchpointQuestion]: {
+    group: DecisionGroup.Delivery,
+    label: 'Watchpoint Question',
+    asks: 'After a gate passes: for each watchpoint with a question, does the change do what it asks about, in the files its paths cover and its lines didn’t settle? One call per watchpoint.',
+    onAnswer:
+      'Logged, and kept with the task’s watchpoint reading; nothing is shown on the task, and it never raises a card, forces a review or holds anything yet.',
+    whenUnsure:
+      'The answer is logged as it came; with no answer the reading keeps the question unanswered.',
+    fellBack: 'the question was left unanswered',
+    mode: DecisionMode.Shadow,
+    note: 'Each question goes to the model with its watchpoint’s files and up to 60 000 characters of their changes. A watchpoint with a question but no lines makes no match of its own.',
+  },
   [JudgeDecision.TestValue]: {
     group: DecisionGroup.Delivery,
     label: 'Tests a Step Added',

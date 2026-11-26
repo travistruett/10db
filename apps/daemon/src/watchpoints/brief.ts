@@ -21,8 +21,12 @@ export function watchpointsForAreas(
   );
 }
 
-/** The build brief's section: the watchpoints in play, and the instruction to explain a change to a covered file. */
-export function watchpointBuildBrief(watchpoints: readonly Watchpoint[]): string | null {
+/**
+ * The build brief's section: the watchpoints in play, and the instruction to explain a change to a covered file. A
+ * watchpoint with a question and no lines is left out: it hits nothing by rule, so no file of it needs a reason.
+ */
+export function watchpointBuildBrief(all: readonly Watchpoint[]): string | null {
+  const watchpoints = all.filter((w) => w.lines.length > 0 || w.question === null);
   if (watchpoints.length === 0) return null;
   return [
     'The builder keeps a watchpoint on these kinds of change. They read the changes themselves, so make each one easy to judge:',
