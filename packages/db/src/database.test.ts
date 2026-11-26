@@ -493,6 +493,48 @@ describe('migrating a task headline into its title', () => {
   });
 });
 
+describe('migrating to the 30 / 40 context thresholds', () => {
+  it('moves projects on the old 40 / 50 pair and keeps every pair the builder tuned', () => {
+    const AT = '2026-11-25T12:00:00.000Z';
+    migrateDatabase(db, migrationsThrough('0117_real_wrecker'));
+    const run = (sql: string, ...args: (string | number)[]): void => {
+      db.$client.prepare(sql).run(...args);
+    };
+    run(
+      `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+       VALUES ('acc_x', 'subscription', 'main', 'me', '{}', 2, ?, ?)`,
+      AT,
+      AT,
+    );
+    const insertProject = (id: string, handoff: number, nudge: number): void => {
+      run(
+        `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
+           handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
+         VALUES (?, ?, ?, 'make gate', '[]', '[]', 2, 'claude', 'acc_x', ?, ?, 10, ?, ?)`,
+        id,
+        id,
+        `/tmp/${id}`,
+        handoff,
+        nudge,
+        AT,
+        AT,
+      );
+    };
+    insertProject('prj_old', 40, 50);
+    insertProject('prj_nudge_tuned', 40, 60);
+    insertProject('prj_handoff_tuned', 35, 50);
+    migrateDatabase(db);
+    expect(
+      db.$client.prepare('SELECT id, handoff_pct, nudge_pct FROM projects ORDER BY id').all(),
+    ).toEqual([
+      { id: 'prj_handoff_tuned', handoff_pct: 35, nudge_pct: 50 },
+      { id: 'prj_nudge_tuned', handoff_pct: 40, nudge_pct: 60 },
+      { id: 'prj_old', handoff_pct: 30, nudge_pct: 40 },
+    ]);
+    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+  });
+});
+
 describe('migrating to per-task placement', () => {
   const AT = '2026-10-29T12:00:00.000Z';
 

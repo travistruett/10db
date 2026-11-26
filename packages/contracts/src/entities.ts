@@ -549,10 +549,12 @@ export const ProjectInput = z
     areas: z.array(AreaDef).min(1),
     hazards: z.array(HazardDef).default(() => [...DEFAULT_HAZARDS]),
     maxLanes: z.int().min(1).max(16).default(2),
-    // Defaults hand off at about 400k tokens on a 1M window (spikes summary). Low minimums let acceptance runs
-    // force a handoff on a large context window.
-    handoffPct: z.int().min(5).max(95).default(40),
-    nudgePct: z.int().min(6).max(98).default(50),
+    // Defaults hand off at about 300k tokens on a 1M window, at the next step boundary, and tell the agent firmly
+    // to hand off at about 400k: accuracy and recall degrade gradually as context grows, with no safe threshold,
+    // and 400k is the builder's hard point (decisions/2026-11-25-lanes-hand-off-at-300k-and-stop-at-400k.md).
+    // Low minimums let acceptance runs force a handoff on a large context window.
+    handoffPct: z.int().min(5).max(95).default(30),
+    nudgePct: z.int().min(6).max(98).default(40),
     humanWaitMinutes: z.int().min(1).max(240).default(10),
     /** The rigor a task gets when nothing else sets one. */
     defaultRigor: z.enum(Rigor).default(Rigor.Standard),
