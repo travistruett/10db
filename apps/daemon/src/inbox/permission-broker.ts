@@ -147,14 +147,22 @@ type BrokerContext = BrokerOwner & {
      */
     readonly unsandboxed?: {
       readonly mayRun: () => string | null;
-      /** The session's count of calls that could change something: a remembered command lasts until it moves. */
+      /**
+       * The session's count of calls that could change something, which also moves when its turn ends or another
+       * chat joins the checkout: a remembered command lasts until it moves.
+       */
       readonly changes: () => number;
       /** Counts a command the builder allowed to run outside the sandbox: it may have changed anything. */
       readonly bump: () => void;
       /** Whether a background task or job is running now, which may still write. */
       readonly background: () => boolean;
-      /** False once the session started something in the background: no command is remembered after that. */
+      /**
+       * False once the session started something in the background, and while anything else shares the
+       * checkout: no command is remembered then.
+       */
       readonly remembers: () => boolean;
+      /** The checkout's HEAD and working tree now, as one value; null when they can't be read. */
+      readonly checkoutState: () => Promise<string | null>;
     };
     /**
      * Where an allowed Read of the checkout's secret is served from (`LaneSession.secretReadsDir`):
@@ -252,7 +260,7 @@ const CHAT_ONCE_OPTIONS: readonly InboxOption[] = [
   { label: PermissionChoice.AllowOnce, description: 'Run this command outside the sandbox once' },
   {
     label: PermissionChoice.AllowChat,
-    description: 'Again in this chat, until Claude changes a file or runs another command',
+    description: 'Again in this turn, until your checkout changes or Claude runs another command',
   },
   { label: PermissionChoice.Deny, description: 'Deny; your note is passed to the agent' },
 ];
@@ -447,8 +455,8 @@ export function createPermissionBroker(
 ): (req: ToolRequest) => Promise<ToolDecision> {
   let allowOnce = ctx.allowOnce ?? null;
   // The commands outside the sandbox the builder allowed for this session: forgotten when it ends.
-  // Each with the session's change count when it was last allowed.
-  const chatAllowed = new Map<string, number>();
+  // Each with the session's change count and the checkout's state when it was last allowed.
+  const chatAllowed = new Map<string, { readonly changes: number; readonly checkout: string }>();
   const isChat = ctx.chat === true;
   /** Why the chat's command may not run outside the sandbox now; null when it may. */
   const outsideRefusal = (): string | null => {
@@ -626,9 +634,13 @@ export function createPermissionBroker(
       if (!remembers) chatAllowed.clear();
       const seen = chatAllowed.get(key);
       // Anything that may have changed since (a change, another command allowed to run outside, a job started
-      // or still running) makes the same command ask again.
-      const unchanged = remembers && seen !== undefined && seen === outside?.changes();
-      const remembered = unchanged && !outside.background();
+      // or still running, the turn's end, HEAD or a file of the checkout's) makes the same command ask again.
+      const remembered =
+        remembers &&
+        seen !== undefined &&
+        seen.changes === outside?.changes() &&
+        !outside.background() &&
+        (await outside.checkoutState()) === seen.checkout;
       const refusal = outsideRefusal();
       if (refusal !== null) return { behavior: 'deny', message: refusal, by: DeniedBy.TenDb };
       if (remembered) return { behavior: 'allow' };
@@ -738,17 +750,21 @@ export function createPermissionBroker(
         const refusal = outsideRefusal();
         if (refusal !== null) return { behavior: 'deny', message: refusal, by: DeniedBy.TenDb };
         // A command allowed now may change anything, so what was remembered before it asks again.
-        ctx.sandbox?.unsandboxed?.bump();
         const outside = ctx.sandbox?.unsandboxed;
+        outside?.bump();
         if (
+          outside !== undefined &&
           result.choice === PermissionChoice.AllowChat &&
-          outside?.remembers() !== false &&
-          outside?.background() !== true
-        )
-          chatAllowed.set(
-            chatCallKey(req.toolName, summary, req.cwd),
-            ctx.sandbox?.unsandboxed?.changes() ?? 0,
-          );
+          outside.remembers() &&
+          !outside.background()
+        ) {
+          // The count first: a change while the checkout is read moves it, so the yes is never newer than both.
+          const changes = outside.changes();
+          const checkout = await outside.checkoutState();
+          const key = chatCallKey(req.toolName, summary, req.cwd);
+          if (checkout === null) chatAllowed.delete(key);
+          else chatAllowed.set(key, { changes, checkout });
+        }
       }
       recordAllowedWrite(item.id, req, ask);
       return { behavior: 'allow' };

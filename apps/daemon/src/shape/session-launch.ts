@@ -87,14 +87,22 @@ export interface ShapePrepareInput {
    */
   readonly unsandboxedAsk?: {
     readonly mayRun: () => string | null;
-    /** Counts the calls let through that could change something; a remembered command lasts until it moves. */
+    /**
+     * Counts the calls let through that could change something, and moves when the turn ends or another chat
+     * joins the checkout; a remembered command lasts until it moves.
+     */
     readonly changes: () => number;
     /** Counts a command the builder allowed to run outside the sandbox: it may have changed anything. */
     readonly bump: () => void;
     /** Whether a background task or job is running now, which may still write. */
     readonly background: () => boolean;
-    /** False once the session started something in the background: no command is remembered after that. */
+    /**
+     * False once the session started something in the background, and while anything else shares the
+     * checkout: no command is remembered then.
+     */
     readonly remembers: () => boolean;
+    /** The checkout's HEAD and working tree now, as one value; null when they can't be read. */
+    readonly checkoutState: () => Promise<string | null>;
   };
 }
 

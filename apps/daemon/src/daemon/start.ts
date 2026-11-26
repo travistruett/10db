@@ -119,6 +119,7 @@ import {
   type JudgeService,
 } from '../judge';
 import { createBenchmarkServices } from './benchmark-services';
+import { checkoutState } from './checkout-state';
 import { createSizingService } from '../sizing';
 import { settleSecondOpinionModel } from './decision-offer';
 import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
@@ -2269,6 +2270,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       live: chatLive,
       state,
       folderHold,
+      checkoutState: (checkout) => checkoutState(git, checkout),
       firstStartAfterMove,
       log: logger.child({ component: 'chat' }),
       dataDir: opts.dataDir,
