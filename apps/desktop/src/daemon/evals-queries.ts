@@ -108,6 +108,23 @@ export function useTaskEvalCoverage(taskId: TaskId | undefined) {
   });
 }
 
+/**
+ * Asks 10db to assess the project's evals now. The answer is the page as it stands after, so the cache takes it
+ * at once; the change events refetch the rest.
+ */
+export function useAssessEvals(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      readJson(
+        await client.projects[':projectId'].evals.assess.$post({ param: { projectId } }),
+        EvalsDto,
+      ),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: evalsKeys.all }),
+  });
+}
+
 /** Files the task that drafts an eval; the lane that takes it writes the cases and never runs them. */
 export function useNewEvalTask(projectId: ProjectId) {
   const { client } = useDaemon();
