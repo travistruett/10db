@@ -37,6 +37,23 @@ describe('pickStatusMove', () => {
     expect(move(LinearEventKind.RunStarted, 'Triage')).toBe('In Progress');
     expect(move(LinearEventKind.RunStarted, 'Backlog')).toBe('In Progress');
     expect(move(LinearEventKind.RunStarted, 'Todo')).toBe('In Progress');
+    // Linear's MCP server lists no positions, in no fixed order: the names place the two started statuses.
+    const unordered: TeamStatus[] = [
+      { name: 'In Review', type: LinearStatusType.Started },
+      { name: 'In Progress', type: LinearStatusType.Started },
+      { name: 'Backlog', type: LinearStatusType.Backlog },
+      { name: 'Duplicate', type: 'duplicate' },
+    ];
+    const pick = (event: LinearEventKind, name: string) => {
+      const current = unordered.find((s) => s.name === name);
+      if (current === undefined) throw new Error(name);
+      return pickStatusMove({ event, current, statuses: unordered, lastSet: null })?.name ?? null;
+    };
+    expect(pick(LinearEventKind.RunStarted, 'Backlog')).toBe('In Progress');
+    expect(pick(LinearEventKind.Landed, 'Backlog')).toBe('In Review');
+    expect(pick(LinearEventKind.Landed, 'In Progress')).toBe('In Review');
+    expect(pick(LinearEventKind.Landed, 'In Review')).toBeNull();
+    expect(pick(LinearEventKind.Landed, 'Duplicate')).toBeNull();
   });
 
   it('leaves a started, completed or canceled issue alone when the run starts', () => {

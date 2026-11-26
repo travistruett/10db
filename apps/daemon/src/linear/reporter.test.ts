@@ -102,6 +102,22 @@ let inbox: InboxService;
 
 const BODY = 'The run started on this task.';
 
+/**
+ * A team's statuses as Linear's MCP server lists them: with ids, no positions, a review status before the one
+ * a run starts in, and a type 10db never moves to or from.
+ */
+const TEAM_STATUSES = [
+  { id: 'st-1', type: 'started', name: 'In Review' },
+  { id: 'st-2', type: 'started', name: 'In Progress' },
+  { id: 'st-3', type: 'backlog', name: 'Backlog' },
+  { id: 'st-4', type: 'duplicate', name: 'Duplicate' },
+  { id: 'st-5', type: 'unstarted', name: 'Todo' },
+  { id: 'st-6', type: 'canceled', name: 'Canceled' },
+  { id: 'st-7', type: 'completed', name: 'Done' },
+];
+/** What the agent read of the issue's statuses, for an update that moves one. */
+const STATUS = { current: 'Backlog', statuses: TEAM_STATUSES };
+
 /** An upload address as Linear signs it. */
 const SIGNED_UPLOAD =
   'https://storage.googleapis.com/linear-uploads-c4/a/b?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=linear-server%40linear-1.iam.gserviceaccount.com%2F20261125%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Signature=ab';
@@ -109,7 +125,7 @@ const SIGNED_UPLOAD =
 /** Hands 10db the body, writes the comment 10db built, and names its id in the closing message. */
 function recordingScript(postId: LinearPostId, closing = `${postId}: comment-1`): FakeStep[] {
   return [
-    { do: 'mcp', tool: 'report_linear_post', args: { postId, body: BODY } },
+    { do: 'mcp', tool: 'report_linear_post', args: { postId, body: BODY, status: STATUS } },
     // The team key repeats across workspaces, so Linear's own id is the only one accepted.
     { do: 'tool', toolName: `${PREFIX}save_comment`, input: { issueId: 'AMP-1', body: 'x' } },
     {
@@ -316,7 +332,6 @@ beforeEach(async () => {
       // Reads the reporter at call time: a test swaps it for a new one over the same store.
       reporter: {
         reportPost: (id, input) => reporter.reportPost(id, input),
-        pickStatus: (id, input) => reporter.pickStatus(id, input),
         uploadPicture: (id, input) => reporter.uploadPicture(id, input),
       },
     }),
@@ -343,7 +358,7 @@ const oweOne = (
   {
     detail = {},
     dueInMs = 30_000,
-  }: { detail?: Record<string, string | null>; dueInMs?: number } = {},
+  }: { detail?: Record<string, string | boolean | null>; dueInMs?: number } = {},
 ): LinearPostId => {
   const row = store.write((ctx) =>
     enqueueLinearPost(ctx, {
@@ -379,47 +394,50 @@ describe('the Linear reporter', () => {
     expect(engine.busy()).toEqual([]);
   });
 
-  it('picks a run start status from the team by type and position, lets only that be set, and records it', async () => {
-    const id = oweOne();
-    const status = (name: string, type: string, position: number) => ({ name, type, position });
-    const statuses = [
-      status('Backlog', 'backlog', 1),
-      status('In Progress', 'started', 3),
-      status('In Review', 'started', 4),
-      status('Done', 'completed', 5),
-    ];
+  it('moves a local landing to the review status from the statuses the agent read, and records it', async () => {
+    const id = oweOne('landed:bat-1', LinearEventKind.Landed, {
+      detail: { baseBranch: 'build', commit: 'a'.repeat(40), localCopy: true },
+    });
     book[KEY] = [
       [
-        {
-          do: 'mcp',
-          tool: 'pick_linear_status',
-          args: { postId: id, current: statuses[0], statuses },
-        },
+        { do: 'tool', toolName: `${PREFIX}get_issue`, input: { id: ISSUE }, result: '{}' },
+        // The body alone, as an agent that skips the status reads hands it over: refused, so the move can't be skipped.
+        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY } },
+        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY, status: STATUS } },
         // The agent's own choice, not the pick: refused.
         {
           do: 'tool',
           toolName: `${PREFIX}save_issue`,
-          input: { id: ISSUE, state: 'In Review' },
+          input: { id: ISSUE, state: 'In Progress' },
+        },
+        {
+          do: 'tool',
+          toolName: `${PREFIX}save_comment`,
+          input: { issueId: ISSUE, body: '$comment.body' },
+          result: JSON.stringify({ id: 'comment-1' }),
         },
         {
           do: 'tool',
           toolName: `${PREFIX}save_issue`,
-          input: { id: ISSUE, state: 'In Progress' },
+          input: { id: ISSUE, state: 'In Review' },
           result: '{}',
         },
-        ...recordingScript(id),
+        { do: 'say', text: `${id}: comment-1` },
+        { do: 'turn_complete' },
       ],
     ];
     clock.advance(30_000);
     await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
-    // The row records the status the run set, whichever of its two writes came first.
-    expect(rows()[0]?.statusSet).toBe('In Progress');
+    expect(rows()[0]?.statusSet).toBe('In Review');
     expect(rows()[0]?.commentIds).toEqual(['comment-1']);
     const results = adapter.observations.filter((o) => o.kind === 'mcp_result');
-    expect(results.map((o) => o.detail['isError'])).toEqual([false, false]);
-    expect(String(results[0]?.detail['text'])).toContain('In Progress');
-    // The status 10db did not pick, and the comment by the team key.
-    expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(2);
+    expect(results.map((o) => o.detail['isError'])).toEqual([true, false]);
+    expect(String(results[0]?.detail['text'])).toContain('list_issue_statuses');
+    // 10db's answer names the comment, then the status it picked.
+    expect(String(results[1]?.detail['text'])).toMatch(
+      /save_comment[\s\S]*save_issue[\s\S]*In Review/,
+    );
+    expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(1);
   });
 
   it('keeps a row whose session ended without recording pending, and runs it again at its backoff', async () => {
@@ -541,7 +559,7 @@ describe('the Linear reporter', () => {
         {
           do: 'mcp',
           tool: 'report_linear_post',
-          args: { postId: first, nothingToReport: true },
+          args: { postId: first, nothingToReport: true, status: STATUS },
         },
         { do: 'turn_complete' },
       ],
@@ -616,12 +634,12 @@ describe('the Linear reporter', () => {
         {
           do: 'mcp',
           tool: 'report_linear_post',
-          args: { postId: id, body: 'placeholder' },
+          args: { postId: id, body: 'placeholder', status: STATUS },
         },
         {
           do: 'mcp',
           tool: 'report_linear_post',
-          args: { postId: id, body: 'The key is sk-ant-abcdefghijklmnopqrstuvwx' },
+          args: { postId: id, body: 'The key is sk-ant-abcdefghijklmnopqrstuvwx', status: STATUS },
         },
         { do: 'turn_complete' },
       ],
@@ -641,7 +659,7 @@ describe('the Linear reporter', () => {
     const id = oweOne();
     book[KEY] = [
       [
-        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY } },
+        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY, status: STATUS } },
         // The agent's own write is refused: 10db has made it.
         {
           do: 'tool',
@@ -692,7 +710,7 @@ describe('the Linear reporter', () => {
         {
           do: 'mcp',
           tool: 'report_linear_post',
-          args: { postId: id, body: 'The run ended and its change landed.' },
+          args: { postId: id, body: 'The run ended and its change landed.', status: STATUS },
         },
         { do: 'turn_complete' },
       ],
@@ -745,7 +763,7 @@ describe('the Linear reporter', () => {
         {
           do: 'mcp',
           tool: 'report_linear_post',
-          args: { postId: id, body: 'The run ended and its change landed.' },
+          args: { postId: id, body: 'The run ended and its change landed.', status: STATUS },
         },
         { do: 'turn_complete' },
       ],
@@ -770,7 +788,7 @@ describe('the Linear reporter', () => {
         {
           do: 'mcp',
           tool: 'report_linear_post',
-          args: { postId: id, body: 'The run ended and its change landed.' },
+          args: { postId: id, body: 'The run ended and its change landed.', status: STATUS },
         },
         { do: 'turn_complete' },
       ],
@@ -788,7 +806,7 @@ describe('the Linear reporter', () => {
     const id = oweOne();
     book[KEY] = [
       [
-        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY } },
+        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY, status: STATUS } },
         { do: 'turn_complete' },
       ],
     ];
@@ -810,7 +828,11 @@ describe('the Linear reporter', () => {
       writeError = { message: 'HTTP 401', refused: true, signedOut: true };
       book[KEY] = [
         [
-          { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY } },
+          {
+            do: 'mcp',
+            tool: 'report_linear_post',
+            args: { postId: id, body: BODY, status: STATUS },
+          },
           { do: 'turn_complete' },
         ],
       ];
@@ -923,7 +945,7 @@ describe('the Linear reporter', () => {
     const id = oweOne();
     book[KEY] = [
       [
-        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY } },
+        { do: 'mcp', tool: 'report_linear_post', args: { postId: id, body: BODY, status: STATUS } },
         { do: 'turn_complete' },
       ],
     ];
@@ -973,7 +995,11 @@ describe('the Linear reporter', () => {
         {
           do: 'each_owed',
           steps: [
-            { do: 'mcp', tool: 'report_linear_post', args: { postId: '$post', body: BODY } },
+            {
+              do: 'mcp',
+              tool: 'report_linear_post',
+              args: { postId: '$post', body: BODY, status: STATUS },
+            },
             {
               do: 'tool',
               // Whichever Linear server the account's agent has: the brief names its tools by full name.

@@ -167,7 +167,7 @@ export interface McpDeps {
   /** The tools of a chat's session; absent, such a session is refused. */
   readonly chatTools?: ChatToolsFor;
   /** The Linear reporter's tool, offered only to a session of its own. */
-  readonly reporter?: Pick<LinearReporter, 'reportPost' | 'pickStatus' | 'uploadPicture'>;
+  readonly reporter?: Pick<LinearReporter, 'reportPost' | 'uploadPicture'>;
   /** Draws a mock-up and shoots the app for `check_design`; absent, a lane is not offered it. */
   readonly pictures?: Pick<Pictures, 'shootNow' | 'drawMockup' | 'bytesOf'>;
   /** Checks and saves a dev login for `save_dev_login`; absent, no lane is offered it. */

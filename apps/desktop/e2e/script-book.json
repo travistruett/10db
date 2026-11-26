@@ -731,7 +731,15 @@
             "tool": "report_linear_post",
             "args": {
               "postId": "$post",
-              "body": "Update from 10db: the task moved forward."
+              "body": "Update from 10db: the task moved forward.",
+              "status": {
+                "current": "Backlog",
+                "statuses": [
+                  { "name": "Backlog", "type": "backlog" },
+                  { "name": "In Progress", "type": "started" },
+                  { "name": "In Review", "type": "started" }
+                ]
+              }
             }
           },
           {
@@ -762,7 +770,15 @@
             "tool": "report_linear_post",
             "args": {
               "postId": "$post",
-              "body": "Update from 10db: the task moved forward."
+              "body": "Update from 10db: the task moved forward.",
+              "status": {
+                "current": "Backlog",
+                "statuses": [
+                  { "name": "Backlog", "type": "backlog" },
+                  { "name": "In Progress", "type": "started" },
+                  { "name": "In Review", "type": "started" }
+                ]
+              }
             }
           },
           {
@@ -793,7 +809,15 @@
             "tool": "report_linear_post",
             "args": {
               "postId": "$post",
-              "body": "Update from 10db: the task moved forward."
+              "body": "Update from 10db: the task moved forward.",
+              "status": {
+                "current": "Backlog",
+                "statuses": [
+                  { "name": "Backlog", "type": "backlog" },
+                  { "name": "In Progress", "type": "started" },
+                  { "name": "In Review", "type": "started" }
+                ]
+              }
             }
           },
           {
