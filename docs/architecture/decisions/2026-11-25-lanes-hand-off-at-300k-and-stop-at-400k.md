@@ -12,7 +12,7 @@ commit it, then call `write_handoff`) at about 300k tokens and the firm one (cal
 400k. The runner's comparison is unchanged. Desktop setup sends no thresholds, so the contract's defaults are the
 only source.
 
-Existing projects: migration 0118 moves a project whose stored pair is exactly the old defaults (40 / 50) to
+Existing projects: migration 0119 moves a project whose stored pair is exactly the old defaults (40 / 50) to
 30 / 40. Every other stored pair, including one where only one of the two numbers was changed, is kept.
 
 The thresholds are shares of the session's window, so they apply the same way on a Claude plan, on Claude through
