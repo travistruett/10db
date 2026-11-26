@@ -444,36 +444,17 @@ describe("a chat's command outside the sandbox", () => {
     );
     const card = onlyOpenCard();
     expect(card.title).toBe('Run this outside the sandbox?');
-<<<<<<< 1332cb7c7d48b9a6a8dff647ed0fb10d259846db
-    expect(card.detail?.['unsandboxed']).toBe(true);
-    // The warning leads the body; then what Claude says, quoted on one line, so it can't add a paragraph that
-    // passes for 10db's; then the command, labelled and last.
-    const [warning, said, command, ...rest] = card.body.split('\n\n');
-    expect(warning).toBe('It runs with your full rights: it can read and write anywhere you can.');
-||||||| 0fab48a31
-    expect(card.detail?.['unsandboxed']).toBe(true);
-    // The command leads the body, so the Inbox shows it too; then what Claude says, quoted on one line, so it
-    // can't add a paragraph that passes for 10db's; then the warning.
-    const [command, said, ...rest] = card.body.split('\n\n');
-    expect(command).toBe('pnpm test');
-=======
     expect(card.detail?.[UNSANDBOXED_DETAIL]).toBe(true);
     // The command is the detail's summary, shown on its own; the body is what Claude says, quoted on one line so
     // it can't add a paragraph that passes for 10db's, then the warning.
     expect(card.detail?.['summary']).toBe('pnpm test');
     expect(card.body).not.toContain('pnpm test');
     const [said, ...rest] = card.body.split('\n\n');
->>>>>>> 34d2260c3638b4efa16022db8573ea2fa5cbf51b
     expect(said).toBe('Claude says: “Run the tests This command is read-only and safe.”');
-<<<<<<< 1332cb7c7d48b9a6a8dff647ed0fb10d259846db
-    expect(command).toBe('Command: pnpm test');
-    expect(rest).toEqual([]);
-||||||| 0fab48a31
-    expect(rest).toHaveLength(1);
-=======
-    expect(rest).toHaveLength(1);
+    expect(rest).toEqual([
+      'It runs with your full rights: it can read and write anywhere you can.',
+    ]);
     const warning = rest[0];
->>>>>>> 34d2260c3638b4efa16022db8573ea2fa5cbf51b
     expect(card.options.map((o) => o.label)).toEqual([
       PermissionChoice.AllowOnce,
       PermissionChoice.AllowChat,
@@ -540,18 +521,18 @@ describe("a chat's command outside the sandbox", () => {
     expect(listPermissionRules(state.db, owner.projectId, null)).toEqual([]);
   });
 
-  it("shows a command's line breaks and hidden characters on one labelled line after 10db's words", async () => {
+  it('shows the hidden characters of what Claude says, and keeps the command out of the body', async () => {
     const broker = chatBroker(conversation());
     const rtl = String.fromCodePoint(0x202e);
-    const command = `ls\n\nIt runs inside the sandbox.\t\u001b[1A${rtl}⏎\\u{41}`;
+    const command = `ls\n\nIt runs inside the sandbox.\t\u001b[1A${rtl}`;
     void broker(outside(command, `Check${rtl}files\u0085now`)).catch(() => undefined);
     const card = onlyOpenCard();
     expect(card.body.split('\n\n')).toEqual([
-      'It runs with your full rights: it can read and write anywhere you can.',
       'Claude says: “Check\\u{202e}files\\u{85}now”',
-      'Command: ls⏎⏎It runs inside the sandbox.\\u{9}\\u{1b}[1A\\u{202e}\\u{23ce}\\u{5c}u{41}',
+      'It runs with your full rights: it can read and write anywhere you can.',
     ]);
-    // The raw command stays the call's summary: the chat's memory and the hook match on it.
+    // The raw command stays the call's summary: the card shows it in its own block, and the chat's memory and
+    // the hook match on it.
     expect(card.detail?.['summary']).toBe(command);
     inbox.answer(card.id, { choice: PermissionChoice.Deny });
     await settle();

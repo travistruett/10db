@@ -857,22 +857,9 @@ export function createPermissionBroker(
       return {
         summary: command,
         title: OUTSIDE_CARD_TITLE,
-<<<<<<< 1332cb7c7d48b9a6a8dff647ed0fb10d259846db
-        // 10db's warning first, so it always shows; then what Claude says; then the command, labelled, on one
-        // line and last, so nothing it holds reads as 10db's.
-        body: [
-          OUTSIDE_CARD_WARNING,
-          why === '' ? '' : `Claude says: “${why}”`,
-          commandParagraph(command),
-        ]
-||||||| 0fab48a31
-        // The command first, as the Inbox shows only the body; then what Claude says it is for.
-        body: [command, why === '' ? '' : `Claude says: “${why}”`, OUTSIDE_CARD_WARNING]
-=======
         // The command is the card's detail.summary, shown on its own in a code block; the body is only what
         // Claude says and 10db's warning, so nothing in the command can pass for either.
         body: [why === '' ? '' : `Claude says: “${why}”`, OUTSIDE_CARD_WARNING]
->>>>>>> 34d2260c3638b4efa16022db8573ea2fa5cbf51b
           .filter((part) => part !== '')
           .join('\n\n'),
         chatOnce: true,

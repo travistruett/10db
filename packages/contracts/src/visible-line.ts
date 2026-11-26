@@ -23,6 +23,16 @@ export function visibleLine(text: string): string {
   return text.replace(HIDDEN, (char) => (char === '\n' ? LINE_MARK : escaped(char)));
 }
 
+/**
+ * Agent text for a block of its own, such as a command's code block: its line feeds stay breaks and
+ * every other hidden character shows as `\u{hex}`, so nothing in it reorders or hides what it runs.
+ */
+export function visibleBlock(text: string): string {
+  return text.replace(HIDDEN, (char) =>
+    char === '\n' || char === LINE_MARK ? char : escaped(char),
+  );
+}
+
 /** A command as the last, labelled paragraph of a card, after 10db's own words. */
 export function commandParagraph(command: string): string {
   return `Command: ${visibleLine(command)}`;

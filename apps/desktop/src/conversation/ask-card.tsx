@@ -1,41 +1,10 @@
-<<<<<<< 1332cb7c7d48b9a6a8dff647ed0fb10d259846db
 import {
   commandParagraph,
   PermissionChoice,
-  visibleLine,
   type InboxItemDto,
   type InboxOption,
 } from '@10db/contracts';
-import {
-  Box,
-  Button,
-  Divider,
-  Group,
-  Kbd,
-  Paper,
-  Stack,
-  Text,
-  TextInput,
-  Tooltip,
-} from '@mantine/core';
-||||||| 0fab48a31
-import { PermissionChoice, type InboxItemDto, type InboxOption } from '@10db/contracts';
-import {
-  Box,
-  Button,
-  Divider,
-  Group,
-  Kbd,
-  Paper,
-  Stack,
-  Text,
-  TextInput,
-  Tooltip,
-} from '@mantine/core';
-=======
-import { PermissionChoice, type InboxItemDto, type InboxOption } from '@10db/contracts';
 import { Button, Divider, Group, Kbd, Paper, Stack, Text, TextInput, Tooltip } from '@mantine/core';
->>>>>>> 34d2260c3638b4efa16022db8573ea2fa5cbf51b
 import { IconShieldHalf } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { DaemonRequestError } from '../daemon/client';
@@ -60,20 +29,17 @@ function detailText(item: InboxItemDto, key: string): string | null {
 }
 
 /**
- * The body less what repeats the call shown in the block above: a body that is only the call, a raw call
- * leading the body, and the labelled `Command:` paragraph. A raw call is cut whole, never split into
- * paragraphs, so no piece of it reappears beside 10db's words.
+ * The body less what repeats the call shown in its own block: a body that is only the call, a raw call
+ * leading the body, and the labelled `Command:` paragraph ending it. Each is cut whole, never split into
+ * paragraphs, so no piece of a call with blank lines reappears beside 10db's words.
  */
 function bodyWithoutCall(body: string, call: string | null): string {
   if (call === null) return body;
   if (body === call) return '';
   const lead = `${call}\n\n`;
   const after = body.startsWith(lead) ? body.slice(lead.length) : body;
-  const labelled = commandParagraph(call);
-  return after
-    .split('\n\n')
-    .filter((paragraph) => paragraph !== labelled)
-    .join('\n\n');
+  const labelled = `\n\n${commandParagraph(call)}`;
+  return after.endsWith(labelled) ? after.slice(0, -labelled.length) : after;
 }
 
 export function AskCard({
@@ -129,28 +95,8 @@ export function AskCard({
   };
   if (answer.isSuccess) return null;
   const call = detailText(item, 'summary');
-<<<<<<< 1332cb7c7d48b9a6a8dff647ed0fb10d259846db
-  // The command is in the block above, on one line with its hidden characters shown; the body's own copy
-  // of it is left out.
+  // The command is in its own block, with its hidden characters shown; the body's own copy of it is left out.
   const rest = bodyWithoutCall(item.body, call);
-||||||| 0fab48a31
-  // The command is in the block above; the body's own paragraph that repeats it is left out.
-  const rest = item.body
-    .split('\n\n')
-    .filter((paragraph) => paragraph !== call)
-    .join('\n\n');
-=======
-  // The command is in its own block; a body that opens with it drops that copy whole. Split into paragraphs
-  // instead, a command with blank lines would leave its pieces among 10db's text.
-  const rest =
-    call === null
-      ? item.body
-      : item.body === call
-        ? ''
-        : item.body.startsWith(`${call}\n\n`)
-          ? item.body.slice(call.length + 2)
-          : item.body;
->>>>>>> 34d2260c3638b4efa16022db8573ea2fa5cbf51b
   return (
     <Paper
       {...{ [WAITING_CARD_ATTRIBUTE]: true }}
@@ -179,49 +125,7 @@ export function AskCard({
             </Text>
           ) : null}
         </Group>
-<<<<<<< 1332cb7c7d48b9a6a8dff647ed0fb10d259846db
-        {call === null ? null : (
-          <Box
-            component="pre"
-            m={0}
-            p="xs"
-            fz="xs"
-            style={{
-              fontFamily: 'var(--mantine-font-family-monospace)',
-              background: 'var(--mantine-color-body)',
-              borderRadius: 'var(--mantine-radius-sm)',
-              whiteSpace: 'pre-wrap',
-              overflowWrap: 'anywhere',
-              maxHeight: 160,
-              overflowY: 'auto',
-            }}
-          >
-            {visibleLine(call)}
-          </Box>
-        )}
-||||||| 0fab48a31
-        {call === null ? null : (
-          <Box
-            component="pre"
-            m={0}
-            p="xs"
-            fz="xs"
-            style={{
-              fontFamily: 'var(--mantine-font-family-monospace)',
-              background: 'var(--mantine-color-body)',
-              borderRadius: 'var(--mantine-radius-sm)',
-              whiteSpace: 'pre-wrap',
-              overflowWrap: 'anywhere',
-              maxHeight: 160,
-              overflowY: 'auto',
-            }}
-          >
-            {call}
-          </Box>
-        )}
-=======
         {call === null ? null : <CommandBlock command={call} />}
->>>>>>> 34d2260c3638b4efa16022db8573ea2fa5cbf51b
         {rest === '' ? null : (
           <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-line' }}>
             {rest}
