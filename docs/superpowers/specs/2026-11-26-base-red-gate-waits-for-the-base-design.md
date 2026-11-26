@@ -1,6 +1,6 @@
 # A task's gate that fails on its base's own failures waits for the base
 
-**Status:** revision 2, 2026-11-26; designed, not built. **Size: Core** (recovery, a migration, a new
+**Status:** revision 3, 2026-11-26; designed, not built. **Size: Core** (recovery, a migration, a new
 `NextAction` kind). This pull request is the spec and
 `decisions/2026-11-26-a-gate-failure-the-base-has-holds-the-task.md`; the code is three follow-up tasks (§12).
 
@@ -143,12 +143,23 @@ the task's to look at.
 ## 6. Resume
 
 The scheduler tick (`scheduler/`, which already keeps queue waits) reads each held run's base tip: the shared
-HEAD, or the base ref as the base update reads it. When it differs from `heldAt`, the run goes `QUEUED` with
-`{ kind: 'verify' }`, and its result is classified again:
+HEAD, or the base ref as the base update reads it. When it differs from `heldAt`, the run may gate again. A
+shared folder's HEAD moves at every lane's commit, and a gate can take 18 minutes, so a move alone does not
+send every held run back through the gate:
 
-- still red on base keys: held again, no attempt counted;
+- **A verdict already says.** If a red record at the new tip (or between `heldAt` and it, with no green record
+  after) still holds every one of the run's keys, the hold only moves `heldAt` forward. No gate runs.
+- **Otherwise one run per card gates.** The run held longest goes `QUEUED` with `{ kind: 'verify' }`; the others
+  on the card stay held until its gate writes a verdict, and are then read by the line above or gated in turn.
+
+A gate that runs again is classified as in §4:
+
+- still red on base keys: held again at the new tip, no attempt counted;
 - green: it passes, as any gate does;
 - a failure of its own: the fix loop.
+
+A base that never moves holds its runs until the builder acts on the card (File Fix Task, or a retry from the
+task); the card says so.
 
 `recovery/recover.ts` leaves a `base_red` run waiting, as it does `builder_review`, and raises its card again if
 it was closed some other way; the tick resumes it.
@@ -213,3 +224,15 @@ the author's own check, and 10db's review step on this pull request is the indep
 - Source (iii) asked for "the same B", which a shared folder almost never gives, since each run starts at the
   head of its own moment. Revision 2 lets one base be an ancestor of the other and writes the record at the
   newer one.
+
+## Appendix: revision 3
+
+A second implement session dispatched a reviewer twice more (the plan-reviewer, then a general-purpose agent on
+Fable given the plan-reviewer's instructions). Both read the spec and the code and ended without handing a
+report back, so there is still no independent review in this file: 10db's review step is it. That session
+checked §1's remaining references (`recover.ts` and `builder_review`, `outsideTheBatch` and
+`gateFailedUnrelated` in `ship.ts`, `prCards.baseRed`, `scheduler/queue-waits.ts`) and changed one thing:
+
+- §6 sent every held run back through the gate whenever the base tip moved. In a shared folder the tip moves at
+  each lane's commit, so N held runs would each gate again per commit. Revision 3 reads an existing verdict
+  first and otherwise gates one run per card.
