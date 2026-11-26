@@ -9,6 +9,23 @@ export interface RequestGuardDeps {
   readonly hostLogin: () => string | null;
 }
 
+const listsByRequest = new WeakMap<Request, ListenerAllowlists | null>();
+
+/**
+ * The listener's lists for one request. The CORS check and both guards ask, and the share listener's lists are
+ * worked out from sharing state, so the first answer is kept for the request and the next request asks again.
+ */
+export function requestAllowlists(
+  deps: RequestGuardDeps,
+  request: Request,
+  listener: Listener,
+): ListenerAllowlists | null {
+  if (listsByRequest.has(request)) return listsByRequest.get(request) ?? null;
+  const lists = deps.allowlists(listener);
+  listsByRequest.set(request, lists);
+  return lists;
+}
+
 const isHealth = (method: string, path: string): boolean =>
   routeClassOf(method, path) === RouteClass.Health;
 
@@ -20,7 +37,7 @@ const isHealth = (method: string, path: string): boolean =>
 export function hostGuard(deps: RequestGuardDeps): MiddlewareHandler<ApiEnv> {
   return async (c, next) => {
     const listener = listenerOf(c.env);
-    const lists = deps.allowlists(listener);
+    const lists = requestAllowlists(deps, c.req.raw, listener);
     if (lists === null) {
       if (isHealth(c.req.method, c.req.path)) return next();
       return c.json({ error: 'not_shared' }, 503);
@@ -38,7 +55,7 @@ export function originGuard(deps: RequestGuardDeps): MiddlewareHandler<ApiEnv> {
   return async (c, next) => {
     const origin = c.req.header('origin');
     if (origin === undefined || isHealth(c.req.method, c.req.path)) return next();
-    const lists = deps.allowlists(listenerOf(c.env));
+    const lists = requestAllowlists(deps, c.req.raw, listenerOf(c.env));
     if (!lists?.origins.includes(origin)) return c.json({ error: 'forbidden origin' }, 403);
     return next();
   };

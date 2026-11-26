@@ -15,4 +15,8 @@ never hand-write a parallel interface.
   imports `node:*` (the UI bundles it), and holds no I/O.
 - Pure domain rules shared by the daemon and the UI live here too: the workstream state machine
   (`workflow.ts`) and the vocabularies (`states.ts`).
+- `visible-line.ts`: `visibleLine` shows agent text on one line (a line feed as `⏎`, every other hidden
+  character as `\u{hex}`), `visibleBlock` does the same but keeps line feeds, for a command's own code block
+  (`CommandBlock`), and `commandParagraph` is a card's labelled `Command:` paragraph; the daemon's permission
+  cards and the desktop's command cards share them.
 - Separate copies (`local-copy.ts`, spec `docs/superpowers/specs/2026-11-24-10db-local-copy-landing-design.md`): `ProjectDto`/`ProjectPatch` carry `localCopies` and `copyTeardownCommand` (the refine and `NAME_COPY_TEARDOWN` require a command while copies are on); `LocalCopyDto`, `CopyStep`, `CopyWait` and the branded `CopyId` describe a copy's journal row; `COPY_ID_VARIABLE` (`TENDB_COPY_ID`) is the variable a copy's commands carry it in, which the sandbox sets and the judge's policy names; `COPY_NEEDS_REVIEW` is the refusal for a task whose process runs no review.

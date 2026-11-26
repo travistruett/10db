@@ -116,7 +116,8 @@ export function createSharingService(deps: {
   let refreshQueued = false;
   let monitor: Timer | null = null;
   let closed = false;
-  let lastState: SharingState | null = null;
+  /** The status last published, as JSON: `publish` emits only when the status the UI reads has changed. */
+  let lastView: string | null = null;
   let tail: Promise<unknown> = Promise.resolve();
 
   /** set, requestCertificate, start, stop and the monitor's ticks run one at a time. */
@@ -157,11 +158,17 @@ export function createSharingService(deps: {
     });
   }
 
+  /**
+   * Emits `sharing.changed` when the status the UI reads has changed since the last emit, not only the state
+   * label: a Paused status can change under the same label, when the CLI goes and its steps empty, or when the
+   * failing step does. The rail names that step.
+   */
   function publish(force = false): void {
-    const state = compute().state;
-    if (!force && state === lastState) return;
-    lastState = state;
-    emitChanged(state);
+    const status = compute();
+    const view = JSON.stringify(status);
+    if (!force && view === lastView) return;
+    lastView = view;
+    emitChanged(status.state);
   }
 
   function currentProbe(): CertificateProbe | null {
@@ -486,7 +493,11 @@ export function createSharingService(deps: {
       listenerFqdn = fqdn;
     }
     const cli = deps.cli();
-    if (cli === null) return;
+    if (cli === null) {
+      // Nothing more can be read without the CLI; publish, since the steps it reports are gone.
+      publish();
+      return;
+    }
     let status: ServeStatus;
     try {
       status = await readServe(cli);
@@ -512,16 +523,25 @@ export function createSharingService(deps: {
     publish();
   }
 
+  /**
+   * True when this daemon holds no share: no listener and not enabled. Stop then unserves nothing and owes nothing,
+   * since the port's mapping may be another daemon's; an unserve owed by an earlier Stop is retried by the monitor.
+   */
+  function notSharing(): boolean {
+    return listener === null && !readEnabled();
+  }
+
   async function stopSharing(port: number): Promise<void> {
     stopMonitor();
-    const settled = await unshare(port);
+    const settled = notSharing() || (await unshare(port));
     deps.state.write((ctx) => {
       setAppSetting(ctx, KEY_ENABLED, false);
     });
     if (!settled) writeUnserveOwed([...new Set([...readUnserveOwed(), port])]);
     pausedReason = null;
     portHolder = null;
-    if (!settled) scheduleMonitor();
+    // stopMonitor above cancelled any pending run, so schedule one again while an unserve is owed.
+    if (readUnserveOwed().length > 0) scheduleMonitor();
   }
 
   async function share(port: number): Promise<void> {
@@ -665,9 +685,8 @@ export function createSharingService(deps: {
       return enqueue(async () => {
         closed = true;
         stopMonitor();
-        // A daemon that never shared leaves the mapping alone: it may be another daemon's.
         await settleOwed();
-        if (listener === null && !readEnabled()) return;
+        if (notSharing()) return;
         const port = readPort();
         if (!(await unshare(port))) writeUnserveOwed([...new Set([...readUnserveOwed(), port])]);
       }).catch((error: unknown) => {

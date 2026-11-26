@@ -311,6 +311,17 @@
         }
       ]
     },
+    "appStartCommand": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "screens": {
       "type": "object",
       "properties": {

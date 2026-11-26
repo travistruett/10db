@@ -138,6 +138,7 @@ import {
   titlePrefix,
 } from './pr-text';
 import { readPrTemplate } from './pr-template';
+import { autoTestBudgetLine, TEST_BUDGET_SCRIPT } from './test-budget-reason';
 import { retireWorktree } from './worktree-cleanup';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 import { ensureWorktreeWhole, reopenWorktreeBatch } from './worktree-repair';
@@ -798,8 +799,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
 
   /**
    * The `Test-budget:` lines the batch's commits carry, so the body clears CI's unit-test budget
-   * when a lane said why it adds more. Merges are left out: their messages are 10db's own. A git
-   * failure leaves them out rather than failing the ship.
+   * when a lane said why it adds more. Merges are left out: their messages are 10db's own. With
+   * none, a batch over the budget whose every new test has a value card naming a core area or an
+   * escaped bug gets one summing those up, in a project that has the budget check. A git failure
+   * leaves them out rather than failing the ship.
    */
   async function testBudgetFor(
     batch: BatchDto,
@@ -808,9 +811,14 @@ export function createShipper(deps: ShipperDeps): Shipper {
   ): Promise<string[]> {
     try {
       const commits = await deps.git.commitMessagesSince(target.checkout, target.baseSha, sha);
-      return testBudgetLines(
+      const lines = testBudgetLines(
         commits.filter((commit) => commit.parents.length <= 1).map((commit) => commit.message),
       );
+      if (lines.length > 0) return lines;
+      const script = await deps.git.fileAt(target.checkout, sha, TEST_BUDGET_SCRIPT, 64 * 1024);
+      if (script.kind !== 'file') return [];
+      const line = await autoTestBudgetLine(deps.git, target.checkout, target.baseSha, sha);
+      return line === null ? [] : [line];
     } catch (error) {
       deps.logger.warn(
         { batchId: batch.id, err: error instanceof Error ? error.message : String(error) },
