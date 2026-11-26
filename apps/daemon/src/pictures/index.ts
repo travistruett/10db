@@ -28,4 +28,4 @@ export { keepScreen, pngSize, removeUnnamed, writePicture } from './picture-file
 export { keptRoute, pageAreaRoutes } from './kept-route';
 export { checkShotsOf, missingLines } from './design-shots';
 export { realAccountProblem } from './fictional-account';
-export { loginOutputTail, maskedProse } from './sign-in-output';
+export { maskedProse } from './sign-in-output';
