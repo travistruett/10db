@@ -138,6 +138,52 @@ describe('DaemonProvider', () => {
     expect(headCallsB).toBe(0);
   });
 
+  it('keeps looking for a restarted daemon when one lookup of its address never answers, and sends its new token', async () => {
+    const restarted: DaemonConnection = { url: 'http://127.0.0.1:5000', token: 'test-token-2' };
+    let announced: DaemonConnection = TEST_CONNECTION;
+    let hangNext = false;
+    const resolve: ConnectionResolver = () => {
+      if (!hangNext) return Promise.resolve(announced);
+      hangNext = false;
+      return new Promise<never>(() => undefined);
+    };
+    const bearers: (string | null)[] = [];
+
+    server.use(...baseHandlers());
+    renderWithDaemon(<StatusProbe />, {
+      resolve,
+      intervals: { ...FAST, attemptDeadline: 200 },
+    });
+    await waitFor(() => {
+      expect(probeText()).toBe(`connected ${TEST_CONNECTION.url}`);
+    });
+
+    // The daemon goes down, and the first lookup of where it went never comes back.
+    hangNext = true;
+    server.use(http.get(daemonUrl('/health'), () => HttpResponse.error()));
+    await waitFor(() => {
+      expect(probeText()).toMatch(/^reconnecting /);
+    });
+
+    // It comes back on another port with another token; the window reads both again.
+    announced = restarted;
+    server.use(
+      http.get(daemonUrl('/health', restarted.url), ({ request }) => {
+        bearers.push(request.headers.get('authorization'));
+        return HttpResponse.json({
+          status: 'ok',
+          protocolVersion: PROTOCOL_VERSION,
+          startedAt: '2026-11-25T23:58:00.000Z',
+        });
+      }),
+      ...baseHandlers({ url: restarted.url }),
+    );
+    await waitFor(() => {
+      expect(probeText()).toBe(`connected ${restarted.url}`);
+    });
+    expect(bearers.at(-1)).toBe(`Bearer ${restarted.token}`);
+  });
+
   it('treats a daemon that stops answering as down instead of waiting on it', async () => {
     server.use(...baseHandlers());
     renderWithDaemon(<StatusProbe />, { intervals: FAST });
