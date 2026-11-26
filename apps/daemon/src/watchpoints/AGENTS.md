@@ -11,8 +11,12 @@
   (`split-patch.ts`, which reads git's headers; diffs here are read without renames). It matches on the
   file list, never on the capped patch, so a watchpoint file past any cap is still a hit; one whose text was cut is kept
   with `clipped: true`. It throws when git can't be read: the runner turns that into a row with `skipped`.
-  `WATCHPOINT_HIT_SOURCES` is the list of ways to find hits (the glob matcher now; the Evals session's
-  classified events later).
+  `WATCHPOINT_HIT_SOURCES` is the list of ways to find hits (the glob matcher); the runner adds
+  `evalDefinitionSource` (`eval-definition-source.ts`) per run: a changed file that is a recorded suite's
+  `definitionPaths` is a hit on the watchpoints covering it, or on the `evals` starter, carrying `evalDefinition`
+  (the classification from `evals/definition-change.ts`). A file both sources find keeps the eval account.
+  `recordWatchpointReading` emits `eval.definition_changed` per such file whose classification is new to the run's
+  newest earlier reading; with no watchpoint covering the file there is no hit and no event.
 - The runner calls it after a passing gate (`watchpointReadingAfter` in `runner.ts`), beside `acceptanceAfter`, and in
   `finishWithoutGate`. The base is read again after the gate (its base update moves it). The row is written in the
   write that moves the run on, never on an acceptance send-back; a reading that hits nothing is written only to

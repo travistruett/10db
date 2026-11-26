@@ -110,7 +110,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
       repoPath: E2E_REPO,
       gateCommand:
         "test -f src/greeting/hello.txt && git diff --quiet HEAD && git log -1 --format=%s | grep -qx 'Add the greeting'",
-      areas: [{ name: 'greeting', globs: ['src/greeting/**'] }],
+      // The area covers the eval file too: the run's agent lowers its bar.
+      areas: [{ name: 'greeting', globs: ['src/greeting/**', 'evals/**'] }],
       handoffPct: 40,
       nudgePct: 50,
       delivery: 'local',
@@ -130,9 +131,23 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
         guidance: 'Check the wording is friendly.',
         loudness: 'show',
       },
+      {
+        key: 'evals',
+        label: 'Evals',
+        why: 'A lowered bar hides a regression.',
+        globs: ['**/evals/**'],
+        guidance: '',
+        loudness: 'show',
+      },
     ],
   });
   expect(watched.ok()).toBe(true);
+  // The project's eval suite is defined by evals/gate.py, so a run that changes it is read as an eval change.
+  const recorded = await request.put(`${daemonUrl}/projects/${projectId}/evals/manifest`, {
+    headers: { Authorization: `Bearer ${E2E_TOKEN}` },
+    data: { suites: [{ key: 'gate', definitionPaths: ['evals/gate.py'] }], gaps: [] },
+  });
+  expect(recorded.ok()).toBe(true);
   await page.goto('/board');
 
   // A new project starts with an Icebox column for parked work. While it is empty it is folded to a rail.
@@ -290,6 +305,9 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(forYou.getByText('✓ A plain text file, as the gate expects.')).toBeVisible();
   await expect(forYou.getByText('src/greeting/hello.txt')).toBeVisible();
   await expect(forYou.getByText('added line 1: hello')).toBeAttached();
+  // The run lowered the eval's bar, and the Evals watchpoint says so, naming the line it read.
+  await forYou.getByRole('button', { name: /Evals/ }).click();
+  await expect(forYou.getByText('bar lowered (`GATE = dict(minimum_rate=0.5)`)')).toBeVisible();
   // A Board task nobody watches is never asked anything: the agent's question was answered at once. The
   // task is done, so the drawer lists it and the Inbox raised no card for it.
   await expect(

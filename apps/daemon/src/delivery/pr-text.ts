@@ -163,6 +163,9 @@ export function forYouSection(hits: WatchpointHitsDto['hits']): string {
       `**${plain(hit.watchpoint.label)}** (${hit.watchpoint.loudness})`,
       ...hit.files.flatMap((file) => [
         `- ${pathText(file.path)}${file.added === null ? '' : ` (+${String(file.added)} −${String(file.removed ?? 0)})`}`,
+        ...(file.evalDefinition === undefined
+          ? []
+          : [`  - Eval: ${plain(file.evalDefinition.reason)}`]),
         ...(file.agentNote === null ? [] : [`  - Agent: ${plain(file.agentNote)}`]),
         ...(file.reviewerNote === null ? [] : [`  > ${plain(file.reviewerNote)}`]),
       ]),

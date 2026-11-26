@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { EvalDefinitionHit } from './eval-definition-change';
 
 /** How loudly a watchpoint tells the builder: shown in the task, asked about in the Inbox, or held before merge. */
 export const WatchpointLoudness = { Show: 'show', Ask: 'ask', Hold: 'hold' } as const;
@@ -51,6 +52,8 @@ export const WatchpointFileHit = z.object({
   removed: z.number().int().nullable(),
   patch: z.string(),
   clipped: z.boolean(),
+  /** Set when the file defines an eval suite: what the change did to it. */
+  evalDefinition: EvalDefinitionHit.optional(),
 });
 export type WatchpointFileHit = z.infer<typeof WatchpointFileHit>;
 
