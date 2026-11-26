@@ -73,6 +73,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/workstreams/:id/skips':
     'What a lane skipped holds the commands it tried, which only the builder reads; no screen draws them.',
   '/health': 'Open to every caller; it needs no token.',
+  '/sharing': "Sharing's status names the tailnet name and the host's login, kept to the 10db app.",
+  '/devices': 'The paired devices are kept to the 10db app.',
   '/shapes/:shapeId/screens/:name':
     "A kept screenshot is for the conversation's transcript, not for a screen.",
   '/tasks/:taskId/linear-posts':
@@ -169,6 +171,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/watchpoints': 'No screen draws a setting.',
   '/projects/:projectId/eval-markers': 'No screen draws a task marker.',
   '/tasks/:taskId/eval-coverage': 'No screen draws a task marker.',
+  '/projects/:projectId/watchpoints/stats': 'No screen draws a setting.',
   '/workstreams/:id/watchpoint-hits':
     "A run's hunks and the agent's notes are lane-written text, which no screen draws.",
   '/settings/agent-skill': 'No screen draws a setting.',

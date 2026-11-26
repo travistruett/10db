@@ -1,6 +1,7 @@
 import { applyAcceptanceAnswer } from '../acceptance';
+import { applyWatchpointAnswer } from '../watchpoints';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -93,6 +94,7 @@ import {
   type AccountLimits,
 } from '../accounts';
 import { createApp, type SelfUpdateServices } from '../api';
+import { Listener } from '../listeners';
 import {
   createBenchmarkSync,
   createOpenRouterSync,
@@ -159,6 +161,19 @@ import {
   scheduleNightlyBackup,
 } from '../backups';
 import { systemClock, type Clock } from '../clock';
+import {
+  createDeviceService,
+  createPairingCodes,
+  createSocketRegistry,
+  createTickets,
+} from '../devices';
+import {
+  createSharingService,
+  createTailscaleRun,
+  findTailscaleCli,
+  lsofHolderOf,
+  startShareListener,
+} from '../sharing';
 import {
   allCheckouts,
   createBaseUpdates,
@@ -594,6 +609,8 @@ export interface DaemonOptions {
   readonly aaKey?: () => string | null;
   /** `TENDB_BENCHMARKS=off`: the key is neither read nor written, and the status says off. */
   readonly benchmarksOff?: boolean;
+  /** Sharing finds and runs no Tailscale CLI (`TENDB_TAILSCALE=off`). */
+  readonly tailscaleOff?: boolean;
   readonly fetch?: typeof fetch;
   /** The `fetch` a Plan session's Figma tools post a mock-up with and read assets with; the real one by default. */
   readonly figmaFetch?: typeof fetch;
@@ -1143,6 +1160,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     onAcceptanceAnswer: (ctx, item, answer) => {
       applyAcceptanceAnswer(ctx, item, answer);
+    },
+    onWatchpointAnswer: (ctx, item, answer) => {
+      applyWatchpointAnswer(ctx, item, answer);
     },
     onPlanAnswer: (ctx, item, answer) => {
       if (!runner) throw new RunnerNotStartedError('plan');
@@ -3323,8 +3343,39 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       return selfUpdateServices.selfUpdateStatus();
     },
   };
+  const deviceSockets = createSocketRegistry();
+  const sharing = createSharingService({
+    state,
+    clock,
+    log: logger.child({ component: 'sharing' }),
+    cli: opts.tailscaleOff ? () => null : () => findTailscaleCli(existsSync),
+    run: createTailscaleRun,
+    listen: (sharePort) =>
+      startShareListener({
+        fetch: (req, env) => app.fetch(req, env),
+        port: sharePort,
+        sockets: deviceSockets,
+        holderOf: lsofHolderOf,
+      }),
+    sockets: deviceSockets,
+    mainPort: () => listenPort ?? opts.port,
+  });
+  const devices = createDeviceService({
+    state,
+    clock,
+    codes: createPairingCodes({ clock }),
+    sockets: deviceSockets,
+    sharing: () => sharing.status(),
+  });
+  const streamTickets = createTickets({ clock });
   const app = createApp({
     commit: build?.commit ?? null,
+    listenPort: () => listenPort,
+    share: { allowlists: () => sharing.allowlists(), hostLogin: () => sharing.hostLogin() },
+    remote: { sharing, devices },
+    devices,
+    tickets: streamTickets,
+    sockets: deviceSockets,
     skillVersion: agentSkill.shippedVersion(),
     devUiOrigin: opts.devUiOrigin ?? null,
     // Only when a dev UI is opted in; it reads and nothing else, and outlives a restart.
@@ -3434,7 +3485,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const wss = new WebSocketServer({ noServer: true });
   const server = serve({
-    fetch: app.fetch,
+    // The env is marked in place: the server reads back what the upgrade helper writes on this very object.
+    fetch: (req, env) => app.fetch(req, Object.assign(env, { listener: Listener.Main })),
     hostname: '127.0.0.1',
     port: opts.port,
     // ws declares `options.noServer?: boolean`, which WebSocketServerLike rejects under
@@ -3507,10 +3559,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       logger.error({ err: error }, 'the first self-update check failed');
     });
   }
+  // After the main listener is up and recovery has run. It never throws, and a slow Tailscale CLI must not hold startup.
+  void sharing.start();
   logger.info({ port, dataDir: opts.dataDir }, 'daemon started');
 
   async function shutdown(): Promise<void> {
     try {
+      // First, so a shutdown killed part-way has already unshared.
+      await sharing.stop();
       // First: a check that is holding the scheduler back would otherwise start it again while the
       // rest of this shutdown runs. Its flags are set at the call; what it settles on is a stage
       // under way, killed with the gh it started, which is awaited beside the delivery jobs.

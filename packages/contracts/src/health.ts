@@ -16,6 +16,13 @@ export const HealthResponse = z.object({
 });
 export type HealthResponse = z.infer<typeof HealthResponse>;
 
+/** `GET /health` without a credential: liveness and the protocol version only. */
+export const HealthPublicResponse = z.object({
+  status: z.literal('ok'),
+  protocolVersion: z.int().positive(),
+});
+export type HealthPublicResponse = z.infer<typeof HealthPublicResponse>;
+
 /**
  * What Open Page hands 10db's own dev UI: the daemon's read-only dev UI token, minted at each start
  * when a dev UI origin is opted in. The app's full token never leaves the app.

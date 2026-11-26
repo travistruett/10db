@@ -32,6 +32,8 @@ export const InboxKind = {
   PlaybookMoveReport: 'playbook_move_report',
   /** A criterion the acceptance check could not settle, on a run that shipped; the builder accepts it or sends it back. */
   Acceptance: 'acceptance',
+  /** A change that hit a watchpoint set to ask, on a run that moved on; the builder looks and accepts it or sends it back. */
+  Watchpoint: 'watchpoint',
 } as const;
 export type InboxKind = ValueOf<typeof InboxKind>;
 

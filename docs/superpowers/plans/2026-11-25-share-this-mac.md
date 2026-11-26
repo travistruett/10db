@@ -96,10 +96,11 @@ export const SharingStep = {
   Https: 'https', Certificate: 'certificate', Shared: 'shared',
 } as const;
 export type SharingStep = (typeof SharingStep)[keyof typeof SharingStep];
-export const StepStatus = { Ok: 'ok', Waiting: 'waiting', Failed: 'failed', Todo: 'todo' } as const;
-export type StepStatus = (typeof StepStatus)[keyof typeof StepStatus];
+// Named SharingStepStatus because contracts' states.ts already exports a StepStatus (task 1).
+export const SharingStepStatus = { Ok: 'ok', Waiting: 'waiting', Failed: 'failed', Todo: 'todo' } as const;
+export type SharingStepStatus = (typeof SharingStepStatus)[keyof typeof SharingStepStatus];
 export const SharingStepDto = z.object({
-  step: z.enum(SharingStep), status: z.enum(StepStatus),
+  step: z.enum(SharingStep), status: z.enum(SharingStepStatus),
   detail: z.string().nullable(),   // a path, a version, the tailnet name, a certificate's expiry
   error: z.string().nullable(),    // the CLI's stderr or 10db's reason, verbatim, for a failed or waiting step
 });
@@ -420,7 +421,23 @@ serve control.
 
 ## Serve facts
 
-(Filled in by the coordinator before task 6.)
+Recorded by the coordinator on 2026-11-25 against Tailscale 1.104.7 (standalone app) on this Mac, with a throwaway
+mapping of 4399 to a header-recording listener, removed afterwards (`serve status` back to `{}`).
+
+- **What the share listener receives** through `serve`: the peer is `127.0.0.1`. `Host` is `<fqdn>:<port>`
+  (forwarded as the client sent it), and `Origin` passes through unchanged. Serve adds `X-Forwarded-For`,
+  `X-Forwarded-Host`, `X-Forwarded-Proto`, `Tailscale-Headers-Info`, `Tailscale-User-Login`, `Tailscale-User-Name`
+  and `Tailscale-User-Profile-Pic` to every request from an untagged peer.
+- **Forged headers are replaced:** a request sent with its own `X-Forwarded-For` and `Tailscale-User-Login` arrived
+  with serve's values only.
+- **`serve status --json` with no mapping** is `{}`.
+- **With 10db's mapping** (`serve --bg --https=4399 http://127.0.0.1:4399`):
+  `{"TCP":{"4399":{"HTTPS":true}},"Web":{"<fqdn>:4399":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:4399"}}}}}`.
+  **An HTTPS mapping has a `TCP` entry of its own**, `{ "HTTPS": true }`. A TCP forward is a `TCP[port]` entry
+  with `TCPForward` (or `TerminateTLS`), which this check didn't create. So task 9's "no `TCP` entry" means: the
+  port's `TCP` entry is exactly `{ "HTTPS": true }` (no `TCPForward`, no `TerminateTLS`, no other key), and
+  `AllowFunnel` has no `<fqdn>:<port>` set to true.
+- `tailscale serve` and `serve --https=<port> off` each exit 0 within a second here.
 
 ## Tasks
 
