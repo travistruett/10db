@@ -3,8 +3,14 @@
 const SHELL = 'tendb-app-shell';
 const SHELL_URL = '/app/app.html';
 
-self.addEventListener('install', () => {
+self.addEventListener('install', (event) => {
   self.skipWaiting();
+  event.waitUntil(
+    caches
+      .open(SHELL)
+      .then((cache) => cache.add(ICON_URL))
+      .catch(() => undefined),
+  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -55,16 +61,41 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
-// What a lock screen may show: the card's kind and its headline (the daemon sends nothing else).
+// What a lock screen may show: the card's kind and its headline (the daemon sends nothing else). A kind is one
+// word, as the card's own header names it, because the phone gives the title only a few characters.
 const KIND_TITLES = {
-  question: 'A question needs you',
-  permission: 'A permission needs you',
-  proposal: 'A proposal needs you',
-  review: 'A review needs you',
-  flag: 'Something needs a look',
-  check: 'A check needs you',
-  plan: 'A plan needs you',
+  question: 'Question',
+  permission: 'Permission',
+  proposal: 'Proposal',
+  review: 'Review',
+  flag: 'Flag',
+  check: 'Check',
+  plan: 'Plan',
+  playbook_move_report: 'Playbook',
+  acceptance: 'Acceptance',
+  watchpoint: 'Watchpoint',
 };
+const ICON_URL = '/app/icons/icon-192.png';
+
+// The phone fetches a notification's icon itself, outside this worker, and a Mac it can't reach then shows a
+// letter instead. The icon is kept here and handed over as data, so it shows whether or not the Mac answers.
+async function iconData() {
+  try {
+    const cache = await caches.open(SHELL);
+    let response = await cache.match(ICON_URL);
+    if (!response) {
+      response = await fetch(ICON_URL);
+      if (!response.ok) return ICON_URL;
+      await cache.put(ICON_URL, response.clone());
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    let text = '';
+    for (const byte of bytes) text += String.fromCharCode(byte);
+    return `data:image/png;base64,${btoa(text)}`;
+  } catch {
+    return ICON_URL;
+  }
+}
 const CARD_ID = /^[A-Za-z0-9_-]{1,80}$/;
 
 self.addEventListener('push', (event) => {
@@ -78,13 +109,15 @@ self.addEventListener('push', (event) => {
   const headline = payload && typeof payload.headline === 'string' ? payload.headline : '';
   const id = payload && typeof payload.inboxItemId === 'string' ? payload.inboxItemId : '';
   event.waitUntil(
-    self.registration.showNotification(KIND_TITLES[kind] ?? 'Something needs you', {
-      body: headline,
-      icon: '/app/icons/icon-192.png',
-      // One notification per card: a second push for the same card replaces the first.
-      tag: CARD_ID.test(id) ? id : 'tendb',
-      data: { id: CARD_ID.test(id) ? id : null },
-    }),
+    iconData().then((icon) =>
+      self.registration.showNotification(KIND_TITLES[kind] ?? 'Inbox', {
+        body: headline,
+        icon,
+        // One notification per card: a second push for the same card replaces the first.
+        tag: CARD_ID.test(id) ? id : 'tendb',
+        data: { id: CARD_ID.test(id) ? id : null },
+      }),
+    ),
   );
 });
 
