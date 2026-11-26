@@ -47,6 +47,7 @@ async function failedSource(book: FakeScriptBook = { Alpha: [blocked, [turn]] })
   const { task, workstream } = engine.addTask('Alpha');
   engine.launch(workstream.id);
   await engine.runner.idle();
+  await engine.jobs.idle();
   expect(getWorkstream(engine.store.db, workstream.id).state).toBe('FAILED');
   await raiseSkippedCard(
     { state: engine.state, git: createGit(), log: silentLogger },
@@ -143,6 +144,7 @@ describe('Run these now', () => {
     );
     engine.launch(workstream.id);
     await engine.runner.idle();
+    await engine.jobs.idle();
     await raiseSkippedCard(
       { state: engine.state, git: createGit(), log: silentLogger },
       workstream.id,
