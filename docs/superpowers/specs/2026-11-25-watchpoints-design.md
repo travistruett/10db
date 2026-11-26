@@ -154,7 +154,7 @@ edited stays as you left it.
 `patch` holds that file's hunks as unified diff text, capped at 24 KB per file and 128 KB per row. A clipped file
 says so, and "Open the whole diff" covers the rest while the worktree exists.
 
-Removing a project deletes its `watchpoints.<projectId>` key in the same write.
+Archiving a project keeps its `watchpoints.<projectId>` key, so a restore finds the list again; there is no project deletion.
 
 Cost if this is wrong: moving watchpoints into a `projects` column later is one small migration plus a copy, both
 internal.

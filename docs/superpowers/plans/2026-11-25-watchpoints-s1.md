@@ -33,7 +33,7 @@
    - The Watchpoint branch's `detail` schema is `WatchpointDetail.catch(...)`, so a bad row reads as
      `skipped: 'unreadable'` and never makes `parseRow` throw.
    - The watchpoint settings accessors use the keys `watchpoints.you` and `watchpoints.<projectId>`, read through zod.
-   - Project removal deletes the project's key.
+   - Archiving a project keeps its key, so a restore finds the list again; no project is ever deleted.
    - No migration.
 3. **Daemon matching** (`apps/daemon/src/watchpoints/`, with an `AGENTS.md` note):
    - `split-patch.ts`: unified diff → per-file `{ path, status, patch, clipped }`.
