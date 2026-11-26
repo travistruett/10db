@@ -55,7 +55,23 @@ import { outboundFetch } from '../outbound';
 import type { ShapeToolRequest, ShapeVerdict } from '../sessions';
 import { reporterBlockedBy } from './reporter-events';
 import type { PicturesOutlook } from '../pictures';
-import { carriesPictures, picturesFor } from './reporter-pictures';
+import {
+  awaitsResultOf,
+  beginAgentUpload,
+  closeUploadStep,
+  nameNextPicture,
+  takeUploadResult,
+  toolResultText,
+  uploadedOf,
+  type AgentUpload,
+} from './reporter-agent-upload';
+import {
+  attachmentOf,
+  carriesPictures,
+  picturesFor,
+  picturesText,
+  picturesToShow,
+} from './reporter-pictures';
 import { refreshReporterCard } from './reporter-inbox';
 import { LinearWriteError, type LinearCommentWriter } from './reporter-writer';
 import {
@@ -124,8 +140,22 @@ const SESSION_OVER = 'This reporter run is over; nothing it calls is recorded.';
 const STATUS_NEEDED =
   "This update moves the issue's status, so 10db needs what Linear shows: give status with current, the issue's status name from get_issue, and statuses, every status of its team from list_issue_statuses (each with its name and type). Then call report_linear_post again.";
 
-/** A Linear write 10db dictates to the reporter's agent, made with these arguments unchanged. */
+/** A call 10db dictates to the reporter's agent, made with these arguments unchanged. */
 export type LinearCall =
+  | {
+      /** Linear signs an upload address for the one file 10db named; 10db sends the file itself. */
+      readonly tool: 'prepare_file_upload';
+      readonly arguments: {
+        readonly filename: string;
+        readonly contentType: string;
+        readonly size: number;
+      };
+    }
+  | {
+      /** Back to 10db once Linear answered the upload request: it names the next file, or the comment. */
+      readonly tool: 'report_linear_post';
+      readonly arguments: { readonly postId: LinearPostId };
+    }
   | {
       readonly tool: 'save_comment';
       readonly arguments: { readonly issueId: string; readonly body: string };
@@ -135,7 +165,7 @@ export type LinearCall =
       readonly arguments: { readonly id: string; readonly state: string };
     };
 
-/** What `report_linear_post` answers the agent. `next` is the Linear writes left to make, in order. */
+/** What `report_linear_post` answers the agent. `next` is the calls left to make, in order. */
 export type ReportedPost =
   | { readonly ok: true; readonly next: readonly LinearCall[] }
   | {
@@ -195,6 +225,14 @@ export interface LinearReporter {
   snapshot(taskId: TaskId): Promise<LinearSnapshot | null>;
   /** The reporter's preToolUse for its own session. */
   verdict(sessionId: SessionId, req: ShapeToolRequest): ShapeVerdict;
+  /**
+   * A call of the reporter's session returned, with its result (null when it failed). The result of the upload
+   * request 10db named is where 10db sends that picture.
+   */
+  toolResult(
+    sessionId: SessionId,
+    result: { readonly toolName: string; readonly input: unknown; readonly response: unknown },
+  ): void;
   settings(projectId: ProjectId): LinearReporterSettings & { blockedBy: string | null };
   /** Off drops the project's pending rows. */
   setSettings(projectId: ProjectId, input: LinearReporterSettings): void;
@@ -238,6 +276,13 @@ export interface LinearReporterDeps {
   readonly send?: typeof fetch;
 }
 
+/** An owed update whose pictures go to Linear through the agent's sign-in: the upload, and what its comment needs after it. */
+interface UploadingPost {
+  readonly upload: AgentUpload;
+  readonly body: string;
+  readonly setStatus: readonly LinearCall[];
+}
+
 /** One run, from its trigger to its settle. */
 interface Flight {
   readonly taskId: TaskId;
@@ -259,6 +304,10 @@ interface Flight {
   readonly written: Set<LinearPostId>;
   /** The status 10db picked for each owed update (`report_linear_post`). */
   readonly picked: Map<LinearPostId, string>;
+  /** Per owed update, its pictures on their way to Linear through the agent's sign-in, and the calls that follow them. */
+  readonly uploads: Map<LinearPostId, UploadingPost>;
+  /** The address each update's comment shows its first picture at, recorded on its row with the comment. */
+  readonly attachments: Map<LinearPostId, string>;
   /** The run's newest pick, the furthest one: the only status its `save_issue` may set, and where its later updates start from. */
   runPick: string | null;
   /** Where the run's own conversation items begin: its closing message names the comment ids. */
@@ -514,6 +563,8 @@ export function createLinearReporter(
       taken: new Set(),
       written: new Set(),
       picked: new Map(),
+      uploads: new Map(),
+      attachments: new Map(),
       runPick: null,
       afterSeq: lastItems(state.db, conversationId, 1)[0]?.seq ?? -1,
       error: null,
@@ -881,6 +932,67 @@ export function createLinearReporter(
     return picked.name;
   };
 
+  /**
+   * What `report_linear_post` answers while an update's pictures go to Linear through the agent's sign-in: the
+   * upload request for the next file and the call back to 10db, or, once none is left, the comment with the
+   * pictures that reached Linear. A picture that failed leaves the comment going out without it.
+   */
+  const uploadAnswer = async (
+    flight: Flight,
+    guard: ReporterRun,
+    post: LinearPostDto,
+    uploading: UploadingPost,
+  ): Promise<ReportedPost> => {
+    const { upload } = uploading;
+    const comment = (text: string): ReportedPost => ({
+      ok: true,
+      next: [
+        { tool: 'save_comment', arguments: { issueId: guard.link.issueId, body: text } },
+        ...uploading.setStatus,
+      ],
+    });
+    // The comment is already built: the same calls again, and no picture is sent twice.
+    const built = guard.comments.get(post.id);
+    if (built !== undefined) return comment(built.text);
+    let named: Awaited<ReturnType<typeof nameNextPicture>> = null;
+    try {
+      named = await nameNextPicture(state.db, upload);
+    } catch (error) {
+      log.warn(
+        { err: error, taskId: flight.taskId },
+        'a picture for a Linear comment was not named',
+      );
+    }
+    if (named !== null) {
+      guard.uploads.set(post.id, named);
+      return {
+        ok: true,
+        next: [
+          {
+            tool: 'prepare_file_upload',
+            arguments: {
+              filename: named.filename,
+              contentType: named.contentType,
+              size: named.size,
+            },
+          },
+          { tool: 'report_linear_post', arguments: { postId: post.id } },
+        ],
+      };
+    }
+    guard.uploads.delete(post.id);
+    const uploaded = uploadedOf(upload);
+    const attachment = attachmentOf(uploaded);
+    if (attachment !== null) flight.attachments.set(post.id, attachment);
+    const text = commentText(
+      uploading.body,
+      post,
+      picturesText({ uploaded, more: upload.more, offered: upload.offered }),
+    );
+    guard.comments.set(post.id, { text, written: false });
+    return comment(text);
+  };
+
   return {
     start() {
       const tasks = new Set(pendingLinearPosts(state.db).map((p) => p.taskId));
@@ -953,6 +1065,7 @@ export function createLinearReporter(
           direct: false,
           comments: new Map(),
           noteSteers: false,
+          uploads: new Map(),
           pickedStatuses: new Set(),
         };
         flight.sessionId = input.sessionId;
@@ -980,6 +1093,7 @@ export function createLinearReporter(
         direct: input.writer !== null,
         comments: new Map(),
         noteSteers: reporterSettings(state.db, flight.projectId).note.trim() !== '',
+        uploads: new Map(),
         pickedStatuses: new Set(),
       };
       flight.sessionId = input.sessionId;
@@ -1040,6 +1154,12 @@ export function createLinearReporter(
       );
       if (post === undefined || flight.written.has(post.id))
         throw new ConflictError('That update is already recorded; nothing more is written for it.');
+      // The update's pictures are on their way: this call is the step after an upload request.
+      const uploading = flight.uploads.get(post.id);
+      if (uploading !== undefined) {
+        await closeUploadStep(uploading.upload, clock);
+        return await uploadAnswer(flight, guard, post, uploading);
+      }
       const nothing = input.nothingToReport === true;
       if (nothing === (input.body !== undefined))
         throw new InvalidError('Give the comment body, or nothingToReport true, and not both.');
@@ -1079,6 +1199,38 @@ export function createLinearReporter(
         };
       }
       const writer = flight.writer;
+      const outlook = deps.picturesOutlook ?? (() => ({ kind: 'none' }));
+      if (writer === null) {
+        // The agent holds the Linear sign-in: it asks Linear for each upload address, a file at a time, and 10db
+        // sends the bytes. The comment is built once the last picture is sent.
+        let said = '';
+        try {
+          const show = picturesToShow({ db: state.db, post, outlook });
+          if ('pictures' in show) {
+            const uploading = {
+              upload: beginAgentUpload(show.pictures, show.more),
+              body,
+              setStatus,
+            };
+            flight.uploads.set(post.id, uploading);
+            return await uploadAnswer(flight, guard, post, uploading);
+          }
+          said = show.text;
+        } catch (error) {
+          // The pictures never hold the comment back: whatever goes wrong with them, the words still go out.
+          flight.uploads.delete(post.id);
+          log.warn(
+            { err: error, taskId: flight.taskId },
+            'the pictures for a Linear comment failed',
+          );
+        }
+        const text = commentText(body, post, said);
+        guard.comments.set(post.id, { text, written: false });
+        return {
+          ok: true,
+          next: [{ tool: 'save_comment', arguments: { issueId, body: text } }, ...setStatus],
+        };
+      }
       // The pictures never hold the comment back: whatever goes wrong with them, the words still go out.
       let pictures: Awaited<ReturnType<typeof picturesFor>> = { text: '', attachmentUrl: null };
       try {
@@ -1086,20 +1238,13 @@ export function createLinearReporter(
           db: state.db,
           post,
           uploader: writer,
-          outlook: deps.picturesOutlook ?? (() => ({ kind: 'none' })),
+          outlook,
           send: deps.send ?? outboundFetch,
         });
       } catch (error) {
         log.warn({ err: error, taskId: flight.taskId }, 'the pictures for a Linear comment failed');
       }
       const text = commentText(body, post, pictures.text);
-      if (writer === null) {
-        guard.comments.set(post.id, { text, written: false });
-        return {
-          ok: true,
-          next: [{ tool: 'save_comment', arguments: { issueId, body: text } }, ...setStatus],
-        };
-      }
       // 10db's own write. The row is recorded first, so a crash or a retry never writes the comment twice; the
       // id is added when Linear answers. Only a certain refusal reopens the row with a try spent; a write Linear
       // may have taken without answering stays recorded.
@@ -1166,6 +1311,24 @@ export function createLinearReporter(
       );
     },
 
+    toolResult(sessionId, result) {
+      const flight = bySession.get(sessionId);
+      if (flight === undefined || flight.settled || flight.guard === null) return;
+      const prefix = flight.guard.linearPrefixes.find((p) => result.toolName.startsWith(p));
+      if (prefix === undefined || result.toolName.slice(prefix.length) !== 'prepare_file_upload')
+        return;
+      const waiting = [...flight.uploads.values()].find(({ upload }) =>
+        awaitsResultOf(upload, result.input),
+      );
+      if (waiting === undefined) return;
+      // The signed address lasts a minute, so the picture is sent as soon as its result is read.
+      void takeUploadResult(
+        waiting.upload,
+        result.response === null ? null : toolResultText(result.response),
+        deps.send ?? outboundFetch,
+      );
+    },
+
     verdict(sessionId, req) {
       const flight = bySession.get(sessionId);
       if (flight === undefined || flight.settled || flight.guard === null)
@@ -1210,7 +1373,7 @@ export function createLinearReporter(
               state: 'recorded',
               commentIds: [],
               statusSet: null,
-              attachmentUrl: null,
+              attachmentUrl: flight.attachments.get(wrote) ?? null,
             });
           });
         } catch (error) {
@@ -1228,6 +1391,9 @@ export function createLinearReporter(
         flight.written.add(wrote);
         refreshCard(flight.projectId);
       }
+      const named =
+        judged.prepares === undefined ? undefined : flight.guard.uploads.get(judged.prepares);
+      if (named !== undefined) named.asked = true;
       // Only a call the rule allows counts: a signed-out server's sign-in tool is refused, so it does not.
       if (
         judged.verdict.decision === 'allow' &&

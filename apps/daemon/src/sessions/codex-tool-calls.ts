@@ -9,6 +9,7 @@ import {
 import { z } from 'zod';
 import type { ClaudeDenial } from './claude-tool-calls';
 import { hunksOfPatch, hunksOfTexts, type EditHunks } from './hunks';
+import { mcpToolPrefix } from './mcp-tool-names';
 import { titled, type UntitledToolCall } from './tool-target';
 import { PlanStepStatus, type PlanStep, type ToolCallFull } from './types';
 
@@ -359,6 +360,28 @@ function untitled(item: unknown, times: ItemTimes): UntitledToolCall[] {
       },
     ];
   return [];
+}
+
+/**
+ * A finished MCP call as a session's result hooks take it: the tool by the name the guard hook gave it
+ * (`mcp__<server>__<tool>`), its arguments, and its whole result, or null when the call failed. Null for an
+ * item that is no MCP call or has not ended. The view keeps only a result's tail; this is all of it.
+ */
+export function codexMcpResult(
+  item: unknown,
+): { readonly toolName: string; readonly input: unknown; readonly response: unknown } | null {
+  const mcp = McpItem.safeParse(item);
+  if (!mcp.success) return null;
+  const { data } = mcp;
+  if (data.status !== 'completed' && data.status !== 'failed') return null;
+  // A server's own error comes back as a completed call whose result says so.
+  const failed =
+    data.status === 'failed' || (data.error ?? null) !== null || data.result?.['isError'] === true;
+  return {
+    toolName: `mcp__${mcpToolPrefix(data.server)}__${data.tool}`,
+    input: data.arguments ?? null,
+    response: failed ? null : (data.result ?? null),
+  };
 }
 
 /** The calls a thread item holds: none for an item that isn't a tool call, one per file for a patch. */

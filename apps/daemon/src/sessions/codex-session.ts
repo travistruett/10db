@@ -28,6 +28,7 @@ import {
 import { codexDeveloperInstructions, codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
 import { CODEX_MCP_STATUS_BOUND_MS, McpAuthState, readCodexMcpAuth } from './codex-mcp-auth';
 import { refusedToolCalls } from './codex-refused-calls';
+import { codexMcpResult } from './codex-tool-calls';
 import {
   createTurnState,
   hasKnownShape,
@@ -45,6 +46,7 @@ import {
   ESCALATIONS_TO_BUILDER,
   HooksListResponse,
   InitializeResponse,
+  ItemCompleted,
   NO_APPROVALS,
   RateLimitsReadResponse,
   SERVER_REQUEST_RESOLVED,
@@ -789,6 +791,16 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
             log.warn({ message: warning.data.item.message }, 'codex has no metadata for the model');
           }
           return;
+        }
+        // Codex has no hook for a call's result; the item that ends an MCP call carries all of it.
+        const result = codexMcpResult(ItemCompleted.safeParse(n.params).data?.item);
+        if (result !== null) {
+          try {
+            if (result.response === null) spec.toolFailed?.(result);
+            else spec.postToolUse?.(result);
+          } catch (error) {
+            log.warn({ err: String(error) }, 'a tool result could not be handed on');
+          }
         }
       }
       if (n.method === SERVER_REQUEST_RESOLVED) {

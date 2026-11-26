@@ -407,6 +407,13 @@ export function runFakeLaneSession(
           content: step.result ?? '',
         }))
           emit(event);
+        // An MCP call's result reaches the session's result hook, as each adapter hands it on.
+        if (step.toolName.startsWith('mcp__'))
+          spec.postToolUse?.({
+            toolName: step.toolName,
+            input: effective,
+            response: step.result ?? '',
+          });
         observe(index, 'tool_allowed', {
           toolName: step.toolName,
           ...(effective['answers'] ? { answers: effective['answers'] } : {}),

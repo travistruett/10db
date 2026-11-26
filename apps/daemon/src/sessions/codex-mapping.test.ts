@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { codexMcpResult } from './codex-tool-calls';
 import type { SessionEvent } from './types';
 import {
   createTurnState,
@@ -207,6 +208,32 @@ describe('mapCodexNotification', () => {
     const events = mapCodexNotification(itemCompleted(item), createTurnState());
     expect(events.filter((e) => e.type === 'activity')).toEqual([]);
     expect(callsIn(events)).toMatchObject(calls);
+  });
+
+  it("hands on an MCP call's whole result, which the view keeps only the tail of, and none for a call that failed", () => {
+    const long = JSON.stringify({ uploadRequest: { url: `https://x/${'a'.repeat(6000)}` } });
+    const item = {
+      type: 'mcpToolCall',
+      id: 'exec-1',
+      server: 'linear',
+      tool: 'prepare_file_upload',
+      status: 'completed',
+      arguments: { filename: 'a.png', contentType: 'image/png', size: 3 },
+      result: { content: [{ type: 'text', text: long }] },
+      error: null,
+    };
+    expect(codexMcpResult(item)).toEqual({
+      toolName: 'mcp__linear__prepare_file_upload',
+      input: item.arguments,
+      response: item.result,
+    });
+    expect(codexMcpResult({ ...item, status: 'inProgress', result: null })).toBeNull();
+    expect(codexMcpResult({ ...item, status: 'failed', result: null })?.response).toBeNull();
+    // A server's own error is a completed call whose result says so.
+    expect(
+      codexMcpResult({ ...item, result: { content: [], isError: true } })?.response,
+    ).toBeNull();
+    expect(codexMcpResult({ type: 'agentMessage', id: 'm', text: 'hi' })).toBeNull();
   });
 
   it("follows a command's whole life: running, each piece of output, then done", () => {

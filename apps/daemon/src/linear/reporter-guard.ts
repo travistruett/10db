@@ -28,6 +28,7 @@ const LINEAR_READS: ReadonlySet<string> = new Set([
 const WRITE_KEYS: Readonly<Record<string, readonly string[]>> = {
   save_issue: ['id', 'state'],
   save_comment: ['issueId', 'body'],
+  prepare_file_upload: ['filename', 'contentType', 'size'],
 };
 
 /** The only Linear tools a snapshot run calls: it reads the linked issue, its comments and its relations. */
@@ -37,6 +38,19 @@ const SNAPSHOT_READS: ReadonlySet<string> = new Set(['get_issue', 'list_comments
 export interface StagedComment {
   readonly text: string;
   written: boolean;
+}
+
+/**
+ * One file 10db named for an owed update's comment: the only arguments a `prepare_file_upload` may carry. 10db
+ * sends the file itself, to the address Linear answers that call with.
+ */
+export interface NamedUpload {
+  readonly filename: string;
+  readonly contentType: string;
+  /** The file's exact size in bytes, which Linear signs into the address. */
+  readonly size: number;
+  /** The guard let the call for this file out: it is made once. */
+  asked: boolean;
 }
 
 export interface ReporterRun {
@@ -51,6 +65,8 @@ export interface ReporterRun {
   readonly direct: boolean;
   /** Per owed update, the comment 10db built from the agent's body: the only comment text the run may write. */
   readonly comments: Map<LinearPostId, StagedComment>;
+  /** Per owed update, the one file 10db named for upload just now (`report_linear_post`'s `next`); none on a direct run. */
+  readonly uploads: Map<LinearPostId, NamedUpload>;
   /** The project's note steers status choices, so a status set is the agent's to choose, not 10db's pick. */
   readonly noteSteers: boolean;
   /** The status 10db picked this run (`report_linear_post`), its newest pick alone: with no steering note, the only one that may be set. */
@@ -84,9 +100,10 @@ function* stringsIn(value: unknown): Generator<string> {
     for (const item of Object.values(value)) yield* stringsIn(item);
 }
 
-/** What a write that passed names: the post whose comment it carries, when it carries one. */
+/** What a write that passed names: the post whose comment it carries, or whose named file it asks an upload address for. */
 interface WriteJudged {
   readonly wrote?: LinearPostId;
+  readonly prepares?: LinearPostId;
 }
 
 /**
@@ -149,6 +166,22 @@ function judgeWrite(
         );
       return { wrote: staged[0] };
     }
+    case 'prepare_file_upload': {
+      // The address Linear answers with is where 10db sends a picture, so the call is the one 10db named: that
+      // file, its type and its exact size, once.
+      const named = [...run.uploads].find(
+        ([, upload]) =>
+          !upload.asked &&
+          field(input, 'filename') === upload.filename &&
+          field(input, 'contentType') === upload.contentType &&
+          field(input, 'size') === upload.size,
+      );
+      if (named === undefined)
+        return refuse(
+          "it is not an upload 10db named. Only the prepare_file_upload in report_linear_post's next can be made, once, with its arguments unchanged; 10db sends the file itself.",
+        );
+      return { prepares: named[0] };
+    }
     default:
       return refuse(`${tool} is not a tool this run may call.`);
   }
@@ -174,6 +207,8 @@ export function judgeReporterCall(
   verdict: GuardVerdict;
   withheld?: { readonly postId: LinearPostId; readonly pattern: string };
   wrote?: LinearPostId;
+  /** The post whose named file an allowed `prepare_file_upload` asks an upload address for. */
+  prepares?: LinearPostId;
 } {
   const { toolName } = call;
   if (toolName.startsWith('mcp__10db__')) {
@@ -213,7 +248,7 @@ export function judgeReporterCall(
   if (allowed === undefined)
     return {
       verdict: deny(
-        `This call is refused: ${tool} is not a tool this run may call. The reporter's Linear writes are its comment on the linked issue, through report_linear_post, and the status 10db picks; 10db sets links and pictures itself.`,
+        `This call is refused: ${tool} is not a tool this run may call. The reporter's Linear writes are its comment on the linked issue, through report_linear_post, the status 10db picks, and the upload request 10db names; 10db sets links and sends pictures itself.`,
       ),
     };
   const input = asRecord(call.input);
@@ -230,6 +265,7 @@ export function judgeReporterCall(
   return {
     verdict: allow(),
     ...(judged.wrote === undefined ? {} : { wrote: judged.wrote }),
+    ...(judged.prepares === undefined ? {} : { prepares: judged.prepares }),
   };
 }
 
@@ -247,7 +283,10 @@ const POSTING_LINEAR_TOOLS: readonly string[] = [
  * writes and report tools. The brief names them so a session whose tools are deferred searches for them by name.
  */
 export function runToolNames(run: Readonly<ReporterRun>): string[] {
-  const linear = run.readOnly ? [...SNAPSHOT_READS] : [...POSTING_LINEAR_TOOLS];
+  // A run 10db writes for asks Linear for no upload address: 10db asks itself.
+  const linear = run.readOnly
+    ? [...SNAPSHOT_READS]
+    : [...POSTING_LINEAR_TOOLS, ...(run.direct ? [] : ['prepare_file_upload'])];
   const tenDb = run.readOnly ? [] : [...REPORT_TOOLS];
   return [...run.linearPrefixes.flatMap((prefix) => linear.map((tool) => prefix + tool)), ...tenDb];
 }
