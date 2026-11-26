@@ -201,7 +201,8 @@ const HAND_OVER_DIRECT = [
 ];
 const HAND_OVER_AGENT = [
   ...HAND_OVER,
-  '10db checks the body and answers `next`: the Linear calls to make, in order (its `save_comment`, then a `save_issue` when the update moves the status). Make each with those arguments unchanged, once. Any other `save_comment` is refused, and the refusal says why.',
+  '10db checks the body and answers `next`: the calls to make, in order (its `save_comment`, then a `save_issue` when the update moves the status). Make each with those arguments unchanged, once. Any other `save_comment` is refused, and the refusal says why.',
+  "When the update shows the task's pictures, `next` first lists `prepare_file_upload` for one file and then `report_linear_post` with the post id alone. Make both, in that order, as separate calls: Linear signs an upload address for the file, 10db reads Linear's answer and sends the file itself, and the second call answers the next file or the comment. Do nothing with Linear's answer, upload nothing yourself, and ask for no other file: any other upload is refused.",
   "End your last message with one line per update you handed over: `<post id>: <the comment id save_comment returned>`, or `<post id>: failed: <Linear's words>` when the write failed. 10db records the comment from that line, and never asks for it again.",
   `If Linear answers that you are not signed in, or asks you to sign in, write nothing more and end your last message with the line \`${SIGNED_OUT_LINE}\`. 10db holds the updates until the account signs in.`,
 ];

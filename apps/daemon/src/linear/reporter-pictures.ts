@@ -20,7 +20,9 @@ import { LOCAL_LANDING } from './reporter-events';
 
 // A finished task's before and after pictures go into its `ended` comment on the Linear issue (its
 // `pr_merged` comment when the `ended` one carried none), the pairs its pull request and Slack show. 10db
-// uploads them itself, through the same Linear sign-in that writes the comment: the agent hands over words only.
+// sends the bytes itself, to an address Linear signed: one it asked for through the sign-in that writes the
+// comment, or, for an account whose Linear sign-in only its agent holds, one the agent asked for with the file
+// 10db named (`reporter-agent-upload.ts`). The agent hands over words only, and never sees a picture.
 // A task that took none says so once, with the reason, and never points at a pull request, which a project
 // that commits directly has none of.
 
@@ -168,7 +170,7 @@ export interface PictureUploader {
 }
 
 /** Sends a picture's bytes to a signed upload URL, the signed headers exactly as Linear returned them. */
-async function sendPicture(
+export async function sendPicture(
   prepared: PreparedPicture,
   bytes: Uint8Array,
   send: typeof fetch,
@@ -272,10 +274,6 @@ export function picturesText(input: {
 export const skippedText = (reason: string): string =>
   `No before and after pictures were taken. ${reason}.`;
 
-/** Said once, when the pictures exist but this account's Linear sign-in is not one 10db can upload with. */
-export const NOT_UPLOADABLE_TEXT =
-  "The before and after pictures are in 10db: this account's Linear sign-in is held by its agent, so 10db can't upload them here.";
-
 /** Said on the `ended` comment of a local copy's task, whose after is taken once its change lands. */
 export const LATER_TEXT =
   'The before and after pictures follow in a comment when the change lands in the project.';
@@ -290,50 +288,68 @@ export const carriesPictures = (event: LinearEventKind): boolean =>
   event === LinearEventKind.PrMerged ||
   event === LinearEventKind.Landed;
 
+/** What an owed update's comment says of the task's pictures: words alone, or the pictures to upload for it. */
+export type PicturesToShow =
+  | { readonly text: string }
+  | { readonly pictures: readonly ReporterPicture[]; readonly more: number };
+
 /**
- * What an owed update adds to its comment, and the first picture's address to record on its row. Pictures go in
- * the `ended` comment, or in the `pr_merged` or `landed` one when none showed before. What there is to say about missing
- * ones is said once: on the first `ended` comment, or, for a local copy (whose `ended` comment says they follow),
- * on its landing comment.
+ * What an owed update adds to its comment. Pictures go in the `ended` comment, or in the `pr_merged` or `landed`
+ * one when none showed before. What there is to say about missing ones is said once: on the first `ended`
+ * comment, or, for a local copy (whose `ended` comment says they follow), on its landing comment.
  */
-export async function picturesFor(input: {
+export function picturesToShow(input: {
   readonly db: DbReader;
   readonly post: Pick<LinearPostDto, 'id' | 'event' | 'taskId' | 'detail'>;
-  /** Null when 10db can't sign in to Linear itself: the pictures can't be uploaded. */
-  readonly uploader: PictureUploader | null;
   readonly outlook: (taskId: TaskId) => PicturesOutlook;
-  readonly send: typeof fetch;
-}): Promise<{ readonly text: string; readonly attachmentUrl: string | null }> {
+}): PicturesToShow {
   const { db, post } = input;
-  const none = { text: '', attachmentUrl: null };
+  const none = { text: '' };
   if (!carriesPictures(post.event)) return none;
   const earlier = listLinearPosts(db, post.taskId).filter(
     (p) => p.id !== post.id && p.state === LinearPostState.Recorded,
   );
   if (earlier.some((p) => p.attachmentUrl !== null)) return none;
+  const { pictures, more } = reporterPictures(db, post.taskId);
+  if (pictures.length > 0) return { pictures, more };
   const speaks =
     post.event === LinearEventKind.Ended
       ? !earlier.some((p) => p.event === LinearEventKind.Ended)
       : post.detail[LOCAL_LANDING] === true;
-  const { pictures, more } = reporterPictures(db, post.taskId);
-  if (pictures.length === 0) {
-    if (!speaks) return none;
-    const outlook = input.outlook(post.taskId);
-    const text =
+  if (!speaks) return none;
+  const outlook = input.outlook(post.taskId);
+  return {
+    text:
       outlook.kind === 'skipped'
         ? skippedText(outlook.reason)
         : outlook.kind === 'wait'
           ? STILL_TAKING_TEXT
           : outlook.kind === 'later' && post.event === LinearEventKind.Ended
             ? LATER_TEXT
-            : '';
-    return { text, attachmentUrl: null };
-  }
-  if (input.uploader === null)
-    return { text: speaks ? NOT_UPLOADABLE_TEXT : '', attachmentUrl: null };
-  const uploaded = await uploadPictures(db, pictures, input.uploader, input.send);
+            : '',
+  };
+}
+
+/** The address a row records for the pictures its comment shows: the first one's, or null when none reached Linear. */
+export const attachmentOf = (uploaded: UploadedPictures): string | null =>
+  uploaded.shown[0]?.assetUrl ?? uploaded.shown[0]?.markdown ?? null;
+
+/**
+ * What an owed update adds to its comment when 10db holds a Linear sign-in of its own, and the first picture's
+ * address to record on its row: the pictures are uploaded here, through that sign-in.
+ */
+export async function picturesFor(input: {
+  readonly db: DbReader;
+  readonly post: Pick<LinearPostDto, 'id' | 'event' | 'taskId' | 'detail'>;
+  readonly uploader: PictureUploader;
+  readonly outlook: (taskId: TaskId) => PicturesOutlook;
+  readonly send: typeof fetch;
+}): Promise<{ readonly text: string; readonly attachmentUrl: string | null }> {
+  const show = picturesToShow(input);
+  if ('text' in show) return { text: show.text, attachmentUrl: null };
+  const uploaded = await uploadPictures(input.db, show.pictures, input.uploader, input.send);
   return {
-    text: picturesText({ uploaded, more, offered: pictures.length }),
-    attachmentUrl: uploaded.shown[0]?.assetUrl ?? uploaded.shown[0]?.markdown ?? null,
+    text: picturesText({ uploaded, more: show.more, offered: show.pictures.length }),
+    attachmentUrl: attachmentOf(uploaded),
   };
 }

@@ -19,6 +19,7 @@ function run(over: Partial<ReporterRun> = {}): ReporterRun {
     link,
     direct: false,
     comments: new Map(),
+    uploads: new Map(),
     noteSteers: false,
     pickedStatuses: new Set(),
     ...over,
@@ -38,11 +39,14 @@ const call = (toolName: string, input: unknown = {}) => ({ toolName, input });
 
 const upload = (pictureId: string) =>
   call('mcp__10db__upload_linear_picture', { pictureId, uploadUrl: 'x', headers: {} });
-const prepare = call(`${L}prepare_file_upload`, {
-  filename: '1-home-after.png',
-  contentType: 'image/png',
-  size: 68,
-});
+const PNG = { filename: '1-home-after.png', contentType: 'image/png', size: 68 };
+const prepare = call(`${L}prepare_file_upload`, PNG);
+/** A run whose update has this one file named by 10db: the only upload its agent may ask Linear to sign. */
+const named = (asked = false, over: Partial<ReporterRun> = {}): ReporterRun =>
+  run({
+    uploads: new Map([[POST, { ...PNG, asked }]]),
+    ...over,
+  });
 const decision = (r: ReporterRun, c: { toolName: string; input: unknown }) =>
   judgeReporterCall(r, c).verdict.decision;
 
@@ -156,7 +160,42 @@ describe('judgeReporterCall', () => {
     ['another 10db tool', run(), call('mcp__10db__commit', {}), 'deny'],
     ['upload a picture', run(), upload('tsc_0193a5b0-0000-7000-8000-000000000001'), 'deny'],
     ['prepare a PNG upload', run(), prepare, 'deny'],
-    ['attach a file to Resources', run(), call(`${L}prepare_attachment_upload`, {}), 'deny'],
+    // Only the one upload 10db named may be asked of Linear, once: its answer is where 10db sends the picture.
+    ['the upload 10db named', named(), prepare, 'allow'],
+    ['the named upload a second time', named(true), prepare, 'deny'],
+    [
+      'the named file at another size',
+      named(),
+      call(`${L}prepare_file_upload`, { ...PNG, size: 69 }),
+      'deny',
+    ],
+    [
+      'another file beside the named one',
+      named(),
+      call(`${L}prepare_file_upload`, { ...PNG, filename: 'notes.txt' }),
+      'deny',
+    ],
+    [
+      'the named file as another type',
+      named(),
+      call(`${L}prepare_file_upload`, { ...PNG, contentType: 'text/html' }),
+      'deny',
+    ],
+    [
+      'the named upload with a key Linear does not need',
+      named(),
+      call(`${L}prepare_file_upload`, { ...PNG, makePublic: true }),
+      'deny',
+    ],
+    ['the named upload in a snapshot', named(false, { readOnly: true }), prepare, 'deny'],
+    ['attach a file to Resources', named(), call(`${L}prepare_attachment_upload`, PNG), 'deny'],
+    ['attach a file as base64', named(), call(`${L}create_attachment`, PNG), 'deny'],
+    [
+      'link an upload to the issue',
+      named(),
+      call(`${L}create_attachment_from_upload`, { issue: 'iss-119', assetUrl: 'https://x' }),
+      'deny',
+    ],
     [
       'snapshot uploads nothing',
       run({ readOnly: true }),

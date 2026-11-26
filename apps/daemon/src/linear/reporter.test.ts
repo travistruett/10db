@@ -774,22 +774,88 @@ describe('the Linear reporter', () => {
     return written[0]?.body ?? '';
   };
 
-  it('puts a finished task’s before and after pictures in its ended comment, uploaded by 10db, and names no pull request', async () => {
-    linearHeaders = { Authorization: 'Bearer lin_api_x' };
-    keepPicture(ScreenKind.Before, 'before-bytes');
-    keepPicture(ScreenKind.After, 'after-bytes');
-    const body = await endedComment(oweOne('ended:1:0', LinearEventKind.Ended));
-    expect(prepared.map((p) => p.filename)).toEqual(['1-home-before.png', '1-home-after.png']);
-    expect(prepared.map((p) => p.size)).toEqual(['before-bytes'.length, 'after-bytes'.length]);
-    expect(sent).toEqual([
-      { url: SIGNED_UPLOAD, method: 'PUT' },
-      { url: SIGNED_UPLOAD, method: 'PUT' },
-    ]);
-    expect(body).toContain('![1-home-before.png](https://uploads.linear.app/1-home-before.png)');
-    expect(body).toContain('![1-home-after.png](https://uploads.linear.app/1-home-after.png)');
-    expect(body).not.toMatch(/pull request/i);
-    expect(rows()[0]?.attachmentUrl).toBe('https://uploads.linear.app/1-home-before.png');
-  });
+  /** What Linear answers an upload request with, as its `prepare_file_upload` does. */
+  const signedFor = (filename: string): string =>
+    JSON.stringify({
+      uploadRequest: { url: SIGNED_UPLOAD, headers: { 'Content-Type': 'image/png' } },
+      assetUrl: `https://uploads.linear.app/${filename}`,
+    });
+
+  /**
+   * The run of an account whose Linear sign-in only its agent holds: for each picture 10db names, the agent asks
+   * Linear for the upload address and goes back to 10db, which sends the file; then it writes the comment 10db
+   * built. Answers that comment's body.
+   */
+  const endedCommentThroughAgent = async (id: LinearPostId): Promise<string> => {
+    const ask = (filename: string, size: number): FakeStep[] => [
+      {
+        do: 'tool',
+        toolName: `${PREFIX}prepare_file_upload`,
+        input: { filename, contentType: 'image/png', size },
+        result: signedFor(filename),
+      },
+      { do: 'mcp', tool: 'report_linear_post', args: { postId: id } },
+    ];
+    book[KEY] = [
+      [
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: id, body: 'The run ended and its change landed.', status: STATUS },
+        },
+        // A file 10db did not name is never signed for.
+        {
+          do: 'tool',
+          toolName: `${PREFIX}prepare_file_upload`,
+          input: { filename: 'notes.txt', contentType: 'text/plain', size: 9 },
+        },
+        ...ask('1-home-before.png', 'before-bytes'.length),
+        ...ask('1-home-after.png', 'after-bytes'.length),
+        {
+          do: 'tool',
+          toolName: `${PREFIX}save_comment`,
+          input: { issueId: ISSUE, body: '$comment.body' },
+          result: JSON.stringify({ id: 'comment-1' }),
+        },
+        { do: 'say', text: `${id}: comment-1` },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+    expect(adapter.observations.filter((o) => o.kind === 'denied_by_guard')).toHaveLength(1);
+    const answers = adapter.observations.filter((o) => o.kind === 'mcp_result');
+    // 10db names one file at a time: the next only once the last was sent.
+    expect(String(answers[0]?.detail['text'])).toContain('1-home-before.png');
+    expect(String(answers[0]?.detail['text'])).not.toContain('1-home-after.png');
+    return String(answers.at(-1)?.detail['text']);
+  };
+
+  it.each([
+    ['through a sign-in 10db holds', true],
+    ['through a sign-in only its agent holds, which asks Linear for each address', false],
+  ])(
+    'puts a finished task’s before and after pictures in its ended comment, sent by 10db %s, and names no pull request',
+    async (_how, held) => {
+      if (held) linearHeaders = { Authorization: 'Bearer lin_api_x' };
+      keepPicture(ScreenKind.Before, 'before-bytes');
+      keepPicture(ScreenKind.After, 'after-bytes');
+      const id = oweOne('ended:1:0', LinearEventKind.Ended);
+      const body = held ? await endedComment(id) : await endedCommentThroughAgent(id);
+      if (held) {
+        expect(prepared.map((p) => p.filename)).toEqual(['1-home-before.png', '1-home-after.png']);
+        expect(prepared.map((p) => p.size)).toEqual(['before-bytes'.length, 'after-bytes'.length]);
+      }
+      expect(sent).toEqual([
+        { url: SIGNED_UPLOAD, method: 'PUT' },
+        { url: SIGNED_UPLOAD, method: 'PUT' },
+      ]);
+      expect(body).toContain('![1-home-before.png](https://uploads.linear.app/1-home-before.png)');
+      expect(body).toContain('![1-home-after.png](https://uploads.linear.app/1-home-after.png)');
+      expect(body).not.toMatch(/pull request/i);
+      expect(rows()[0]?.attachmentUrl).toBe('https://uploads.linear.app/1-home-before.png');
+    },
+  );
 
   it('says once, with the reason, that a finished task has no pictures, and never names a pull request', async () => {
     linearHeaders = { Authorization: 'Bearer lin_api_x' };

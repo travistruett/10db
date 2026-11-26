@@ -48,3 +48,4 @@
   an MCP tool result's image never reaches the model as a picture (`test/codex.live.test.ts`, "reports whether an MCP tool
   result image reaches the model", on the Mac): the lane browser's prompt tells a Codex session to open a screenshot's
   path with `view_image` (`briefing/prompts.ts`).
+- A session hears a call's result through `postToolUse` (and `toolFailed` for one that failed): Claude Code's PostToolUse hooks for every tool, and on Codex, which has no such hook, the `mcpToolCall` item that ends an MCP call (`codexMcpResult` in `codex-tool-calls.ts`, called from `codex-session.ts`), with the call named as the guard hook names it (`mcp__<server>__<tool>`) and its whole result, where a `ToolCallView` keeps only the tail. Codex hands on MCP calls only; the fake does the same for a scripted `mcp__` tool. The Linear reporter reads Linear's upload address from it (`linear/reporter-agent-upload.ts`).

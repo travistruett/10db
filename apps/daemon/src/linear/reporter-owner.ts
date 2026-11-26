@@ -76,7 +76,7 @@ export interface ReporterHooksDeps {
   readonly state: StateStore;
   readonly log: Logger;
   readonly mcp: { readonly url: string };
-  readonly runs: LinearReporterRuns & Pick<LinearReporter, 'verdict'>;
+  readonly runs: LinearReporterRuns & Pick<LinearReporter, 'verdict' | 'toolResult'>;
   readonly signIns: { list(): Promise<LinearSignInsDto> };
   /** How 10db writes a comment through a Linear server it can sign in to; the production way when absent. */
   readonly commentWriter?: (server: {
@@ -202,6 +202,13 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
           canUseTool: () =>
             Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb }),
           preToolUse: (req) => deps.runs.verdict(start.sessionId, req),
+          // The result of the upload request 10db named is where it sends a picture; a failed call has none.
+          postToolUse: (req) => {
+            deps.runs.toolResult(start.sessionId, req);
+          },
+          toolFailed: (req) => {
+            deps.runs.toolResult(start.sessionId, { ...req, response: null });
+          },
         },
         limits: pictureLimitsFor(launch.account.kind, {
           accountId: launch.account.accountId,
