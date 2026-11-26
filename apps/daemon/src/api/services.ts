@@ -86,6 +86,10 @@ import type {
   FolderInspectResult,
   FoundHostDto,
   EvalManifest,
+  EvalLiveRunId,
+  EvalLivePreviewDto,
+  EvalLiveRunDto,
+  EvalSuiteKey,
   NewEvalBody,
   EvalManifestResult,
   EvalMarkersDto,
@@ -935,6 +939,8 @@ export interface ApiServices extends PlanRecordServices {
   scanNetworkHosts(projectId: ProjectId): Promise<FoundHostDto[]>;
   /** The project's eval files at HEAD and result files from its checkout, with the recorded manifest laid over them; nothing is run. */
   evals(projectId: ProjectId): Promise<EvalsDto>;
+  /** Assesses the project's evals with a model now, and answers the page as it stands after. */
+  assessEvals(projectId: ProjectId): Promise<EvalsDto>;
   /** Every model the project's results graded, with its newest result per suite; nothing is run. */
   evalModels(projectId: ProjectId): Promise<EvalModelsDto>;
   /** The suites each of the project's tasks touched, with their state against the checkout's results; nothing is run. */
@@ -947,6 +953,18 @@ export interface ApiServices extends PlanRecordServices {
     key: string,
     run: string | undefined,
   ): Promise<EvalSuiteDetailDto>;
+  /** What a suite's Run would do, and whether it may; nothing is started. */
+  evalLivePreview(projectId: ProjectId, suiteKey: EvalSuiteKey): Promise<EvalLivePreviewDto>;
+  /** The click: starts the run the window showed; throws `EvalLiveRefused` (409) when it may not. */
+  startEvalLive(
+    projectId: ProjectId,
+    suiteKey: EvalSuiteKey,
+    previewHash: string,
+  ): Promise<EvalLiveRunDto>;
+  /** Stops a running live run and settles it; throws NotFoundError when it is not running. */
+  stopEvalLive(projectId: ProjectId, runId: EvalLiveRunId): Promise<void>;
+  /** The project's newest live runs, of one suite or all. */
+  evalLiveRuns(projectId: ProjectId, suiteKey: EvalSuiteKey | null): EvalLiveRunDto[];
   /** Records an eval manifest unless it names a path HEAD does not track; nothing is kept then. */
   recordEvalManifest(projectId: ProjectId, manifest: EvalManifest): Promise<EvalManifestResult>;
   /**

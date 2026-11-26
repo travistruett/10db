@@ -496,7 +496,12 @@ import { createAnswerWriter } from './answer-writer-launch';
 import { createAreaNamer } from './area-namer';
 import { systemListeners, type ListenerReader } from './listening-ports';
 import { loopbackProbe, type AddressProbe } from './loopback-probe';
-import { createEvalsService } from '../evals';
+import {
+  createEvalLiveRuns,
+  createEvalsAssessor,
+  createEvalsService,
+  subscribeEvalAssessment,
+} from '../evals';
 import { createServices } from './services';
 import {
   allSandboxRootsOf,
@@ -1489,6 +1494,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // all, so the machine never runs more than `limits.gateSlots` at once.
   // Every project's gate gets its Docker switch as it stands, and 10db turns it on when the gate
   // needs Docker (`auto-docker.ts`); an install or a generator names no project and is left alone.
+  const evalsService = createEvalsService({
+    state,
+    git,
+    logger: logger.child({ module: 'evals' }),
+  });
   const gateRunner = autoDocker(
     createGateRunner({
       sandbox: sandboxes?.gate ?? null,
@@ -1506,6 +1516,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   );
   const gateSlots = createGateSlots(limits.gateSlots);
+  // A suite's live arm, run only when the builder presses Run: the unslotted runner (a paid eval never
+  // holds or waits for a gate slot), its processes in a ledger. What a crash left is stopped here, after
+  // the ledger reap above and before any route serves.
+  const evalLiveRuns = createEvalLiveRuns({
+    gates: gateRunner,
+    ledgers:
+      ledgerSweep && sandboxRoots
+        ? { sweep: ledgerSweep, root: sandboxRoots.files, processes: laneProcesses }
+        : null,
+    sandboxed: sandboxes?.gate != null,
+    dataDir: opts.dataDir,
+    state,
+    evals: evalsService,
+    checkouts: () => allCheckouts(state.db),
+    env: () => launcher.projectEnv(),
+    logger: logger.child({ component: 'eval-live' }),
+  });
+  await evalLiveRuns.recoverAtStart();
   // A final gate that fails because the project's dev stack isn't up to date waits, with one card,
   // instead of failing the task. It wraps the limiter, so a waiting gate holds no slot.
   const gateHoldDeps = {
@@ -2278,11 +2306,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   resumeModelMarks({ state, clock });
   // What each task conversation's session streams now; the runner owns those sessions.
   const laneLive = createLiveRegistry();
-  const evalsService = createEvalsService({
-    state,
-    git,
-    logger: logger.child({ module: 'evals' }),
-  });
   const createdRunner = createRunner({
     evals: evalsService,
     judge,
@@ -2820,6 +2843,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     hazardAssessor,
   );
+  // Assesses each project's evals the same way: when it is added, when a commit changes an eval file, and
+  // when the Evals page asks.
+  const evalsAssessor = createEvalsAssessor({
+    state,
+    git,
+    evals: evalsService,
+    asker: areaNamer,
+    logger: logger.child({ module: 'evals' }),
+  });
+  const unsubscribeEvalAssessment = subscribeEvalAssessment(
+    bus,
+    {
+      projectOfWorkstream: (id) => {
+        try {
+          return getWorkstreamRow(state.db, id).projectId;
+        } catch {
+          return null;
+        }
+      },
+    },
+    evalsAssessor,
+  );
   const github = createGithubServices({
     clock,
     spawn: opts.githubLoginSpawn ?? spawnGhLogin({ git: gitBin }),
@@ -3160,6 +3205,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     probe: opts.probe ?? loopbackProbe(),
     hazards: hazardAssessor,
     evals: evalsService,
+    evalsAssessor,
+    evalLive: evalLiveRuns,
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
       git.gitDirs(repoPath).catch(() => undefined);
@@ -3642,6 +3689,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await pictures?.stop();
       // The dev server 10db started ends with it; a builder's own is never 10db's to stop.
       await preview?.stop();
+      // Each live eval run ends `interrupted` and its stop command runs, before the store closes.
+      await evalLiveRuns.stopAll();
       picturePruning.stop();
       await pictureCamera.close();
       await laneBrowsers?.close();
@@ -3673,6 +3722,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeYields();
       unsubscribeHazards();
       hazardAssessor.stop();
+      unsubscribeEvalAssessment();
+      evalsAssessor.stop();
       watcher?.stop();
       keepAwake.stop();
       // A probe in flight writes to the database; the runner can ask for another while it stops.

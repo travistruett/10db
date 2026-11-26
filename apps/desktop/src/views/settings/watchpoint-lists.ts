@@ -31,6 +31,7 @@ export function plain(row: EffectiveWatchpoint): Watchpoint {
     label: row.label,
     why: row.why,
     globs: row.globs,
+    lines: row.lines,
     guidance: row.guidance,
     loudness: row.loudness,
     starter: row.starter,

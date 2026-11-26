@@ -412,7 +412,7 @@ export function TaskDrawer({
           <Tabs.Panel value="overview" pt="lg">
             <Stack gap="xl">
               <TaskForYou workstreamId={workstream?.id} />
-              <TaskEvalCoverage taskId={task.id} />
+              <TaskEvalCoverage taskId={task.id} projectId={task.projectId} />
               {task.acceptanceCriteria.length > 0 ? (
                 <Stack gap="xs">
                   <SectionLabel>What It Promises</SectionLabel>

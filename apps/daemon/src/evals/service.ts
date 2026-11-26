@@ -1,5 +1,8 @@
+import { lstat, realpath } from 'node:fs/promises';
+import { join, sep } from 'node:path';
 import {
   NotFoundError,
+  EvalManifestSource,
   type EvalManifest,
   type EvalCoverageSideDto,
   type EvalCoverageState,
@@ -59,6 +62,7 @@ export interface EvalsService {
     projectId: ProjectId,
     repoPath: string,
     manifest: EvalManifest,
+    source?: EvalManifestSource,
   ): Promise<EvalManifestResult>;
   /** Where each queried suite stands against its task's times, in the checkout's results as read now. */
   standing(repoPath: string, queries: readonly CoverageQuery[]): Promise<CoverageStanding[]>;
@@ -104,6 +108,27 @@ function untrackedIn(manifest: EvalManifest, found: FoundEvals): string[] {
       checked.add(glob);
       if (!globHolds(glob, found.tracked)) out.add(glob);
       if (out.size >= MAX_REPORTED) return [...out];
+    }
+  }
+  return [...out];
+}
+
+/**
+ * The env files a manifest's live settings name that are not a regular file in the working tree. They are
+ * untracked, so HEAD can't vouch for them; a link, or a name that resolves outside the checkout, is refused so
+ * the sandbox's read grant can't be led out of it.
+ */
+async function missingEnvFiles(manifest: EvalManifest, repoPath: string): Promise<string[]> {
+  const out = new Set<string>();
+  const root = await realpath(repoPath).catch(() => '');
+  for (const suite of manifest.suites) {
+    for (const file of suite.live?.envFiles ?? []) {
+      if (out.has(file)) continue;
+      const path = join(repoPath, file);
+      const stat = await lstat(path).catch(() => null);
+      // A linked directory in the name can lead outside the checkout, so the resolved path must stay inside it.
+      const real = stat?.isFile() ? await realpath(path).catch(() => '') : '';
+      if (root === '' || !real.startsWith(root + sep)) out.add(file);
     }
   }
   return [...out];
@@ -277,7 +302,7 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
       const skills = read === null ? [] : await findEvalSkills(deps.git, repoPath, read.tracked);
       return evalTaskDraft(request, skills, suites);
     },
-    async record(projectId, repoPath, manifest) {
+    async record(projectId, repoPath, manifest, source = EvalManifestSource.Agent) {
       const read = await found(repoPath);
       if (read === null) {
         return { ok: false, untracked: [], message: 'The repository has no commit to read.' };
@@ -290,7 +315,15 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
           message: `Not tracked at HEAD, so nothing was recorded: ${untracked.join(', ')}`,
         };
       }
-      const stored = { manifest, commit: read.commit, assessedAt: deps.state.now() };
+      const missingEnv = await missingEnvFiles(manifest, repoPath);
+      if (missingEnv.length > 0) {
+        return {
+          ok: false,
+          untracked: missingEnv,
+          message: `Not a regular file in the checkout (no link), so nothing was recorded: ${missingEnv.join(', ')}`,
+        };
+      }
+      const stored = { manifest, source, commit: read.commit, assessedAt: deps.state.now() };
       deps.state.write((ctx) => {
         writeEvalManifest(ctx, projectId, stored);
       });

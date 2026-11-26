@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^elr_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "suiteKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "running",
+        "passed",
+        "failed",
+        "stopped",
+        "timed_out",
+        "interrupted"
+      ]
+    },
+    "startedAt": {
+      "type": "string"
+    },
+    "endedAt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "exitCode": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "tail": {
+      "type": "string"
+    },
+    "costShownUsd": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "stopRan": {
+      "type": "boolean"
+    },
+    "stopping": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "id",
+    "projectId",
+    "suiteKey",
+    "state",
+    "startedAt",
+    "endedAt",
+    "exitCode",
+    "tail",
+    "costShownUsd",
+    "stopRan",
+    "stopping"
+  ]
+}

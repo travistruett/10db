@@ -318,6 +318,12 @@ import {
 import { AgentCapabilitiesDto } from './agent-capabilities';
 import { WatchpointHitsDto } from './watchpoint-hit';
 import { EvalMarkersDto, TaskEvalCoverageDto } from './eval-coverage';
+import {
+  EvalLiveRunChangedData,
+  EvalLivePreviewDto,
+  EvalLiveRunDto,
+  RunEvalLiveBody,
+} from './evals';
 import { ProjectWatchpoints, ProjectWatchpointsDto, YourWatchpoints } from './watchpoints';
 import {
   InstalledPluginDto,
@@ -441,6 +447,9 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'system-check-dto': SystemCheckDto,
   'watchpoint-hits-dto': WatchpointHitsDto,
   'eval-markers-dto': EvalMarkersDto,
+  'eval-live-preview-dto': EvalLivePreviewDto,
+  'eval-live-run-dto': EvalLiveRunDto,
+  'run-eval-live-body': RunEvalLiveBody,
   'task-eval-coverage-dto': TaskEvalCoverageDto,
   'project-watchpoints-dto': ProjectWatchpointsDto,
   'your-watchpoints': YourWatchpoints,
@@ -684,6 +693,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-closed-data': PassClosedData,
   'pass-settled-data': PassSettledData,
   'eval-definition-changed-data': EvalDefinitionChangedData,
+  'eval-live-run-changed-data': EvalLiveRunChangedData,
   'pass-preview-broken-data': PassPreviewBrokenData,
   'pass-preview-mended-data': PassPreviewMendedData,
   ...mcpSchemas,

@@ -187,7 +187,7 @@ const DeviceIds = z.array(z.looseObject({ id: z.string() }));
  * expects, so the cleanup never hides the failure that came first.
  */
 async function stopSharing(request: APIRequestContext): Promise<void> {
-  const list = await request.get(`${daemonUrl}/devices`, { headers: auth });
+  const list = await request.get(`${daemonUrl}/devices`, { headers: auth, maxRetries: 2 });
   const devices = DeviceIds.safeParse(list.ok() ? await list.json().catch(() => null) : null);
   for (const device of devices.success ? devices.data : []) {
     await request.delete(`${daemonUrl}/devices/${device.id}`, { headers: auth });
@@ -222,8 +222,11 @@ test('a card is answered from a phone paired with a code made in Devices', async
     await expect
       .poll(
         async () =>
-          Shared.parse(await (await request.get(`${daemonUrl}/sharing`, { headers: auth })).json())
-            .state,
+          Shared.parse(
+            await (
+              await request.get(`${daemonUrl}/sharing`, { headers: auth, maxRetries: 2 })
+            ).json(),
+          ).state,
       )
       .toBe('ready');
     standIn = await startTlsStandIn({ fqdn, sharePort, login: 'e2e@example.com' });
