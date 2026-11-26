@@ -32,6 +32,15 @@ if (target === undefined || target.startsWith('--')) {
 const checkout = resolve(target);
 const valuesOf = (flag: string): string[] =>
   options.flatMap((option, i) => (option === flag ? [options[i + 1] ?? ''] : []));
+const dotEnv = valuesOf('--dot-env');
+if (dotEnv.some((file) => file === '' || file.startsWith('--'))) {
+  process.stderr.write('--dot-env needs a checkout-relative file name\n');
+  process.exit(2);
+}
+if (dotEnv.length > 0 && !options.includes('--docker')) {
+  process.stderr.write('--dot-env needs --docker\n');
+  process.exit(2);
+}
 const hosts = valuesOf('--host');
 const reads = valuesOf('--read').map((path) => resolve(path));
 const logAt = options.indexOf('--log');
@@ -74,7 +83,7 @@ const result = await gate
       sandboxLoopback: options.includes('--loopback'),
       sandboxDocker: options.includes('--docker'),
     },
-    dotEnvReadable: valuesOf('--dot-env'),
+    dotEnvReadable: dotEnv,
     command,
     logPath,
     timeoutMs: 3_600_000,

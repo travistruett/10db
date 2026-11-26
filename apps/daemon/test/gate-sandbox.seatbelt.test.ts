@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -263,8 +264,14 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
           truncate: ': > .env',
           remove: 'rm .env',
           'truncate-dev': ': > sub/.env.dev',
+          'hard-link-write': 'ln .env hl && : > hl',
+          move: 'mv .env moved.env',
+          'move-folder': 'mv sub sub2',
         },
-        { dotEnvReadable: ['.env', 'sub/.env.dev'] },
+        {
+          dotEnvReadable: ['.env', 'sub/.env.dev'],
+          project: { repoPath: checkout, sandboxLoopback: false, sandboxDocker: true },
+        },
       );
       expect(seen).toEqual({
         'read-env': 'ok',
@@ -274,14 +281,28 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
         truncate: 'denied',
         remove: 'denied',
         'truncate-dev': 'denied',
+        'hard-link-write': 'denied',
+        move: 'denied',
+        'move-folder': 'denied',
       });
-      for (const name of ['.env.out', 'missing.env']) {
-        const refused = await run('true', { dotEnvReadable: [name] });
+      expect(readFileSync(join(checkout, '.env'), 'utf8')).toBe(`SECRET=${token}\n`);
+      writeFileSync(join(checkout, 'notes.txt'), 'x');
+      const docker = { repoPath: checkout, sandboxLoopback: false, sandboxDocker: true };
+      for (const [name, project] of [
+        ['.env.out', docker],
+        ['missing.env', docker],
+        ['notes.txt', docker],
+        ['.env', undefined],
+      ] as const) {
+        const refused = await run('true', {
+          dotEnvReadable: [name],
+          ...(project === undefined ? {} : { project }),
+        });
         expect(refused.exitCode).toBe(126);
-        expect(refused.tail).toContain(`${name}: `);
+        expect(refused.tail).toContain(project === undefined ? 'Docker on' : `${name}: `);
       }
     } finally {
-      for (const name of ['.env', '.env.out', 'sub'])
+      for (const name of ['.env', '.env.out', 'sub', 'sub2', 'hl', 'moved.env', 'notes.txt'])
         rmSync(join(checkout, name), { recursive: true, force: true });
       rmSync(outside, { force: true });
     }
