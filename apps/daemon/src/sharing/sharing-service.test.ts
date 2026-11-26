@@ -4,7 +4,8 @@ import { ManualClock } from '../clock';
 import { createSocketRegistry } from '../devices';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
-import { createSharingService, type ShareListenResult } from './sharing-service';
+import type { ShareListenResult } from './share-listener';
+import { createSharingService } from './sharing-service';
 import type { CliResult, TailscaleRun } from './tailscale-cli';
 
 const FQDN = 'mac.tail1234.ts.net';

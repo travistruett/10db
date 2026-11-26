@@ -6,7 +6,9 @@ import {
   type DeviceId,
 } from '@10db/contracts';
 import { createTestStore } from '@10db/db';
+import { upgradeWebSocket } from '@hono/node-server';
 import { defineWebSocketHelper } from 'hono/ws';
+import { WebSocket } from 'ws';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { stubServices } from '../../test/api-stub';
 import { ManualClock } from '../clock';
@@ -20,6 +22,8 @@ import {
   type Tickets,
 } from '../devices';
 import { createEventBus, createStateStore } from '../events';
+import { silentLogger } from '../log';
+import { createSharingService, startShareListener } from '../sharing';
 import { createApp } from './app';
 import { Listener } from './listener';
 import type { ListenerAllowlists } from './request-guards';
@@ -46,6 +50,8 @@ let devices: DeviceService;
 let tickets: Tickets;
 let pair: () => { deviceId: DeviceId; token: string };
 let app: ReturnType<typeof createApp>;
+let sockets: ReturnType<typeof createSocketRegistry>;
+let makeApp: (upgrade: typeof noUpgrade) => ReturnType<typeof createApp>;
 
 const call = (listener: Listener, path: string, init?: RequestInit) =>
   app.request(path, init, listener === Listener.Share ? { listener } : undefined);
@@ -56,7 +62,7 @@ beforeEach(() => {
   close = made.close;
   const state = createStateStore(made.store, createEventBus());
   const codes = createPairingCodes({ clock });
-  const sockets = createSocketRegistry();
+  sockets = createSocketRegistry();
   devices = createDeviceService({
     state,
     clock,
@@ -85,29 +91,44 @@ beforeEach(() => {
     });
     return { deviceId: paired.deviceId, token: paired.token };
   };
-  app = createApp({
-    startedAt: new Date('2026-10-13T12:00:00.000Z'),
-    allowedOrigins: ['http://localhost:1420'],
-    token: UI,
-    devUi: { token: DEV_UI, mayRead: () => false },
-    screens: {
-      claim: () => Promise.resolve(null),
-      deliver: () => false,
-      refuse: () => false,
-      tokenValid: (token) => token === RENDER,
-      mayRead: () => false,
-      image: () => null,
-    },
-    services: stubServices(),
-    upgradeWebSocket: noUpgrade,
-    mcp: () => Promise.resolve(new Response('mcp')),
-    builderMcp: () => Promise.resolve(new Response('builder')),
-    onUnexpectedError: () => undefined,
-    listenPort: () => MAIN_PORT,
-    share: { allowlists: () => lists, hostLogin: () => HOST_LOGIN },
-    devices,
-    tickets,
-  });
+  makeApp = (upgrade) =>
+    createApp({
+      startedAt: new Date('2026-10-13T12:00:00.000Z'),
+      allowedOrigins: ['http://localhost:1420'],
+      token: UI,
+      devUi: { token: DEV_UI, mayRead: () => false },
+      screens: {
+        claim: () => Promise.resolve(null),
+        deliver: () => false,
+        refuse: () => false,
+        tokenValid: (token) => token === RENDER,
+        mayRead: () => false,
+        image: () => null,
+      },
+      services: stubServices(),
+      upgradeWebSocket: upgrade,
+      mcp: () => Promise.resolve(new Response('mcp')),
+      builderMcp: () => Promise.resolve(new Response('builder')),
+      onUnexpectedError: () => undefined,
+      listenPort: () => MAIN_PORT,
+      share: { allowlists: () => lists, hostLogin: () => HOST_LOGIN },
+      devices,
+      tickets,
+      remote: {
+        devices,
+        sharing: createSharingService({
+          state,
+          clock,
+          log: silentLogger,
+          cli: () => null,
+          run: () => () => Promise.reject(new Error('no tailscale')),
+          listen: () => Promise.resolve({ ok: false, holder: null }),
+          sockets,
+          mainPort: () => MAIN_PORT,
+        }),
+      },
+    });
+  app = makeApp(noUpgrade);
 });
 afterEach(() => {
   close();
@@ -365,4 +386,45 @@ describe('the request path through both listeners', () => {
       Array.from({ length: 3 }, () => ({ status: 401, body: '{"error":"unauthorized"}' })),
     );
   });
+
+  it('closes a real share-listener socket with 4401 when its device is revoked', async () => {
+    const realApp = makeApp(upgradeWebSocket);
+    const started = await startShareListener({
+      fetch: (req, env) => realApp.fetch(req, env),
+      port: 0,
+      sockets,
+      holderOf: () => Promise.resolve(null),
+    });
+    if (!started.ok) throw new Error('the share listener did not start');
+    try {
+      const host = `127.0.0.1:${String(started.listener.port)}`;
+      lists = { hosts: [host], origins: [] };
+      const device = pair();
+      const { ticket } = tickets.issue({
+        scope: TicketScope.Full,
+        deviceId: device.deviceId,
+        listener: Listener.Share,
+      });
+      const socket = new WebSocket(`ws://${host}/events/stream?ticket=${ticket}`);
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', () => {
+          resolve();
+        });
+        socket.once('error', reject);
+      });
+      const closed = new Promise<number>((resolve) => {
+        socket.once('close', (code) => {
+          resolve(code);
+        });
+      });
+      const revoked = await app.request(`/devices/${device.deviceId}`, {
+        method: 'DELETE',
+        headers: { ...mainHost, ...bearer(UI) },
+      });
+      expect(revoked.status).toBe(204);
+      expect(await closed).toBe(4401);
+    } finally {
+      await started.listener.close();
+    }
+  }, 10_000);
 });

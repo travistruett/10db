@@ -10,11 +10,12 @@ import {
 } from '@10db/contracts';
 import { getAppSetting, setAppSetting } from '@10db/db';
 import { z } from 'zod';
-import { Listener } from '../api';
+import { Listener, type ListenerAllowlists } from '../api';
 import type { Clock, Timer } from '../clock';
 import type { SocketRegistry } from '../devices';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
+import type { ShareListener, ShareListenResult } from './share-listener';
 import { createCertificateProbe, type CertificateProbe } from './certificate-probe';
 import {
   ServeStatus,
@@ -27,20 +28,6 @@ import {
   type MappingProblem,
 } from './serve-mapping';
 import { readTailscaleSelf, type TailscaleRun, type TailscaleSelf } from './tailscale-cli';
-
-/** The share listener a service opens; the same shape `startShareListener` returns. */
-export interface ShareListenerHandle {
-  readonly port: number;
-  close(): Promise<void>;
-}
-export type ShareListenResult =
-  | { readonly ok: true; readonly listener: ShareListenerHandle }
-  | { readonly ok: false; readonly holder: string | null };
-
-export interface ListenerAllowlists {
-  readonly hosts: readonly string[];
-  readonly origins: readonly string[];
-}
 
 export interface SharingService {
   /** The cache, at once; also starts a refresh (not awaited) when the last one is over 10 s old. */
@@ -113,7 +100,7 @@ export function createSharingService(deps: {
   let serve: ServeStatus | null = null;
   let probe: CertificateProbe | null = null;
   let probeName: string | null = null;
-  let listener: ShareListenerHandle | null = null;
+  let listener: ShareListener | null = null;
   let listenerFqdn: string | null = null;
   let portHolder: string | null = null;
   let pausedReason: string | null = null;

@@ -1,7 +1,6 @@
 # sharing
 
-Shares this Mac's daemon on the builder's tailnet through `tailscale serve` (built in part; the share listener and the
-`start.ts` wiring come in a later task).
+Shares this Mac's daemon on the builder's tailnet through `tailscale serve`.
 
 - `tailscale-cli.ts` is the only module that runs the Tailscale CLI. `findTailscaleCli` reads no environment;
   `TENDB_TAILSCALE=off` is parsed in `daemonOptionsFromEnv` (`tailscaleOff`) and `start.ts` then passes
@@ -27,6 +26,12 @@ Shares this Mac's daemon on the builder's tailnet through `tailscale serve` (bui
   (`blocked`); a start that fails for Tailscale or certificate reasons (`retry`) is tried again by the monitor, a held
   port is not, and the monitor only removes 10db's mapping while the listener is down. `set` refuses with
   `SharingRefusedError`, whose message is shown to the builder (task 10 maps it to 409).
+- `share-listener.ts` is the second `serve()` on `127.0.0.1:<port>` with its own `WebSocketServer({ noServer: true })`
+  and the same app. Its fetch wrapper (and the main listener's in `start.ts`) marks the **env object in place**
+  (`Object.assign(env, { listener })`): `@hono/node-server` reads back a symbol the upgrade helper writes on that very
+  object, so a spread copy silently breaks every WebSocket upgrade. `EADDRINUSE` answers `{ ok: false, holder }`,
+  `holder` from `lsofHolderOf` (`"<command> (pid <n>)"`). `start.ts` calls `sharing.start()` unawaited after recovery
+  and `sharing.stop()` first in shutdown.
 
 ## Serve facts
 
