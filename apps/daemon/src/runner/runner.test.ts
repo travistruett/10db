@@ -1,4 +1,4 @@
-import { createDeliveryJobs, workstreamChanges } from '../delivery';
+import { createDeliveryJobs, jobKey, JobQueue, workstreamChanges } from '../delivery';
 import { execFileSync } from 'node:child_process';
 import {
   cpSync,
@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   readlinkSync,
   realpathSync,
   rmSync,
@@ -46,6 +47,7 @@ import {
   getAttachmentRevision,
   getProject,
   getTask,
+  getTaskKeptWork,
   getWorkstream,
   getWorkstreamRow,
   insertBatch,
@@ -3251,23 +3253,38 @@ describe('a step that ends with changes in its claims', () => {
         encoding: 'utf8',
       }).trim();
     const head = repoGit('rev-parse', 'HEAD');
+    const own = repoGit('rev-parse', `10db/lane/${workstream.id.slice(-8)}`);
 
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
-    // No second commit: the gate passed on the step's one commit, and the builder's edit stays theirs.
-    expect(repoGit('rev-parse', 'HEAD')).toBe(head);
-    expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[head]]);
+    // No second commit: the gate passed on the step's one commit, which lands on the base once, and
+    // the builder's edit stays theirs.
+    expect(repoGit('rev-parse', 'HEAD^')).toBe(head);
+    expect(repoGit('rev-parse', `10db/lane/${workstream.id.slice(-8)}`)).toBe(own);
+    expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[own]]);
     expect(repoGit('status', '--porcelain')).toBe('?? src/api/builder.txt');
   });
 
-  it("a retry after its committed step was blocked finishes on that commit, naming only the task's commits", async () => {
+  // Value: protects=a Commit Directly run's commits reach the base only once its checks pass, and a
+  // failed run's work leaves the base and Your folder for its own branch; fails_when=a blocked run's
+  // checkpoint commit lands on the base, or its files stay in the folder for the next lane's gate;
+  // why_new=escaped bug: two blocked Ampsio lanes left checkpoint commits on build, failing every later gate;
+  // no_claim=a take-out or landing a crash cut short.
+  it("a blocked run's commit never reaches the base: its work moves to its lane branch, and a retry lands it once", async () => {
     engine = await createTestEngine({
       Alpha: [
         [
           write('src/api/a.txt'),
           commit('op-retry-0001', ['src/api/a.txt']),
           // Skipped, sent out to the network, so the step can say it was blocked.
+          { do: 'tool', toolName: 'Bash', input: { command: 'curl -s https://example.com' } },
+          { do: 'mcp', tool: 'report_blocked', args: { reason: 'The checks could not start.' } },
+          turn,
+        ],
+        [
+          write('src/api/b.txt'),
+          commit('op-retry-0002', ['src/api/b.txt']),
           { do: 'tool', toolName: 'Bash', input: { command: 'curl -s https://example.com' } },
           { do: 'mcp', tool: 'report_blocked', args: { reason: 'The checks could not start.' } },
           turn,
@@ -3280,23 +3297,194 @@ describe('a step that ends with changes in its claims', () => {
         env: isolatedGitEnv(),
         encoding: 'utf8',
       }).trim();
-    const { workstream } = engine.addTask('Alpha');
+    const inFolder = (path: string): boolean => existsSync(join(engine.repoPath, path));
+    // A Retry as the scheduler starts it: the run launches once its kept-work gate lets it.
+    const retry = async (id: WorkstreamId): Promise<void> => {
+      engine.retry(id);
+      expect(engine.keptWork.ready(ws(id))).toBe(false);
+      await engine.jobs.idle();
+      expect(engine.keptWork.ready(ws(id))).toBe(true);
+      engine.launch(id);
+      await engine.runner.idle();
+      await engine.jobs.idle();
+    };
+    const start = repoGit('rev-parse', 'HEAD');
+    const { task, workstream } = engine.addTask('Alpha');
+    const lane = `10db/lane/${workstream.id.slice(-8)}`;
     engine.launch(workstream.id);
     await engine.runner.idle();
+    await engine.jobs.idle();
     expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureKind: 'blocked' });
-    const own = repoGit('rev-parse', 'HEAD');
+    // The base never had the run's commit, and Your folder no longer holds its file.
+    expect(repoGit('rev-parse', 'HEAD')).toBe(start);
+    expect(inFolder('src/api/a.txt')).toBe(false);
+    const own = repoGit('rev-parse', lane);
+    expect(repoGit('show', `${own}:src/api/a.txt`)).not.toBe('');
+    expect(getTaskKeptWork(engine.store.db, task.id)).toEqual({ keptSha: own, keptBaseSha: start });
+    // The failed card names where the work is.
+    expect(
+      listInbox(engine.store.db, { states: ['OPEN'] }).some((card) =>
+        card.body.includes(`Its work is on branch ${lane}`),
+      ),
+    ).toBe(true);
     // The builder commits their own work on the shared branch before pressing Retry.
     writeFileSync(join(engine.repoPath, 'builder.txt'), 'theirs');
     repoGit('add', 'builder.txt');
     repoGit('commit', '-q', '-m', 'Builder work');
     const builders = repoGit('rev-parse', 'HEAD');
 
-    engine.retry(workstream.id);
-    engine.launch(workstream.id);
-    await engine.runner.idle();
-    expect(ws(workstream.id).state).toBe('DONE');
+    // The retried run fails again: both its commits are on its branch, and neither file stays.
+    await retry(workstream.id);
+    expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureKind: 'blocked' });
     expect(repoGit('rev-parse', 'HEAD')).toBe(builders);
-    expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[own]]);
+    expect([inFolder('src/api/a.txt'), inFolder('src/api/b.txt')]).toEqual([false, false]);
+    const second = repoGit('rev-parse', lane);
+    expect(repoGit('rev-parse', `${second}^`)).toBe(own);
+
+    // A second Retry starts on all of the run's work, so its gate checks what then lands.
+    await retry(workstream.id);
+    expect(ws(workstream.id).state).toBe('DONE');
+    // One commit lands on the base, on top of the builder's, once the gate passed.
+    expect(repoGit('rev-parse', 'HEAD^')).toBe(builders);
+    expect(repoGit('show', 'HEAD:src/api/a.txt')).toBe(repoGit('show', `${own}:src/api/a.txt`));
+    expect(repoGit('show', 'HEAD:src/api/b.txt')).toBe(repoGit('show', `${second}:src/api/b.txt`));
+    expect(repoGit('status', '--porcelain')).toBe('');
+    expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[own, second]]);
+  });
+
+  // Value: protects=a failed lane run's files stay its own until its take-out has them out of Your
+  // folder; fails_when=the failure frees its claims before the take-out's turn, so another run starts on
+  // its area and the take-out commits and removes that run's files; why_new=claims and git (core);
+  // no_claim=a take-out a restart cut short.
+  it("holds a failed lane run's claims until its take-out ends, so no run starts on its files", async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          write('src/api/a.txt'),
+          commit('op-hold-0001', ['src/api/a.txt']),
+          { do: 'tool', toolName: 'Bash', input: { command: 'curl -s https://example.com' } },
+          { do: 'mcp', tool: 'report_blocked', args: { reason: 'The checks could not start.' } },
+          turn,
+        ],
+      ],
+      Beta: [[write('src/api/new.txt'), commit('op-hold-0002', ['src/api/new.txt']), turn]],
+    });
+    const repoGit = (...args: string[]) =>
+      execFileSync('git', ['-C', engine.repoPath, ...args], {
+        env: isolatedGitEnv(),
+        encoding: 'utf8',
+      }).trim();
+    const alpha = engine.addTask('Alpha', ['api'], [], { flow: 'quick' }).workstream;
+    const beta = engine.addTask('Beta', ['api'], [], { flow: 'quick' }).workstream;
+    // Your folder's git work is busy when Alpha fails, so its take-out waits its turn.
+    let free = (): void => undefined;
+    const busy = new Promise<void>((resolve) => {
+      free = resolve;
+    });
+    engine.jobs.run(
+      jobKey({ projectId: engine.project.id, worktreePath: null }, JobQueue.Cut),
+      () => busy,
+    );
+    engine.launch(alpha.id);
+    await engine.runner.idle();
+    expect(ws(alpha.id)).toMatchObject({ state: 'FAILED', failureKind: 'blocked' });
+    let refused: unknown = null;
+    try {
+      engine.launch(beta.id);
+    } catch (error) {
+      refused = error;
+    }
+    free();
+    expect(String(refused)).toContain('claim conflict on api');
+    await engine.jobs.idle();
+    engine.launch(beta.id);
+    await engine.runner.idle();
+    await engine.jobs.idle();
+    expect(ws(beta.id).state).toBe('DONE');
+    // Beta's file landed and stays in Your folder; Alpha's work is on its own branch alone.
+    expect(repoGit('show', 'HEAD:src/api/new.txt')).toBe('x');
+    expect(existsSync(join(engine.repoPath, 'src/api/new.txt'))).toBe(true);
+    expect(existsSync(join(engine.repoPath, 'src/api/a.txt'))).toBe(false);
+    expect(
+      repoGit('ls-tree', '-r', '--name-only', `10db/lane/${alpha.id.slice(-8)}`).split('\n'),
+    ).not.toContain('src/api/new.txt');
+  });
+
+  // Value: protects=a base change made after a lane's newest commit of a file is never undone by the
+  // lane's landing, and one the lane's commit already took lands; fails_when=the landing takes a file
+  // from the lane's tip over a base commit that changed it, or refuses a file a builder's commit in the
+  // shared folder took the lane's edits of; why_new=git landing (core); no_claim=a base change to a file
+  // the lane never committed again after it.
+  it('lands over a base change its lane already holds, and refuses one it does not', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          write('src/api/g.txt'),
+          commit('op-held-0001', ['src/api/g.txt']),
+          write('src/api/f.txt', 'a\nb2\nc\nd\n'),
+          { do: 'await_signal', name: 'builder-took' },
+          write('src/api/f.txt', 'a\nb2\nc\nd\ne\n'),
+          commit('op-held-0002', ['src/api/f.txt']),
+          turn,
+        ],
+      ],
+      Beta: [
+        [
+          write('src/api/a.txt', 'run\n'),
+          commit('op-undo-0001', ['src/api/a.txt']),
+          { do: 'await_signal', name: 'builder-committed' },
+          turn,
+        ],
+      ],
+    });
+    const repoGit = (...args: string[]) =>
+      execFileSync('git', ['-C', engine.repoPath, ...args], {
+        env: isolatedGitEnv(),
+        encoding: 'utf8',
+      }).trim();
+    mkdirSync(join(engine.repoPath, 'src/api'), { recursive: true });
+    writeFileSync(join(engine.repoPath, 'src/api/f.txt'), 'a\nb\nc\n');
+    repoGit('add', 'src/api/f.txt');
+    repoGit('commit', '-q', '-m', 'Start f');
+
+    // The builder commits the file from the shared folder while the run is editing it, which takes
+    // the run's edits with it; the run then commits the file again, holding the builder's commit.
+    const alpha = engine.addTask('Alpha', ['api'], [], { flow: 'quick' }).workstream;
+    engine.launch(alpha.id);
+    await waitFor(() =>
+      readFileSync(join(engine.repoPath, 'src/api/f.txt'), 'utf8') === 'a\nb2\nc\nd\n'
+        ? true
+        : undefined,
+    );
+    repoGit('add', 'src/api/f.txt');
+    repoGit('commit', '-q', '-m', 'Builder takes f');
+    engine.adapter.signal('builder-took');
+    await engine.runner.idle();
+    await engine.jobs.idle();
+    expect(ws(alpha.id).state).toBe('DONE');
+    expect(repoGit('show', 'HEAD:src/api/f.txt')).toBe('a\nb2\nc\nd\ne');
+
+    // A base change after the run's commit of the file, which the run's work lacks, is never undone.
+    const beta = engine.addTask('Beta', ['api'], [], { flow: 'quick' }).workstream;
+    engine.launch(beta.id);
+    await waitFor(
+      () =>
+        engine.adapter.observations.find(
+          (o) => o.kind === 'mcp_result' && o.detail['tool'] === 'commit' && o.title === 'Beta',
+        ) ?? undefined,
+    );
+    // The builder adds a line to the file in Your folder and commits it on the base.
+    writeFileSync(join(engine.repoPath, 'src/api/a.txt'), 'run\nbuilder\n');
+    repoGit('add', 'src/api/a.txt');
+    repoGit('commit', '-q', '-m', 'Builder line');
+    const builders = repoGit('rev-parse', 'HEAD');
+    engine.adapter.signal('builder-committed');
+    await engine.runner.idle();
+    await engine.jobs.idle();
+    expect(ws(beta.id)).toMatchObject({ state: 'FAILED', failureKind: 'landing_refused' });
+    expect(repoGit('rev-parse', 'HEAD')).toBe(builders);
+    expect(repoGit('show', 'HEAD:src/api/a.txt')).toBe('run\nbuilder');
+    expect(repoGit('show', `10db/lane/${beta.id.slice(-8)}:src/api/a.txt`)).toBe('run');
   });
 
   // Value: protects=a task's failures show as one Inbox card that speaks for its newest run;
@@ -3330,13 +3518,17 @@ describe('a step that ends with changes in its claims', () => {
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('FAILED');
+    // A failed run keeps its claims until its take-out has its work out of Your folder.
+    await engine.jobs.idle();
     const second = later();
     engine.launch(second.id);
     await engine.runner.idle();
+    await engine.jobs.idle();
     const third = later();
     engine.launch(third.id);
     await engine.runner.idle();
     expect(ws(third.id).state).toBe('FAILED');
+    await engine.jobs.idle();
 
     const [card, ...more] = failedCards();
     expect(more).toEqual([]);
@@ -6480,8 +6672,14 @@ describe("a Light task's review safety net", () => {
     engine.adapter.signal('builder-committed');
     await engine.runner.idle();
 
-    const [first, builders, second] = repoGit('rev-list', '--reverse', 'HEAD~3..HEAD').split('\n');
-    expect(repoGit('log', '-1', '--format=%s', builders ?? '')).toBe('Builder migration');
+    // The task's two commits are on its lane branch; the base has the builder's, then the one landing.
+    const builders = repoGit('rev-parse', 'HEAD^');
+    expect(repoGit('log', '-1', '--format=%s', builders)).toBe('Builder migration');
+    const [first, second] = repoGit(
+      'rev-list',
+      '--reverse',
+      `${builders}..10db/lane/${workstream.id.slice(-8)}`,
+    ).split('\n');
     // The builder's migration forces no review of the task's work.
     expect(ws(workstream.id).state).toBe('DONE');
     expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement']);

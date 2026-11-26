@@ -29,7 +29,13 @@ import {
   type DbReader,
   type WorkstreamRow,
 } from '@10db/db';
-import { batchCardFields, checkoutOf, runCommits, type DeliveryJobs } from '../delivery';
+import {
+  batchCardFields,
+  checkoutOf,
+  laneBranchOf,
+  runCommits,
+  type DeliveryJobs,
+} from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { flagFailedRun, type InboxService } from '../inbox';
@@ -274,7 +280,8 @@ export async function recoverOnStartup(opts: {
             ...(row.steps.length > 0 ? { steps: failStep(row.steps, row.stepIndex) } : {}),
           },
         });
-        releaseClaims(ctx, ws.id);
+        // A run on a lane branch keeps its claims until its take-out has its work out of Your folder.
+        if (laneBranchOf(row) === null) releaseClaims(ctx, ws.id);
       } else {
         transitionWorkstream(ctx, ws.id, {
           to: S.Queued,

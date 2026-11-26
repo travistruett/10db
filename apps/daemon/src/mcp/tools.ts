@@ -79,6 +79,7 @@ import type { z } from 'zod';
 import { buildContextPack, quoteSlackAnswer } from '../briefing';
 import {
   checkoutOf,
+  laneBranchOf,
   MIGRATIONS_HAZARD,
   runCommits,
   type DependencyChanges,
@@ -948,13 +949,27 @@ export function createToolHandlers(
         });
         if (verdict.decision === 'deny') throw new InvalidError(verdict.reason);
       }
-      const result = await deps.git.commit({
-        repo: checkout,
-        paths: input.paths,
-        message: input.message,
-        opId: input.opId,
-        branch,
-      });
+      // A Commit Directly run in Your folder commits on its own lane branch; the base gets its work
+      // only once its final gate passed.
+      const lane = laneBranchOf(row);
+      const result =
+        lane === null
+          ? await deps.git.commit({
+              repo: checkout,
+              paths: input.paths,
+              message: input.message,
+              opId: input.opId,
+              branch,
+            })
+          : await deps.git.commitOnBranch({
+              repo: checkout,
+              branch: lane.lane,
+              checkedOut: lane.base,
+              startAt: `refs/heads/${lane.base}`,
+              paths: input.paths,
+              message: input.message,
+              opId: input.opId,
+            });
       // The record says when this commit resolved conflict markers of a base merge: it is on the branch
       // but brings none of a reverted task's work back. The session's answer is unchanged.
       // It also says when the tool made no new commit and handed the session one the run's revert
@@ -1262,7 +1277,11 @@ export function createToolHandlers(
       if (done !== undefined) return McpToolOutputs.write_handoff.parse(done);
       const row = getWorkstreamRow(db, workstreamId);
       const checkout = checkoutOf(db, row);
-      const head = await deps.git.head(checkout);
+      // A run on a lane branch commits there, not on the checkout's head.
+      const lane = laneBranchOf(row);
+      const head =
+        (lane === null ? null : await deps.git.branchTip(checkout, lane.lane)) ??
+        (await deps.git.head(checkout));
       const base = row.baseHead ?? head;
       const [changed, run] = await Promise.all([
         deps.git.changedFilesSince(checkout, base),

@@ -37,7 +37,7 @@ const message = (error: unknown): string =>
 
 /** Puts each task's saved Workbench work back in `checkout`. A put-back that fails is logged: the work stays saved. */
 export async function putBackForStart(
-  ctx: DeliveryContext,
+  ctx: Pick<DeliveryContext, 'state' | 'putBack' | 'logger'>,
   taskIds: Iterable<TaskId>,
   checkout: string,
 ): Promise<void> {
@@ -65,7 +65,19 @@ export interface KeptWorkGate {
    * W9 holds pass: their own rules hold them. A restart asks again; the put-back is idempotent.
    */
   ready(run: WorkstreamDto): boolean;
+  /**
+   * A failed run's work is about to leave Your folder for its lane branch. Until the returned
+   * function is called the run does not launch, so a Retry never starts on files the take-out is
+   * still moving; and the run's next start puts its work back again, however often it has failed.
+   */
+  takingOut(id: WorkstreamId): () => void;
 }
+
+/** What the kept-work gate reads of the delivery context. */
+export type KeptWorkGateContext = Pick<
+  DeliveryContext,
+  'state' | 'jobs' | 'folderHold' | 'putBack' | 'logger' | 'onWorkQueued'
+>;
 
 /**
  * Whether `run` waits for its task's saved work: it is queued, its task has saved work and no pass
@@ -89,14 +101,31 @@ function waitsForPutBack(db: DbReader, run: WorkstreamDto): boolean {
  * or Your folder may have changed since the scheduler asked: a run no longer waiting gets nothing
  * written, and is asked again if it comes to wait once more.
  */
-export function createKeptWorkGate(ctx: DeliveryContext): KeptWorkGate {
+export function createKeptWorkGate(ctx: KeptWorkGateContext): KeptWorkGate {
   const db = ctx.state.db;
-  /** Runs whose put-back has run. */
+  /** Runs whose put-back has run since their work was last taken out. */
   const back = new Set<WorkstreamId>();
   /** Runs whose put-back is queued or running. */
   const putting = new Set<WorkstreamId>();
+  /** Runs whose failed work is leaving Your folder, with how many take-outs are still to finish. */
+  const leaving = new Map<WorkstreamId, number>();
   return {
+    takingOut(id) {
+      leaving.set(id, (leaving.get(id) ?? 0) + 1);
+      // The take-out saves the run's work again: its next start has a put-back of its own to do.
+      back.delete(id);
+      let finished = false;
+      return () => {
+        if (finished) return;
+        finished = true;
+        const left = (leaving.get(id) ?? 1) - 1;
+        if (left > 0) leaving.set(id, left);
+        else leaving.delete(id);
+        ctx.onWorkQueued();
+      };
+    },
     ready(run) {
+      if (leaving.has(run.id)) return false;
       if (back.has(run.id) || !waitsForPutBack(db, run)) return true;
       if (putting.has(run.id)) return false;
       putting.add(run.id);

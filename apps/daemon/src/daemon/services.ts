@@ -204,7 +204,7 @@ import {
 } from '../pass';
 import type { AgentSkill } from '../agent-skill';
 import type { KeepAwake } from '../keep-awake';
-import type { Runner } from '../runner';
+import { releaseReplacedLaneRun, type Runner } from '../runner';
 import type { Admission, QueueWaits, Scheduler } from '../scheduler';
 import type { StatusService } from '../status';
 import { capacitySettings, setCapacitySettings } from '../load';
@@ -615,6 +615,12 @@ export function createServices(deps: {
       // couldn't take it again (none, or no longer open).
       const superseded: WorkstreamId | null =
         held?.state === WorkstreamState.Failed ? held.id : null;
+      // A failed lane run keeps its claims while its work is still in Your folder; the run that
+      // replaces it, and the tasks sharing its areas, could otherwise never start.
+      if (superseded)
+        deps.state.write((ctx) => {
+          releaseReplacedLaneRun(ctx, superseded);
+        });
       const project = getProject(db, getTask(db, taskId).projectId);
       // A task placed in a separate copy of a local project is cut a batch, as a pull-request task is.
       const inCopy =

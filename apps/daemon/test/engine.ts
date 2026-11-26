@@ -79,10 +79,18 @@ import {
   type StateStore,
 } from '../src/events';
 import { createLiveRegistry, type LiveRegistry } from '../src/conversation';
-import { applySkippedChoice, createDeliveryJobs, skipFollowUpStarter } from '../src/delivery';
+import {
+  applySkippedChoice,
+  createDeliveryJobs,
+  createKeptWorkGate,
+  skipFollowUpStarter,
+  type DeliveryJobs,
+  type KeptWorkGate,
+} from '../src/delivery';
+import { createFolderHold } from '../src/folder-hold';
 import { createGit, resolveGit } from '../src/git';
 import { resolveGh } from '../src/github';
-import { startSignOff } from '../src/pass';
+import { putBackKeptWork, startSignOff } from '../src/pass';
 import { createJudge, type Judge } from '../src/judge';
 import type { AnswerWriter } from '../src/stakeholders';
 import {
@@ -122,6 +130,7 @@ import {
   DEFAULT_RUNNER_LIMITS,
   type Runner,
   type RunnerOptions,
+  subscribeLaneTakeOut,
 } from '../src/runner';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { createGateRunner } from '../src/verify';
@@ -186,6 +195,10 @@ export interface TestEngine {
   readonly sends: StakeholderSends;
   readonly replyWatches: ReplyWatches;
   readonly timerWatch: TimerWatch;
+  /** The delivery jobs, where a failed Your-folder run's take-out runs. */
+  readonly jobs: DeliveryJobs;
+  /** The scheduler's last check before a launch: a run's saved work is back in its checkout. */
+  readonly keptWork: KeptWorkGate;
   readonly runner: Runner;
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
@@ -634,6 +647,23 @@ export async function createTestEngine(
     ...runnerOverrides,
   });
   runner = created;
+  // As start.ts wires it: a failed Your-folder run of a Commit Directly project leaves the folder.
+  // The scheduler's kept-work gate holds the run's Retry meanwhile, then puts the work back.
+  const folderHold = createFolderHold({ state, bus });
+  const keptWork = createKeptWorkGate({
+    state,
+    jobs,
+    folderHold,
+    logger: silentLogger,
+    onWorkQueued: () => undefined,
+    putBack: (input) =>
+      putBackKeptWork({ state, git, inbox, jobs, logger: silentLogger, clock }, input),
+  });
+  const unsubscribeLaneTakeOut = subscribeLaneTakeOut(
+    bus,
+    { state, folderHold, git, jobs, logger: silentLogger },
+    keptWork,
+  );
   const account = setup.account ? seedAccount(store, setup.account) : null;
   const secret = setup.secret;
   if (account && secret !== undefined) {
@@ -666,6 +696,8 @@ export async function createTestEngine(
     sends,
     replyWatches,
     timerWatch,
+    jobs,
+    keptWork,
     runner: created,
     adapter,
     clock,
@@ -740,6 +772,8 @@ export async function createTestEngine(
     async close() {
       moveBack.stop();
       await created.stopAll('shutdown');
+      unsubscribeLaneTakeOut();
+      await jobs.idle();
       server.close();
       close();
       repo.cleanup();

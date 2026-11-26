@@ -18,7 +18,7 @@ import {
 } from '@10db/db';
 import { PrState } from '../github';
 import { removeBranch, settleBranch } from './branch-cleanup';
-import { batchBranchName } from './branch-name';
+import { batchBranchName, LANE_BRANCH_PREFIX } from './branch-name';
 import { branchCardKey, branchCards, detailOf } from './cards';
 import { ghCall, networkCall, raise, withdraw, type DeliveryContext } from './context';
 import { ghDown } from './pr-watch';
@@ -172,9 +172,10 @@ async function strayBranchesOf(ctx: DeliveryContext, project: ProjectDto): Promi
       batch.state === BatchState.Cutting ? batchBranchName(batch.title, batch.id) : batch.branch,
     ),
   );
+  // A lane branch holds a Your-folder run's commits, which may be all that is left of its work.
   return (await ctx.git.localBranches(project.repoPath, BRANCH_PREFIX))
     .map((b) => b.name)
-    .filter((name) => !named.has(name));
+    .filter((name) => !named.has(name) && !name.startsWith(LANE_BRANCH_PREFIX));
 }
 
 /**

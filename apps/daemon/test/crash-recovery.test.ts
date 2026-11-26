@@ -218,16 +218,30 @@ describe('kill -9 mid-step', () => {
       ).toBe(true);
       expect(events.some((e) => e.type === 'recovery.step')).toBe(true);
 
-      const trailers = execFileSync(
-        'git',
-        ['-C', repo.path, 'log', '--format=%(trailers:key=10db-Op,valueonly)'],
-        { env: isolatedGitEnv() },
-      )
-        .toString()
-        .split('\n')
-        .filter(Boolean);
+      const opsOn = (ref: string) =>
+        execFileSync(
+          'git',
+          ['-C', repo.path, 'log', ref, '--format=%(trailers:key=10db-Op,valueonly)'],
+          { env: isolatedGitEnv() },
+        )
+          .toString()
+          .split('\n')
+          .filter(Boolean);
+      // The run commits on its lane branch; the base gets its work as one landing commit.
+      const trailers = opsOn('--all');
       expect(trailers.filter((t) => t === 'op-x-00001')).toHaveLength(1);
       expect(trailers.filter((t) => t === 'op-x-00002')).toHaveLength(1);
+      expect(opsOn('HEAD').filter((t) => t === `land-${ws.id}`)).toHaveLength(1);
+      const git = (...args: string[]) =>
+        execFileSync('git', ['-C', repo.path, ...args], {
+          env: isolatedGitEnv(),
+          encoding: 'utf8',
+        });
+      expect(git('status', '--porcelain')).toBe('');
+      expect(git('ls-tree', '-r', '--name-only', 'HEAD', '--', 'src').trim().split('\n')).toEqual([
+        'src/x/one.txt',
+        'src/x/two.txt',
+      ]);
       expect(events.filter((e) => e.type === 'commit.recorded')).toHaveLength(2);
       const db = new Database(join(data.path, '10db.sqlite'), { readonly: true });
       const ops = z

@@ -168,16 +168,31 @@ describe('§1.3 with the fake adapter', () => {
       ).toBe(0);
     }
 
-    const trailers = execFileSync(
-      'git',
-      ['-C', repo.path, 'log', '--format=%(trailers:key=10db-Op,valueonly)'],
-      { env: isolatedGitEnv() },
-    )
-      .toString()
-      .split('\n')
-      .filter(Boolean);
+    const opsOn = (...refs: string[]) =>
+      execFileSync(
+        'git',
+        ['-C', repo.path, 'log', ...refs, '--format=%(trailers:key=10db-Op,valueonly)'],
+        { env: isolatedGitEnv() },
+      )
+        .toString()
+        .split('\n')
+        .filter(Boolean);
+    // Each run commits on its own lane branch, and its work reaches the base as one landing commit.
+    const trailers = opsOn('--all');
     expect(trailers.length).toBe(new Set(trailers).size);
     expect(trailers.filter((t) => t === 'op-c-0001')).toHaveLength(1);
+    expect(opsOn('HEAD').filter((t) => t.startsWith('land-'))).toEqual(
+      expect.arrayContaining(all.map((w) => `land-${w.id}`)),
+    );
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv(), encoding: 'utf8' });
+    expect(git('status', '--porcelain')).toBe('');
+    expect(git('ls-tree', '-r', '--name-only', 'HEAD', '--', 'src').trim().split('\n')).toEqual([
+      'src/a/one.txt',
+      'src/a/two.txt',
+      'src/b/one.txt',
+      'src/c/one.txt',
+    ]);
     // The retried commit succeeds and returns the original result rather than failing on an empty diff.
     const gammaCommits = adapter.observations.filter(
       (o) => o.title === 'Gamma' && o.kind === 'mcp_result' && o.detail['tool'] === 'commit',

@@ -89,3 +89,20 @@ export function withdrawFailedCard(ctx: WriteContext, run: FailedRun): void {
   const open = findOpenByFoldKey(ctx.tx, run.projectId, failedCardKey(run.taskId));
   if (open !== undefined) withdrawCard(ctx, open.id);
 }
+
+/**
+ * Says on the task's open failed card, after the run's own reason, what became of the run's work once
+ * it failed. Each call replaces the last one's words. Answers false when no open card speaks for the
+ * run, so the caller can say it another way.
+ */
+export function noteOnFailedCard(
+  ctx: WriteContext,
+  run: FailedRun & { readonly failureReason: string | null },
+  note: string,
+): boolean {
+  const open = findOpenByFoldKey(ctx.tx, run.projectId, failedCardKey(run.taskId));
+  if (!open?.targets.some((t) => t.workstreamId === run.id)) return false;
+  const reason = run.failureReason ?? 'The run failed.';
+  updateInboxItem(ctx, open.id, { body: `${reason}\n\n${note}` });
+  return true;
+}

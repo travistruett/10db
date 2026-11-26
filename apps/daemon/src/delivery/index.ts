@@ -1,5 +1,7 @@
 export { finished as taskFinished, unfinishedDependencies } from './deps';
 export { batchBranchName } from './branch-name';
+export { LANE_BRANCH_DETAIL, laneBranchFor, laneBranchOf, type LaneBranch } from './lane-branch';
+export { landLaneWork } from './lane-landing';
 export {
   createBaseUpdates,
   gateNote,
@@ -51,7 +53,7 @@ export {
 } from './pass-pr';
 export { createSlackPicturePost, type SlackPicturePost } from './slack-picture-post';
 export { picturePlan } from './pr-pictures';
-export { createKeptWorkGate, subscribeKeptWorkLanding } from './kept-work-start';
+export { createKeptWorkGate, subscribeKeptWorkLanding, type KeptWorkGate } from './kept-work-start';
 export { answerPassMoveCard, resumePassSettles, subscribePassSettles } from './pass-settle';
 export { createFailedRestarts } from './restart';
 export { CopyJournalMissingError, copyIdForBatch } from './copy-id';

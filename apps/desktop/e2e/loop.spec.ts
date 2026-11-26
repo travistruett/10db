@@ -115,8 +115,9 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     data: {
       name: 'e2e',
       repoPath: E2E_REPO,
+      // The run commits on a lane branch of its own and lands on the base only once this has passed.
       gateCommand:
-        "test -f src/greeting/hello.txt && git diff --quiet HEAD && git log -1 --format=%s | grep -qx 'Add the greeting'",
+        "test -f src/greeting/hello.txt && git log --format=%s --branches='10db/lane/*' | grep -qx 'Add the greeting'",
       // The area covers the eval file too: the run's agent lowers its bar.
       areas: [{ name: 'greeting', globs: ['src/greeting/**', 'evals/**'] }],
       handoffPct: 40,
@@ -482,6 +483,15 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   });
   expect(changes.ok()).toBe(true);
   expect(Changes.parse(await changes.json()).commits).toHaveLength(1);
+  const gitEnv = {
+    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+  };
+  const git = (...args: string[]): string =>
+    execFileSync('git', args, { cwd: E2E_REPO, env: gitEnv, encoding: 'utf8' }).trim();
+  // The base holds the run's work as one landing commit, named for the task.
+  expect(git('log', '-1', '--format=%s', 'HEAD', '--', 'src/greeting/hello.txt')).toBe(TASK);
 
   // A lane's browser_screenshot would leave one picture and its evidence on the task; the e2e daemon runs
   // no browser, so they are seeded. The drawer shows the picture under its note, with the page it came from.
@@ -625,13 +635,6 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   expect(landed?.gateExitCode).toBe(0);
   const gateLog = landed?.gateLogPath ?? '';
   expect(existsSync(gateLog)).toBe(true);
-  const gitEnv = {
-    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))),
-    GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_GLOBAL: '/dev/null',
-  };
-  const git = (...args: string[]): string =>
-    execFileSync('git', args, { cwd: E2E_REPO, env: gitEnv, encoding: 'utf8' }).trim();
   const base = landed?.baseBranch ?? '';
   expect(git('log', base, '--format=%s')).toContain('Add the farewell');
   // The base moved only after the gate's evidence was written, and the builder's folder shows the work.

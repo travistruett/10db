@@ -447,6 +447,12 @@ export const WorkstreamFailure = {
    * same refusal until the builder fixes pnpm.
    */
   NoPnpm: 'no_pnpm',
+  /**
+   * A Your-folder run of a Commit Directly project passed its checks, but its lane branch could not
+   * land on the base (Your folder was on another branch, or the base moved under the landing):
+   * nothing reached the base, and the work stays on the lane branch.
+   */
+  LandingRefused: 'landing_refused',
 } as const;
 export type WorkstreamFailure = ValueOf<typeof WorkstreamFailure>;
 
