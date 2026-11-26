@@ -7,6 +7,7 @@ import {
   reviewRounds,
   Verdict,
   type ExternalLink,
+  type LinearEventKind,
   type LinearPostDto,
   type TaskId,
 } from '@10db/contracts';
@@ -24,6 +25,7 @@ import {
 } from '@10db/db';
 import type { ReporterPicture } from './reporter-pictures';
 import { reporterSettings } from './reporter-settings';
+import { STATUS_AIM_TEXT, statusAimOf } from './reporter-status';
 import { linearLinkOf } from './task-link';
 
 // What the Linear reporter is handed and told: the facts 10db recorded
@@ -82,7 +84,7 @@ export interface ReporterFacts {
   /** The rows this run takes. */
   readonly owed: readonly {
     readonly id: string;
-    readonly event: string;
+    readonly event: LinearEventKind;
     readonly attempt: number;
     readonly detail: Readonly<Record<string, unknown>>;
   }[];
@@ -193,7 +195,9 @@ const RULES = [
   'Name the issue by its Linear id (given above) in every write, never by its identifier.',
   "Read the issue (`get_issue`) and its comments (`list_comments`) first. An update whose id already appears in a comment's footer is recorded without posting again.",
   "Read the statuses of the issue's own team (`list_issue_statuses` for the team `get_issue` shows), with their types and positions. Never move to an earlier position or a lower type.",
-  "If the issue's status changed since the last recorded row's status set, and it isn't what 10db set, comment only.",
+  "If the issue's status changed since the last recorded row's status set, and it isn't what 10db set, comment only and set no status.",
+  "Each owed update below names its default status move, or none. Make that move with `save_issue` `state`, choosing the status from the team's list by type and position, and by name only to break a tie; then read the issue again (`get_issue`) and report the status name it now shows as `statusSet`. When the update names no move, or the issue is already at or past the target, set no status and report `statusSet` null.",
+  "The builder's note may steer or replace a default move; where it does, follow the note.",
   'Set no completed-type status unless the project note says so.',
   'Open findings and unverified checks are named in the comment and block a Ready for Release-like status.',
   'A `run_started` update states run facts only: the task, the attempt, the account or provider when the facts name it, and which step starts. It says nothing about what the work did, what is verified, what is missing or which commit does what, since none of that exists yet.',
@@ -215,6 +219,12 @@ const data = (name: string, text: string): string => {
 
 const shown = (c: Capped): string =>
   c.cut === 0 ? c.text : `${c.text}\n[${String(c.cut)} more characters cut]`;
+
+/** An owed update's default status move in words, or none. */
+const moveOf = (event: LinearEventKind): string => {
+  const aim = statusAimOf(event);
+  return aim === null ? 'none' : `to ${STATUS_AIM_TEXT[aim]}`;
+};
 
 /** The footer an update's comment ends with: what retry deduplication reads back. */
 const footerOf = (p: {
@@ -267,7 +277,7 @@ export function reporterBrief(facts: ReporterFacts): string {
       facts.owed
         .map(
           (p) =>
-            `- ${p.id}: ${p.event}, attempt ${String(p.attempt)}, ${JSON.stringify(p.detail)}, footer \`${footerOf(p)}\``,
+            `- ${p.id}: ${p.event}, attempt ${String(p.attempt)}, ${JSON.stringify(p.detail)}, default status move: ${moveOf(p.event)}, footer \`${footerOf(p)}\``,
         )
         .join('\n'),
     )}`,
