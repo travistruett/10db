@@ -24,3 +24,8 @@
   a hazard's glob, `guard`'s `classifyPath`); else it answers the untracked names and keeps nothing. A recording emits
   the project's change event.
 - It imports `git` (types), `guard`, `events` (types), `log` (types) and `@10db/db`.
+- Availability is kept apart from quality: a gate report's `outcomes` other than `ok` and `validation_failed`
+  (the model answered, malformed) are a model's `unanswered` trials. A trend point is `evalChanged` when its
+  fingerprint differs from the run before it. `definitionChangedAt` is the last commit of a suite's definition
+  paths (`Git.lastChangedAt`, read once per HEAD) when it is more than 12 hours after the latest run: a run
+  is often committed with its eval soon after, which isn't a change.

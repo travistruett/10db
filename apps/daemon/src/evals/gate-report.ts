@@ -31,6 +31,7 @@ const Slot = z
       .loose()
       .nullish(),
     latency_ms: z.object({ p50: z.number().nullish() }).loose().nullish(),
+    outcomes: z.record(z.string(), z.number()).nullish(),
     cases: z.array(Trial).nullish(),
   })
   .loose();
@@ -48,6 +49,21 @@ export const GateReport = z
 export type GateReport = z.infer<typeof GateReport>;
 
 const unit = (n: number): number => Math.min(1, Math.max(0, n));
+
+/**
+ * Outcomes that are an answer: `ok`, and `validation_failed`, where the model answered and the answer was
+ * malformed, which is a quality miss. Every other kind (`provider_error`, `timeout`) got no answer.
+ */
+const ANSWERED = new Set(['ok', 'validation_failed']);
+
+function unansweredOf(outcomes: Readonly<Record<string, number>> | null | undefined) {
+  const out: Record<string, number> = {};
+  for (const [kind, count] of Object.entries(outcomes ?? {})) {
+    const n = Math.trunc(count);
+    if (!ANSWERED.has(kind) && n >= 1) out[kind] = n;
+  }
+  return out;
+}
 
 function modelOf(slot: z.infer<typeof Slot>): EvalModelResultDto {
   const total = slot.cost?.total;
@@ -72,6 +88,7 @@ function modelOf(slot: z.infer<typeof Slot>): EvalModelResultDto {
       slot.trials === null || slot.trials === undefined
         ? null
         : Math.max(0, Math.trunc(slot.trials)),
+    unanswered: unansweredOf(slot.outcomes),
   };
 }
 

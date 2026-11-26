@@ -10,7 +10,7 @@ import { GateReport, gateReportTask, parseGateReport } from './gate-report';
 import { LanePipelineReport, parseLanePipeline } from './lane-pipeline';
 import { findEvalMarkers, type EvalMarkers } from './markers';
 import { evalsDirs, findResultFiles } from './result-files';
-import { runCost, type ParsedRun } from './run-summary';
+import { runSummary, type ParsedRun } from './run-summary';
 
 /** One suite's runs, as read from the result files that name it. */
 export interface FoundSuite {
@@ -45,13 +45,7 @@ function fitsContracts(key: string, run: ParsedRun): boolean {
   return (
     EvalSuiteKey.safeParse(key).success &&
     run.models.every((m) => EvalModelResultDto.safeParse(m).success) &&
-    EvalRunSummaryDto.safeParse({
-      path: run.path,
-      at: run.at,
-      passed: run.passed,
-      costUsd: runCost(run.models),
-      models: run.models.map((m) => m.model),
-    }).success
+    EvalRunSummaryDto.safeParse(runSummary(run)).success
   );
 }
 

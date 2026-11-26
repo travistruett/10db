@@ -118,6 +118,21 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   });
   expect(created.ok()).toBe(true);
   const projectId = z.object({ id: z.string() }).parse(await created.json()).id;
+  // The builder watches the greeting folder in this project; the fake agent writes a file there.
+  const watched = await request.put(`${daemonUrl}/projects/${projectId}/watchpoints`, {
+    headers: { Authorization: `Bearer ${E2E_TOKEN}` },
+    data: [
+      {
+        key: 'greetings',
+        label: 'Greetings',
+        why: 'What users read first.',
+        globs: ['src/greeting/**'],
+        guidance: 'Check the wording is friendly.',
+        loudness: 'show',
+      },
+    ],
+  });
+  expect(watched.ok()).toBe(true);
   await page.goto('/board');
 
   // A new project starts with an Icebox column for parked work. While it is empty it is folded to a rail.
@@ -266,6 +281,15 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const report = taskDrawer.getByTestId('task-report');
   await expect(report.getByText('Implementation Report')).toBeVisible();
   await expect(report.getByText('Wrote src/greeting/hello.txt and committed it.')).toBeVisible();
+  // For You is the first section: the watchpoint the run's file hit, with the agent's reason, the reviewer's
+  // check and the hunk, kept with the run.
+  const forYou = taskDrawer.getByTestId('for-you');
+  await expect(forYou.getByText('For You', { exact: true })).toBeVisible();
+  await forYou.getByRole('button', { name: /Greetings/ }).click();
+  await expect(forYou.getByText('Adds the greeting file the gate looks for.')).toBeVisible();
+  await expect(forYou.getByText('✓ A plain text file, as the gate expects.')).toBeVisible();
+  await expect(forYou.getByText('src/greeting/hello.txt')).toBeVisible();
+  await expect(forYou.getByText('added line 1: hello')).toBeAttached();
   // A Board task nobody watches is never asked anything: the agent's question was answered at once. The
   // task is done, so the drawer lists it and the Inbox raised no card for it.
   await expect(
