@@ -1,4 +1,4 @@
-# A Preview window reaches 10db only through four checked commands that fill a draft
+# A Preview window reaches 10db only through five checked commands that fill a draft
 
 - **Date:** 2026-11-25
 
@@ -10,7 +10,7 @@
 - The app has an ACL manifest (`src-tauri/build.rs`), so every app command is checked. The main window's
   capability (`capabilities/default.json`, windows `["main"]`) names each command it calls.
 - Opening a preview adds a runtime capability for that window's label and the app's exact origin
-  (`<origin>/*`) allowing exactly `preview_target`, `add_pick`, `remove_pick` and `show_composer`
+  (`<origin>/*`) allowing exactly `preview_target`, `add_pick`, `remove_pick`, `show_composer` and `preview_dictation`
   (`PREVIEW_PERMISSIONS`), and no plugin or core permission. A Rust test holds the main capability's shape.
 - Each command checks the calling window's label and its page's origin again. `add_pick` caps the payload at
   64 KB, parses it with every field capped (`pick_rules.rs`), drops a source path outside the project,
@@ -19,6 +19,8 @@
 - The main window parses it again (`PickArrived`) and only adds it to that page's draft as a chip. Nothing from
   the page sends, answers, approves or starts anything. `show_composer` works only while the preview is
   focused, at most once a second, and the main window then focuses the page's picks, not its input.
+  `preview_dictation` also works only while the preview is focused, so the page can start macOS Dictation
+  only in its own window, in the field the builder is in.
 - The crop is the shell's `WKWebView takeSnapshot` of the pick's box (`snapshot.rs`), not a script in the page.
 
 ## Why

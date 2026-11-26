@@ -74,11 +74,12 @@ pub struct Previews {
 
 /// The only app commands a preview's page may call. Each checks the window and the page's origin
 /// again; none sends, answers or starts anything.
-pub const PREVIEW_PERMISSIONS: [&str; 4] = [
+pub const PREVIEW_PERMISSIONS: [&str; 5] = [
     "allow-preview-target",
     "allow-add-pick",
     "allow-remove-pick",
     "allow-show-composer",
+    "allow-preview-dictation",
 ];
 
 /// Lets the preview window's page, on the app's exact origin only, call the pick channel.
@@ -475,6 +476,25 @@ pub fn show_composer(
     // so its composer's input doesn't take the cursor.
     app.emit_to(MAIN, "preview-show-composer", ShowComposer { task_id })
         .map_err(|e| e.to_string())
+}
+
+/// Starts macOS Dictation in the note the builder is typing. Only while the preview is in front, so
+/// the page can't start it in a window the builder is using.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+pub fn preview_dictation(
+    app: AppHandle,
+    webview: tauri::Webview,
+    previews: State<'_, Previews>,
+) -> Result<(), String> {
+    if !webview.window().is_focused().unwrap_or(false) {
+        return Err("the preview is not in front".into());
+    }
+    {
+        let mut map = previews.windows.lock().map_err(|e| e.to_string())?;
+        checked(&mut map, &webview).map_err(|r| r.to_string())?;
+    }
+    crate::dictation::start_dictation(app)
 }
 
 /// Forgets a preview once its window is gone.

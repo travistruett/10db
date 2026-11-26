@@ -164,10 +164,10 @@ export function startPicker(config: PickerConfig): void {
     const anchor = boxes[boxes.length - 1] ?? { x: 16, y: 16, width: 0, height: 0 };
     let left = anchor.x + anchor.width + 12;
     let top = anchor.y - 6;
-    if (left + 304 > window.innerWidth) {
-      left = Math.min(anchor.x, window.innerWidth - 312);
+    if (left + 364 > window.innerWidth) {
+      left = Math.min(anchor.x, window.innerWidth - 372);
       top = anchor.y + anchor.height + 8;
-      if (top + 130 > window.innerHeight) top = anchor.y - 128;
+      if (top + 170 > window.innerHeight) top = anchor.y - 168;
     }
     ui.note.style.left = `${String(Math.max(8, left))}px`;
     ui.note.style.top = `${String(Math.max(8, top))}px`;
@@ -254,15 +254,37 @@ export function startPicker(config: PickerConfig): void {
     pick.described.set(element, describe(element, config.repoPath));
   }
 
+  function untrack(pick: Pick, element: Element) {
+    const index = pick.elements.indexOf(element);
+    if (index >= 0) pick.elements.splice(index, 1);
+    pick.described.delete(element);
+    if (pick.elements.length === 1) pick.kind = PickKind.Element;
+  }
+
+  /** A click toggles: ⇧ takes a member out of the group, and a plain click unpicks an element with no note. */
   function pickElement(element: Element, shift: boolean) {
     const newest = picks[picks.length - 1];
     if (shift && newest !== undefined) {
-      if (!newest.elements.includes(element) && newest.elements.length < PAGE_PICK_ELEMENTS_MAX) {
+      if (newest.area === null && newest.elements.includes(element)) {
+        if (newest.elements.length === 1) {
+          remove(newest);
+          return;
+        }
+        untrack(newest, element);
+      } else if (newest.elements.length < PAGE_PICK_ELEMENTS_MAX) {
         track(newest, element);
         newest.kind = PickKind.Group;
         newest.area = null;
       }
       openNote(newest);
+      render();
+      return;
+    }
+    const holder = picks.find((p) => p.area === null && p.elements.includes(element));
+    if (holder !== undefined) {
+      // A note is never lost to a stray click: the pick opens instead.
+      if (holder.note === '' && holder.elements.length === 1) remove(holder);
+      else openNote(holder);
       render();
       return;
     }
@@ -460,11 +482,28 @@ export function startPicker(config: PickerConfig): void {
       closeNote();
     }
   });
+  if (!channel.available()) ui.noteDictate.style.display = 'none';
+  // The button must not take focus: dictation goes to the field that has it.
+  ui.noteDictate.addEventListener('mousedown', (event) => {
+    event.preventDefault();
+  });
+  ui.noteDictate.addEventListener('click', () => {
+    ui.noteText.focus();
+    void channel.dictate().catch((error: unknown) => {
+      say(refusalOf(error));
+    });
+  });
   ui.noteRemove.addEventListener('click', () => {
     if (open !== null) remove(open);
   });
   ui.pillMark.addEventListener('click', () => {
     setPicking(!picking);
+  });
+  ui.pillStart.addEventListener('click', () => {
+    setPicking(true);
+  });
+  ui.pillExit.addEventListener('click', () => {
+    setPicking(false);
   });
   ui.pillSend.addEventListener('click', () => {
     closeNote();

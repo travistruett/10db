@@ -7,7 +7,7 @@ The picker that runs inside a project's Preview window (Pick on Page spec
   `virtual:picker-source`. `desktop/preview.ts` imports it on the first Open Preview and hands it to the
   shell's `open_preview`, which wraps it in a check of `location.origin` and adds it as the window's
   initialization script. It runs in the page's own JavaScript world, so the page can see and forge anything it
-  does: the shell and the UI check every pick again (`decisions/2026-11-25-a-preview-window-reaches-10db-only-through-four-checked-commands.md`).
+  does: the shell and the UI check every pick again (`decisions/2026-11-25-a-preview-window-reaches-10db-only-through-five-checked-commands.md`).
 - It imports only types from `@10db/contracts`. Its values would bundle zod into every page (81 KB without,
   746 KB with), so the few limits it needs are written in `picker.ts` and checked again by the shell and the
   UI.

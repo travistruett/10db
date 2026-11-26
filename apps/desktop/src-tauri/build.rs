@@ -15,6 +15,7 @@ fn main() {
             "add_pick",
             "remove_pick",
             "show_composer",
+            "preview_dictation",
         ]),
     ))
     .expect("the Tauri build step failed");

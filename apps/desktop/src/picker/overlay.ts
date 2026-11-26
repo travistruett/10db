@@ -23,13 +23,13 @@ const STYLE = `
 .badge.flash { animation: flash .9s ease 2; }
 @keyframes flash { 50% { transform: translate(-50%,-50%) scale(1.5); } }
 .marquee { position: fixed; border: 1.5px dashed #f275be; background: rgba(242,117,190,.07); display: none; }
-.note { position: fixed; width: 300px; background: #103c48; color: #adbcbc; border: 1px solid #2d5b69; border-radius: 10px;
+.note { position: fixed; width: 360px; background: #103c48; color: #adbcbc; border: 1px solid #2d5b69; border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0,0,0,.4); padding: 10px; pointer-events: auto; display: none; }
 .note.faded { opacity: .2; pointer-events: none; }
 .head { display: flex; gap: 6px; align-items: center; font-size: 11.5px; margin-bottom: 6px; min-width: 0; }
 .n { background: #f275be; color: #103c48; border-radius: 9px; padding: 0 6px; font-weight: 600; flex: none; }
 .head code { font: 11px ui-monospace, Menlo, monospace; color: #41c7b9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-textarea { width: 100%; min-height: 54px; resize: none; background: #184956; color: #cad8d9; border: 1px solid #2d5b69;
+textarea { width: 100%; min-height: 88px; resize: none; background: #184956; color: #cad8d9; border: 1px solid #2d5b69;
   border-radius: 7px; padding: 7px 8px; font: 13px/1.4 -apple-system, system-ui, sans-serif; outline: none; }
 textarea:focus { border-color: #4695f7; }
 .foot { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: #72898f; }
@@ -37,6 +37,7 @@ textarea:focus { border-color: #4695f7; }
 button { font: inherit; cursor: pointer; }
 .ghost { background: #184956; color: #adbcbc; border: 1px solid #2d5b69; border-radius: 6px; padding: 3px 7px; font-size: 11.5px; }
 .ghost:hover { background: #2d5b69; }
+.mic { width: 26px; height: 24px; display: grid; place-items: center; padding: 0; }
 kbd { font: 10.5px ui-monospace, Menlo, monospace; background: #184956; border: 1px solid #2d5b69; border-bottom-width: 2px;
   border-radius: 4px; padding: 0 4px; color: #adbcbc; }
 .pill { font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; position: fixed; left: 16px; bottom: 16px; display: flex; align-items: center; height: 36px; border-radius: 18px;
@@ -45,6 +46,9 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; background: #184956; border: 
 .pill.picking { box-shadow: 0 6px 20px rgba(0,0,0,.35), 0 0 0 2px #f275be; }
 .mark { width: 36px; height: 36px; display: grid; place-items: center; background: none; border: 0; color: inherit; padding: 0; }
 .picking .mark { color: #f275be; }
+.start { display: inline-flex; align-items: center; gap: 8px; padding: 0 12px 0 0; height: 36px; background: none;
+  border: 0; color: inherit; white-space: nowrap; }
+.picking .start { display: none; }
 .mode { display: none; align-items: center; gap: 8px; padding: 0 12px 0 2px; white-space: nowrap; }
 .picking .mode { display: inline-flex; }
 .sep { width: 1px; height: 18px; background: #2d5b69; }
@@ -52,9 +56,16 @@ kbd { font: 10.5px ui-monospace, Menlo, monospace; background: #184956; border: 
 .send { display: none; background: #f275be; color: #103c48; border: 0; height: 26px; border-radius: 13px; padding: 0 11px;
   font-weight: 600; font-size: 12px; margin-right: 5px; }
 .has .send { display: inline-block; }
+.exit { display: none; width: 26px; height: 26px; border-radius: 13px; margin-right: 5px; background: none; border: 0;
+  color: #72898f; place-items: center; padding: 0; }
+.exit:hover { background: #184956; color: #cad8d9; }
+.picking .exit { display: grid; }
 .notice { font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; position: fixed; left: 16px; bottom: 60px; background: #103c48; color: #fa5750; padding: 6px 10px; border-radius: 7px;
   font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.3); display: none; pointer-events: none; z-index: 2147483647; }
 `;
+
+const MIC = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4M8 21h8"/></svg>`;
+const CLOSE = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>`;
 
 const MARK = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4l6.5 16 2.3-6.7L19.5 11z"/><path d="M13 13l6 6"/></svg>`;
 
@@ -79,9 +90,12 @@ export interface Overlay {
   readonly noteNumber: HTMLElement;
   readonly noteSource: HTMLElement;
   readonly noteText: HTMLTextAreaElement;
+  readonly noteDictate: HTMLButtonElement;
   readonly noteRemove: HTMLButtonElement;
   readonly pill: HTMLElement;
   readonly pillMark: HTMLButtonElement;
+  readonly pillStart: HTMLButtonElement;
+  readonly pillExit: HTMLButtonElement;
   readonly pillCount: HTMLElement;
   readonly pillSend: HTMLButtonElement;
   readonly notice: HTMLElement;
@@ -104,23 +118,33 @@ export function createOverlay(): Overlay {
   const noteNumber = el('span', 'n', head);
   const noteSource = el('code', '', head);
   const noteText = el('textarea', '', note);
-  noteText.placeholder = 'What should change? (fn fn to dictate)';
+  noteText.placeholder = 'What should change?';
   noteText.setAttribute('aria-label', 'Note for this pick');
   const foot = el('div', 'foot', note);
   foot.innerHTML =
     '<span><kbd>↩</kbd> save</span><span><kbd>⇧↩</kbd> line</span><span><kbd>esc</kbd> no note</span><span class="grow"></span>';
+  const noteDictate = el('button', 'ghost mic', foot);
+  noteDictate.innerHTML = MIC;
+  noteDictate.title = 'Dictate';
+  noteDictate.setAttribute('aria-label', 'Dictate');
   const noteRemove = el('button', 'ghost', foot);
   noteRemove.textContent = 'Remove';
   const pill = el('div', 'pill', root);
   const pillMark = el('button', 'mark', pill);
   pillMark.innerHTML = MARK;
-  pillMark.title = 'Pick on Page (⌘⇧C)';
-  pillMark.setAttribute('aria-label', 'Pick on Page');
+  pillMark.title = 'Mark up this page (⌘⇧C)';
+  pillMark.setAttribute('aria-label', 'Mark up this page');
+  const pillStart = el('button', 'start', pill);
+  pillStart.innerHTML = 'Mark up <kbd>⌘⇧C</kbd>';
   const mode = el('span', 'mode', pill);
   mode.append('Picking');
   el('span', 'sep', mode);
   const pillCount = el('span', 'count', mode);
   const pillSend = el('button', 'send', pill);
+  const pillExit = el('button', 'exit', pill);
+  pillExit.innerHTML = CLOSE;
+  pillExit.title = 'Stop picking (esc)';
+  pillExit.setAttribute('aria-label', 'Stop picking');
   const notice = el('div', 'notice', root);
   document.documentElement.appendChild(host);
   return {
@@ -133,9 +157,12 @@ export function createOverlay(): Overlay {
     noteNumber,
     noteSource,
     noteText,
+    noteDictate,
     noteRemove,
     pill,
     pillMark,
+    pillStart,
+    pillExit,
     pillCount,
     pillSend,
     notice,

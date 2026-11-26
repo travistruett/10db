@@ -40,4 +40,7 @@ export const channel = {
   showComposer: async (): Promise<void> => {
     await internals()?.invoke('show_composer');
   },
+  dictate: async (): Promise<void> => {
+    await internals()?.invoke('preview_dictation');
+  },
 };

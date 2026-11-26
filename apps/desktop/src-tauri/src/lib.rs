@@ -91,7 +91,8 @@ pub fn run() {
             preview::preview_target,
             preview::add_pick,
             preview::remove_pick,
-            preview::show_composer
+            preview::show_composer,
+            preview::preview_dictation
         ])
         .setup(|app| {
             let items = tray::build(app.handle())?;
