@@ -1,5 +1,6 @@
 import { NavLink, SegmentedControl, Stack, Text } from '@mantine/core';
 import {
+  IconEye,
   IconBolt,
   IconCoffee,
   IconPalette,
@@ -45,6 +46,7 @@ const SECTION_ICON: Readonly<Record<SettingsSectionKey, typeof IconSettings>> = 
   [SettingsSectionKey.BoardColumns]: IconColumns,
   [SettingsSectionKey.Planning]: IconListCheck,
   [SettingsSectionKey.Areas]: IconMap,
+  [SettingsSectionKey.Watchpoints]: IconEye,
   [SettingsSectionKey.NetworkHosts]: IconBox,
   [SettingsSectionKey.Billing]: IconCoin,
   [SettingsSectionKey.Team]: IconUsers,

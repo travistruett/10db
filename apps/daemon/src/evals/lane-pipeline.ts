@@ -43,6 +43,7 @@ export function parseLanePipeline(report: LanePipelineReport, path: string): Par
         : costs.reduce<number>((a, b) => a + (b ?? 0), 0),
     latencyP50Ms: null,
     trials: report.cases.reduce((n, c) => n + c.runs.length, 0),
+    unanswered: {},
   };
   return {
     path,

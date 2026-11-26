@@ -33,7 +33,7 @@ const GATE_REPORT = {
       passed: false,
       trials: 2,
       gates: { complete: { rate: 0.5, good: 1, total: 2, trials: 2, minimum: 1, passed: false } },
-      outcomes: { ok: 2 },
+      outcomes: { ok: 1, provider_error: 1 },
       cost: { total: '0.5', per_trial: '0.25', basis: 'billed' },
       latency_ms: { p50: 7400, p95: 9900 },
       served: [{ model: 'acme/model-b', provider: 'Acme', responses: 2 }],
@@ -134,6 +134,8 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await expect(suites).toContainText('ingest.mapping');
   await expect(suites).toContainText('acme/model-b');
   await expect(suites).toContainText('complete 0.5 < 1');
+  // A trial with no answer is availability, said apart from the gates.
+  await expect(suites).toContainText('1 provider error');
   await expect(page.getByText('Found by file names.')).toBeVisible();
   await expect(page.getByText('evals/ingest/mapping.py')).toBeVisible();
   await suites.getByText('ingest.mapping').click();

@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import { BarPart } from './factory-summary';
 import { BarSwatch } from './stacked-bar';
 import { StatusDot } from './status-dot';
-import { WaitRing } from './task-line';
 
 export interface GlanceFigures {
   readonly needsYou: number;
@@ -48,9 +47,11 @@ function Tile({
           </Text>
         )}
       </Group>
-      <Group gap={6} mt={12} wrap="nowrap">
+      <Group gap={6} mt={12} wrap="nowrap" align="center">
         {mark}
-        <Text size="xs">{label}</Text>
+        <Text size="xs" lh={1}>
+          {label}
+        </Text>
       </Group>
     </Paper>
   );
@@ -62,7 +63,7 @@ export function GlanceTiles({ figures: f }: { readonly figures: GlanceFigures })
     <SimpleGrid component="section" aria-label="At a glance" cols={5} spacing={12}>
       <Tile
         n={f.needsYou}
-        mark={<WaitRing />}
+        mark={<StatusDot color="yellow" />}
         label={`${plural(f.needsYou, 'needs', 'need')} you`}
       />
       <Tile

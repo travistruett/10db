@@ -43,6 +43,12 @@ export const EvalModelResultDto = z.object({
   costUsd: z.number().min(0).nullable(),
   latencyP50Ms: z.number().min(0).nullable(),
   trials: z.int().min(0).nullable(),
+  /**
+   * Trials that got no answer, by the report's own kind (`provider_error`, `timeout`): availability, apart
+   * from quality. They stay in every gate's denominator. Empty when every trial was answered or the format
+   * doesn't say.
+   */
+  unanswered: z.record(z.string(), z.int().min(1)),
 });
 export type EvalModelResultDto = z.infer<typeof EvalModelResultDto>;
 
@@ -55,8 +61,14 @@ export const EvalRunSummaryDto = z.object({
   /** The run's whole cost; null when any model's is unknown. */
   costUsd: z.number().min(0).nullable(),
   models: z.array(z.string()),
+  /** The dataset's fingerprint when the format records one: runs with different ones graded different evals. */
+  fingerprint: z.string().nullable(),
 });
 export type EvalRunSummaryDto = z.infer<typeof EvalRunSummaryDto>;
+
+/** One run in a suite's trend. */
+export const EvalTrendPointDto = z.object({ passed: z.boolean(), evalChanged: z.boolean() });
+export type EvalTrendPointDto = z.infer<typeof EvalTrendPointDto>;
 
 /** What the list shows of a suite. */
 export const EvalSuiteDto = z.object({
@@ -77,8 +89,16 @@ export const EvalSuiteDto = z.object({
       models: z.array(EvalModelResultDto),
     })
     .nullable(),
-  /** Whether each of the last eight runs passed, oldest first. */
-  trend: z.array(z.boolean()).max(8),
+  /**
+   * The last eight runs, oldest first: whether each passed, and whether it graded a different eval than the
+   * run before it (its fingerprint changed), so a dot isn't compared with one that measured something else.
+   */
+  trend: z.array(EvalTrendPointDto).max(8),
+  /**
+   * When a definition file was committed well after the latest run, so that run no longer measures the
+   * eval as written; null when it wasn't, or nothing names the definition.
+   */
+  definitionChangedAt: z.iso.datetime().nullable(),
 });
 export type EvalSuiteDto = z.infer<typeof EvalSuiteDto>;
 
