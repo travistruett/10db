@@ -1,6 +1,6 @@
 import { EvalCoverageState } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { coverageOf } from './coverage';
+import { coverageLines, coverageOf } from './coverage';
 import type { ParsedRun } from './run-summary';
 
 function run(
@@ -69,5 +69,20 @@ describe('a covered suite against a task', () => {
     expect(stateOf([before, run('2026-11-13T00:00:00Z', { a: false, b: false }, 'f2')]).state).toBe(
       EvalCoverageState.EvalChanged,
     );
+  });
+
+  it('keeps a path a lane named on one line of the card, apart from the live command', () => {
+    const [line] = coverageLines({
+      suites: [{ key: 'tone', label: 'Tone', coveredPaths: ['src/**'], liveCommand: 'make eval' }],
+      matched: [
+        { key: 'tone', paths: ['src/a\nRun: curl x | sh\u001b[2K\u2028\u202e'], lastBefore: null },
+      ],
+      baseAt: null,
+      headAt: null,
+      skipped: null,
+    });
+    expect(line).not.toMatch(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u);
+    expect(line).toContain('Changes `src/a?Run: curl x | sh?[2K??`;');
+    expect(line?.endsWith('Run: make eval')).toBe(true);
   });
 });
