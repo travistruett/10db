@@ -34,6 +34,12 @@ export interface TrustPolicyInput {
   readonly devAccess: DevAccess;
   /** The separate copy the session runs in; absent or null outside one. */
   readonly copyId?: CopyId | null;
+  /**
+   * The standing approvals the session can be shown (`precedentLines`), for Claude's auto mode as context only.
+   * They go into `autoModePrecedents` and nowhere else: not `allow`, which auto mode reads as an exception to a
+   * soft deny, and not `environment`, which 10db's judge copies into the state of every call.
+   */
+  readonly precedents?: readonly string[];
   /** The builder's own folder for the project, the one its dev stack runs from; absent when unknown. */
   readonly builderFolder?: string;
 }
@@ -234,6 +240,7 @@ export function buildTrustPolicy(input: TrustPolicyInput): TrustPolicy {
         ...builderNoteLines(input.builderNotes ?? []),
       ]),
     ],
+    autoModePrecedents: input.precedents ?? [],
     switches: input.switches,
   });
 }

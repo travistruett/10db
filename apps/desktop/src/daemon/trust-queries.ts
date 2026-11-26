@@ -3,12 +3,17 @@ import {
   LiveSystemProposalsDto,
   LiveSystemsDto,
   McpSignInsDto,
+  type PrecedentAnswer,
+  type PrecedentPatch,
+  ProjectPrecedentsDto,
   RepoMcpServersDto,
   type SetRepoMcpVerdict,
   type StartMcpSignIn,
   ProjectTrustDto,
   TrustGrantDto,
   type TrustGrantId,
+  type TrustPrecedentId,
+  TrustPrecedentDto,
   TrustSettingsDto,
   type ProjectId,
   type TrustOverrides,
@@ -28,6 +33,7 @@ export const trustKeys = {
   grants: (projectId: ProjectId) => ['trust', 'grants', projectId],
   proposals: (projectId: ProjectId) => ['trust', 'proposals', projectId],
   repoMcp: (projectId: ProjectId) => ['trust', 'repo-mcp', projectId],
+  precedents: (projectId: ProjectId) => ['trust', 'precedents', projectId],
   signIns: ['trust', 'mcp-sign-ins'],
 } as const;
 
@@ -264,5 +270,60 @@ export function useSetRepoMcpVerdict(projectId: ProjectId) {
     onSuccess: (saved) => {
       queryClient.setQueryData(trustKeys.repoMcp(projectId), saved);
     },
+  });
+}
+
+/** A project's standing approvals in every state, and the kinds its proposal card offers. */
+export function usePrecedents(projectId: ProjectId) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: trustKeys.precedents(projectId),
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId'].precedents.$get({ param: { projectId } }),
+        ProjectPrecedentsDto,
+      ),
+  });
+}
+
+/** The builder's answer to the proposal card; the answer is the list as it stands after it. */
+export function useAnswerPrecedents(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    scope: { id: `precedents ${projectId}` },
+    mutationFn: async (answer: PrecedentAnswer) =>
+      readJson(
+        await client.projects[':projectId'].precedents.answer.$post({
+          param: { projectId },
+          json: answer,
+        }),
+        ProjectPrecedentsDto,
+      ),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(trustKeys.precedents(projectId), saved);
+    },
+    // A kind offered no more (another answer settled it) shows as it stands now.
+    onError: () => queryClient.invalidateQueries({ queryKey: trustKeys.precedents(projectId) }),
+  });
+}
+
+/** Removes a standing approval (`revoked`) or approves it again (`active`). */
+export function usePatchPrecedent(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    scope: { id: `precedents ${projectId}` },
+    mutationFn: async (input: PrecedentPatch & { readonly id: TrustPrecedentId }) => {
+      const { id, ...json } = input;
+      return readJson(
+        await client.projects[':projectId'].precedents[':precedentId'].$patch({
+          param: { projectId, precedentId: id },
+          json,
+        }),
+        TrustPrecedentDto,
+      );
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: trustKeys.precedents(projectId) }),
   });
 }

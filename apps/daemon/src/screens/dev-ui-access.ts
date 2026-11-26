@@ -128,6 +128,8 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/settings/sign-ins/figma':
     "Figma's sign-in rows can start Codex to read each account's sign-ins, which only the 10db app does.",
   '/settings/trust': "Trust lists the plugins installed in the builder's home.",
+  '/projects/:projectId/precedents':
+    "A project's precedents are the builder's own trust answers, kept to the 10db app.",
   '/projects/:projectId/trust':
     "Trust's preview runs git in every checkout and lists the builder's home.",
   '/health': 'Open to every caller; it needs no token.',

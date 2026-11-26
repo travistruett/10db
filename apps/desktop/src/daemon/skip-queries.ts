@@ -33,7 +33,13 @@ export function useRunSkippedCalls() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: WorkstreamId) =>
-      readJson(await client.workstreams[':id'].skips.run.$post({ param: { id } }), TaskDto),
+      readJson(
+        await client.workstreams[':id'].skips.run.$post({
+          param: { id },
+          query: { routine: 'false' },
+        }),
+        TaskDto,
+      ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
   });
 }

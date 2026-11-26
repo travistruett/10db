@@ -787,6 +787,10 @@ describe('judgeHookCall with the session judge', () => {
             skips: null,
             limits: createLimitNotes(),
             onFloor: () => undefined,
+            precedents: () => [],
+            inCopy: false,
+            onPrecedentPaused: () => undefined,
+            onPrecedentChanged: () => undefined,
             clock: new ManualClock(),
           },
         );

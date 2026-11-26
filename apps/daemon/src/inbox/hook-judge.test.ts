@@ -217,6 +217,10 @@ function hookJudge(
       onFloor: (detail) => {
         floors.push(detail);
       },
+      precedents: () => [],
+      inCopy: false,
+      onPrecedentPaused: () => undefined,
+      onPrecedentChanged: () => undefined,
       clock,
     },
   );

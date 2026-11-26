@@ -10,8 +10,10 @@ import {
 import { createTestStore, seedAccount, seedProject } from '@10db/db';
 import { afterEach, expect, it } from 'vitest';
 import { z } from 'zod';
+import { systemClock } from '../clock';
 import { AgentState, AgentTool } from '../environment';
 import { createEventBus, createStateStore } from '../events';
+import { createPrecedentService } from '../inbox';
 import { silentLogger } from '../log';
 import { FakeAdapter } from '../sessions';
 import { createServiceConnector, type RunCli } from './connect-service';
@@ -65,6 +67,12 @@ function world(opts: { readonly codex: boolean; readonly servers: Record<string,
     judge: { ready: () => Promise.resolve(false) },
     log: silentLogger,
     loginEnv: () => ({}),
+    precedents: createPrecedentService({
+      state,
+      clock: systemClock,
+      log: silentLogger,
+      readerFor: () => null,
+    }),
   });
   const connector = createServiceConnector({
     state,

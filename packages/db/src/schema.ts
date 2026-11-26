@@ -176,6 +176,9 @@ import type {
   ShapeProposalState,
   ShapeState,
   TrustGrantId,
+  TrustPrecedentId,
+  PrecedentScope,
+  PrecedentState,
 } from '@10db/contracts';
 import { USAGE_HANDOFF_AT } from '@10db/contracts';
 import { sql } from 'drizzle-orm';
@@ -1595,9 +1598,18 @@ export const judgeCalls = sqliteTable(
     costUsd: real('cost_usd'),
     workstreamId: text('workstream_id').$type<WorkstreamId>(),
     taskId: text('task_id').$type<TaskId>(),
+    /** The precedent that allowed the call; set only on a reading by precedent. No foreign key: the log outlives it. */
+    precedentId: text('precedent_id').$type<TrustPrecedentId>(),
+    /** The program the shell call runs (`trust/program-key.ts`); null for a call with no key. */
+    programKey: text('program_key'),
     createdAt: createdAt(),
   },
-  (t) => [index('judge_calls_created_idx').on(t.createdAt)],
+  (t) => [
+    index('judge_calls_created_idx').on(t.createdAt),
+    index('judge_calls_precedent_idx')
+      .on(t.precedentId, t.createdAt)
+      .where(sql`precedent_id IS NOT NULL`),
+  ],
 );
 
 // --- Shape (docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §13) ----------------
@@ -2743,6 +2755,8 @@ export const skippedActions = sqliteTable(
     limitName: text('limit_name').$type<LimitName>(),
     reason: text('reason').notNull(),
     source: text('source').$type<SkipSource>().notNull(),
+    /** The program the shell call runs (`trust/program-key.ts`); null for a call with no key. */
+    programKey: text('program_key'),
     createdAt: createdAt(),
   },
   (t) => [
@@ -2843,6 +2857,48 @@ export const trustGrants = sqliteTable(
       'trust_grants_limit_name',
       sql`${t.limitName} IS NULL OR ${t.limitName} IN ('destroys_data', 'sends_data_out', 'reads_secrets', 'writes_live')`,
     ),
+  ],
+);
+
+/**
+ * A standing approval of a kind of command in a project (a precedent): one per project, program key and scope.
+ * Every judge weighs it after the limits, and none reads it as a limit's clearance. Gone with its project.
+ */
+export const trustPrecedents = sqliteTable(
+  'trust_precedents',
+  {
+    id: text('id').$type<TrustPrecedentId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    programKey: text('program_key').notNull(),
+    scope: text('scope').$type<PrecedentScope>().notNull(),
+    /** One line, the builder's to edit. */
+    kind: text('kind').notNull(),
+    /** Up to five calls the builder saw, each one line. */
+    examples: text('examples', { mode: 'json' })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** sha256 of the committed text the kind ran at approval; null when there was none. */
+    runsHash: text('runs_hash'),
+    state: text('state').$type<PrecedentState>().notNull(),
+    uses: integer('uses').notNull().default(0),
+    lastUsedAt: text('last_used_at'),
+    conflicts: integer('conflicts').notNull().default(0),
+    sourceInboxId: text('source_inbox_id').$type<InboxItemId>(),
+    /** When the builder last approved or kept it; null for a kind only ever declined. */
+    approvedAt: text('approved_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    endedAt: text('ended_at'),
+  },
+  (t) => [
+    uniqueIndex('trust_precedents_one_per_key').on(t.projectId, t.programKey, t.scope),
+    check('trust_precedents_state', sql`${t.state} IN ('active', 'paused', 'declined', 'revoked')`),
+    check('trust_precedents_scope', sql`${t.scope} IN ('copy', 'project')`),
+    check('trust_precedents_approved', sql`${t.state} <> 'active' OR ${t.approvedAt} IS NOT NULL`),
   ],
 );
 

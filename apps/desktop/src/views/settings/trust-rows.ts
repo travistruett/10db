@@ -1,4 +1,10 @@
-import { JudgeKind, TRUST_SWITCH_KEYS, type LimitName, type TrustSwitchKey } from '@10db/contracts';
+import {
+  JudgeKind,
+  PrecedentScope,
+  TRUST_SWITCH_KEYS,
+  type LimitName,
+  type TrustSwitchKey,
+} from '@10db/contracts';
 
 /** One switch of Settings › Trust: its label, what it brings, and how each agent takes it. */
 export interface TrustRow {
@@ -118,3 +124,25 @@ export function grantDescription(
     return `Grant again: this was saved before grants named their tool · ${date}`;
   return `${grant.limit === null ? 'Any limit' : GRANT_LIMIT_LABELS[grant.limit]} · ${date}`;
 }
+
+/** Where a standing approval holds, as Settings and the proposal card say it. */
+export const PRECEDENT_SCOPE_LABELS: Readonly<Record<PrecedentScope, string>> = {
+  [PrecedentScope.Copy]: 'In copies only',
+  [PrecedentScope.Project]: 'Everywhere in this project, copies included',
+};
+
+export const STANDING_APPROVALS_DESCRIPTION =
+  "Kinds of command you made routine. 10db's judge weighs one on every call of its kind; it never lets a call cross a limit.";
+
+export const STANDING_APPROVALS_EMPTY =
+  "Nothing yet. A card in the Inbox offers the kinds of command 10db's judge keeps doubting.";
+
+/** Said while no account runs decisions: no model of 10db's can weigh a kind, so none is offered or stored. */
+export const STANDING_APPROVALS_NEEDS_ACCOUNT = 'Standing approvals need a Decisions account';
+
+/** Beside Remove: auto mode reads the approved kinds once, when a session starts. */
+export const PRECEDENT_REMOVE_NOTE =
+  'A running Claude session in auto mode keeps this until it next starts.';
+
+export const NOT_ROUTINE_DESCRIPTION =
+  'Kinds you kept skipping or removed. Approve makes one routine again.';

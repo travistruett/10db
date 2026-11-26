@@ -28,6 +28,7 @@ import {
   WorkstreamState,
   type InboxAnswer,
   type InboxItemDto,
+  type PrecedentScope,
   type ProjectDto,
   type AccountId,
   type Effort,
@@ -280,6 +281,7 @@ import {
 } from '../github';
 import { createGithubServices } from './github-services';
 import {
+  applyPrecedentConflictAnswer,
   applySignInSetupChoice,
   cannotSignInCard,
   CardTier,
@@ -287,6 +289,7 @@ import {
   createInboxService,
   createJudgeOutageCard,
   createParkAnswers,
+  createPrecedentService,
   leftWithBuilder,
   raiseNoSignInOffer,
   raisePictureSignInCard,
@@ -1158,6 +1161,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       after?.();
     },
   });
+  // Standing approvals: candidates, their card and the answers. It reads the base through `git`, made below.
+  const precedents = createPrecedentService({
+    state,
+    clock,
+    log: logger.child({ component: 'precedents' }),
+    readerFor: (project) => readCommitted(git, project, project.repoPath),
+  });
   const inbox = createInboxService({
     state,
     judgeOff: opts.judgeOff === true,
@@ -1177,10 +1187,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     log: logger,
     onFlagAnswerInWrite: (ctx, item, answer) => {
       const retried = answerReporterCard(ctx, item, answer);
+      applyPrecedentConflictAnswer(ctx, item, answer);
+      const madeRoutine: { programKey: string; scope: PrecedentScope }[] = [];
       let after: (() => void) | undefined;
-      if (applySkippedChoice(ctx, item, answer)) {
+      if (
+        applySkippedChoice(ctx, item, answer, (kind) => {
+          madeRoutine.push(kind);
+        })
+      ) {
         after = () => {
           startFollowUps();
+          // The hash of what each kind runs is read once the answer is committed.
+          if (madeRoutine.length > 0) void precedents.settleHashes(item.projectId, madeRoutine);
         };
       } else {
         const setUp = applySignInSetupChoice(ctx, item, answer);
@@ -2297,6 +2315,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   exploreEngine.register(
     ConversationOwnerKind.Chat,
     chatHooks({
+      precedents: precedents.events,
       live: chatLive,
       state,
       folderHold,
@@ -2343,6 +2362,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const createdRunner = createRunner({
     evals: evalsService,
     judge,
+    precedents: precedents.events,
     gitTools: { git: gitBin, gh: ghBin },
     awaitBeforePicture: (task, signal) => pictures?.awaitBefore(task, signal) ?? Promise.resolve(),
     protectedPaths: guarded,
@@ -2547,6 +2567,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     skippedRaises.add(raised);
   });
   await sweepUnlistedRuns(skippedDeps);
+  // Each project's proposal card is recomputed from the rows, and again every hour while one is open.
+  precedents.start();
   // Cards an earlier daemon left open that have nothing left to do close now, so a backlog clears
   // without the builder. The stray-write cards close once the watcher has been synced, below.
   const closedAtStart =
@@ -2969,6 +2991,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const { appMcpPlan, projectMcpServers, ...trust } = createTrustServices({
     state,
+    precedents,
     builderHome,
     laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
     worktreeBase: worktreeRoot,
@@ -3143,6 +3166,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // Without a live OpenRouter account the rows are Artificial Analysis's alone.
     openRouterOn: () => openRouterSync !== null && liveOpenRouterAccounts().length > 0,
     trust: { ...trust, ...createProjectTrustServices({ state, inbox, git }) },
+    precedents,
     mcpSignIns,
     linearSignIns,
     connector,
@@ -3761,6 +3785,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       );
       createdScheduler.stop();
       stallSweep.stop();
+      precedents.stop();
       // A move under way leaves its worktree and its row for the next start to finish.
       chatMovesAbort.abort();
       // A sign-in's agent is a child of ours: it is told to end now, in step with the lanes, and awaited

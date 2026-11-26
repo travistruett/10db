@@ -333,7 +333,16 @@ import {
   TrustSettingsDto,
   TrustSwitches,
 } from './trust';
-import { LiveSystemProposalsDto, LiveSystemsDto, TrustGrantDto } from './trust-policy';
+import {
+  LiveSystemProposalsDto,
+  LiveSystemsDto,
+  PrecedentAnswer,
+  PrecedentCandidateDto,
+  PrecedentPatch,
+  ProjectPrecedentsDto,
+  TrustGrantDto,
+  TrustPrecedentDto,
+} from './trust-policy';
 import {
   ApproveYourMcpServer,
   McpSignInChangedData,
@@ -470,6 +479,11 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'live-systems-dto': LiveSystemsDto,
   'live-system-proposals-dto': LiveSystemProposalsDto,
   'trust-grant-dto': TrustGrantDto,
+  'trust-precedent-dto': TrustPrecedentDto,
+  'precedent-candidate-dto': PrecedentCandidateDto,
+  'precedent-answer': PrecedentAnswer,
+  'precedent-patch': PrecedentPatch,
+  'project-precedents-dto': ProjectPrecedentsDto,
   'tool-call-view': ToolCallView,
   'trust-overrides': TrustOverrides,
   'trust-settings-dto': TrustSettingsDto,

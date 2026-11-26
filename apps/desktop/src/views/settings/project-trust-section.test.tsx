@@ -11,6 +11,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { projectDto } from '../../test/fixtures';
+import { judgeStatusDto } from '../../test/judge-fixtures';
 
 // Trust spec §9: a project's Trust overrides each app-wide switch, and lists what comes along.
 
@@ -47,6 +48,10 @@ function serve(initialGrants: readonly TrustGrantDto[]) {
     http.get(daemonUrl('/projects/:projectId/repo-mcp-servers'), () =>
       HttpResponse.json({ servers: [], error: null }),
     ),
+    http.get(daemonUrl('/projects/:projectId/precedents'), () =>
+      HttpResponse.json({ precedents: [], candidates: [] }),
+    ),
+    http.get(daemonUrl('/judge'), () => HttpResponse.json(judgeStatusDto())),
     http.get(daemonUrl('/projects/:projectId/trust-grants'), () => HttpResponse.json(grants)),
     http.delete(daemonUrl('/projects/:projectId/trust-grants/:grantId'), ({ params }) => {
       const id = String(params['grantId']);
