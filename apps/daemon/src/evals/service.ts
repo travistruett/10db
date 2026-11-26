@@ -11,7 +11,7 @@ import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { classifyPath } from '../guard';
 import type { Logger } from '../log';
-import { buildEvals, buildSuiteDetail } from './build';
+import { buildEvals, buildSuiteDetail, type DefinitionTimes } from './build';
 import { readEvalManifest, writeEvalManifest } from './manifest-store';
 import { createEvalsCache, readEvals, type FoundEvals } from './read-results';
 
@@ -32,7 +32,7 @@ export interface EvalsService {
 
 export interface EvalsDeps {
   readonly state: StateStore;
-  readonly git: Pick<Git, 'survey' | 'commitAt'>;
+  readonly git: Pick<Git, 'survey' | 'commitAt' | 'lastChangedAt'>;
   readonly logger: Logger;
 }
 
@@ -44,6 +44,9 @@ function globHolds(glob: string, tracked: ReadonlySet<string>): boolean {
   }
   return false;
 }
+
+/** A tracked path as a glob that matches only itself: git's glob pathspec reads `*`, `?`, `[` and `\\`. */
+const literalGlob = (path: string): string => path.replace(/[*?[\]\\]/gu, (c) => `\\${c}`);
 
 /** The most untracked names reported before the check stops. */
 const MAX_REPORTED = 20;
@@ -75,16 +78,58 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
   const cache = createEvalsCache();
   const found = (repoPath: string): Promise<FoundEvals | null> =>
     readEvals(deps.git, repoPath, deps.logger, cache);
+  // A definition's last commit is a fact of HEAD, so it is read once per commit and path list, and only the
+  // checkout's current HEAD is kept. A failed read is not kept, so the next open asks again.
+  const committed = new Map<
+    string,
+    { readonly commit: string; readonly at: Map<string, Promise<string | null>> }
+  >();
+  const lastCommitted = (repoPath: string, commit: string, paths: readonly string[]) => {
+    let atHead = committed.get(repoPath);
+    if (atHead?.commit !== commit) {
+      atHead = { commit, at: new Map() };
+      committed.set(repoPath, atHead);
+    }
+    const key = paths.join('\0');
+    const kept = atHead.at.get(key);
+    if (kept !== undefined) return kept;
+    const at = deps.git.lastChangedAt(repoPath, paths.map(literalGlob)).catch(() => {
+      atHead.at.delete(key);
+      return null;
+    });
+    atHead.at.set(key, at);
+    return at;
+  };
+  /** When each suite with a run and a named definition last had that definition committed. */
+  async function definitionTimes(
+    repoPath: string,
+    read: FoundEvals | null,
+    manifest: ReturnType<typeof readEvalManifest>,
+  ): Promise<DefinitionTimes> {
+    const times = new Map<string, string>();
+    if (read === null) return times;
+    for (const suite of buildEvals(read, manifest).suites) {
+      if (suite.latest === null || suite.definitionPaths.length === 0) continue;
+      const at = await lastCommitted(repoPath, read.commit, suite.definitionPaths);
+      if (at !== null) times.set(suite.key, at);
+    }
+    return times;
+  }
   return {
     async read(projectId, repoPath) {
-      return buildEvals(await found(repoPath), readEvalManifest(deps.state.db, projectId));
+      const read = await found(repoPath);
+      const manifest = readEvalManifest(deps.state.db, projectId);
+      return buildEvals(read, manifest, await definitionTimes(repoPath, read, manifest));
     },
     async suite(projectId, repoPath, key, run) {
+      const read = await found(repoPath);
+      const manifest = readEvalManifest(deps.state.db, projectId);
       const result = buildSuiteDetail(
-        await found(repoPath),
-        readEvalManifest(deps.state.db, projectId),
+        read,
+        manifest,
         key,
         run,
+        await definitionTimes(repoPath, read, manifest),
       );
       if (result.kind === 'no_suite') throw new NotFoundError('Eval suite', key);
       if (result.kind === 'no_run') throw new NotFoundError('Eval run', run ?? '');
@@ -107,7 +152,10 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
       deps.state.write((ctx) => {
         writeEvalManifest(ctx, projectId, stored);
       });
-      return { ok: true, evals: buildEvals(read, stored) };
+      return {
+        ok: true,
+        evals: buildEvals(read, stored, await definitionTimes(repoPath, read, stored)),
+      };
     },
   };
 }

@@ -1,6 +1,6 @@
 import { Box, Group, Text } from '@mantine/core';
-import type { EvalModelResultDto } from '@10db/contracts';
-import { gatesPassed, rateText, worstGate } from './eval-figures';
+import type { EvalModelResultDto, EvalTrendPointDto } from '@10db/contracts';
+import { gatesPassed, rateText, unansweredText, worstGate } from './eval-figures';
 
 /** A run's result as a dot: filled green for passed, a red ring for failed. The words beside carry it. */
 function ResultDot({ passed }: { readonly passed: boolean }) {
@@ -22,19 +22,43 @@ function ResultDot({ passed }: { readonly passed: boolean }) {
   );
 }
 
-/** The last runs, oldest first, as a row of dots; its name says the same in words. */
-export function Trend({ runs }: { readonly runs: readonly boolean[] }) {
+/** A thin rule before a run that graded a different eval than the run before it. */
+function EvalChange() {
+  return (
+    <Box
+      component="span"
+      aria-hidden
+      w={1}
+      h={12}
+      style={{ display: 'inline-block', flex: 'none', background: 'var(--mantine-color-dimmed)' }}
+    />
+  );
+}
+
+/**
+ * The last runs, oldest first, as a row of dots, with a rule where the eval itself changed, so a dot is
+ * read against the runs that graded the same eval. Its name says the same in words.
+ */
+export function Trend({ runs }: { readonly runs: readonly EvalTrendPointDto[] }) {
   if (runs.length === 0) return null;
-  const failed = runs.filter((passed) => !passed).length;
+  const failed = runs.filter((run) => !run.passed).length;
+  const changes = runs.filter((run) => run.evalChanged).length;
   return (
     <Group
       gap={4}
       wrap="nowrap"
       role="img"
-      aria-label={`Last ${String(runs.length)} runs: ${String(failed)} failed`}
+      aria-label={`Last ${String(runs.length)} runs: ${String(failed)} failed${
+        changes > 0
+          ? `, the eval changed ${changes === 1 ? 'once' : `${String(changes)} times`}`
+          : ''
+      }`}
     >
-      {runs.map((passed, place) => (
-        <ResultDot key={`${String(place)}-${String(passed)}`} passed={passed} />
+      {runs.map((run, place) => (
+        <Group key={`${String(place)}-${String(run.passed)}`} gap={4} wrap="nowrap">
+          {run.evalChanged ? <EvalChange /> : null}
+          <ResultDot passed={run.passed} />
+        </Group>
       ))}
     </Group>
   );
@@ -50,6 +74,7 @@ function slotText(result: EvalModelResultDto): string | null {
 export function ModelLine({ result }: { readonly result: EvalModelResultDto }) {
   const worst = worstGate(result);
   const slot = slotText(result);
+  const unanswered = unansweredText(result.unanswered);
   return (
     <Group gap={8} wrap="nowrap" align="baseline">
       <ResultDot passed={result.passed} />
@@ -62,6 +87,7 @@ export function ModelLine({ result }: { readonly result: EvalModelResultDto }) {
           {worst === null
             ? ''
             : ` · ${worst.name} ${rateText(worst.rate)}${worst.minimum === null ? '' : ` < ${rateText(worst.minimum)}`}`}
+          {unanswered === null ? null : <Text span size="xs" c="dimmed">{` · ${unanswered}`}</Text>}
           {slot === null ? null : <Text span size="xs" c="dimmed">{` · ${slot}`}</Text>}
         </Text>
       </Group>

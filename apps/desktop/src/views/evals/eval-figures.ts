@@ -48,6 +48,26 @@ export function gatesPassed(model: EvalModelResultDto): string {
   return `${String(passed)}/${String(model.gates.length)}`;
 }
 
+/** The no-answer kinds that are nouns, so their count reads "2 timeouts". */
+const UNANSWERED_NOUNS = new Set(['timeout', 'provider_error', 'transport_error', 'error']);
+
+/**
+ * Trials that got no answer, in words ("3 provider errors · 1 timeout"), apart from the gates; null when
+ * every trial was answered.
+ */
+export function unansweredText(unanswered: Readonly<Record<string, number>>): string | null {
+  const parts = Object.entries(unanswered)
+    .filter(([, n]) => n > 0)
+    .map(([kind, n]) => {
+      const words = kind.replaceAll('_', ' ');
+      // Only a noun takes an s: "2 timeouts", "2 provider errors", but "rate limited: 2".
+      const noun = UNANSWERED_NOUNS.has(kind);
+      if (!noun) return `${words}: ${String(n)}`;
+      return `${String(n)} ${n === 1 ? words : `${words}s`}`;
+    });
+  return parts.length === 0 ? null : parts.join(' · ');
+}
+
 /** A rate as the report gives it, to at most three places. */
 export function rateText(rate: number): string {
   return String(Math.round(rate * 1000) / 1000);
