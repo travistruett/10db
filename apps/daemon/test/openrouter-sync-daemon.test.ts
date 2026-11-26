@@ -46,7 +46,7 @@ function answer(url: string, body: unknown): Response {
       choices: [{ message: { content: '{"choice":"review","confidence":0.9}' } }],
       usage: { cost: 0 },
     });
-  if (url.endsWith('/systemone') || url.endsWith('/alpha/decisions'))
+  if (url.endsWith('/alpha/decisions'))
     return Response.json({
       model: 'typesafe/jev-1.13',
       answers: {

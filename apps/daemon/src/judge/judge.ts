@@ -22,7 +22,7 @@ import type { Logger } from '../log';
 import { askModel, askModelNouls, type ModelQuestion } from './ask';
 import type { NoulQuestion } from './noul-questions';
 import type { BedrockClientFactory } from './bedrock';
-import { ModelApi, modelApi, optionsText } from './openrouter';
+import { isTypeSafeModel, ModelApi, modelApi, optionsText } from './openrouter';
 import { NO_DECISION_CREDENTIAL, secretsOf, type JudgeCredential } from './credential';
 import type { JudgeCallHealth } from './outage';
 import { untilAborted } from './until-aborted';
@@ -246,14 +246,13 @@ function choiceOf(
 }
 
 /**
- * The OpenRouter endpoint yes/no questions go to: a System One model's own, the decisions endpoint for a model its
- * list names, and chat for every other model. With the list unread a model is asked as a chat model, since only
- * System One is known to answer a `noul`.
+ * The OpenRouter endpoint yes/no questions go to: the decisions endpoint for a TypeSafe model or a model the list
+ * names, and chat for every other model. With the list unread any other model is asked as a chat model, since only
+ * TypeSafe's are known to answer a `noul` on the decisions endpoint.
  */
 function noulApi(model: string, decisionModels: () => ReadonlySet<string> | null): ModelApi {
-  const api = modelApi(model, decisionModels);
-  if (api !== ModelApi.Decisions) return api;
-  return decisionModels() === null ? ModelApi.Chat : ModelApi.Decisions;
+  if (modelApi(model, decisionModels) === ModelApi.Chat) return ModelApi.Chat;
+  return decisionModels() !== null || isTypeSafeModel(model) ? ModelApi.Decisions : ModelApi.Chat;
 }
 
 function messageOf(error: unknown): string {
