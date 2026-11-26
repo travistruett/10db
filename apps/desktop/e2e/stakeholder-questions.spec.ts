@@ -16,7 +16,7 @@ const Projects = z.array(z.object({ id: z.string(), name: z.string() }));
 /** The `e2e` project with the greeting area, made by an earlier spec or here: the question belongs to it. */
 async function projectId(request: APIRequestContext): Promise<string> {
   const listed = Projects.parse(
-    await (await request.get(`${daemonUrl}/projects`, { headers: auth })).json(),
+    await (await request.get(`${daemonUrl}/projects`, { headers: auth, maxRetries: 2 })).json(),
   );
   // Other specs in the same shard add projects of their own; this one seeds into the project with its area.
   const own = listed.find((p) => p.name === 'e2e');
@@ -259,7 +259,11 @@ test('a question Mark asked back reaches the Inbox, and the Board says the task 
   // The run is a seeded one with no session behind it; cancel it so later specs see no stray lane.
   const runs = z
     .array(z.object({ id: z.string(), taskTitle: z.string() }))
-    .parse(await (await request.get(`${daemonUrl}/workstreams`, { headers: auth })).json());
+    .parse(
+      await (
+        await request.get(`${daemonUrl}/workstreams`, { headers: auth, maxRetries: 2 })
+      ).json(),
+    );
   const run = runs.find((w) => w.taskTitle === WAITING_TASK);
   expect(run).toBeDefined();
   const cancelled = await request.post(`${daemonUrl}/workstreams/${run?.id ?? ''}/cancel`, {

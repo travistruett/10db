@@ -366,11 +366,15 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
 
   // The MCP commit really landed: the finished run's changes hold the one commit it made.
   const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
-  const runs = await request.get(`${daemonUrl}/workstreams?active=false`, { headers: auth });
+  const runs = await request.get(`${daemonUrl}/workstreams?active=false`, {
+    headers: auth,
+    maxRetries: 2,
+  });
   const run = Runs.parse(await runs.json()).find((w) => w.taskTitle === TASK);
   expect(run).toBeDefined();
   const changes = await request.get(`${daemonUrl}/workstreams/${run?.id ?? ''}/changes`, {
     headers: auth,
+    maxRetries: 2,
   });
   expect(changes.ok()).toBe(true);
   expect(Changes.parse(await changes.json()).commits).toHaveLength(1);
@@ -492,6 +496,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const copyBatch = async () => {
     const response = await request.get(`${daemonUrl}/projects/${projectId}/batches`, {
       headers: authHeader,
+      maxRetries: 2,
     });
     return Batches.parse(await response.json()).find((b) => b.title.includes(COPY_TASK));
   };
