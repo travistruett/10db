@@ -21,9 +21,9 @@
 - The manifest is an app setting (`evals-manifest:<project id>`, `manifest-store.ts`), recorded by an agent
   (`evals <projectId> <file>` in the agent skill) and never a file in the repository. `service.ts` records it only
   when every `definitionPaths` entry is tracked at HEAD and every `coveredPaths` glob holds a tracked file (matched as
-  a hazard's glob, `guard`'s `classifyPath`); else it answers the untracked names and keeps nothing. A recording emits
+  a hazard's glob, `guard`'s `classifyPath`); else it answers the untracked names and keeps nothing. A suite's `live.envFiles` entry (untracked by nature: it holds secrets) must be a regular file in the working tree (`lstat`, so no link), else it is refused the same way. `live` (contracts `EvalLiveRun`) is what a suite's Run needs from the gate sandbox (Docker, env files readable never writable, hosts, loopback, a stop command, a time limit); a manifest refuses `live` without `liveCommand`. A recording emits
   the project's change event.
-- It imports `git` (types), `guard`, `events` (types), `log` (types) and `@10db/db`.
+- It imports `git` (types), `guard`, `events` (types), `log` (types), `clock` (types), `preview` (the process ledger), `verify` (types) and `@10db/db`.
 - Availability is kept apart from quality: a gate report's `outcomes` other than `ok` and `validation_failed`
   (the model answered, malformed) are a model's `unanswered` trials. A trend point is `evalChanged` when its
   fingerprint differs from the run before it. `definitionChangedAt` is the last commit of a suite's definition
@@ -74,3 +74,14 @@
   each one's name and file path, so a Claude or Codex lane uses it by name or reads the file. With none, it points
   at the existing eval files. The task's areas are those the `where` paths fall in, else the catch-all or the first
   area. It reads, files a task and runs nothing.
+- Live runs (`live-runs.ts`, `eval_live_runs`): the one place 10db runs an eval, and only on the builder's click
+  (`POST /projects/:projectId/evals/:suiteKey/live/runs`). The window's `GET .../live` is the preview: the stored
+  manifest's command, stop command, Docker, hosts, env files, loopback and time limit, the last run's cost and a
+  `previewHash` over them and the project's Docker and loopback switches; Run recomputes it from the manifest as
+  stored now and refuses `manifest_changed` on a mismatch. Refusals (`no_live`, `no_sandbox`, `docker_off`, `busy`)
+  write no row. The command runs through the unslotted gate runner with no project id (so `autoDocker` never turns
+  Docker on), the project's Docker and loopback switches only where the suite also asks, only the suite's own hosts
+  as rules (none for Docker), the suite's env files as `dotEnvReadable`, no key, and its group in a process ledger.
+  Stop, the time limit, daemon stop and archive abort it and then run the suite's `stopCommand` (2 minutes) in the
+  same ledger; a start after a crash marks `running` rows `interrupted` and runs the stop command (in the background after start; a Run is refused `busy` until they settle) only when the
+  suite still hashes as the row did. Exit 0 is `passed`: the suite's verdict is the result file it writes.
