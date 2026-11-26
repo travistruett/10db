@@ -35,6 +35,8 @@ import {
   type ProjectId,
   type ShapeId,
   type SystemCheckDto,
+  SHARE_PORT_DEFAULT,
+  SharingState,
 } from '@10db/contracts';
 import {
   addStockHazardCommands,
@@ -159,6 +161,12 @@ import {
   scheduleNightlyBackup,
 } from '../backups';
 import { systemClock, type Clock } from '../clock';
+import {
+  createDeviceService,
+  createPairingCodes,
+  createSocketRegistry,
+  createTickets,
+} from '../devices';
 import {
   allCheckouts,
   createBaseUpdates,
@@ -3317,8 +3325,31 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       return selfUpdateServices.selfUpdateStatus();
     },
   };
+  const deviceSockets = createSocketRegistry();
+  const devices = createDeviceService({
+    state,
+    clock,
+    codes: createPairingCodes({ clock }),
+    sockets: deviceSockets,
+    sharing: () => ({
+      state: SharingState.Off,
+      enabled: false,
+      port: SHARE_PORT_DEFAULT,
+      fqdn: null,
+      login: null,
+      certificateRequested: false,
+      certificateExists: false,
+      url: null,
+      portHolder: null,
+      steps: [],
+    }),
+  });
   const app = createApp({
     commit: build?.commit ?? null,
+    listenPort: () => listenPort,
+    share: { allowlists: () => null, hostLogin: () => null },
+    devices,
+    tickets: createTickets({ clock }),
     skillVersion: agentSkill.shippedVersion(),
     devUiOrigin: opts.devUiOrigin ?? null,
     // Only when a dev UI is opted in; it reads and nothing else, and outlives a restart.

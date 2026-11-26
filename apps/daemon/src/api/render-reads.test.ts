@@ -9,6 +9,7 @@ import {
 } from '../screens';
 import { createApp } from './app';
 import type { ApiServices } from './services';
+import { noSharing } from '../../test/api-stub';
 
 // Shape spec §5.5: a screen's token reads only what a screen shows. Every GET the daemon serves is
 // named in screens/render-access.ts, allowed or refused, so a new GET (one that moves a mark, runs a
@@ -16,6 +17,7 @@ import type { ApiServices } from './services';
 
 describe('every GET the daemon serves is classified for a screen', () => {
   const app = createApp({
+    ...noSharing,
     startedAt: new Date(),
     allowedOrigins: [],
     token: 'ui',
@@ -48,6 +50,7 @@ describe('every GET the daemon serves is classified for a screen', () => {
 // default too, so a new GET is refused to it until someone names it a read.
 describe('every GET the daemon serves is classified for the dev UI', () => {
   const app = createApp({
+    ...noSharing,
     startedAt: new Date(),
     allowedOrigins: [],
     token: 'ui',
