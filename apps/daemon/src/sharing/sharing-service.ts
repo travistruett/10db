@@ -116,7 +116,8 @@ export function createSharingService(deps: {
   let refreshQueued = false;
   let monitor: Timer | null = null;
   let closed = false;
-  let lastState: SharingState | null = null;
+  /** The status last published, as JSON: `publish` emits only when the status the UI reads has changed. */
+  let lastView: string | null = null;
   let tail: Promise<unknown> = Promise.resolve();
 
   /** set, requestCertificate, start, stop and the monitor's ticks run one at a time. */
@@ -157,11 +158,17 @@ export function createSharingService(deps: {
     });
   }
 
+  /**
+   * Emits `sharing.changed` when the status the UI reads has changed since the last emit, not only the state
+   * label: a Paused status can change under the same label, when the CLI goes and its steps empty, or when the
+   * failing step does. The rail names that step.
+   */
   function publish(force = false): void {
-    const state = compute().state;
-    if (!force && state === lastState) return;
-    lastState = state;
-    emitChanged(state);
+    const status = compute();
+    const view = JSON.stringify(status);
+    if (!force && view === lastView) return;
+    lastView = view;
+    emitChanged(status.state);
   }
 
   function currentProbe(): CertificateProbe | null {
@@ -486,7 +493,11 @@ export function createSharingService(deps: {
       listenerFqdn = fqdn;
     }
     const cli = deps.cli();
-    if (cli === null) return;
+    if (cli === null) {
+      // Nothing more can be read without the CLI; publish, since the steps it reports are gone.
+      publish();
+      return;
+    }
     let status: ServeStatus;
     try {
       status = await readServe(cli);
