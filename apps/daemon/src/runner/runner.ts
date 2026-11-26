@@ -84,6 +84,7 @@ import {
   approvedLines,
   buildTrustPolicy,
   precedentLines,
+  devStackElsewhere,
   sessionDevAccess,
   CROSSES_LIMIT_QUESTION,
   PRE_EXISTING_READ_MAX,
@@ -3311,6 +3312,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       devAccess,
       copyId: sessionCopyId,
       precedents: precedentLines(listPrecedents(db, project.id), sessionCopyId !== null),
+      builderFolder: project.repoPath,
     });
     // Only a sandboxed lane that asks for auto mode starts on its agent's judge; every other session
     // starts on 10db's rules.
@@ -3497,6 +3499,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       pictures:
         project.appUrl !== null && takesPictures(project, task, [], taskInLocalCopy(db, task.id)),
       browser: laneSession !== null && opts.endLaneBrowser !== undefined,
+      generators: devStackElsewhere({ checkout, builderFolder: project.repoPath, devAccess }),
       sandboxed: Boolean(opts.laneSandbox),
       instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
       judged,

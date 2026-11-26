@@ -44,6 +44,20 @@ function CardOutline() {
   );
 }
 
+/** True once a page has waited `PAGE_LOADING_DELAY_MS`; a placeholder that draws its own shape waits on it. */
+export function useLoadingDelayElapsed(): boolean {
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLate(true);
+    }, PAGE_LOADING_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, []);
+  return late;
+}
+
 /**
  * What a page shows in place of its content while it loads, under a header that is already drawn: quiet
  * static placeholder rows in the shape of what is coming, after a short delay, never a lone spinner.
@@ -59,15 +73,7 @@ export function PageLoading({
   /** What assistive tech hears, such as "Loading the pages". */
   readonly label: string;
 }) {
-  const [late, setLate] = useState(false);
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setLate(true);
-    }, PAGE_LOADING_DELAY_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, []);
+  const late = useLoadingDelayElapsed();
   if (!late) return null;
   const placeholders = Array.from({ length: rows ?? DEFAULT_ROWS[shape] }, (_, i) => i);
   return (

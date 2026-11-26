@@ -1,6 +1,7 @@
 import {
   COPY_ID_VARIABLE,
   type CopyId,
+  LimitName,
   SkipKind,
   TrustPolicy,
   TrustSurface,
@@ -39,6 +40,8 @@ export interface TrustPolicyInput {
    * soft deny, and not `environment`, which 10db's judge copies into the state of every call.
    */
   readonly precedents?: readonly string[];
+  /** The builder's own folder for the project, the one its dev stack runs from; absent when unknown. */
+  readonly builderFolder?: string;
 }
 
 /** What of this Mac's dev environment is open to the session (`sessionDevAccess`). */
@@ -66,6 +69,21 @@ export function sessionDevAccess(
   };
 }
 
+/**
+ * Whether the session's commands can reach a dev stack that runs from another folder than its checkout:
+ * Docker open, the project's compose services named, and the checkout not the builder's own folder.
+ */
+export function devStackElsewhere(
+  input: Pick<TrustPolicyInput, 'checkout' | 'builderFolder' | 'devAccess'>,
+): boolean {
+  return (
+    input.devAccess.docker &&
+    input.devAccess.compose !== null &&
+    input.builderFolder !== undefined &&
+    input.builderFolder !== input.checkout
+  );
+}
+
 /** The lines that tell the judge what Docker, the project's compose services and loopback are to it. */
 function devAccessLines(access: DevAccess): string[] {
   const lines = [
@@ -86,7 +104,7 @@ function devAccessLines(access: DevAccess): string[] {
         : `, or by their container_name ${compose.containerNames.map(quotedValue).join(', ')}`;
     lines.push(
       `Local dev containers: the compose services ${compose.services.map(quotedValue).join(', ')}${project === null ? '' : ` of the compose project ${project}`}, from ${compose.files.map(quotedValue).join(', ')} at the project's base. Their containers are ${named}${containers}. They are this project's local dev environment on this Mac, and their own processes are not live systems. A container that forwards to a remote system (a cloud-sql-proxy, a kubectl port-forward, an ssh -L tunnel, a service proxying to a hosted database or API) is that system: judge what it forwards to, not that it runs here.`,
-      "Routine in them: running a command in one of these containers (docker exec, docker compose exec or run), or in docker run --rm with only this checkout or this session's temp folder mounted, crosses no limit by itself. Listing and reading the project's source there, and running its tests, linters, formatters, type checks, builds and file generators, such as making migration files or an API client that land in the checkout, are routine. What the command does is still judged under the four limits, as if the session ran it: reading a .env file, a key or a credential there is reading secrets, and reaching a host outside this Mac is judged by what it sends or writes there.",
+      "Routine in them: running a command in one of these containers (docker exec, docker compose exec or run), or in docker run --rm with only this checkout, this session's temp folder and named volumes mounted read-only (:ro), crosses no limit by itself. Listing and reading the project's source there, and running its tests, linters, formatters, type checks, builds and file generators, are routine. A throwaway docker run --rm container from the project's own images with --network none reaches no database or host, so making migration files or an API client in one, written into this checkout, is routine. What the command does is still judged under the four limits, as if the session ran it: reading a .env file (--env-file included), a key or a credential there is reading secrets, a named volume mounted writable is shared state, and reaching a host outside this Mac is judged by what it sends or writes there.",
     );
   }
   if (access.docker || access.localhost)
@@ -114,7 +132,27 @@ function copyLines(copyId: CopyId | null): string[] {
   ];
 }
 
-/** Whether a person is in the session: a lane runs alone; a pass, Plan and chat have the builder in them. */
+/**
+ * What the project's shared dev containers are to a session that works in a checkout of its own: none when
+ * they run from that checkout. They hold the builder's folder, so a generator run in them writes there. In a
+ * copy, the containers named with its id were started from the copy's checkout and stay its own.
+ */
+function worktreeLines(input: TrustPolicyInput): string[] {
+  if (!devStackElsewhere(input) || input.builderFolder === undefined) return [];
+  const folder = quotedValue(input.builderFolder);
+  const destroys = LIMITS[LimitName.DestroysData].label;
+  const copyId = input.copyId ?? null;
+  if (copyId === null)
+    return [
+      `Separate worktree: this checkout is not the builder's folder ${folder}. The dev containers above were started from that folder and hold its files, never this checkout's. A command run in them, directly or through a make target or script, that generates or rewrites project files (migrations, an API client, formatted sources) writes outside this checkout, into the builder's folder: judge it under ${destroys}. Generating in a throwaway container from the project's images, with this checkout mounted, is the routine way instead.`,
+    ];
+  const id = quotedValue(copyId);
+  return [
+    `Separate worktree: this checkout is not the builder's folder ${folder}. Containers whose names hold ${id} were started from this checkout and are the copy's own; the project's own commands that read the id are judged as the Separate copy line says, generators included. Only a container whose name lacks ${id} (the builder's dev stack) holds the builder's folder: a command run in one that generates or rewrites project files writes outside this checkout, so judge it under ${destroys}.`,
+  ];
+}
+
+/** Whether a person is in the session:a lane runs alone; a pass, Plan and chat have the builder in them. */
 export function isAttended(surface: TrustSurface): boolean {
   switch (surface) {
     case TrustSurface.Lane:
@@ -151,6 +189,7 @@ function environmentLines(input: TrustPolicyInput): string[] {
       : []),
     ...devAccessLines(input.devAccess),
     ...copyLines(input.copyId ?? null),
+    ...worktreeLines(input),
     ...(input.yourMcpServers.length > 0
       ? [
           `Outside the sandbox: the MCP servers ${input.yourMcpServers.join(', ')} are the builder's own and run with the builder's access. Their tools can read and change anything the builder can, so judge each call to them under the four limits and the coordination rules above, as if the session made it directly.`,

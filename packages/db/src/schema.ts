@@ -328,6 +328,8 @@ export const projects = sqliteTable('projects', {
   devLoginCommand: text('dev_login_command'),
   /** Serves the app at its address while a pass is open; null when the builder runs it. */
   previewCommand: text('preview_command'),
+  /** Brings the dev stack up when a picture or the dev login finds the app address down; null when the builder keeps it up. */
+  appStartCommand: text('app_start_command'),
   /** The viewports and themes a page's pictures are taken in. */
   screens: text('screens', { mode: 'json' })
     .$type<ScreensMatrix>()

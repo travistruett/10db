@@ -815,6 +815,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           devAccess: { ...open, compose: open.docker ? compose : null },
           // A chat never runs in a separate copy.
           precedents: precedentLines(listPrecedents(state.db, project.id), false),
+          builderFolder: project.repoPath,
         });
       // A Claude Full access session is judged by Claude Code, which reads no policy: it is built only if read.
       const policy =

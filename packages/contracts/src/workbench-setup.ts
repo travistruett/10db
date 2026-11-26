@@ -63,6 +63,7 @@ export type WorkbenchSetupAreas = z.infer<typeof WorkbenchSetupAreas>;
 export const SettingField = {
   AppUrl: 'appUrl',
   DevLoginCommand: 'devLoginCommand',
+  AppStartCommand: 'appStartCommand',
   ChangedCheckCommand: 'changedCheckCommand',
   SandboxDocker: 'sandboxDocker',
 } as const;
@@ -79,6 +80,11 @@ export const SettingSuggestion = z.discriminatedUnion('field', [
   z.object({ field: z.literal(SettingField.AppUrl), value: AppUrl, ...Found }),
   z.object({
     field: z.literal(SettingField.DevLoginCommand),
+    value: z.string().min(1).max(2000),
+    ...Found,
+  }),
+  z.object({
+    field: z.literal(SettingField.AppStartCommand),
     value: z.string().min(1).max(2000),
     ...Found,
   }),

@@ -426,6 +426,7 @@ import {
   createLedgerSweep,
   reapLaneProcessLedgers,
   secretFilesIn,
+  dockerAccess,
   sweepSystemTempDirs,
   sweepSystemTempFiles,
   type SweepReport,
@@ -482,7 +483,8 @@ import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { autoDocker } from './auto-docker';
 import { GATE_HOLD_RETRY_MS, holdStaleGates } from './gate-hold';
-import { MAX_DOCKER_SCAN_BYTES, originBaseCommit } from './docker-need';
+import { commandCallsDocker, MAX_DOCKER_SCAN_BYTES, originBaseCommit } from './docker-need';
+import { createAppStart, type AppStart } from '../app-start';
 import { createProjectPinStore } from './checkout-pins';
 import { resolveNoticeCards } from './notice-sweep';
 import {
@@ -767,7 +769,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
   mkdirSync(join(opts.dataDir, 'logs'), { recursive: true });
-  const lock = acquireInstanceLock(opts.dataDir);
+  // On the system clock, not the injected one: the waits here are for another process.
+  const lock = await acquireInstanceLock(opts.dataDir);
   const logPath = join(opts.dataDir, 'logs', 'daemon.log');
   rotateLogFile(logPath);
   const logFile = fileDestination(logPath);
@@ -1060,6 +1063,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     bytesOf: (sha256) => pictures?.bytesOf(sha256) ?? 0,
   };
   let preview: Preview | null = null;
+  let appStart: AppStart | null = null;
   // The API's port, once it listens: an app address may not name it, and no picture is taken before.
   let listenPort: number | null = null;
   const listening = Promise.withResolvers<number>();
@@ -2702,7 +2706,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         : null,
   });
   const previewNow = preview;
+  // The project's own start command brings its dev stack up when a picture or the dev login finds the
+  // app address down, run under the gate's sandbox with Docker allowed.
+  const appStartNow = createAppStart({
+    state,
+    inbox,
+    gate: gateRunner,
+    dataDir: opts.dataDir,
+    clock,
+    logger: logger.child({ component: 'app-start' }),
+    sessionEnv: () => launcher.projectEnv(),
+    rules: (project) => listPermissionRules(state.db, project.id, null),
+    checkouts: () => allCheckouts(state.db),
+    dockerSockets: () => dockerAccess(homedir(), launcher.projectEnv()).sockets,
+    usesDocker: (project) => commandCallsDocker(git, project, project.appStartCommand),
+  });
+  appStart = appStartNow;
   pictures = startPictures({
+    ensureApp: (projectId, signal) => appStartNow.ensureUp(projectId, signal),
     onNoAnswer: (projectId) => {
       void previewNow.lost(projectId);
     },
@@ -3428,10 +3449,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   };
   const deviceSockets = createSocketRegistry();
+  const sharingLog = logger.child({ component: 'sharing' });
   const sharing = createSharingService({
     state,
     clock,
-    log: logger.child({ component: 'sharing' }),
+    log: sharingLog,
     cli: opts.tailscaleOff ? () => null : () => opts.tailscaleCli ?? findTailscaleCli(existsSync),
     run: createTailscaleRun,
     listen: (sharePort) =>
@@ -3439,7 +3461,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         fetch: (req, env) => app.fetch(req, env),
         port: sharePort,
         sockets: deviceSockets,
-        holderOf: lsofHolderOf,
+        // An unreadable holder is logged and shown as "another process": the port is still held, so the share
+        // stays blocked rather than turning into a retry or a non-refusal error.
+        holderOf: (port) =>
+          lsofHolderOf(port).catch((error: unknown) => {
+            sharingLog.warn(
+              { error: String(error) },
+              'sharing: could not read the port holder from lsof',
+            );
+            return null;
+          }),
       }),
     sockets: deviceSockets,
     mainPort: () => listenPort ?? opts.port,
@@ -3703,6 +3734,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       clearInterval(pictureRetries);
       copyRecheck.cancel();
       await pictures?.stop();
+      await appStart?.stop();
       // The dev server 10db started ends with it; a builder's own is never 10db's to stop.
       await preview?.stop();
       // Each live eval run ends `interrupted` and its stop command runs, before the store closes.
