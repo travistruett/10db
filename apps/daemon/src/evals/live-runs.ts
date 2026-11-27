@@ -69,6 +69,8 @@ export function previewHash(
         live?.timeoutMinutes ?? null,
         project.sandboxDocker,
         project.sandboxLoopback,
+        // Appended only when present, so a suite with no model env hashes as it did before.
+        ...(live?.models === undefined ? [] : [live.models]),
       ]),
     )
     .digest('hex');

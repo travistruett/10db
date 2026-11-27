@@ -113,6 +113,18 @@ describe('a suite’s live run, through the daemon', () => {
         .parse(await (await send('GET', `${at}/live/runs?suite=${suite}`)).json());
     expect(await runs('slow')).toEqual([]);
 
+    // A changed model env since the window: refused the same way, then back to what it showed.
+    const withModels = manifest();
+    const [slow] = withModels.suites;
+    if (slow?.live) slow.live.models = { env: 'MODELS', ids: 'openrouter' };
+    expect((await send('PUT', `${at}/manifest`, withModels)).status).toBe(200);
+    const modelsChanged = await send('POST', `${at}/slow/live/runs`, {
+      previewHash: shown.previewHash,
+    });
+    expect(modelsChanged.status).toBe(409);
+    expect(await modelsChanged.json()).toMatchObject({ refusal: 'manifest_changed' });
+    expect((await send('PUT', `${at}/manifest`, manifest())).status).toBe(200);
+
     // The click starts it; a second click while it runs is refused busy.
     const started = await send('POST', `${at}/slow/live/runs`, { previewHash: shown.previewHash });
     expect(started.status).toBe(201);
