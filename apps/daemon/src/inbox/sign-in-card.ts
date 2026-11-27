@@ -1,5 +1,6 @@
 import {
   AreaRole,
+  BuilderOwns,
   CARD_OPENS,
   InboxKind,
   ProjectId,
@@ -30,7 +31,7 @@ import {
 import { z } from 'zod';
 import type { StateStore } from '../events';
 import { flagCard, type InboxService } from './service';
-import { CardTier } from './card-tier';
+import { CardTier, decidedByBuilder } from './card-tier';
 
 const RESOLVED = 'The dev login signed the picture browser in';
 
@@ -174,6 +175,7 @@ export function raisePictureSignInCard(deps: CardDeps, failure: PictureSignInFai
       by: 'withdrawn',
       when: "the project's dev login signs the picture browser in (picture-sign-in)",
     },
+    decision: decidedByBuilder(BuilderOwns.YourHands),
     title: `${project.name}'s pictures can't sign in`,
     body: [
       failure.problem,
@@ -208,6 +210,7 @@ export function raiseNoSignInOffer(deps: CardDeps, projectId: ProjectId): void {
       by: 'withdrawn',
       when: "the project's dev login signs the picture browser in (picture-sign-in)",
     },
+    decision: decidedByBuilder(BuilderOwns.YourHands),
     title: `${project.name}'s pictures have no sign-in`,
     body: [
       'The project has an app address but no dev login, so 10db can picture only the pages anyone can see without signing in.',
@@ -250,6 +253,7 @@ export function applySignInSetupChoice(
       by: 'withdrawn',
       when: "the project's dev login signs the picture browser in (picture-sign-in)",
     },
+    decision: decidedByBuilder(BuilderOwns.YourHands),
     title: `10db is setting up ${project.name}'s picture sign-in`,
     body: `The task "${task.title}" is writing a dev login. 10db saves it only once it signs the picture browser in, and this card closes then.`,
     detail: { ...OPEN_APP_PREVIEW, [SIGN_IN_SETUP_TASK]: task.id },
@@ -278,6 +282,7 @@ export function cannotSignInCard(
       by: 'withdrawn',
       when: "the project's dev login signs the picture browser in (picture-sign-in)",
     },
+    decision: decidedByBuilder(BuilderOwns.YourHands),
     title: `10db can't sign in to ${project.name}'s app for pictures`,
     body: [
       ...cannotLines(words),

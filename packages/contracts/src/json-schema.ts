@@ -134,7 +134,7 @@ import {
 import { GithubSigninDto, GithubStatusDto } from './github';
 import { DecisionModelListDto } from './decision-models';
 import { DecisionStatsListDto } from './decision-stats';
-import { ActivityPageDto, ActivityPageQuery, NoticePostedData } from './activity';
+import { ActivityPageDto, ActivityPageQuery, ActivityRowRef, NoticePostedData } from './activity';
 import { InboxPageDto, InboxPageQuery } from './inbox-page';
 import { InboxCardContextDto } from './inbox-rows';
 import {
@@ -512,6 +512,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'notice-posted-data': NoticePostedData,
   'activity-page-query': ActivityPageQuery,
   'activity-page-dto': ActivityPageDto,
+  'activity-row-ref': ActivityRowRef,
   'inbox-page-dto': InboxPageDto,
   'inbox-page-query': InboxPageQuery,
   'openrouter-sync-status-dto': OpenRouterSyncStatusDto,

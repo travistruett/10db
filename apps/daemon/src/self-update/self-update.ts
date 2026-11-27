@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   type InboxAnswer,
   type InboxItemDto,
   SELF_UPDATE_SWITCH,
@@ -24,7 +25,7 @@ import { cardsResolvedByEvent, resolveStaleCards, type InboxService } from '../i
 import type { Logger } from '../log';
 import type { StatusService } from '../status';
 import { GATE_TIMEOUT_CAP_MS } from '../verify';
-import { CardTier } from '../inbox';
+import { CardTier, decidedByBuilder } from '../inbox';
 import {
   DRAIN_HOLD_CAP_MS,
   drainNotBefore,
@@ -715,6 +716,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       workstreamId: null,
       tier: CardTier.Ask,
       urgency: Urgency.Normal,
+      decision: decidedByBuilder(BuilderOwns.OutOfMoves),
       ...card,
     });
   }

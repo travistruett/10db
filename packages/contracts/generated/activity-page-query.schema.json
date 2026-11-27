@@ -15,6 +15,10 @@
       "minLength": 1,
       "maxLength": 200
     },
+    "decided": {
+      "type": "string",
+      "const": "true"
+    },
     "after": {
       "type": "integer",
       "exclusiveMinimum": 0,

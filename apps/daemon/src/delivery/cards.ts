@@ -1,7 +1,9 @@
 import {
   BatchFailure,
   BatchState,
+  BuilderOwns,
   CARD_OPENS,
+  type CardDecision,
   OPEN_INTEGRATIONS_DETAIL,
   type BatchDto,
   type BatchId,
@@ -35,6 +37,7 @@ import { gateTailLines, type GateStepFailure } from './gate-failures';
 import {
   BY_ANSWER,
   CardTier,
+  decidedByBuilder,
   type CardClosesWhen,
   type NoticeInput,
   type StoredTier,
@@ -61,6 +64,8 @@ export interface Card {
   readonly urgency: Urgency;
   /** How the open card closes. */
   readonly closesWhen: CardClosesWhen;
+  /** Who decides the card; a builder card names which of the seven things only the builder owns. */
+  readonly decision: CardDecision;
 }
 
 /** A refusal's words, before the step that raises it says how it closes (`forTasks`). */
@@ -393,6 +398,7 @@ export const worktreeCards = {
           tier: CardTier.Ask,
           urgency: Urgency.High,
           closesWhen: BY_ANSWER,
+          decision: decidedByBuilder(BuilderOwns.OutOfMoves),
           title: `Batch "${batch.title}" waits: its worktree ${path} is missing`,
           body: `Nothing in the batch starts without its worktree. Abandon the batch here, or restart 10db, which fails the batch so Retry can make the worktree again from ${branch}.`,
           foldKey: `worktree-missing:${batch.id}`,
@@ -403,6 +409,7 @@ export const worktreeCards = {
           tier: CardTier.Ask,
           urgency: Urgency.High,
           closesWhen: BY_ANSWER,
+          decision: decidedByBuilder(BuilderOwns.OutOfMoves),
           title: `Batch "${batch.title}" failed: its worktree ${path} is missing`,
           body: `10db restarted and found no worktree at ${path}, so nothing in the batch runs. Retry makes it again from ${branch}; Abandon batch gives the batch up.`,
           ...worktreeOffer({ kind: 'batch', batchId: batch.id }, detail),
@@ -420,6 +427,7 @@ export const worktreeCards = {
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: { by: 'withdrawn', when: "the batch's worktree is removed (worktree-cleanup)" },
+    decision: decidedByBuilder(BuilderOwns.OneWayDoor),
     title: `Batch "${batch.title}" abandoned: uncommitted changes kept in ${path}`,
     body: `10db never throws away uncommitted work, so it kept the worktree with these changes:\n${listPaths(paths)}${alsoIgnored(ignored)}\n\nCopy what you need, then answer Remove worktree, or remove it yourself with ${worktreeRemovalCommand(main, path)}.`,
     foldKey: keptWorktreeKey.batchChanges(batch.id),
@@ -439,6 +447,7 @@ export const worktreeCards = {
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: { by: 'withdrawn', when: "the batch's worktree is removed (worktree-cleanup)" },
+    decision: decidedByBuilder(BuilderOwns.OneWayDoor),
     title:
       paths === null
         ? `10db kept the worktree of "${batch.title}": it can't be read`
@@ -468,6 +477,7 @@ export const worktreeCards = {
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: { by: 'withdrawn', when: 'the orphan worktree is removed (worktree-sweep)' },
+    decision: decidedByBuilder(BuilderOwns.OneWayDoor),
     title:
       paths === null
         ? `10db kept ${path}: it can't be read`
@@ -485,6 +495,7 @@ export const worktreeCards = {
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: { by: 'withdrawn', when: 'the orphan worktree is removed (worktree-sweep)' },
+    decision: decidedByBuilder(BuilderOwns.OneWayDoor),
     title: `10db kept ${path}: it holds git-ignored files`,
     body: `No batch uses this worktree any more, but it holds git-ignored files 10db didn't put there, such as a hand-made .env:\n${listPaths(paths)}\n\nCopy what you need, then answer Remove worktree, or remove it yourself with ${worktreeRemovalCommand(main, path)}.`,
     foldKey: keptWorktreeKey.orphanIgnored(path),
@@ -494,6 +505,7 @@ export const worktreeCards = {
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.OneWayDoor),
     title: `10db left ${path} in place`,
     body: `The worktree path of batch "${batch.title}" holds a directory git doesn't list as a worktree, so 10db didn't remove it and no longer treats it as the batch's. Look inside first. Delete directory deletes it and everything in it; Keep leaves it for you.`,
     foldKey: keptWorktreeKey.stray(path),
@@ -508,6 +520,7 @@ export const worktreeCards = {
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.OneWayDoor),
     title: `10db could not remove ${path}`,
     body: `${detailOf(error)}\n\nNothing was removed that the error doesn't name. Answer again once that is fixed, or keep ${path}.`,
     foldKey: keptWorktreeKey.removeFailed(path),
@@ -527,6 +540,7 @@ export const worktreeCards = {
     tier: CardTier.Ask,
     urgency: Urgency.High,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     title: `Batch "${batch.title}" not retried: ${path} is in the way`,
     body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before a retry, and won't remove what is at ${path}: ${reason}. Look inside; if nothing there is needed, delete it, then answer Retry (Abandon batch gives the batch up).`,
     foldKey: `worktree-in-the-way:${batch.id}`,
@@ -536,6 +550,7 @@ export const worktreeCards = {
     tier: CardTier.Ask,
     urgency: Urgency.High,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     title: `Batch "${batch.title}" not reopened: ${detailOf(error)}`,
     body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before the batch reopens, and couldn't. Fix the cause, then answer Retry (Abandon batch gives the batch up).`,
     ...worktreeOffer({ kind: 'batch', batchId: batch.id }, { batchId: batch.id }),
@@ -551,6 +566,7 @@ export const worktreeCards = {
       tier: CardTier.Ask,
       urgency: Urgency.High,
       closesWhen: BY_ANSWER,
+      decision: decidedByBuilder(BuilderOwns.YourHands),
       title: `Batch "${batch.title}" not retried: its worktree is on ${found ?? 'a detached HEAD'}, with uncommitted changes`,
       body: `10db makes the worktree whole on ${branch} before a retry and won't throw away changes. Commit or discard these in ${path}, or run git switch ${shellWord(branch)} there, then answer Retry (Abandon batch gives the batch up):\n${listPaths(paths)}`,
       ...worktreeOffer({ kind: 'batch', batchId: batch.id }, { batchId: batch.id }),
@@ -616,6 +632,7 @@ export const baseCards = {
     tier: CardTier.Ask,
     urgency: Urgency.High,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.OneWayDoor),
     title: `Batch "${batch.title}": a merge of ${batch.baseBranch} lost migrations 10db can no longer list`,
     body: `A merge of ${batch.baseBranch} lost migrations of this batch's, and the list of them could not be read from the batch's lost-migrations notice. 10db cannot tell whether the journal holds them, so no gate passes and nothing ships while the notice stands, and 10db never reads an unreadable list as all carried.\n\n${CHECK_THE_JOURNAL}\n\nThe batch's worktree is ${worktree}. Once the journal holds them all, answer "${LostChoice.Clear}" here: the next gate then runs, and a retry of a failed ship can pass. Abandoning the batch also ends it.`,
     foldKey: baseRegenerateKey(batch.id),
@@ -689,6 +706,7 @@ export function forTasks(
     urgency: Urgency.High,
     closesWhen:
       ids.length > 0 ? { by: 'event', when: { event: 'tasks_started', taskIds: ids } } : BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.YourHands),
   };
 }
 
@@ -720,6 +738,7 @@ export function wrongBranchCard(
         tier: CardTier.Ask,
         urgency: Urgency.High,
         closesWhen: ready,
+        decision: decidedByBuilder(BuilderOwns.YourHands),
         title: `Batch "${batch.title}" waits: ${where}`,
         body: `Nothing in the batch starts until the checkout is back on its branch. Answer Switch Back, or run git switch ${shellWord(branch)} in ${repoPath}, or abandon the batch in a task's drawer on the Board.${reason}`,
         foldKey: `batch-branch:${batch.id}:${on}`,
@@ -730,6 +749,7 @@ export function wrongBranchCard(
         tier: CardTier.Ask,
         urgency: Urgency.High,
         closesWhen: ready,
+        decision: decidedByBuilder(BuilderOwns.YourHands),
         title: `Batch "${batch.title}" failed: ${where}`,
         body: `10db restarted with the checkout off the batch branch, so nothing in the batch runs. Answer Switch Back, or run git switch ${shellWord(branch)} in ${repoPath}, then press Retry in a task's drawer on the Board; or abandon the batch there.${reason}`,
         foldKey: `batch-branch-failed:${batch.id}:${on}`,
@@ -740,6 +760,7 @@ export function wrongBranchCard(
         tier: CardTier.Ask,
         urgency: Urgency.High,
         closesWhen: { by: 'event', when: { event: 'batch_shipped', batchId: batch.id } },
+        decision: decidedByBuilder(BuilderOwns.YourHands),
         title: `Batch "${batch.title}" not shipped: ${where}`,
         body: `10db ships only from the batch branch, and pushed nothing. Run git switch ${shellWord(branch)} in ${repoPath}, then press Retry in a task's drawer on the Board.`,
         foldKey: shipFailureFoldKey(batch.id),
@@ -752,6 +773,7 @@ export function wrongBranchCard(
         urgency: Urgency.High,
         // forTasks sets the closer
         closesWhen: BY_ANSWER,
+        decision: decidedByBuilder(BuilderOwns.YourHands),
         title: `Not added to batch "${batch.title}": ${where}`,
         body: `Start the task again once the checkout is on ${branch} (git switch ${shellWord(branch)} in ${repoPath}).`,
         detail,
@@ -868,6 +890,7 @@ function shipCard(
     tier: CardTier.Ask,
     urgency: Urgency.High,
     closesWhen: { by: 'event', when: { event: 'batch_shipped', batchId: batch.id } },
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
   };
 }
 
@@ -1108,6 +1131,7 @@ function leftCard(
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.YourHands),
     title: `Your checkout stays on ${batch.branch ?? '(no branch)'}: ${why}`,
     body,
     foldKey: `checkout-return:${batch.id}`,
@@ -1265,6 +1289,7 @@ export const prCards = {
             by: 'withdrawn',
             when: 'GitHub reads the pull request as mergeable (pr-watch, ship)',
           },
+          decision: decidedByBuilder(BuilderOwns.OutOfMoves),
           title: `Pull request for "${batch.title}" conflicts with ${base}`,
           body: `${prUrl}\n\n${base} changed these files in ways that conflict with the batch's own changes, and 10db couldn't settle them itself:\n${listPaths(stop.paths)}${stop.reasons ? `\n\n${stop.reasons}` : ''}\n\n${resolveOnGitHub}`,
           foldKey: prCardKey.catchUp(batch.id),
@@ -1279,6 +1304,7 @@ export const prCards = {
             by: 'withdrawn',
             when: 'GitHub reads the pull request as mergeable (pr-watch, ship)',
           },
+          decision: decidedByBuilder(BuilderOwns.OutOfMoves),
           title: `Pull request for "${batch.title}" not updated: the ${stop.name} failed after merging ${base}`,
           body: `${prUrl}\n\nThe pull request conflicted with ${base}. 10db merged ${base} into the batch's branch, and the ${stop.name} failed on the result, so it pushed nothing.${stop.logPath === null ? '' : ` The log: ${stop.logPath}`}${stop.settled && stop.settled.length > 0 ? `\n\n10db settled these files itself in the merge, so look there first:\n${listPaths(stop.settled)}` : ''}\n\n${resolveOnGitHub}`,
           foldKey: prCardKey.catchUp(batch.id),
@@ -1293,6 +1319,7 @@ export const prCards = {
             by: 'withdrawn',
             when: 'GitHub reads the pull request as mergeable (pr-watch, ship)',
           },
+          decision: decidedByBuilder(BuilderOwns.OutOfMoves),
           title: `Pull request for "${batch.title}" conflicts with ${base} and 10db couldn't update it`,
           body: `${prUrl}\n\n${stop.why}\n\n${resolveOnGitHub}`,
           foldKey: prCardKey.catchUp(batch.id),
@@ -1324,6 +1351,7 @@ export const prCards = {
         by: 'withdrawn',
         when: "the pull request's CI passes or it ends (clearCiStop)",
       },
+      decision: decidedByBuilder(BuilderOwns.OutOfMoves),
       title: `CI still failing on ${root.title}: ${failing.map((job) => job.name).join(', ') || 'a required check'}`,
       body: [
         link,
@@ -1357,6 +1385,7 @@ export const prCards = {
       tier: CardTier.Ask,
       urgency: Urgency.High,
       closesWhen: { by: 'withdrawn', when: 'a new head, a merge or a close (pr-watch)' },
+      decision: decidedByBuilder(BuilderOwns.OutOfMoves),
       title: `${list} got no runner on GitHub after ${String(attempts)} reruns: ${root.title}`,
       body: [
         `Pull request: ${prUrl}`,
@@ -1400,6 +1429,7 @@ export const prCards = {
     tier: CardTier.Ask,
     urgency: Urgency.High,
     closesWhen: { by: 'withdrawn', when: 'the base passes these checks again (pr-watch)' },
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     title: `${input.branch} is red: ${String(input.waiting)} pull request${input.waiting === 1 ? ' waits' : 's wait'} on it`,
     body: [
       `${input.repo}'s ${input.branch} fails ${input.checks.join(', ')}, and pull requests fail the same checks.`,
@@ -1413,6 +1443,7 @@ export const prCards = {
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     title: `Could not rerun the failed CI jobs for ${root.title}`,
     body: `GitHub did not rerun the failed jobs: ${detailOf(error)}\n\nPull request: ${root.prUrl ?? '(none)'}\n\nRerun them from the pull request's checks page, or push a commit to ${root.branch ?? 'the branch'}.`,
     foldKey: `${prCardKey.ciStopped(root.id)}:rerun`,
@@ -1431,6 +1462,7 @@ export const prCards = {
         by: 'withdrawn',
         when: 'the checks pass or the pull request merges (pr-watch)',
       },
+      decision: decidedByBuilder(BuilderOwns.OutOfMoves),
       title: `Pull request checks failed for "${batch.title}": ${first?.name ?? 'a check'}${more > 0 ? ` and ${String(more)} more` : ''}`,
       body: [
         link,
@@ -1454,6 +1486,7 @@ export const prCards = {
       tier: CardTier.Ask,
       urgency: Urgency.Normal,
       closesWhen: BY_ANSWER,
+      decision: decidedByBuilder(BuilderOwns.OneWayDoor),
       title: `Pull request closed without merging: "${batch.title}"`,
       body: `${prUrl}\n\nThe batch's tasks are in Blocked on the Board, because their code is not on ${batch.baseBranch}.${keeps}\n\nOn the Board, reopen a task to run it again, or close it if you don't want the work. To land the existing work instead, reopen the pull request on GitHub and merge it there; 10db doesn't follow a reopened pull request, so close the tasks once it merges.`,
       foldKey: prCardKey.closed(batch.id),
@@ -1491,6 +1524,7 @@ export const prCards = {
         tier: CardTier.Ask,
         urgency: Urgency.Normal,
         closesWhen: { by: 'withdrawn', when: 'gh works again (pr-watch)' },
+        decision: decidedByBuilder(BuilderOwns.YourHands),
         foldKey,
         title: 'Pull request status unknown: gh is signed out',
         body: `10db reads your pull requests' checks and merge state with gh. ${SIGN_IN_IN_SETTINGS} ${until}`,
@@ -1501,6 +1535,7 @@ export const prCards = {
         tier: CardTier.Ask,
         urgency: Urgency.Normal,
         closesWhen: { by: 'withdrawn', when: 'gh works again (pr-watch)' },
+        decision: decidedByBuilder(BuilderOwns.YourHands),
         foldKey,
         title: 'Pull request status unknown: gh is not installed',
         body: `10db reads your pull requests' checks and merge state with gh. Install the GitHub CLI (brew install gh). ${SIGN_IN_IN_SETTINGS} ${until}`,
@@ -1510,6 +1545,7 @@ export const prCards = {
       tier: CardTier.Ask,
       urgency: Urgency.Normal,
       closesWhen: { by: 'withdrawn', when: 'gh works again (pr-watch)' },
+      decision: decidedByBuilder(BuilderOwns.YourHands),
       foldKey,
       title: 'Pull request status unknown: gh could not reach GitHub',
       body: `gh couldn't reach GitHub: ${detailOf(error)}\n\nCheck your connection and run gh auth status in a terminal to see why. ${until}`,
@@ -1539,6 +1575,7 @@ export const branchCards = {
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.OneWayDoor),
     title: `Delete ${batch.branch ?? 'the branch'}? It holds ${commitsOf(commits)}`,
     body: `Batch "${batch.title}" was abandoned, and its branch ${batch.branch ?? '(none)'} holds ${commitsOf(commits)} beyond ${batch.baseBranch}. 10db keeps it until you answer: Delete Branch removes it from your repository, so that work is gone; Keep leaves it.`,
     foldKey: branchCardKey.offer(batch.id),
@@ -1561,6 +1598,7 @@ export const branchCards = {
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.OneWayDoor),
     title: `${batch.branch ?? 'The branch'} was not deleted: it is checked out`,
     body: `${batch.branch ?? 'The branch'} is checked out in ${path}, and git won't delete a branch that is in use. Switch ${path} to another branch, then answer again.`,
     foldKey: branchCardKey.offer(batch.id),
@@ -1578,6 +1616,7 @@ export const branchCards = {
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: { by: 'withdrawn', when: 'no branch under 10db/ lacks a task (branch-sweep)' },
+    decision: decidedByBuilder(BuilderOwns.OneWayDoor),
     title: `${String(branches.length)} local branch${branches.length === 1 ? '' : 'es'} under 10db/ without a task`,
     body: `10db has no task for these local branches, so it can't tell whether they are yours and leaves them alone:\n${listPaths(branches)}\n\nDelete Them removes exactly these branches from your repository, so any work only on them is gone. Keep leaves them.${
       checkedOut.length === 0
@@ -1618,6 +1657,7 @@ export const passCards = {
     // The branch is dealt with by hand and may be left, so a dismiss closes the card as well as the
     // start-up withdrawal once the branch is gone.
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.YourHands),
     title: `${record.branch} is left from a UI Workbench pass that did not open`,
     body:
       `10db stopped while opening a UI Workbench pass, after it made ${record.branch} at the commit ${record.returnBranch} was on and before the pass was recorded. ` +
@@ -1683,6 +1723,7 @@ function leftOutCard(
     tier: CardTier.Ask,
     urgency: Urgency.High,
     closesWhen: { by: 'event', when: { event: 'batch_shipped', batchId: batch.id } },
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     ...batchCardFields(
       { id: attempt.workstreamId, batchId: batch.id },
       attempt.revert,
@@ -1744,6 +1785,7 @@ export const leftOutCards = {
           closesWhen: batchIsOver(batch)
             ? BY_ANSWER
             : { by: 'event', when: { event: 'batch_shipped', batchId: batch.id } },
+          decision: decidedByBuilder(BuilderOwns.OutOfMoves),
         };
   },
   /**
@@ -1780,6 +1822,7 @@ export const leftOutCards = {
       tier: CardTier.Ask,
       urgency: Urgency.Normal,
       closesWhen: BY_ANSWER,
+      decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     } as const;
     if (answerable)
       return leftOutCard(
@@ -1819,6 +1862,7 @@ export const leftOutCards = {
       tier: CardTier.Ask,
       urgency: Urgency.High,
       closesWhen: { by: 'event', when: { event: 'batch_shipped', batchId: batch.id } },
+      decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     };
   },
   /** Later commits changed `paths` in ways that conflict with undoing the task's commits. */

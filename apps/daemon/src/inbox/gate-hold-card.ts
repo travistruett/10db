@@ -1,8 +1,8 @@
-import { type ProjectId, Urgency } from '@10db/contracts';
+import { BuilderOwns, type ProjectId, Urgency } from '@10db/contracts';
 import { findOpenByFoldKey, getProject } from '@10db/db';
 import type { StateStore } from '../events';
 import type { InboxService } from './service';
-import { CardTier } from './card-tier';
+import { CardTier, decidedByBuilder } from './card-tier';
 
 const RESOLVED = 'The gate got past its environment check';
 
@@ -29,6 +29,7 @@ export function raiseGateHoldCard(
       by: 'withdrawn',
       when: 'a held gate gets past its environment check (gate-hold)',
     },
+    decision: decidedByBuilder(BuilderOwns.YourHands),
     title: `${name}'s dev stack isn't in sync: its gates are waiting`,
     body: [
       `The gate printed this line (quoted as text): "${input.reason.replace(/"/g, "'")}"`,

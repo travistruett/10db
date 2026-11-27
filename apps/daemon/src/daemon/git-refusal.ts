@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   CARD_OPENS,
   type InboxAnswer,
   type InboxItemDto,
@@ -12,6 +13,7 @@ import {
   BY_ANSWER,
   CardTier,
   cardsResolvedByEvent,
+  decidedByBuilder,
   resolveStaleCards,
   type CardClosesWhen,
   type InboxService,
@@ -59,6 +61,7 @@ export function createGitRefusalHandler(deps: {
       tier: CardTier.Ask,
       urgency: Urgency.High,
       closesWhen,
+      decision: decidedByBuilder(BuilderOwns.Guardrails),
       ...(card.candidate
         ? {
             options: OPTIONS,

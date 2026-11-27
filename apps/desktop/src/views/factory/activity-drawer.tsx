@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   Stack,
+  Switch,
   Text,
   TextInput,
   Tooltip,
@@ -68,9 +69,11 @@ function ActivityList({ project }: { readonly project: ProjectId | null }) {
   const now = useNow();
   const [text, setText] = useState('');
   const [typed] = useDebouncedValue(text.trim(), SEARCH_PAUSE_MS);
+  const [decidedOnly, setDecidedOnly] = useState(false);
   const rows = useActivityRows({
     ...(project === null ? {} : { project }),
     ...(typed === '' ? {} : { q: typed }),
+    ...(decidedOnly ? { decided: 'true' as const } : {}),
   });
   const [limit, setLimit] = useState(FIRST_SHOWN);
   // The open notice is looked up by key on each render, so a repeat that joins it shows at once.
@@ -126,6 +129,16 @@ function ActivityList({ project }: { readonly project: ProjectId | null }) {
           setLimit(FIRST_SHOWN);
         }}
       />
+      <Switch
+        size="xs"
+        label="Decided For You"
+        description="Only what 10db decided, with who decided it"
+        checked={decidedOnly}
+        onChange={(event) => {
+          setDecidedOnly(event.currentTarget.checked);
+          setLimit(FIRST_SHOWN);
+        }}
+      />
       {rows.error ? (
         <Alert color="red" title="Couldn't load activity">
           {rows.error.message}
@@ -133,7 +146,9 @@ function ActivityList({ project }: { readonly project: ProjectId | null }) {
       ) : null}
       {!rows.isPending && all.length === 0 ? (
         <Text size="sm" c="dimmed">
-          {typed === '' ? 'Nothing has happened yet.' : 'No activity matches the search.'}
+          {typed === '' && !decidedOnly
+            ? 'Nothing has happened yet.'
+            : 'No activity matches the search.'}
         </Text>
       ) : null}
       {shown.length > 0 ? (

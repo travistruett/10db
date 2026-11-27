@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  BuilderOwns,
   CARD_RESOLVES_WHEN,
   ConflictError,
   InboxKind,
@@ -27,7 +28,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
-import { createInboxService, flagFailedRun, type InboxService } from '../inbox';
+import { createInboxService, decidedByBuilder, flagFailedRun, type InboxService } from '../inbox';
 import {
   afterMarkersResolved,
   commitResultAsStored,
@@ -123,6 +124,7 @@ function failedCard(workstreamId: WorkstreamId, batchId: BatchId) {
     tier: 'ask',
     urgency: 'high',
     closesWhen: { by: 'answer' },
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     projectId: h.project.id,
     workstreamId,
     title: 'Workstream failed',
@@ -216,6 +218,7 @@ async function failedInBatch(
     tier: 'ask',
     urgency: 'high',
     closesWhen: { by: 'answer' },
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     projectId: h.project.id,
     workstreamId: a.id,
     title: 'Workstream failed: Alpha',
@@ -288,6 +291,7 @@ describe('the failed workstream card', () => {
       tier: 'ask',
       urgency: 'high',
       closesWhen: { by: 'answer' },
+      decision: decidedByBuilder(BuilderOwns.OutOfMoves),
       projectId: h.project.id,
       workstreamId: null,
       title: 'FYI',
@@ -937,6 +941,7 @@ describe('the failed workstream card', () => {
             tier: 'ask',
             urgency: 'high',
             closesWhen: { by: 'answer' },
+            decision: decidedByBuilder(BuilderOwns.OutOfMoves),
             projectId: h.project.id,
             workstreamId: merge.id,
             title: 'Workstream failed: Beta',
@@ -979,6 +984,7 @@ describe('the failed workstream card', () => {
             tier: 'ask',
             urgency: 'high',
             closesWhen: { by: 'answer' },
+            decision: decidedByBuilder(BuilderOwns.OutOfMoves),
             projectId: h.project.id,
             workstreamId: made.failed,
             title: 'Workstream failed: Alpha again',

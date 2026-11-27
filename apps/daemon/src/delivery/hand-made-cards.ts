@@ -1,5 +1,5 @@
-import { Urgency } from '@10db/contracts';
-import { BY_ANSWER, CardTier } from '../inbox';
+import { BuilderOwns, Urgency } from '@10db/contracts';
+import { BY_ANSWER, CardTier, decidedByBuilder } from '../inbox';
 import { detailOf, listPaths, worktreeOffer, type Card, type DeliveryNotice } from './cards';
 
 /** A worktree in the hand-made folder whose pull request merged and which holds nothing unsaved. */
@@ -62,6 +62,7 @@ export const handMadeCards = {
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.OneWayDoor),
     title: `${String(worktrees.length)} worktree${worktrees.length === 1 ? '' : 's'} in ${folder} ${worktrees.length === 1 ? 'has' : 'have'} merged`,
     body: `Each pull request below merged, the branch holds nothing the pull request lacks, and the worktree has no uncommitted changes or loose files. Every one keeps a copy of node_modules and build output that the editor, Spotlight and the file watcher keep reading, which adds to the load.\n\n${listPaths(worktrees.map((w) => `${w.path} (${w.branch})`))}\n\nRemove Merged Worktrees removes them; the branches stay.`,
     foldKey: handMadeKey.merged,
@@ -75,6 +76,7 @@ export const handMadeCards = {
       by: 'withdrawn',
       when: 'the folder holds no worktree or the answer is given (hand-made-worktrees)',
     },
+    decision: decidedByBuilder(BuilderOwns.YourHands),
     title: `Spotlight indexes ${folder}`,
     body: `${folder} holds your hand-made worktrees, each with its own node_modules and build output. Spotlight (mds_stores and mdworker) indexes every file there, and installs and test runs keep it busy.\n\nSpotlight skips any folder whose name ends in .noindex. Make new worktrees in ${folder.replace(/-worktrees$/, '-worktrees.noindex')}, beside the checkout; the ones here leave as their work merges. 10db changes nothing here.`,
     foldKey: handMadeKey.spotlight(folder),
@@ -85,6 +87,7 @@ export const handMadeCards = {
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.OneWayDoor),
     title: 'Merged worktrees were not removed',
     body: `${detailOf(error)}\n\nWhat was removed before the failure is gone. 10db does not offer the same worktrees again; remove the rest yourself with git worktree remove.`,
     foldKey: 'hand-made-remove-failed',

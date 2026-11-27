@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   MCP_APPROVAL_DETAIL,
   McpApprovalChoice,
   McpServerReview,
@@ -17,7 +18,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { InboxService } from './service';
-import { BY_ANSWER, CardTier } from './card-tier';
+import { BY_ANSWER, CardTier, decidedByBuilder } from './card-tier';
 
 /**
  * Characters that can hide, reorder or add lines to text the builder reads: C0 and C1 controls, the
@@ -186,6 +187,7 @@ export function requestMcpApproval(
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.Guardrails),
     title: `Run the repo's MCP server "${visible(review.name)}"?`,
     body: approvalBody(review, earlier),
     options: approvalOptions(review),

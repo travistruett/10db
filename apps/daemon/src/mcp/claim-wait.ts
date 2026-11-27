@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   EventType,
   InboxKind,
   InboxState,
@@ -37,7 +38,7 @@ import { claimScopeOf } from '../delivery';
 import type { EventBus, StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import { DEADLOCK_DETAIL, deadlockAnswers, taskLetter } from './claim-deadlock';
-import { CardTier } from '../inbox';
+import { CardTier, decidedByBuilder } from '../inbox';
 
 /** How often a task waiting for a claim looks again; the holder's release is not pushed to it. */
 export const CLAIM_POLL_MS = 2_000;
@@ -515,6 +516,7 @@ function deadlock(a: Asking, heldBy: WorkstreamId, waits: ClaimWaits): InboxItem
     tier: CardTier.Ask,
     urgency: Urgency.High,
     closesWhen: { by: 'withdrawn', when: 'the deadlock clears (claim-wait)' },
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     title: `Claim deadlock: ${a.kind} ${a.name}`,
     body,
     options,

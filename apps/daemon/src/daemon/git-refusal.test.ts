@@ -1,13 +1,13 @@
 import { realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { InboxItemDto } from '@10db/contracts';
+import { BuilderOwns, type InboxItemDto } from '@10db/contracts';
 import { createTestStore, insertBatch, listInbox, listProjects, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from '../../test/fixtures';
 import { execFileSync } from 'node:child_process';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit, GitTrustError, memoryPinStore, type Git } from '../git';
-import { createInboxService, type InboxService } from '../inbox';
+import { createInboxService, decidedByBuilder, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { createProjectPinStore } from './checkout-pins';
 import {
@@ -239,6 +239,7 @@ describe('a refusal of the daemon git', () => {
       tier: 'ask',
       urgency: 'high',
       closesWhen: { by: 'answer' },
+      decision: decidedByBuilder(BuilderOwns.Guardrails),
       projectId: project.id,
       workstreamId: null,
       title: 'Elsewhere',

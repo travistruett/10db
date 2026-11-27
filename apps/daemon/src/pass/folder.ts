@@ -1,8 +1,8 @@
 import type { PassDto, PassId } from '@10db/contracts';
 import { findOpenByFoldKey, getPass, getProject, type DbReader } from '@10db/db';
-import { flagCard, withdrawCard, CardTier } from '../inbox';
+import { flagCard, withdrawCard, CardTier, decidedByBuilder } from '../inbox';
 import { passBranch, type PassWorkDeps } from './kept-work';
-import { Urgency } from '@10db/contracts';
+import { BuilderOwns, Urgency } from '@10db/contracts';
 
 // Workbench spec §5.1, §12: a pass's turns run only while Your folder is on the pass's branch. A
 // folder the builder switched away is one card, never a repoint: moving HEAD alone would leave the
@@ -40,6 +40,7 @@ export function raiseFolderCard(
       tier: CardTier.Ask,
       urgency: Urgency.High,
       closesWhen: { by: 'withdrawn', when: 'the folder is back, or the pass is abandoned' },
+      decision: decidedByBuilder(BuilderOwns.YourHands),
       title: `UI Workbench pass "${pass.name}" is waiting for Your folder`,
       body:
         `Your folder is on ${where}, not on the pass's branch ${branch}, so no page of the pass ` +

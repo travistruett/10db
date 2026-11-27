@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import {
+  BuilderOwns,
   NotFoundError,
   ScreenKind,
   TaskId,
@@ -25,7 +26,7 @@ import {
   setAppSetting,
   type Json,
 } from '@10db/db';
-import { CardTier } from '../inbox';
+import { CardTier, decidedByBuilder } from '../inbox';
 import { SlackError, SlackFailure, type SlackClient } from '../slack';
 import { raise, type DeliveryContext } from './context';
 import { signedOffTasks } from './pass-signed-off';
@@ -202,6 +203,7 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
       tier: CardTier.Ask,
       urgency: Urgency.Low,
       closesWhen: { by: 'withdrawn', when: 'the post lands (slack-picture-post)' },
+      decision: decidedByBuilder(BuilderOwns.Promise),
       title: `The pictures of "${pass.name}" did not reach Slack`,
       body: `The pull request is open and unaffected. Slack's reason: ${reasonOf(error)}. 10db tries again at the pass's next push to the pull request.`,
       foldKey: foldKeyOf(passId),
@@ -347,6 +349,7 @@ export function createSlackPicturePost(deps: SlackPicturePostDeps): SlackPicture
       tier: CardTier.Ask,
       urgency: Urgency.Low,
       closesWhen: { by: 'withdrawn', when: 'the post lands (slack-picture-post)' },
+      decision: decidedByBuilder(BuilderOwns.Promise),
       title: `The pictures of "${task.title}" did not reach Slack`,
       body,
       foldKey,

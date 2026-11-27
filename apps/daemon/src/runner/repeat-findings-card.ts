@@ -1,6 +1,12 @@
-import { Urgency, type InboxItemDto, type TaskDto, type WorkstreamId } from '@10db/contracts';
+import {
+  BuilderOwns,
+  Urgency,
+  type InboxItemDto,
+  type TaskDto,
+  type WorkstreamId,
+} from '@10db/contracts';
 import { findOpenByFoldKey, type RetryLimitFindings, type WriteContext } from '@10db/db';
-import { BY_ANSWER, CardTier, flagCard } from '../inbox';
+import { BY_ANSWER, CardTier, decidedByBuilder, flagCard } from '../inbox';
 
 /** The fold key of a retry-limit follow-up's repeat-findings card: one per task. */
 const foldKeyOf = (task: TaskDto): string => `findings-repeat:${task.id}`;
@@ -39,6 +45,7 @@ export function raiseRepeatFindings(
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.ProductAndTaste),
     title: `Findings repeat: ${task.title}`,
     body,
     foldKey,

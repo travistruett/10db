@@ -91,6 +91,7 @@ function flagOf(projectId: ProjectId, card: Card) {
     tier: card.tier,
     urgency: card.urgency,
     closesWhen: card.closesWhen,
+    decision: card.decision,
     ...(card.detail ? { detail: card.detail } : {}),
     ...(card.options ? { options: card.options } : {}),
   };

@@ -1,7 +1,13 @@
-import { InvalidError, MCP_APPROVAL_DETAIL, type McpServerReview } from '@10db/contracts';
+import {
+  BuilderOwns,
+  InvalidError,
+  MCP_APPROVAL_DETAIL,
+  type McpServerReview,
+} from '@10db/contracts';
 import { createTestStore, getMcpApproval, seedProject, type Store } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore } from '../events';
+import { decidedByBuilder } from './card-tier';
 import { requestMcpApproval } from './mcp-approval';
 import { createInboxService, type InboxService } from './service';
 
@@ -346,6 +352,7 @@ describe('MCP approval cards', () => {
       tier: 'ask',
       urgency: 'high',
       closesWhen: { by: 'answer' },
+      decision: decidedByBuilder(BuilderOwns.Guardrails),
       projectId: project.id,
       workstreamId: null,
       title: 'Run the repo\'s MCP server "mantine"?',
@@ -392,6 +399,7 @@ describe('MCP approval cards', () => {
       tier: 'ask',
       urgency: 'high',
       closesWhen: { by: 'answer' },
+      decision: decidedByBuilder(BuilderOwns.Guardrails),
       projectId: project.id,
       workstreamId: null,
       title: 'Watcher',

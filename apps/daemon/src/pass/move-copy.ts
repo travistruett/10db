@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   Delivery,
   InboxState,
   PASS_MOVE_TO_COPY_CHOICE,
@@ -27,7 +28,7 @@ import {
   type DbReader,
   type WriteContext,
 } from '@10db/db';
-import { flagCard, BY_ANSWER, CardTier } from '../inbox';
+import { flagCard, BY_ANSWER, CardTier, decidedByBuilder } from '../inbox';
 import { takeOut, TakeOutWithin, type TakeOutDeps } from './take-out';
 
 // Workbench spec §8.4: a pass task that asks for the migrations or deps hazard runs it in a separate
@@ -177,6 +178,7 @@ export function askMoveToCopy(
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.ProductAndTaste),
     title: `Move "${task.title}" to a separate copy?`,
     body: words.body,
     foldKey: key,

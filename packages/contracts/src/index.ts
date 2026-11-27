@@ -7,6 +7,7 @@ export * from './batches';
 export * from './benchmarks';
 export * from './builder-mcp-tools';
 export * from './board';
+export * from './card-decider';
 export * from './card-resolution';
 export * from './catalogue';
 export * from './command-runners';

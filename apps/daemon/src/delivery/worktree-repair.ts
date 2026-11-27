@@ -1,6 +1,13 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { BatchState, InvalidError, type BatchDto, type BatchId, Urgency } from '@10db/contracts';
+import {
+  BatchState,
+  BuilderOwns,
+  InvalidError,
+  type BatchDto,
+  type BatchId,
+  Urgency,
+} from '@10db/contracts';
 import {
   getBatch,
   getLocalCopy,
@@ -19,7 +26,7 @@ import { worktreeLockReason } from './worktree-cut';
 import { raiseInstallHostCards } from './worktree-dependencies';
 import { withWorktreeLock } from './worktree-lock';
 import { seedDirs, seedWorktree } from './worktree-seed';
-import { BY_ANSWER, CardTier } from '../inbox';
+import { BY_ANSWER, CardTier, decidedByBuilder } from '../inbox';
 
 /** What `ensureWorktreeWhole` found: a worktree kept, one made again, or a refusal with its card. */
 export type Wholeness = 'whole' | 'replaced' | 'refused';
@@ -152,6 +159,7 @@ async function makeWhole(
         tier: CardTier.Ask,
         urgency: Urgency.High,
         closesWhen: BY_ANSWER,
+        decision: decidedByBuilder(BuilderOwns.OutOfMoves),
         ...worktreeOffer({ kind: 'batch', batchId: batch.id }, { batchId: batch.id }),
       });
       await raiseInstallHostCards(ctx, batch.projectId, installed);

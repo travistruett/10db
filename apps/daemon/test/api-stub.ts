@@ -43,6 +43,8 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     listInbox: () => [],
     pageInbox: track('pageInbox'),
     pageActivity: () => ({ rows: [], next: null }),
+    undoActivity: none,
+    askNextTime: none,
     inboxCardContext: track('inboxCardContext'),
     answerInbox: none,
     eventsAfter: () => [] as DaemonEvent[],

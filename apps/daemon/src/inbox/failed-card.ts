@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   CARD_RELEASED_WORKSTREAMS,
   CARD_RESOLVES_WHEN,
   ReleasedWorkstreams,
@@ -18,7 +19,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { z } from 'zod';
-import { CardTier } from './card-tier';
+import { CardTier, decidedByBuilder } from './card-tier';
 import { flagCard, withdrawCard } from './service';
 
 /** A task has one failed card: a later run's failure folds into it. */
@@ -80,6 +81,7 @@ export function flagFailedRun(ctx: WriteContext, run: FailedRun, content: Failed
       by: 'withdrawn',
       when: 'the run is retried, cancelled or shipped (cancelForWorkstream), or a later run of the task finishes',
     },
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     title: `${WORKSTREAM_FAILED_TITLE_PREFIX}${task.title}${runs > 1 ? ` (${String(runs)} runs)` : ''}`,
     body: content.body,
     ...(content.options === undefined ? {} : { options: content.options }),

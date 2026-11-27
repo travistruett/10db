@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   InboxKind,
   type InboxAnswer,
   type InboxItemDto,
@@ -7,7 +8,7 @@ import {
 } from '@10db/contracts';
 import { patchProject, type WriteContext } from '@10db/db';
 import type { InboxService } from './service';
-import { BY_ANSWER, CardTier } from './card-tier';
+import { BY_ANSWER, CardTier, decidedByBuilder } from './card-tier';
 
 const DOCKER_DETAIL = 'dockerAuto';
 
@@ -52,6 +53,7 @@ export function raiseDockerOnNote(
     tier: CardTier.Ask,
     urgency: Urgency.Low,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.YourHands),
     title: `Docker is on for ${input.project.name}'s gate and lanes`,
     body: [
       REASON[input.why],
@@ -105,6 +107,7 @@ export function raiseDockerMayBeNeededNote(
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.YourHands),
     title: `${input.project.name} may need Docker`,
     body: [
       'A gate ran docker, which the sandbox refused, and the gate failed. The gate asked for Docker.',

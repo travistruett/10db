@@ -1,5 +1,6 @@
 import {
   BatchFailure,
+  BuilderOwns,
   CopyWait,
   Urgency,
   type BatchDto,
@@ -10,7 +11,7 @@ import {
 import { findOpenByFoldKey, getBatch } from '@10db/db';
 import { areaMatches } from '../guard';
 import type { StateStore } from '../events';
-import { BY_ANSWER, CardTier, type InboxService } from '../inbox';
+import { BY_ANSWER, CardTier, decidedByBuilder, type InboxService } from '../inbox';
 import { shipFailureFoldKey, type Card, type ShipFailure } from './cards';
 import { raise, type DeliveryContext } from './context';
 
@@ -34,6 +35,7 @@ function waitCard(batch: BatchDto, wait: CopyWait, detail: readonly string[]): C
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: { by: 'withdrawn', when: WITHDRAWN } as const,
+    decision: decidedByBuilder(BuilderOwns.YourHands),
     foldKey: waitKey(batch.id, wait),
     refresh: true,
   };
@@ -60,6 +62,7 @@ function waitCard(batch: BatchDto, wait: CopyWait, detail: readonly string[]): C
       return {
         ...common,
         tier: CardTier.Status,
+        decision: decidedByBuilder(BuilderOwns.YourHands),
         title: `${title}: ${batch.baseBranch} keeps moving`,
         body: `${batch.baseBranch} keeps moving; the landing waits for it to be still for 10 minutes.`,
       };
@@ -100,6 +103,7 @@ export function raiseMigrationsCard(
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.YourHands),
     title: `The landing of "${batch.title}" brought migrations into ${batch.baseBranch}`,
     body: `Apply them to your dev database before you use the app:\n${lines(paths)}`,
     foldKey: migrationsKey(batch.id),
@@ -148,6 +152,7 @@ function failure(
       tier: CardTier.Ask,
       urgency: Urgency.High,
       closesWhen: { by: 'event', when: { event: 'batch_shipped', batchId: batch.id } },
+      decision: decidedByBuilder(BuilderOwns.OutOfMoves),
       detail: { batchId: batch.id, actions: [...actions] },
     },
   };

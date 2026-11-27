@@ -743,6 +743,10 @@ export interface ApiServices extends PlanRecordServices {
   pageInbox(query: InboxPageQuery): InboxPageDto;
   /** One page of notices, newest first, repeats grouped; `next` is null on the last page. */
   pageActivity(query: ActivityPageQuery): ActivityPageDto;
+  /** Takes back the decision an Activity row reports, where it can be; a 404 or 409 says why not. */
+  undoActivity(seq: number): void;
+  /** Sets the row's rule to ask in its project (or back to deciding), so its next occurrence is a card. */
+  askNextTime(seq: number, asking: boolean): void;
   /** The card's conversation's last messages; a `NotFoundError` for an unknown card. */
   inboxCardContext(id: InboxItemId): InboxCardContextDto;
   /** Answers a card, recording `answerer` as who gave the answer. */

@@ -8,10 +8,11 @@ import {
   setBatchNotice,
   transitionBatch,
 } from '@10db/db';
-import type { BatchId, ProjectId } from '@10db/contracts';
+import { BuilderOwns, type BatchId, type ProjectId } from '@10db/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { waitFor } from '../../test/fixtures';
+import { decidedByBuilder } from '../inbox';
 import { ManualClock } from '../clock';
 import { GhError, PrState, type CheckRollupItem, type Gh } from '../github';
 import { prCardKey } from './cards';
@@ -303,6 +304,7 @@ describe('the pull request watch', () => {
           tier: 'ask',
           urgency: 'high',
           closesWhen: { by: 'answer' },
+          decision: decidedByBuilder(BuilderOwns.OutOfMoves),
           title: 'Pull request conflicts',
           body: 'x',
           foldKey: prCardKey.catchUp(id),

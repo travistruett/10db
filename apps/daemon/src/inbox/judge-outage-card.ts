@@ -1,9 +1,9 @@
-import { CARD_OPENS, type ProjectId, Urgency } from '@10db/contracts';
+import { BuilderOwns, CARD_OPENS, type ProjectId, Urgency } from '@10db/contracts';
 import { findOpenByFoldKey, getTask, getWorkstream, listProjects } from '@10db/db';
 import type { StateStore } from '../events';
 import type { JudgeOutage, JudgeOutageSink } from '../judge';
 import type { InboxService } from './service';
-import { CardTier } from './card-tier';
+import { CardTier, decidedByBuilder } from './card-tier';
 
 const FOLD_KEY = 'judge-outage';
 const RESOLVED = "10db's judge answers again, or is off";
@@ -68,6 +68,7 @@ export function createJudgeOutageCard(deps: {
         tier: CardTier.Status,
         urgency: Urgency.Normal,
         closesWhen: { by: 'withdrawn', when: 'the judge answers again (judge/outage)' },
+        decision: decidedByBuilder(BuilderOwns.YourHands),
         title: `Unattended work skips more: ${outageCause(outage)}`,
         body: [
           `Decisions run on ${outage.provider === 'the provider' ? '' : `${outage.provider}, `}${outage.model}.`,

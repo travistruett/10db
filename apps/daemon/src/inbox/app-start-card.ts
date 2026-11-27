@@ -1,8 +1,8 @@
-import { type ProjectId, Urgency } from '@10db/contracts';
+import { BuilderOwns, type ProjectId, Urgency } from '@10db/contracts';
 import { findOpenByFoldKey } from '@10db/db';
 import type { StateStore } from '../events';
 import type { InboxService } from './service';
-import { CardTier } from './card-tier';
+import { CardTier, decidedByBuilder } from './card-tier';
 
 const RESOLVED = "The project's app answers at its address";
 const MAX_COMMAND_CHARS = 400;
@@ -44,6 +44,7 @@ export function raiseAppStartCard(
       by: 'withdrawn',
       when: 'the project app answers at its address (app-start)',
     },
+    decision: decidedByBuilder(BuilderOwns.YourHands),
     title: `${input.projectName}'s app did not start`,
     body: [
       `Nothing answered at ${input.appUrl}, so 10db tried to bring the app up for a picture or a sign-in. The picture or sign-in was skipped.`,

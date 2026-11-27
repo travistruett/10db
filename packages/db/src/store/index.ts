@@ -3,6 +3,7 @@ export * from './account-models';
 export * from './accounts';
 export * from './activity';
 export * from './activity-group';
+export * from './rule-asking';
 export * from './batches';
 export * from './board-columns';
 export * from './claims';

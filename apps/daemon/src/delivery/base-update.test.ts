@@ -9,7 +9,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { mintId, type BatchDto, type BatchId, type WorkstreamDto } from '@10db/contracts';
+import {
+  BuilderOwns,
+  mintId,
+  type BatchDto,
+  type BatchId,
+  type WorkstreamDto,
+} from '@10db/contracts';
 import {
   getBatch,
   getWorkstreamRow,
@@ -20,6 +26,7 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { decidedByBuilder } from '../inbox';
 import { opened, pathOf } from '../../test/delivery-worlds';
 import { isolatedGitEnv } from '../../test/fixtures';
 import type { DeliveryContext } from './context';
@@ -1646,6 +1653,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       tier: 'ask',
       urgency: 'high',
       closesWhen: { by: 'answer' },
+      decision: decidedByBuilder(BuilderOwns.OutOfMoves),
       title: `Batch "${batch.title}" conflicts with main`,
       body: 'x',
       foldKey: baseConflictKey(batch.id),
@@ -1680,6 +1688,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         tier: 'ask',
         urgency: 'high',
         closesWhen: { by: 'answer' },
+        decision: decidedByBuilder(BuilderOwns.OutOfMoves),
         title: `Batch "${batch.title}" conflicts with main`,
         body: 'x',
         foldKey,

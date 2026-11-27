@@ -1,6 +1,12 @@
-import { Urgency, type ProjectId, type TaskId, type WorkstreamId } from '@10db/contracts';
+import {
+  BuilderOwns,
+  Urgency,
+  type ProjectId,
+  type TaskId,
+  type WorkstreamId,
+} from '@10db/contracts';
 import { findOpenByFoldKey, getTask, type WriteContext } from '@10db/db';
-import { CardTier } from './card-tier';
+import { CardTier, decidedByBuilder } from './card-tier';
 import { flagCard, withdrawCard } from './service';
 
 /** A task has one card for a run held because it was starting when 10db went down. */
@@ -35,6 +41,7 @@ export function raiseStartHoldCard(
       by: 'withdrawn',
       when: 'the task is started again (startTask) or the run is cancelled (cancelForWorkstream)',
     },
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     title: `Held: ${task.title} stopped 10db while starting`,
     body: [
       `${happened}, the second time in a row while this run was starting, so the run may be what brings 10db down.`,

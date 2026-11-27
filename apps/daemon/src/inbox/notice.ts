@@ -6,6 +6,7 @@ import {
   NoticeEntity,
   NoticePostedData,
   type Notice,
+  type NoticeDecision,
   type ProjectId,
   type TaskId,
 } from '@10db/contracts';
@@ -22,6 +23,8 @@ export interface NoticeInput {
   readonly tone: Notice['tone'];
   readonly line: string;
   readonly body: string;
+  /** Set when the notice reports a decision 10db made for the builder: who made it, and whether it can be undone. */
+  readonly decision?: NoticeDecision;
 }
 
 /** A notice filed under a task that has no project: the raiser's bug, never the builder's data. */
@@ -55,12 +58,21 @@ export function postNotice(ctx: WriteContext, notice: NoticeInput): void {
     line: notice.line,
     body: notice.body,
   });
-  const data = NoticePostedData.parse({ projectId, taskId, key, tone, line, body });
+  const { decision, ...shown } = NoticePostedData.parse({
+    projectId,
+    taskId,
+    key,
+    tone,
+    line,
+    body,
+    ...(notice.decision === undefined ? {} : { decision: notice.decision }),
+  });
   const entity =
     taskId !== null
       ? { entityType: NoticeEntity.Task, entityId: taskId }
       : projectId !== null
         ? { entityType: NoticeEntity.Project, entityId: projectId }
         : { entityType: NoticeEntity.App, entityId: APP_ENTITY_ID };
+  const data = decision === undefined ? shown : { ...shown, decision };
   ctx.emit({ type: EventType.NoticePosted, ...entity, data });
 }

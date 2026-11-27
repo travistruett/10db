@@ -2,6 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   type ConversationId,
   CARD_CLOSES_ITSELF,
+  BuilderOwns,
+  decisionDetail,
+  type CardDecision,
   CARD_PROPOSED_PRINCIPLES,
   CARD_RESOLVES_WHEN,
   CARD_RELEASED_WORKSTREAMS,
@@ -83,7 +86,13 @@ import type { Logger } from '../log';
 import { ESCALATED_KEY, EXACT_WRITE_KEY, mcpGrantRules, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
 import { grantTargetOf } from '../trust';
-import { BY_ANSWER, CardTier, type CardClosesWhen, type StoredTier } from './card-tier';
+import {
+  BY_ANSWER,
+  CardTier,
+  decidedByBuilder,
+  type CardClosesWhen,
+  type StoredTier,
+} from './card-tier';
 import { applyDockerChoice } from './docker-card';
 import { applyTrustChoice, isSensitiveStray } from './trusted-writes';
 import { postNotice, type NoticeInput } from './notice';
@@ -178,6 +187,11 @@ export interface FlagInput {
   readonly urgency: Urgency;
   /** How the open card closes; an event closer is stored in the detail, where `resolveStaleCards` finds it. */
   readonly closesWhen: CardClosesWhen;
+  /**
+   * Who decides the card: a builder card names which of the seven things only the builder owns, and only a
+   * builder card is in Open and pushed. Another decider's card is never in Open.
+   */
+  readonly decision: CardDecision;
   readonly workstreamId: WorkstreamId | null;
   readonly title: string;
   readonly body: string;
@@ -267,13 +281,13 @@ export interface InboxService {
  */
 export function flagCard(ctx: WriteContext, input: FlagInput): InboxItemDto {
   const closesItself = input.closesWhen.by === 'event';
-  const stored: Record<string, Json> | null = closesItself
-    ? {
-        ...input.detail,
-        [CARD_RESOLVES_WHEN]: input.closesWhen.when,
-        [CARD_CLOSES_ITSELF]: true,
-      }
-    : (input.detail ?? null);
+  const stored: Record<string, Json> = {
+    ...input.detail,
+    ...decisionDetail(input.decision),
+    ...(closesItself
+      ? { [CARD_RESOLVES_WHEN]: input.closesWhen.when, [CARD_CLOSES_ITSELF]: true }
+      : {}),
+  };
   if (input.foldKey) {
     const existing = findOpenByFoldKey(ctx.tx, input.projectId, input.foldKey);
     // A condition card is never dismissed, so a repeat is its only way to say something new: it updates
@@ -748,6 +762,7 @@ export function createInboxService(deps: {
           tier: CardTier.Ask,
           urgency: Urgency.High,
           closesWhen: BY_ANSWER,
+          decision: decidedByBuilder(BuilderOwns.OutOfMoves),
           title: 'An answer was stored but not delivered',
           body: `The answer to “${now.title}” was recorded, but handing it to the lane failed, so the lane may still be waiting. Retry delivery once the cause is fixed.`,
           detail: { [REDELIVER_KEY]: now.id },

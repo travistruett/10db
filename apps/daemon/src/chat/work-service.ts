@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   CHAT_DEFAULT_TITLE,
   ChatId as ChatIdSchema,
   ConflictError,
@@ -29,7 +30,7 @@ import {
 import { BUSY, type ExploreEngine } from '../conversation';
 import type { StateStore } from '../events';
 import type { FolderHold } from '../folder-hold';
-import { BY_ANSWER, CardTier, flagCard, withdrawCard } from '../inbox';
+import { BY_ANSWER, CardTier, decidedByBuilder, flagCard, withdrawCard } from '../inbox';
 import type { Logger } from '../log';
 
 import { chatWorkCardKey, CHAT_WORK_CARD_DETAIL } from './work-card';
@@ -174,6 +175,7 @@ function raiseChoiceCard(
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.ProductAndTaste),
     title: 'Where should this session change files?',
     body: `The session “${chat.title ?? 'New session'}” wants to change files in ${project.name}. It has only read so far.`,
     foldKey: chatWorkCardKey(chat.id),

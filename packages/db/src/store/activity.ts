@@ -3,12 +3,14 @@ import {
   NoticePostedData,
   type ActivityPageDto,
   type ActivityPageQuery,
+  type DecisionRule,
   type ProjectId,
 } from '@10db/contracts';
 import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import { groupNotices, type PostedNotice } from './activity-group';
 import { ofActiveProject } from './projects';
+import { askingRules, undoneRows } from './rule-asking';
 import type { DbReader } from './store';
 
 const events = schema.events;
@@ -37,6 +39,8 @@ function filterOf(q: ActivityPageQuery): SQL[] {
           (SELECT ${schema.tasks.id} FROM ${schema.tasks} WHERE NOT ${ofActiveProject(schema.tasks.projectId)})))`,
     );
   }
+  if (q.decided !== undefined)
+    where.push(sql`json_extract(${events.data}, '$.decision') IS NOT NULL`);
   if (q.q !== undefined) {
     const pattern = likePattern(q.q);
     where.push(
@@ -54,6 +58,41 @@ function filterOf(q: ActivityPageQuery): SQL[] {
  * that is accepted.
  */
 export function pageActivity(db: DbReader, q: ActivityPageQuery): ActivityPageDto {
+  const page = pageNotices(db, q);
+  const undone = undoneRows(db);
+  const asking = new Map<ProjectId, ReadonlySet<DecisionRule>>();
+  return {
+    ...page,
+    rows: page.rows.map((row) => {
+      if (row.decision === undefined) return row;
+      const { projectId } = row;
+      let rules = projectId === null ? undefined : asking.get(projectId);
+      if (projectId !== null && rules === undefined) {
+        rules = askingRules(db, projectId);
+        asking.set(projectId, rules);
+      }
+      return {
+        ...row,
+        asking: rules?.has(row.decision.rule) ?? false,
+        undone: undone.has(row.seq),
+      };
+    }),
+  };
+}
+
+/** The notice.posted event with this seq, or null when it is not one. */
+export function getPostedNotice(db: DbReader, seq: number): PostedNotice | null {
+  const row = db
+    .select({ seq: events.seq, at: events.at, data: events.data })
+    .from(events)
+    .where(and(eq(events.seq, seq), eq(events.type, EventType.NoticePosted)))
+    .get();
+  if (row === undefined) return null;
+  const data = NoticePostedData.safeParse(row.data);
+  return data.success ? { seq: row.seq, at: row.at, data: data.data } : null;
+}
+
+function pageNotices(db: DbReader, q: ActivityPageQuery): ActivityPageDto {
   const chunkSize = Math.max(100, 4 * q.pageSize);
   const where = filterOf(q);
   let below = q.after;

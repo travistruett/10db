@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  BuilderOwns,
   ConflictError,
   SkipKind,
   SkipSource,
@@ -59,6 +60,7 @@ import {
   BY_ANSWER,
   CardTier,
   createInboxService,
+  decidedByBuilder,
   stampFile,
   trustedWrites,
   type InboxService,
@@ -323,6 +325,7 @@ describe('watcher', () => {
         tier: CardTier.Ask,
         urgency: 'high',
         closesWhen: BY_ANSWER,
+        decision: decidedByBuilder(BuilderOwns.Guardrails),
         title: 'Write outside every claim',
         body: rel,
         detail: { path: rel, candidates: [workstreamId] },

@@ -50,6 +50,109 @@
             "type": "string",
             "maxLength": 8000
           },
+          "decision": {
+            "type": "object",
+            "properties": {
+              "by": {
+                "type": "string",
+                "enum": [
+                  "rule",
+                  "judge"
+                ]
+              },
+              "rule": {
+                "type": "string",
+                "enum": [
+                  "stray-write",
+                  "flaky-check",
+                  "move-back-after-limit"
+                ]
+              },
+              "confidence": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "undo": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "state": {
+                        "type": "string",
+                        "const": "undoable"
+                      },
+                      "action": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "move_project"
+                              },
+                              "projectId": {
+                                "type": "string",
+                                "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                              },
+                              "accountId": {
+                                "type": "string",
+                                "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "projectId",
+                              "accountId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "action"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "state": {
+                        "type": "string",
+                        "const": "final"
+                      },
+                      "reason": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "required": [
+              "by",
+              "rule",
+              "confidence",
+              "undo"
+            ],
+            "additionalProperties": false
+          },
           "seq": {
             "type": "integer",
             "exclusiveMinimum": 0,
@@ -69,6 +172,12 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 9007199254740991
+          },
+          "asking": {
+            "type": "boolean"
+          },
+          "undone": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -81,7 +190,9 @@
           "seq",
           "at",
           "firstAt",
-          "count"
+          "count",
+          "asking",
+          "undone"
         ],
         "additionalProperties": false
       }

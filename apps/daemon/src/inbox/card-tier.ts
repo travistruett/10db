@@ -1,4 +1,9 @@
-import type { CardResolvesWhen } from '@10db/contracts';
+import {
+  CardDecider,
+  type BuilderOwns,
+  type CardDecision,
+  type CardResolvesWhen,
+} from '@10db/contracts';
 
 /** What a card asks of the builder: an ask needs an answer, a notice is only told, a status shows state. */
 export const CardTier = { Ask: 'ask', Notice: 'notice', Status: 'status' } as const;
@@ -15,3 +20,17 @@ export type CardClosesWhen =
   | { readonly by: 'withdrawn'; readonly when: string };
 
 export const BY_ANSWER: CardClosesWhen = { by: 'answer' };
+
+/** The builder decides this card, and it is the given one of the seven things only they own. */
+export function decidedByBuilder(owns: BuilderOwns): CardDecision {
+  return { decider: CardDecider.Builder, owns };
+}
+
+/** A rule settles this card's question; the card is not in Open. */
+export const DECIDED_BY_RULE: CardDecision = { decider: CardDecider.Rule };
+
+/** 10db's judge settles this card's question; the card is not in Open. */
+export const DECIDED_BY_JUDGE: CardDecision = { decider: CardDecider.Judge };
+
+/** The project's stakeholder settles this card's question; the card is not in Open. */
+export const DECIDED_BY_STAKEHOLDER: CardDecision = { decider: CardDecider.Stakeholder };

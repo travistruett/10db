@@ -1,8 +1,14 @@
-import type { AccountId, ProjectDto, ProjectId } from '@10db/contracts';
-import { getAccountRow, getProject, listMoveBacks, setMoveBack } from '@10db/db';
+import {
+  CardDecider,
+  DecisionRule,
+  type AccountId,
+  type ProjectDto,
+  type ProjectId,
+} from '@10db/contracts';
+import { getAccountRow, getProject, isRuleAsking, listMoveBacks, setMoveBack } from '@10db/db';
 import { timerAt, type Clock, type Timer } from '../clock';
 import type { StateStore } from '../events';
-import type { InboxService } from '../inbox';
+import { CardTier, type InboxService } from '../inbox';
 import { moveBackCard } from './cards';
 import { usageLimitEnd, type AccountPauses } from './pauses';
 import type { UsageReports } from './usage-reports';
@@ -91,14 +97,39 @@ export function createMoveBack(opts: {
       schedule(projectId, high);
       return;
     }
-    if (project.moveBackAutomatic) {
+    // A builder who set this rule to ask is asked, as a move the builder made by hand is.
+    const asking = isRuleAsking(db, projectId, DecisionRule.MoveBack);
+    if (project.moveBackAutomatic && !asking) {
       // The limit moved it, so the limit's end moves it back: no card, no builder. A move the daemon
       // can't make (a refusal in the move itself) is asked about instead of lost or thrown at a timer.
+      let moved = false;
       try {
         opts.back(projectId, from.id);
-        return;
+        moved = true;
       } catch {
         // Falls through to the card.
+      }
+      if (moved) {
+        // The move is in Activity with the Undo that puts the project back where it was.
+        opts.inbox.notice({
+          tier: CardTier.Notice,
+          projectId,
+          taskId: null,
+          key: `move-back:${projectId}`,
+          tone: 'info',
+          line: `${project.name} moved back to ${from.label}`,
+          body: `${from.label}'s usage limit reset, so 10db moved ${project.name} back to it from ${getAccountRow(db, project.accountId).label}. Each lane's next session runs there from its latest handoff.`,
+          decision: {
+            by: CardDecider.Rule,
+            rule: DecisionRule.MoveBack,
+            confidence: null,
+            undo: {
+              state: 'undoable',
+              action: { kind: 'move_project', projectId, accountId: project.accountId },
+            },
+          },
+        });
+        return;
       }
     }
     const card = moveBackCard(project, from, getAccountRow(db, project.accountId));
@@ -108,6 +139,7 @@ export function createMoveBack(opts: {
       tier: card.tier,
       urgency: card.urgency,
       closesWhen: card.closesWhen,
+      decision: card.decision,
       title: card.title,
       body: card.body,
       detail: card.detail,

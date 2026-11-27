@@ -14,6 +14,9 @@ import {
   TaskStatus,
   type TaskId,
   BatchId,
+  BuilderOwns,
+  CardDecider,
+  DecisionRule,
   type InboxItemDto,
   type ProjectDto,
   ProjectId,
@@ -32,6 +35,7 @@ import {
   findOpenByFoldKey,
   getWorkstream,
   getWorkstreamRow,
+  isRuleAsking,
   listInbox,
   listOpenFlagRows,
   latestPassTurn,
@@ -103,7 +107,7 @@ import {
   STRAY_BULK_THRESHOLD,
   strayFoldKey,
 } from './strays';
-import { BY_ANSWER, CardTier } from '../inbox';
+import { BY_ANSWER, CardTier, decidedByBuilder } from '../inbox';
 
 const WATCH_BATCH_MS = 500;
 /**
@@ -482,6 +486,12 @@ export function createWatcher(deps: {
           ? `${String(fresh.length)} writes outside every claim`
           : `A write outside every claim: ${single}`,
       body: `${listed.map(line).join('\n')}${fresh.length > listed.length ? `\n…and ${String(fresh.length - listed.length)} more` : ''}${during}\nNothing is asked of you: commit the work, or a claim over it settles it.`,
+      decision: {
+        by: CardDecider.Rule,
+        rule: DecisionRule.StrayWrite,
+        confidence: null,
+        undo: { state: 'final', reason: 'Nothing was changed: 10db left the files as they are' },
+      },
     });
   }
 
@@ -525,11 +535,13 @@ export function createWatcher(deps: {
     const { sensitive, ordinary: unguarded } = splitSensitive(raised, (rel) => rel);
     // Any other path is the lane's own work or the builder's hand edit, and committing it or a claim over
     // it settles it: it asks nothing, so it is a notice. A guardrail path is still the builder's card.
-    const ordinary = unguarded.filter(isGuardrailPath);
+    // A builder who set this rule to ask (Ask Me Next Time in Activity) gets those writes as cards again.
+    const asking = isRuleAsking(db, project.id, DecisionRule.StrayWrite);
+    const ordinary = unguarded.filter((rel) => asking || isGuardrailPath(rel));
     noteQuietStrays(
       project,
       site,
-      unguarded.filter((rel) => !isGuardrailPath(rel)),
+      unguarded.filter((rel) => !asking && !isGuardrailPath(rel)),
       left,
       during,
     );
@@ -555,6 +567,7 @@ export function createWatcher(deps: {
           tier: CardTier.Ask,
           urgency: Urgency.High,
           closesWhen: BY_ANSWER,
+          decision: decidedByBuilder(BuilderOwns.Guardrails),
           title: STRAY_TITLE,
           body: `${labelled(site, rel)}${leavers.length === 0 ? during : leftNote(leavers)}${note === undefined ? '' : `\n${note}`}`,
           detail: {
@@ -580,6 +593,7 @@ export function createWatcher(deps: {
         tier: CardTier.Ask,
         urgency: Urgency.High,
         closesWhen: BY_ANSWER,
+        decision: decidedByBuilder(BuilderOwns.Guardrails),
         title: `${String(unnamed.length)} writes outside every claim`,
         body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(unnamed.length - listed.length)} more${during}`,
         detail: { count: unnamed.length, paths: listed, candidates: [...candidates] },
@@ -795,6 +809,7 @@ export function createWatcher(deps: {
           tier: CardTier.Ask,
           urgency: Urgency.High,
           closesWhen: BY_ANSWER,
+          decision: decidedByBuilder(BuilderOwns.Guardrails),
           title: "Write inside another workstream's claim",
           body: labelled(site, path),
           detail: {
@@ -817,6 +832,7 @@ export function createWatcher(deps: {
         tier: CardTier.Ask,
         urgency: Urgency.High,
         closesWhen: BY_ANSWER,
+        decision: decidedByBuilder(BuilderOwns.Guardrails),
         title: `${String(ordinary.length)} writes inside another workstream's claim`,
         body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(ordinary.length - listed.length)} more`,
         detail: { count: ordinary.length, paths: listed, candidates: running },
