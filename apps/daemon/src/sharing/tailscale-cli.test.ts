@@ -15,7 +15,7 @@ function fakeRun(result: CliResult) {
 }
 
 describe('readTailnetName', () => {
-  it('runs the CLI only for a bare Tailscale address', async () => {
+  it('runs the CLI only for a bare Tailscale address, picks the best name, and is null on any failure', async () => {
     const answer = whois({ Hostinfo: { Hostname: 'phone' } });
     const accepted = ['100.64.0.0', '100.127.255.255', '100.100.1.2', 'fd7a:115c:a1e0::1'];
     const refused = [
@@ -45,9 +45,7 @@ describe('readTailnetName', () => {
       expect(await readTailnetName(run, ip, 1000), ip).toBeNull();
       expect(calls, ip).toEqual([]);
     }
-  });
 
-  it('prefers the device hostname, then the computed name, then the first label of the name', async () => {
     const read = (node: unknown) => readTailnetName(fakeRun(whois(node)).run, '100.64.0.9', 1000);
     expect(
       await read({ Hostinfo: { Hostname: ' Travis’s S26 ' }, ComputedName: 'travis-s26' }),
@@ -64,16 +62,15 @@ describe('readTailnetName', () => {
     );
     expect(await read({ Hostinfo: { Hostname: '  ' } })).toBeNull();
     expect(await read(null)).toBeNull();
-  });
 
-  it('is null when the CLI fails, times out or answers junk', async () => {
-    const read = (result: CliResult) => readTailnetName(fakeRun(result).run, '100.64.0.9', 1000);
-    expect(await read({ code: null, stdout: '', stderr: '', timedOut: true })).toBeNull();
+    const readResult = (result: CliResult) =>
+      readTailnetName(fakeRun(result).run, '100.64.0.9', 1000);
+    expect(await readResult({ code: null, stdout: '', stderr: '', timedOut: true })).toBeNull();
     expect(
-      await read({ code: 1, stdout: '{}', stderr: 'no such peer', timedOut: false }),
+      await readResult({ code: 1, stdout: '{}', stderr: 'no such peer', timedOut: false }),
     ).toBeNull();
-    expect(await read(ok('not json'))).toBeNull();
-    expect(await read(ok('{"Node":{"Hostinfo":{"Hostname":7}}}'))).toBeNull();
+    expect(await readResult(ok('not json'))).toBeNull();
+    expect(await readResult(ok('{"Node":{"Hostinfo":{"Hostname":7}}}'))).toBeNull();
     const throwing: TailscaleRun = () => Promise.reject(new Error('boom'));
     expect(await readTailnetName(throwing, '100.64.0.9', 1000)).toBeNull();
   });
