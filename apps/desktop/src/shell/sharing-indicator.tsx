@@ -25,6 +25,7 @@ import { useConnectTailscale, useSetSharing, useSharing } from '../daemon/sharin
 import { PairDeviceModal } from '../views/settings/pair-device-modal';
 import { SettingsSectionKey } from '../views/settings/sections';
 import { fromNow, useNow } from './relative';
+import { ignoreRestingPointer } from './resting-pointer';
 
 const STEP_NAME: Readonly<Record<SharingStep, string>> = {
   [SharingStep.Installed]: 'Tailscale',
@@ -93,6 +94,11 @@ function shareBlocker(status: SharingStatusDto): string | null {
   return broken === undefined ? null : `Waits for the ${STEP_NAME[broken.step]} step.`;
 }
 
+/** The icon wrapper's ref: one function for every render, so the guard keeps what it has seen. */
+function guardRestingPointer(element: HTMLElement | null): (() => void) | undefined {
+  return element === null ? undefined : ignoreRestingPointer(element);
+}
+
 /**
  * Remote access, at the bar's right just before the view's actions: a phone icon whenever Tailscale is there to read
  * (green while shared, orange while paused, grey otherwise), in the same place in every state so nothing moves. Its
@@ -124,19 +130,19 @@ export function SharingIndicator() {
           if (!devices.isSuccess) void devices.refetch();
         }}
       >
-        <HoverCard.Target>
-          <ActionIcon
-            variant="subtle"
-            color="gray"
-            aria-label={name}
-            // Just before the view's actions, which stay at the row's end where a click on them leaves the pointer: a
-            // card opened under a resting pointer would cover the page below. The margin keeps it right where a view
-            // drew no title row.
-            style={{ flex: 'none', order: 2, marginLeft: 'auto' }}
-          >
-            <IconDeviceMobile size={16} stroke={1.8} color={ICON_COLOR[status.state]} />
-          </ActionIcon>
-        </HoverCard.Target>
+        {/* Just before the view's actions, which stay at the row's end. The margin keeps it right where a view drew
+            no title row. A Settings drawer's × sits right over it, so the wrapper keeps a pointer left resting there
+            from opening the card over the page below. */}
+        <Box
+          ref={guardRestingPointer}
+          style={{ display: 'flex', flex: 'none', order: 2, marginLeft: 'auto' }}
+        >
+          <HoverCard.Target>
+            <ActionIcon variant="subtle" color="gray" aria-label={name}>
+              <IconDeviceMobile size={16} stroke={1.8} color={ICON_COLOR[status.state]} />
+            </ActionIcon>
+          </HoverCard.Target>
+        </Box>
         <HoverCard.Dropdown>
           <SharingCard
             status={status}

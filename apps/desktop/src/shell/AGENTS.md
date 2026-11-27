@@ -37,7 +37,11 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   each state, lists the paired devices once shared, offers Pair a phone (the Pair a Device dialog), holds the switch
   (`useSetSharing`, disabled with the step it waits on), Turn on Tailscale when the connected step failed
   (`POST /sharing/connect`, the CLI's words on a refusal) and a Settings link to Remote Access. It shows no address:
-  on a device that isn't paired the address opens only the Not paired page, so the card offers pairing instead.
+  on a device that isn't paired the address opens only the Not paired page, so the card offers pairing instead. Where a view draws no
+  actions the icon is the row's end, right under the × of a Settings drawer (Mantine's `Drawer`, which covers the
+  title row). When the drawer leaves, the browser reports the still pointer as entering the icon, so the icon's
+  wrapper stops `mouseenter` and `mousemove` at the place of the last pointer event seen outside it
+  (`resting-pointer.ts`); the card opens once the pointer really moves on the icon, or arrives from elsewhere.
 - The panel column and the content are a Mantine `Splitter`: the panel's hairline is the handle, and the builder
   drags the panel between 240 and 480 px (340 until dragged, and again on a double-click of the handle; `PANEL_WIDTH` and its bounds in `shell-layout.ts`).
   One width for every section, remembered (`panel-width.ts`, `tendb.shell.panelWidth`); a sheet takes it too.
