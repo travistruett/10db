@@ -64,7 +64,7 @@
 .panel {
   position: absolute;
   inset: calc(var(--shell-bar-height) + env(safe-area-inset-top)) 0
-    calc(var(--nav-height) + env(safe-area-inset-bottom));
+    calc(var(--nav-height) + env(safe-area-inset-bottom) + var(--push-banner-space, 0px));
   z-index: 20;
   display: none;
   flex-direction: column;
@@ -121,13 +121,9 @@
   left: 14px;
 }
 
-/* The Inbox's offer of notifications floats over the list, just above the nav, so neither the list sheet nor the
-   card covers it and nothing under it moves when it shows. */
+/* The Inbox's offer of notifications sits in the flow just above the nav, so the content and a card's answer bar end
+   above it; the list sheet's foot moves up by its height (`--push-banner-space`, set while it shows). */
 .pushBanner {
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + 8px);
-  z-index: 22;
-  box-shadow: var(--mantine-shadow-md);
+  flex: none;
+  margin: 0 8px 8px;
 }

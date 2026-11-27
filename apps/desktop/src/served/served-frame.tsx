@@ -130,7 +130,6 @@ export function ServedFrame() {
             <div ref={setTitleHost} className={classes['titleHost']} />
             <ReconnectingIndicator />
           </div>
-          <PushBanner />
           <div className={classes['content']}>
             <main className={classes['main']}>
               <Outlet />
@@ -142,6 +141,7 @@ export function ServedFrame() {
             className={classes['panel']}
             data-shown={panelShown ? '' : undefined}
           />
+          <PushBanner />
           <Places />
         </div>
       </UnsavedGuardProvider>

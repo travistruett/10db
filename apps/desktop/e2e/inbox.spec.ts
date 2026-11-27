@@ -306,6 +306,8 @@ test('a card is answered from a phone paired with a code made in Devices', async
     const mobile = await phone.newPage();
     await mobile.goto(`https://${fqdn}:${String(standIn.port)}/app/pair#code=${code}`);
     await expect(mobile.getByRole('heading', { name: /^Paired with/ })).toBeVisible();
+    // Notifications come first once paired; with the worker blocked here, the page says why it can't offer them.
+    await expect(mobile.getByText(/This browser can’t show notifications here/)).toBeVisible();
     // The dialog on the Mac says who paired, then closes.
     await expect(dialog).toBeHidden();
     await mobile.getByRole('link', { name: 'Open Inbox' }).click();

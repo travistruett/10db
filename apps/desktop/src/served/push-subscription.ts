@@ -118,10 +118,14 @@ export function usePushSwitchFor(client: DaemonClient) {
   }, [client]);
 
   async function turnOn(): Promise<void> {
+    // Asked before any await, while the tap still counts as one: WebKit may not carry it across an await.
+    const asked = 'Notification' in window ? Notification.requestPermission() : null;
     const reg = await registration();
-    if (reg === null) throw new Error('This browser cannot show notifications.');
-    if ((await Notification.requestPermission()) !== 'granted') {
-      setState(PushState.Blocked);
+    if (reg === null || asked === null) throw new Error('This browser cannot show notifications.');
+    const permission = await asked;
+    if (permission !== 'granted') {
+      // A dismissed prompt can be asked again; only a refusal is blocked.
+      setState(permission === 'denied' ? PushState.Blocked : PushState.Off);
       return;
     }
     const { key } = await readJson(await client.push.key.$get(), PushKeyDto);

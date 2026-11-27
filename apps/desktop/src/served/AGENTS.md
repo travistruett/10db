@@ -27,8 +27,10 @@ share listener. It reaches only what a paired device may (`api/auth-matrix.ts`).
   (`views/factory/live-passes.ts`). A seeded card with no task is not a run, so "need you" can read 0 beside an
   Inbox of cards: that is the window's number too. Settings is `ThisDevice`: Forget This Device calls
   `DELETE /devices/me`, then clears the token.
-- `push-banner.tsx`: on the Inbox, while push is Off (not blocked or unsupported), a card floats over the list
-  above the nav with Turn On and a Not Now that keeps it away on this phone (`tendb.pushBannerDismissed`).
+- `push-banner.tsx`: on the Inbox, while push is Off (not blocked or unsupported), a card sits
+  in the flow above the nav (the content ends above it; the list sheet's foot moves up by `--push-banner-space`)
+  with Turn On and a Not Now that keeps it away on this phone (`tendb.pushBannerDismissed`). Its hook mounts only
+  on the Inbox, so it reads the state again on each visit.
 - Push (`push-subscription.ts`, the switch on This Device): permission, then `GET /push/key`,
   `pushManager.subscribe`, `PUT /devices/me/push`; off deletes both. It needs the worker (`getRegistration`), so it
   reads "can't show notifications" in a dev page, which registers none.

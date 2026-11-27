@@ -1,11 +1,16 @@
 import { Button, CloseButton, Group, Paper, Text } from '@mantine/core';
+import { useElementSize } from '@mantine/hooks';
 import { useRouterState } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PushState, usePushSwitch } from './push-subscription';
 import classes from './served-frame.module.css';
 
-/** Where a Not Now is kept, so the banner stays away on this phone until notifications are turned on elsewhere. */
+/** Where a Not Now is kept: the banner stays away on this phone for good, and This Device keeps the switch. */
 const DISMISSED_KEY = 'tendb.pushBannerDismissed';
+/** The space the list sheet leaves at its foot for the banner (`served-frame.module.css`). */
+const SPACE_VAR = '--push-banner-space';
+/** The banner's bottom margin, which the space includes. */
+const BANNER_MARGIN = 8;
 
 function dismissedBefore(): boolean {
   try {
@@ -16,18 +21,32 @@ function dismissedBefore(): boolean {
 }
 
 /**
- * The phone Inbox's one-tap offer of notifications, shown only while this phone could have them and doesn't. Not Now
- * keeps it away on this phone; Settings › This Device keeps the switch.
+ * The phone Inbox's one-tap offer of notifications, shown only while this phone could have them and doesn't. It
+ * reads the browser's state on each visit to the Inbox, so a change made in This Device shows on the way back.
  */
 export function PushBanner() {
   const onInbox = useRouterState({
     select: (state) => state.location.pathname.startsWith('/inbox'),
   });
+  return onInbox ? <InboxPushBanner /> : null;
+}
+
+function InboxPushBanner() {
   const push = usePushSwitch();
   const [dismissed, setDismissed] = useState(dismissedBefore);
-  if (!onInbox || dismissed || push.state !== PushState.Off) return null;
+  const { ref, height } = useElementSize();
+  const shown = !dismissed && push.state === PushState.Off;
+  // The list sheet stands over the content, so its foot is moved up by the banner's height while it shows.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty(SPACE_VAR, shown ? `${String(height + BANNER_MARGIN)}px` : '0px');
+    return () => {
+      root.style.removeProperty(SPACE_VAR);
+    };
+  }, [shown, height]);
+  if (!shown) return null;
   return (
-    <Paper withBorder radius="md" p="sm" className={classes['pushBanner']}>
+    <Paper ref={ref} withBorder radius="md" p="sm" className={classes['pushBanner']}>
       <Group justify="space-between" wrap="nowrap" gap="sm">
         <Text size="sm">Get a buzz when an agent needs you.</Text>
         <Group gap={4} wrap="nowrap">

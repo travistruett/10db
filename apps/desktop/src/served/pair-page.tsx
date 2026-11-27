@@ -1,5 +1,5 @@
 import { Alert, Button, Center, Loader, Stack, Text, TextInput, Title } from '@mantine/core';
-import { useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
+import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import { createDaemonClient } from '../daemon/client';
 import { readDevice } from './device-session';
 import { pairingFailureText, pairWithThisHost, takeCodeFromAddress, thisPlatform } from './pairing';
@@ -129,7 +129,7 @@ function Paired({
 }) {
   // Pairing has just stored the token; the app's own connection starts only on the next page.
   const token = readDevice()?.token ?? '';
-  const client = useMemo(() => createDaemonClient({ url: window.location.origin, token }), [token]);
+  const client = createDaemonClient({ url: window.location.origin, token });
   const push = usePushSwitchFor(client);
   const offerPush = push.state === PushState.Off;
   return (
