@@ -67,7 +67,7 @@ was accepted. In `start.ts`, `tailnetName` resolves the CLI the way sharing does
 the sharing wiring, hoisted so both use it) and returns null when there is none (not installed, or
 `TENDB_TAILSCALE=off`, as in the e2e daemon); else `readTailnetName(createTailscaleRun(cli), ip,
 TAILNET_NAME_TIMEOUT_MS)`, with `TAILNET_NAME_TIMEOUT_MS = 3_000` beside `readTailnetName`. A fallback logs one
-debug line with the reason, never the address.
+debug line, "no tailnet name for the pairing device", never the address.
 
 The route (`POST /devices/pair` in `api/app.ts`) passes `peer` from `X-Forwarded-For` (the last value, trimmed)
 only when `listenerOf(c.env)` is `Listener.Share`, else null, and awaits `pair`.
@@ -89,7 +89,7 @@ inserted. What can happen in that gap:
 
 | During the lookup                                     | Outcome                                                         |
 | ----------------------------------------------------- | --------------------------------------------------------------- |
-| The daemon shuts down or crashes                      | the code is spent, no device row; the phone gets an error and the builder opens a new code. Shutdown closes the listeners first, and a write after the database closed throws into this request only |
+| The daemon shuts down or crashes                      | a clean shutdown closes the share listener first, so the lookup usually finishes and the row is inserted with no token delivered (a device to revoke); after a crash, or a lookup outlasting shutdown, the code is spent and there is no row. The builder opens a new code either way |
 | Sharing stops, or the phone drops the request         | the row is inserted, the token never arrives: a device to revoke in Devices (the window grows from ~0 to 3 s) |
 | The builder opens a new code                          | this pairing still completes with the code it spent             |
 | The same code is posted twice                         | the second is refused: the code is spent before the wait        |
