@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useDaemonStatus, type DaemonStatus } from '../daemon/provider';
+import { RELOADED_STUCK_KEY } from './cant-reach-mac';
 
 /** How long the phone app may stay unreachable after it comes back to the front before it loads again. */
 const STUCK_AFTER_RESUME_MS = 20_000;
@@ -41,7 +42,13 @@ export function useReloadWhenStuck(): void {
     const stuckFrom = Math.max(resumedAt, status.since);
     const timer = setTimeout(
       () => {
-        if (document.visibilityState === 'visible') window.location.reload();
+        if (document.visibilityState !== 'visible') return;
+        try {
+          sessionStorage.setItem(RELOADED_STUCK_KEY, '1');
+        } catch {
+          // The help then waits its usual 10 s.
+        }
+        window.location.reload();
       },
       Math.max(0, stuckFrom + STUCK_AFTER_RESUME_MS - Date.now()),
     );
