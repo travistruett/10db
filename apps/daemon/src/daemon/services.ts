@@ -576,8 +576,12 @@ export function createServices(deps: {
         archiveProject(ctx, projectId);
       });
       // A live eval is the builder's spend in this checkout: it ends with the project's work, its stop command run
-      // in the background. A sweep ends first, so no step starts after its run is gone.
-      void deps.evalSweeps.stopProject(projectId).then(() => deps.evalLive.stopProject(projectId));
+      // in the background. Both always run, so a sweep that fails to stop never leaves its live run going; each
+      // settles on its own and its failure is the stop's own to record.
+      void Promise.allSettled([
+        deps.evalSweeps.stopProject(projectId),
+        deps.evalLive.stopProject(projectId),
+      ]);
     },
     restoreProject(projectId) {
       deps.state.write((ctx) => {
