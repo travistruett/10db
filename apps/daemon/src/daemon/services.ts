@@ -55,6 +55,8 @@ import {
   effectiveWatchpoints,
   type PrecedentScope,
   type ProjectWatchpointsDto,
+  type Watchpoint,
+  type WatchpointCoverageDto,
   type ProjectId,
   type TaskInput,
 } from '@10db/contracts';
@@ -181,6 +183,7 @@ import { classifyPath } from '../guard';
 import { taskSession } from '../chat';
 import { suitesOfTasks, type EvalLiveRuns, type EvalsAssessor, type EvalsService } from '../evals';
 import type { Git } from '../git';
+import { coverageSubjects, sumCoverage, type WatchpointCoverageReader } from '../watchpoints';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import {
   earlierMcpApproval,
@@ -416,6 +419,8 @@ export function createServices(deps: {
   readonly listeners: ListenerReader;
   /** Whether something answers at a loopback address, for the Workbench setup's app address. */
   readonly probe: AddressProbe;
+  /** Counts the files each watchpoint covers in a project's checkout; kept warm by the daemon. */
+  readonly watchpointCoverage: Pick<WatchpointCoverageReader, 'read'>;
   /** Works out each project's hazards from its repository. */
   readonly hazards: Pick<HazardAssessor, 'assess'>;
   /** Reads each project's committed eval results and keeps the manifest an agent recorded. */
@@ -442,6 +447,11 @@ export function createServices(deps: {
     const entries = readProjectWatchpoints(db, projectId);
     return { effective: effectiveWatchpoints(readYourWatchpoints(db), entries), entries };
   };
+  const watchpointCoverage = deps.watchpointCoverage;
+  const coverageIn = (
+    project: { id: ProjectId; repoPath: string },
+    applying: readonly Watchpoint[],
+  ): Promise<WatchpointCoverageDto> => watchpointCoverage.read(project, coverageSubjects(applying));
   const restarts = createFailedRestarts(deps);
   const catalogueStatus = (): CatalogueStatusDto => ({
     ...deps.catalogue.status(),
@@ -987,6 +997,14 @@ export function createServices(deps: {
       return effectiveWatchpointsOf(projectId);
     },
     watchpointHits: (id) => watchpointHitsOf(db, id),
+    watchpointCoverage: (projectId) =>
+      coverageIn(getProject(db, projectId), effectiveWatchpointsOf(projectId).effective),
+    yourWatchpointCoverage: async () => {
+      const yours = readYourWatchpoints(db);
+      return sumCoverage(
+        await Promise.all(listActiveProjects(db).map((project) => coverageIn(project, yours))),
+      );
+    },
     watchpointStats: (projectId) => {
       getProject(db, projectId);
       return watchpointStats(db, projectId, deps.clock.now());

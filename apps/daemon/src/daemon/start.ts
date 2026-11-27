@@ -271,6 +271,12 @@ import { createGit, memoryPinStore, resolveGit, runGit } from '../git';
 import { readCommitted, readComposeServices } from '../folders';
 import { createHazardAssessor, subscribeHazardAssessment } from '../hazards';
 import {
+  announceCoverage,
+  backgroundSubjects,
+  createWatchpointCoverage,
+  subscribeWatchpointCoverage,
+} from '../watchpoints';
+import {
   createGh,
   createSystemGhExec,
   resolveGh,
@@ -2923,18 +2929,29 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // manifest, lockfile, makefile, compose file or AGENTS.md, and when Settings asks. The model gets text
   // and no tool, like the area namer, and when it is unavailable or slow nothing changes.
   const hazardAssessor = createHazardAssessor({ state, git, asker: areaNamer, logger });
-  const unsubscribeHazards = subscribeHazardAssessment(
-    bus,
-    {
-      projectOfWorkstream: (id) => {
-        try {
-          return getWorkstreamRow(state.db, id).projectId;
-        } catch {
-          return null;
-        }
-      },
+  const projectOfWorkstream = {
+    projectOfWorkstream: (id: WorkstreamId): ProjectId | null => {
+      try {
+        return getWorkstreamRow(state.db, id).projectId;
+      } catch {
+        return null;
+      }
     },
-    hazardAssessor,
+  };
+  const unsubscribeHazards = subscribeHazardAssessment(bus, projectOfWorkstream, hazardAssessor);
+  // Counts the files each watchpoint covers in a project's checkout, with no model: when the project is added and
+  // when a commit is recorded, so Settings finds the counts kept. A count that lands is announced.
+  const watchpointCoverage = createWatchpointCoverage({
+    git,
+    subjects: (projectId) => backgroundSubjects(state.db, projectId),
+    landed: (projectId) => {
+      announceCoverage(state, projectId);
+    },
+  });
+  const unsubscribeCoverage = subscribeWatchpointCoverage(
+    bus,
+    projectOfWorkstream,
+    watchpointCoverage,
   );
   // Assesses each project's evals the same way: when it is added, when a commit changes an eval file, and
   // when the Evals page asks.
@@ -3117,6 +3134,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   const services = createServices({
     state,
+    watchpointCoverage,
     slackConnections,
     github: {
       githubStatus: github.githubStatus,
@@ -3854,6 +3872,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeYields();
       unsubscribeHazards();
       hazardAssessor.stop();
+      unsubscribeCoverage();
+      watchpointCoverage.stop();
       unsubscribeEvalAssessment();
       evalsAssessor.stop();
       watcher?.stop();

@@ -187,6 +187,7 @@ import {
   taskHasRunASession,
   listToolOpResults,
   listPrecedents,
+  listPrinciples,
 } from '@10db/db';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -409,6 +410,7 @@ import {
   WATCHPOINT_HIT_SOURCES,
   evalDefinitionSource,
   watchpointHitsAfter,
+  watchpointPrinciples,
   watchpointReviewBrief,
   watchpointsForAreas,
   type WatchpointChangeReader,
@@ -3550,14 +3552,25 @@ export function createRunner(opts: RunnerOptions): Runner {
       readYourWatchpoints(db),
       readProjectWatchpoints(db, row.projectId),
     );
+    // The principles each watchpoint's Knowledge topics resolve to, read once for the step.
+    const principles = watchpointPrinciples(
+      watchpoints,
+      watchpoints.some((w) => w.knowledge.length > 0)
+        ? listPrinciples(db, { projectId: row.projectId })
+        : [],
+      task.areas,
+    );
     const watchpointBuild =
       step.role === StepRole.Implement
-        ? watchpointBuildBrief(watchpointsForAreas(watchpoints, task.areas, project.areas))
+        ? watchpointBuildBrief(
+            watchpointsForAreas(watchpoints, task.areas, project.areas),
+            principles,
+          )
         : null;
     const reading = newestWatchpointRow(listEvidence(db, id));
     const watchpointReview =
       (step.role === StepRole.Review || step.role === StepRole.Qa) && reading !== null
-        ? watchpointReviewBrief(reading.detail, agentNotesOf(db, id))
+        ? watchpointReviewBrief(reading.detail, agentNotesOf(db, id), principles)
         : null;
     const prompt = buildSessionPrompt({
       provider,

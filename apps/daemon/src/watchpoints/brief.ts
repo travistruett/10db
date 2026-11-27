@@ -4,6 +4,7 @@ import {
   type Watchpoint,
   type WatchpointDetail,
 } from '@10db/contracts';
+import type { WatchpointPrinciples } from './knowledge';
 
 /**
  * The watchpoints a task's areas overlap. A task with no areas gets every watchpoint: there are few, and the agent is
@@ -21,19 +22,33 @@ export function watchpointsForAreas(
   );
 }
 
+/** The builder's principles a watchpoint links, as lines under it; none when it links none. */
+function principleLines(key: string, principles: WatchpointPrinciples, indent: string): string[] {
+  const linked = principles.get(key) ?? [];
+  if (linked.length === 0) return [];
+  return [
+    `${indent}Your principles for this (cite the id):`,
+    ...linked.map((p) => `${indent}  - ${p.statement} (${p.id})`),
+  ];
+}
+
 /**
  * The build brief's section: the watchpoints in play, and the instruction to explain a change to a covered file. A
  * watchpoint with a question and no lines is left out: it hits nothing by rule, so no file of it needs a reason.
+ * `principles` are the ones its linked Knowledge topics resolve to for this run.
  */
-export function watchpointBuildBrief(all: readonly Watchpoint[]): string | null {
+export function watchpointBuildBrief(
+  all: readonly Watchpoint[],
+  principles: WatchpointPrinciples,
+): string | null {
   const watchpoints = all.filter((w) => w.lines.length > 0 || w.question === null);
   if (watchpoints.length === 0) return null;
   return [
     'The builder keeps a watchpoint on these kinds of change. They read the changes themselves, so make each one easy to judge:',
-    ...watchpoints.map(
-      (f) =>
-        `- ${f.label}: ${f.globs.join(', ')}${f.lines.length > 0 ? `; changed lines matching: ${f.lines.join(', ')}` : ''}. Why it matters: ${f.why || '(none given)'} What they will check: ${f.guidance || '(none given)'}`,
-    ),
+    ...watchpoints.flatMap((f) => [
+      `- ${f.label}: ${f.globs.join(', ')}${f.lines.length > 0 ? `; changed lines matching: ${f.lines.join(', ')}` : ''}. Why it matters: ${f.why || '(none given)'} What they will check: ${f.guidance || '(none given)'}`,
+      ...principleLines(f.key, principles, '  '),
+    ]),
     "If you change a file a watchpoint covers, give your reason in that commit's watchpointNotes: one { path, note } per file, at most 400 characters each. For a watchpoint that names changed lines, only files where a matching line changed need a reason.",
   ].join('\n');
 }
@@ -45,12 +60,14 @@ export function watchpointBuildBrief(all: readonly Watchpoint[]): string | null 
 export function watchpointReviewBrief(
   detail: WatchpointDetail,
   agent: ReadonlyMap<string, string>,
+  principles: WatchpointPrinciples,
 ): string | null {
   if (detail.hits.length === 0) return null;
   return [
     "Watchpoint: the builder reads these files themselves. Check each against what they want checked, from the change and not from the agent's claim.",
     ...detail.hits.flatMap((hit) => [
       `${hit.watchpoint.label} (${hit.watchpoint.loudness}). They want: ${hit.watchpoint.guidance || hit.watchpoint.why || '(no guidance given)'}`,
+      ...principleLines(hit.watchpoint.key, principles, ''),
       ...hit.files.map((file) => `  - ${JSON.stringify(file.path)}`),
     ]),
     ...agentAccount(detail, agent),

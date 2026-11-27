@@ -107,6 +107,10 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
     "A task's suites are read from result files in the checkout, which a lane's pass may be writing.",
   '/tasks/:taskId/eval-coverage':
     "A task's suites are read from result files in the checkout, which a lane's pass may be writing.",
+  '/projects/:projectId/watchpoints/coverage':
+    "The files a watchpoint covers are read from the checkout, which a lane's pass may be writing.",
+  '/settings/watchpoints/coverage':
+    "The files a watchpoint covers are read from the checkouts, which a lane's pass may be writing.",
   '/workstreams/:id/watchpoint-hits':
     "A run's hunks and the agent's notes are text the lane wrote, which the preview's agent-editable code must not read.",
   '/workstreams/:id/skips':

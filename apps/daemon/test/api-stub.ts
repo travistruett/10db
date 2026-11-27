@@ -92,6 +92,8 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     setProjectWatchpoints: none,
     watchpointHits: none,
     watchpointStats: () => [],
+    watchpointCoverage: () => Promise.resolve([]),
+    yourWatchpointCoverage: () => Promise.resolve([]),
     keepAwake: () => ({ mode: 'while_running', active: false }),
     setKeepAwake: none,
     agentSkill: none,

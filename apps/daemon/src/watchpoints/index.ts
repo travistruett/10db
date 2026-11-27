@@ -9,3 +9,15 @@ export {
 export { agentNotesOf, newestWatchpointRow, reviewerNotesOf, withNotes } from './notes';
 export { askWatchpointQuestions, questionDiff } from './question';
 export type { QuestionCandidates } from './covers';
+export {
+  coverageSubjects,
+  createWatchpointCoverage,
+  sumCoverage,
+  type WatchpointCoverageReader,
+} from './coverage';
+export {
+  announceCoverage,
+  backgroundSubjects,
+  subscribeWatchpointCoverage,
+} from './coverage-triggers';
+export { watchpointPrinciples, type WatchpointPrinciples } from './knowledge';
