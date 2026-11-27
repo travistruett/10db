@@ -7,6 +7,7 @@ import {
   type ProjectId,
 } from '@10db/contracts';
 import { Button, Code, Group, Loader, Modal, Stack, Text } from '@mantine/core';
+import type { ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { z } from 'zod';
@@ -25,7 +26,7 @@ import { costText, dayTimeText } from './eval-figures';
 
 const RefusalBody = z.object({ refusal: z.string() });
 
-const REFUSAL_WORDS: Readonly<Record<EvalLiveRefusal, string>> = {
+export const REFUSAL_WORDS: Readonly<Record<EvalLiveRefusal, string>> = {
   [EvalLiveRefusal.NoLive]: '10db does not know how this command runs yet. Assess Now to find out.',
   [EvalLiveRefusal.NoSandbox]: "This 10db runs no sandbox, so it can't run a live eval.",
   [EvalLiveRefusal.DockerOff]: "This runs in Docker and the project's Docker switch is off.",
@@ -68,7 +69,7 @@ function Elapsed({ startedAt }: { readonly startedAt: string }) {
   return <>{elapsedText(startedAt, now)}</>;
 }
 
-function Notes({ preview }: { readonly preview: EvalLivePreviewDto }) {
+export function Notes({ preview }: { readonly preview: EvalLivePreviewDto }) {
   const lines: string[] = [];
   if (preview.docker) {
     lines.push(
@@ -181,7 +182,7 @@ function RunView({
 }
 
 /** True for the daemon's `manifest_changed` 409: the window refetches and says what changed instead. */
-function changedRefusal(error: unknown): boolean {
+export function changedRefusal(error: unknown): boolean {
   if (!(error instanceof DaemonRequestError) || error.status !== 409) return false;
   const body = RefusalBody.safeParse(error.body);
   return body.success && body.data.refusal === EvalLiveRefusal.ManifestChanged;
@@ -392,10 +393,13 @@ export function LiveRunControls({
   projectId,
   suiteKey,
   label = 'Run',
+  beside = null,
 }: {
   readonly projectId: ProjectId;
   readonly suiteKey: string;
   readonly label?: string;
+  /** More actions on the same row as Run: the drawer's model sweeps. */
+  readonly beside?: ReactNode;
 }) {
   const preview = useEvalLivePreview(projectId, suiteKey, true);
   const runs = useEvalLiveRuns(projectId, suiteKey);
@@ -420,15 +424,18 @@ export function LiveRunControls({
   if (preview.data === undefined) return null;
   return (
     <Stack gap="xs" align="flex-start">
-      <Button
-        size="compact-sm"
-        variant="default"
-        onClick={() => {
-          setOpened(true);
-        }}
-      >
-        {label}
-      </Button>
+      <Group gap="xs">
+        <Button
+          size="compact-sm"
+          variant="default"
+          onClick={() => {
+            setOpened(true);
+          }}
+        >
+          {label}
+        </Button>
+        {beside}
+      </Group>
       <History projectId={projectId} runs={runs.data ?? []} />
       <RunModal
         projectId={projectId}

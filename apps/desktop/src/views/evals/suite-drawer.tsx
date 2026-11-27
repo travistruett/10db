@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { useEvalSuite } from '../../daemon/evals-queries';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { LiveRunControls } from './live-run-modal';
+import { SweepActions } from './sweep-actions';
 import {
   costText,
   dayTimeText,
@@ -222,7 +223,13 @@ function Actions({
         10db does not know how to run this suite yet.
       </Text>
     );
-  return <LiveRunControls projectId={projectId} suiteKey={detail.suite.key} />;
+  return (
+    <LiveRunControls
+      projectId={projectId}
+      suiteKey={detail.suite.key}
+      beside={<SweepActions detail={detail} projectId={projectId} />}
+    />
+  );
 }
 
 function SuiteBody({
