@@ -30,6 +30,9 @@ describe('readTailnetName', () => {
       '100.64.0.9:443',
       '[fd7a:115c:a1e0::1]',
       'host.tail1234.ts.net',
+      'fd7a:115c:a1e0::1%en0',
+      '::ffff:100.64.0.9',
+      '::ffff:6440:9',
       '',
     ];
     for (const ip of accepted) {

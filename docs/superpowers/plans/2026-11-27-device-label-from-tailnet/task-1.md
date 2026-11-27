@@ -37,7 +37,7 @@ devices module's note, one line. Every caller of `devices.pair` awaits it: `requ
   null); a whois answer with a Hostname, with `localhost`, with only `Name`; a timeout; junk output.
 - One case in `request-path.test.ts`, which drives the share listener through the real pipeline: a pair with
   `X-Forwarded-For` saves the fake `tailnetName`'s name, and a wrong code never calls it. It fails if the lookup
-  moves before the code check or the header is read off the wrong listener.
+  moves before the code check (the main listener never routes the pair, so the listener check has no test).
 - The commit carries a value card (`why_new=pairing`).
 
 **Before the PR:** pair the builder's phone against the dev daemon only if that's cheap; otherwise say in the PR that

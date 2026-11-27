@@ -139,8 +139,12 @@ const tailscaleAddresses = new BlockList();
 tailscaleAddresses.addSubnet('100.64.0.0', 10, 'ipv4');
 tailscaleAddresses.addSubnet('fd7a:115c:a1e0::', 48, 'ipv6');
 
-/** Only a bare Tailscale address, so a host name, a port or a value starting with `-` never reaches the CLI. */
+/**
+ * Only a bare Tailscale address, so a host name, a port, a zone id, an IPv4-mapped form or a value starting with `-`
+ * never reaches the CLI. `isIP` and the block list accept the last three, so they are refused first.
+ */
 function isTailscaleAddress(value: string): boolean {
+  if (value.includes('%') || value.toLowerCase().startsWith('::ffff:')) return false;
   const family = isIP(value);
   if (family === 0) return false;
   return tailscaleAddresses.check(value, family === 4 ? 'ipv4' : 'ipv6');
@@ -155,6 +159,14 @@ const WhoisJson = z.object({
     })
     .nullish(),
 });
+
+/** Cut to `DEVICE_LABEL_MAX` UTF-16 units without leaving half a surrogate pair at the end; null when empty. */
+function cutLabel(name: string): string | null {
+  let cut = name.slice(0, DEVICE_LABEL_MAX);
+  const last = cut.charCodeAt(cut.length - 1);
+  if (cut.length < name.length && last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
+  return cut.trim() || null;
+}
 
 function usableName(value: string | undefined): string | null {
   const name = value?.trim() ?? '';
@@ -185,7 +197,7 @@ export async function readTailnetName(
       usableName(node?.Hostinfo?.Hostname) ??
       usableName(node?.ComputedName) ??
       usableName(node?.Name?.split('.')[0]);
-    return name === null ? null : name.slice(0, DEVICE_LABEL_MAX).trim() || null;
+    return name === null ? null : cutLabel(name);
   } catch {
     return null;
   }
