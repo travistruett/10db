@@ -15,6 +15,12 @@ share listener. It reaches only what a paired device may (`api/auth-matrix.ts`).
   the page reloads onto "This device was removed from <Mac>. Pair it again to reconnect." `/events/head` is asked once
   per connect because `/health` answers a revoked token with its public form. The stream takes tickets as the window's
   does (`daemon/events.ts`).
+- `reload-when-stuck.ts` (`useReloadWhenStuck`, in `ServedFrame`): still reconnecting 20 s after the app comes back
+  to the front, the page loads itself again, once per return, and only for an outage already under way at the
+  return (a newer healthy status ends it; a later outage keeps the views and the pill). A phone that slept with
+  Tailscale idle can wake to requests that hang on a gone connection, which a reload clears; the worker's kept shell
+  opens it with no signal. The connect's `/events/head` lookup is bounded at 3 s, so no try leaves a request in
+  flight to fill the browser's few connections to the Mac.
 - `pair-page.tsx` / `pairing.ts`: `/app/pair#code=` posts the code to `POST /devices/pair` without a credential, keeps
   the answer, and offers Install (`beforeinstallprompt`). The fragment is cleaned from the address on first read.
 - `served-frame.tsx`: the narrow layout with none of the window's chrome (no traffic lights, drag regions or rail):

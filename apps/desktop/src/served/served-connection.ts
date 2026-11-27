@@ -2,6 +2,9 @@ import { createDaemonClient } from '../daemon/client';
 import { resolveConnection, type ConnectionResolver } from '../daemon/connection';
 import { forgetDevice, isForgetting, readDevice } from './device-session';
 
+/** How long the connect's `/events/head` lookup may take: with the health check's 5 s it fits the 8 s attempt. */
+const HEAD_TIMEOUT_MS = 3_000;
+
 export class NotPairedError extends Error {
   override readonly name = 'NotPairedError';
   constructor() {
@@ -37,6 +40,10 @@ export const resolveServedConnection: ConnectionResolver = async () => {
     throw new NotPairedError();
   }
   const connection = { url: window.location.origin, token: device.token, fetch: watchedFetch };
-  await createDaemonClient(connection).events.head.$get();
+  // Bounded, so a lookup on a connection that hangs is given up rather than left in flight: each try leaving one
+  // behind would fill the browser's few connections to the Mac until TCP gave up on them.
+  await createDaemonClient(connection).events.head.$get(undefined, {
+    init: { signal: AbortSignal.timeout(HEAD_TIMEOUT_MS) },
+  });
   return connection;
 };
