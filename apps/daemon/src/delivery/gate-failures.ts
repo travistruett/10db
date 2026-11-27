@@ -24,6 +24,27 @@ function plain(text: string): string {
   return text.replace(ANSI, '');
 }
 
+/** The most lines the card quotes when no step or test could be read. */
+const TAIL_LINES = 10;
+
+/** Docker's container, network and volume lifecycle lines, and progress bars: output that says nothing of why. */
+const LIFECYCLE =
+  /^\s*(?:Container|Network|Volume)\s+\S+\s+(?:Creating|Created|Starting|Started|Running|Waiting|Healthy|Stopping|Stopped|Removing|Removed)\b|\d+%\||\[[=#>\-\s]{6,}\]/;
+const WORRYING = /FAILED|Error|error:/;
+
+/**
+ * The lines of a gate's output worth quoting when nothing in it parsed: colour codes, blank lines and
+ * container lifecycle lines dropped, then the last ten, preferring those that name a failure or an error.
+ */
+export function gateTailLines(tail: string): string {
+  const lines = plain(tail)
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim() !== '' && !LIFECYCLE.test(line));
+  const worrying = lines.filter((line) => WORRYING.test(line));
+  return (worrying.length > 0 ? worrying : lines).slice(-TAIL_LINES).join('\n');
+}
+
 const TEST_FILE = /^\S+\.(?:test|spec)\.[cm]?[jt]sx?$/;
 
 /**

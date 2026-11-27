@@ -178,6 +178,8 @@ import {
   createSharingService,
   createTailscaleRun,
   findTailscaleCli,
+  readTailnetName,
+  TAILNET_NAME_TIMEOUT_MS,
   lsofHolderOf,
   startShareListener,
 } from '../sharing';
@@ -309,7 +311,7 @@ import {
   systemFreeBytes,
   type LoadMonitorOptions,
 } from '../load';
-import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
+import { createLogger, openLogFile, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
 import { createBuilderMcpHandler, createBuilderTools } from '../builder';
 import type { LaneBrief } from '../briefing';
@@ -788,24 +790,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const lock = await acquireInstanceLock(opts.dataDir);
   const logPath = join(opts.dataDir, 'logs', 'daemon.log');
   rotateLogFile(logPath);
-  const logFile = fileDestination(logPath);
-  const logger = createLogger({ level: opts.logLevel, destination: logFile });
+  const logFile = openLogFile(logPath);
+  logFile.keepRotated(clock);
+  const logger = createLogger({ level: opts.logLevel, destination: logFile.destination });
   /**
    * Ends the log file and waits for its descriptor to close. A stop right after start would otherwise
    * leak the descriptor, and the stream's late open fails once a test has removed the data directory.
    */
-  function closeLog(): Promise<void> {
-    return new Promise((resolve) => {
-      logFile.once('close', () => {
-        resolve();
-      });
-      // SonicBoom emits 'error', not 'close', when its open or close fails, and an unlistened 'error' throws.
-      logFile.once('error', () => {
-        resolve();
-      });
-      logFile.end();
-    });
-  }
+  const closeLog = (): Promise<void> => logFile.close();
   const adapter = typeof opts.adapter === 'function' ? opts.adapter(logger) : opts.adapter;
   // A probe that a crash cut off leaves its scratch folders; none is ever reused.
   await sweepConnectorProbeRoot(connectorProbeRoot(opts.dataDir)).catch((error: unknown) => {
@@ -2526,7 +2518,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   if (frozenKill !== null) {
     logger.warn(
       { killedPid: frozenKill.pid, at: frozenKill.at, frozenAfterMs: frozenKill.frozenAfterMs },
-      'the app killed the previous daemon as frozen; runs are not charged for the restart',
+      'the app killed the previous daemon as frozen or stuck starting; runs are not charged for the restart',
     );
   }
   await recoverOnStartup({
@@ -3538,11 +3530,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   const deviceSockets = createSocketRegistry();
   const sharingLog = logger.child({ component: 'sharing' });
+  const tailscaleCli = () =>
+    opts.tailscaleOff ? null : (opts.tailscaleCli ?? findTailscaleCli(existsSync));
   const sharing = createSharingService({
     state,
     clock,
     log: sharingLog,
-    cli: opts.tailscaleOff ? () => null : () => opts.tailscaleCli ?? findTailscaleCli(existsSync),
+    cli: tailscaleCli,
     run: createTailscaleRun,
     listen: (sharePort) =>
       startShareListener({
@@ -3569,6 +3563,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     codes: createPairingCodes({ clock }),
     sockets: deviceSockets,
     sharing: () => sharing.status(),
+    tailnetName: async (ip) => {
+      const cli = tailscaleCli();
+      const name =
+        cli === null
+          ? null
+          : await readTailnetName(createTailscaleRun(cli), ip, TAILNET_NAME_TIMEOUT_MS);
+      if (name === null) sharingLog.debug({}, 'no tailnet name for the pairing device');
+      return name;
+    },
   });
   const streamTickets = createTickets({ clock });
   const vapidKeys = createVapidKeyStore(opts.keychain ?? unavailableKeychain);

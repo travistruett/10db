@@ -46,7 +46,7 @@ function InboxPushBanner() {
   }, [shown, height]);
   if (!shown) return null;
   return (
-    <Paper ref={ref} withBorder radius="md" p="sm" className={classes['pushBanner']}>
+    <Paper ref={ref} withBorder radius="md" p="sm" className={classes['bottomBanner']}>
       <Group justify="space-between" wrap="nowrap" gap="sm">
         <Text size="sm">Get a buzz when an agent needs you.</Text>
         <Group gap={4} wrap="nowrap">

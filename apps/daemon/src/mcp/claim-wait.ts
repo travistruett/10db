@@ -36,7 +36,7 @@ import {
 import { claimScopeOf } from '../delivery';
 import type { EventBus, StateStore } from '../events';
 import type { InboxService } from '../inbox';
-import { DEADLOCK_DETAIL, deadlockAnswers } from './claim-deadlock';
+import { DEADLOCK_DETAIL, deadlockAnswers, taskLetter } from './claim-deadlock';
 import { CardTier } from '../inbox';
 
 /** How often a task waiting for a claim looks again; the holder's release is not pushed to it. */
@@ -505,7 +505,10 @@ function deadlock(a: Asking, heldBy: WorkstreamId, waits: ClaimWaits): InboxItem
     },
     { workstreamId: heldBy, title: holder, yields: [{ kind: a.kind, name: a.name }] },
   ]);
-  const body = `Task "${holder}" holds ${a.kind} ${a.name} and is itself waiting for a claim that task "${asker}" holds, so neither can go on. Reason given: ${a.reason}`;
+  const body = [
+    `Task ${taskLetter(0)} is "${asker}" and task ${taskLetter(1)} is "${holder}". ${taskLetter(1)} holds ${a.kind} ${a.name} and is itself waiting for a claim that ${taskLetter(0)} holds, so neither can go on. Reason given: ${a.reason}`,
+    ...options.map((o) => `- ${o.label}: ${o.description}`),
+  ].join('\n');
   const card = a.inbox.flag({
     projectId: a.projectId,
     workstreamId: a.workstreamId,

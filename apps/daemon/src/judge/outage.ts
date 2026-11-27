@@ -39,7 +39,7 @@ export interface JudgeOutage {
   readonly provider: string;
   /** The model the failing call asked. */
   readonly model: string;
-  /** What is wrong, as a clause: "says the account has no credits". */
+  /** What is wrong, as a clause: "has no credits". */
   readonly cause: string;
   /** What clears it, as a clause: "add credits or check the key on that account". */
   readonly fix: string;
@@ -94,7 +94,7 @@ function causeOf(failure: Extract<JudgeCallHealth, { kind: 'failed' }>): {
   if (HARD_STATUS_402.test(detail) || CREDIT_BALANCE.test(detail))
     return {
       provider,
-      cause: 'says the account has no credits',
+      cause: 'has no credits',
       fix: `add credits or ${fixKey}`,
       hard: true,
     };

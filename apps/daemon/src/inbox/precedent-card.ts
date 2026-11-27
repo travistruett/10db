@@ -115,7 +115,12 @@ export function refreshPrecedentCard(
   }
   const skips = offered.reduce((sum, c) => sum + c.skips, 0);
   const runs = offered.reduce((sum, c) => sum + c.runCount, 0);
-  const title = `Make ${String(offered.length)} ${plural(offered.length, 'kind', 'kinds')} of command routine in ${getProject(ctx.tx, projectId).name}?`;
+  const only = offered.length === 1 ? offered[0] : undefined;
+  const skipping =
+    only === undefined
+      ? `${String(offered.length)} kinds of command`
+      : oneLine(only.kind).slice(0, TITLE_KEY_MAX);
+  const title = `Stop skipping ${skipping} in ${getProject(ctx.tx, projectId).name}? ${String(skips)} ${plural(skips, 'skip', 'skips')} in ${String(runs)} ${plural(runs, 'run', 'runs')}`;
   const body = [
     `${String(skips)} skipped ${plural(skips, 'call', 'calls')} in ${String(runs)} ${plural(runs, 'run', 'runs')}.`,
     'Each kind the judge keeps doubting is below. A kind you approve is a standing approval the judge weighs on every later call; it never lets a call cross a limit.',
