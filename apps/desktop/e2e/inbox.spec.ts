@@ -330,6 +330,10 @@ test("a card is answered from a phone paired from the bar's Remote access card",
     await page.goto(inboxUrl('&kind=question'));
     await expect(page.getByText(stays).first()).toBeVisible();
     await expect(page.getByText(title)).toHaveCount(0);
+    // The Mac goes out of the phone's reach: once it has failed for 10 s, the phone says so and what to check.
+    await standIn.close();
+    standIn = undefined;
+    await expect(mobile.getByText("Can't reach your Mac")).toBeVisible({ timeout: 30_000 });
   } finally {
     await browser?.close();
     await standIn?.close();

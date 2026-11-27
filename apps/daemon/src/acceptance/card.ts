@@ -1,4 +1,5 @@
 import { coverageSection } from '../evals';
+import { unaskedDescription } from './read';
 import {
   AcceptanceChoice,
   AcceptanceDetail,
@@ -29,15 +30,16 @@ function bodyOf(
   reviewFollows: boolean,
   evalLines: readonly string[],
 ): string {
+  const unasked = unaskedDescription(detail.unasked);
   const open = detail.criteria
     .filter((c) => c.verdict !== AcceptanceVerdict.Met)
     .map((c) => `- ${c.criterion} (${c.note})`);
   return [
     `${reviewFollows ? 'The work went on to review' : 'The work shipped'}, and 10db could not confirm these criteria:`,
     ...open,
-    ...(detail.unasked === null
+    ...(unasked === null
       ? []
-      : ['', `It may also do something the task didn't ask for: ${detail.unasked}`]),
+      : ['', `It may also do something the task didn't ask for: ${unasked}`]),
     ...coverageSection(evalLines),
     '',
     'Keep it as it is, or send it back with a note.',

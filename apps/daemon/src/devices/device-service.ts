@@ -37,7 +37,8 @@ export interface DeviceService {
   /** Throws SharingNotReadyError. */
   pairingCode(): PairingCodeDto;
   /** Throws PairingRefusedError. */
-  pair(body: PairRequest): PairResponse;
+  /** `peer` is the caller's tailnet address, when the request came through Serve on the share listener. */
+  pair(body: PairRequest, peer: string | null): Promise<PairResponse>;
   /** Closes the device's sockets after the write. */
   revoke(id: DeviceId): boolean;
   /** Touches last_used_at at most once a minute per device. */
@@ -56,6 +57,8 @@ export function createDeviceService(deps: {
   readonly codes: PairingCodes;
   readonly sockets: SocketRegistry;
   readonly sharing: () => SharingStatusDto;
+  /** The name Tailscale has for the device at an address, or null; a rejection counts as null. */
+  readonly tailnetName: (ip: string) => Promise<string | null>;
 }): DeviceService {
   return {
     list() {
@@ -73,17 +76,23 @@ export function createDeviceService(deps: {
         url: `${sharing.url}/app/pair#code=${code}`,
       };
     },
-    pair(body) {
+    async pair(body, peer) {
       // Read before the code is spent, so a Mac with no name burns no one's try.
       const sharing = deps.sharing();
       if (sharing.fqdn === null) throw new PairingRefusedError(false);
       const attempt = deps.codes.attempt(body.code);
       if (attempt === PairAttempt.RateLimited) throw new PairingRefusedError(true);
       if (attempt === PairAttempt.Refused) throw new PairingRefusedError(false);
+      // After the code is spent, so a wrong code never runs the CLI; a failed lookup keeps the client's label.
+      const named = peer === null ? null : await deps.tailnetName(peer).catch(() => null);
       const id = mintId('Device');
       const { token, tokenHash } = mintDeviceToken(id);
       deps.state.write((ctx) =>
-        insertDevice(ctx, id, { label: body.label, platform: body.platform, tokenHash }),
+        insertDevice(ctx, id, {
+          label: named ?? body.label,
+          platform: body.platform,
+          tokenHash,
+        }),
       );
       return {
         deviceId: id,

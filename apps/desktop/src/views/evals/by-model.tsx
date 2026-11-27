@@ -7,6 +7,7 @@ import { useEvalModels } from '../../daemon/evals-queries';
 import { EmptyState } from '../../shell/empty-state';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
+import { pagerProps, TABLE_PAGE_SIZES, usePaging } from '../../shell/table-pager';
 import { costText, dayText, latencyText } from './eval-figures';
 import { compareRows, costDifference, shareText, type CompareRow } from './model-compare';
 import { ResultDot } from './result-marks';
@@ -50,11 +51,17 @@ function ModelTable({
   readonly picked: string;
   readonly onPick: (model: string) => void;
 }) {
+  const paging = usePaging('models', TABLE_PAGE_SIZES[0]);
+  const page = Math.min(paging.page, Math.max(1, Math.ceil(models.length / paging.pageSize)));
+  const from = (page - 1) * paging.pageSize;
+  // A short list shows whole, with no pager.
+  const paged = models.length > TABLE_PAGE_SIZES[0];
   return (
     <RaisedPanel>
       <DataTable<EvalModelDto>
         aria-label="Models"
-        records={[...models]}
+        records={paged ? models.slice(from, from + paging.pageSize) : [...models]}
+        {...(paged ? pagerProps({ ...paging, page, total: models.length }, TABLE_PAGE_SIZES) : {})}
         idAccessor="model"
         backgroundColor="transparent"
         verticalSpacing="sm"

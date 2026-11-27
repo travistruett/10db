@@ -67,8 +67,8 @@ function build() {
 const notices = () => noticesPosted(state.db).filter((n) => n.key === 'judge-outage');
 
 const cards = () =>
-  listInbox(state.db, { states: [InboxState.Open, InboxState.Resolved] }).filter(
-    (c) => c.title === "10db's judge can't answer",
+  listInbox(state.db, { states: [InboxState.Open, InboxState.Resolved] }).filter((c) =>
+    c.title.startsWith('Unattended work skips more: '),
   );
 
 beforeEach(() => {
@@ -114,7 +114,7 @@ describe('a judge outage', () => {
     message = 'Your credit balance is too low';
     await judge.choose(request);
     expect(cards().map((c) => c.state)).toEqual([InboxState.Resolved, InboxState.Open]);
-    expect(cards()[1]?.body).toContain('says the account has no credits');
+    expect(cards()[1]?.body).toContain('has no credits');
   });
 
   it('raises nothing for a tail of failures among answers, and raises once nothing has answered for two minutes', async () => {

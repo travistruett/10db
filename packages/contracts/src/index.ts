@@ -27,6 +27,7 @@ export * from './external';
 export * from './events';
 export * from './dev-ui-handoff';
 export * from './folder-hold';
+export * from './watchpoint-coverage';
 export * from './watchpoint-hit';
 export * from './watchpoints';
 export * from './folders';

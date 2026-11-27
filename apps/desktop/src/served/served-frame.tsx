@@ -12,6 +12,7 @@ import { useEventStream } from '../daemon/events';
 import { CountBadge, CountTone } from '../shell/count-badge';
 import { FrameSlotsContext, type FrameSlots } from '../shell/frame-slots';
 import { ReconnectingIndicator } from '../shell/reconnecting-indicator';
+import { CantReachMacBanner } from './cant-reach-mac';
 import { PushBanner } from './push-banner';
 import { useReloadWhenStuck } from './reload-when-stuck';
 import { UnsavedGuardProvider } from '../shell/unsaved-guard';
@@ -143,6 +144,7 @@ export function ServedFrame() {
             className={classes['panel']}
             data-shown={panelShown ? '' : undefined}
           />
+          <CantReachMacBanner />
           <PushBanner />
           <Places />
         </div>

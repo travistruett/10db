@@ -179,6 +179,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/eval-markers': 'No screen draws a task marker.',
   '/tasks/:taskId/eval-coverage': 'No screen draws a task marker.',
   '/projects/:projectId/watchpoints/stats': 'No screen draws a setting.',
+  '/projects/:projectId/watchpoints/coverage': 'No screen draws a setting.',
+  '/settings/watchpoints/coverage': 'No screen draws a setting.',
   '/workstreams/:id/watchpoint-hits':
     "A run's hunks and the agent's notes are lane-written text, which no screen draws.",
   '/settings/agent-skill': 'No screen draws a setting.',

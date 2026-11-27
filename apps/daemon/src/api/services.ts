@@ -135,6 +135,7 @@ import type {
   ProjectWatchpointsDto,
   ProjectWatchpoints,
   WatchpointHitsDto,
+  WatchpointCoverageDto,
   WatchpointStatsDto,
   YourWatchpoints,
   KeepAwakeStatus,
@@ -862,6 +863,10 @@ export interface ApiServices extends PlanRecordServices {
   setProjectWatchpoints(projectId: ProjectId, entries: ProjectWatchpoints): ProjectWatchpointsDto;
   /** The run's newest watchpoint reading with the agent's and reviewer's notes on each file. */
   watchpointHits(id: WorkstreamId): WatchpointHitsDto;
+  /** The tracked files each applying watchpoint and each starter covers in the project's checkout. */
+  watchpointCoverage(projectId: ProjectId): Promise<WatchpointCoverageDto>;
+  /** The same for the builder's own list and the starters, summed across the active projects. */
+  yourWatchpointCoverage(): Promise<WatchpointCoverageDto>;
   /** Each watchpoint's last 30 days in the project: tasks hit, cards raised and waved through. */
   watchpointStats(projectId: ProjectId): WatchpointStatsDto[];
   /** Settings › Agent skill: the shipped skill's switch, installed copy and links. */

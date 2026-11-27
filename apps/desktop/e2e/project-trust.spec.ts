@@ -170,7 +170,7 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
 
   // Evals: the local report is a suite, the failing model says which gate, nothing ran a model.
   await page.goto('/evals');
-  const suites = page.getByRole('table', { name: 'Suites' });
+  const suites = page.getByRole('table', { name: 'Evals' });
   await expect(suites).toContainText('ingest.mapping');
   await expect(suites).toContainText('acme/model-b');
   await expect(suites).toContainText('complete 0.5 < 1');
@@ -192,7 +192,7 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await expect(drawer).toHaveCount(0);
 
   // By Model: each model's suites read off the same report, and two side by side with the cost difference.
-  await page.getByRole('tab', { name: 'By Model' }).click();
+  await page.getByLabel('Evals view').getByText('Models', { exact: true }).click();
   const modelB = page.getByRole('table', { name: 'Models' }).getByRole('row', { name: /model-b/u });
   await expect(modelB).toContainText('0 of 1');
   await expect(modelB).toContainText('ingest.mapping');
@@ -225,7 +225,7 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await page.goto('/evals');
   // Run: a suite with live settings offers it, and this daemon has no sandbox, so the window refuses with
   // no Run; a suite whose assessment said nothing of how its command runs has none.
-  await page.getByRole('table', { name: 'Suites' }).getByText('ingest.mapping').click();
+  await page.getByRole('table', { name: 'Evals' }).getByText('ingest.mapping').click();
   const liveDrawer = page.getByRole('dialog', { name: 'Suite' });
   await liveDrawer.getByRole('button', { name: 'Run', exact: true }).click();
   const runWindow = page.getByRole('dialog', { name: 'Run live eval' });
@@ -234,12 +234,18 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await expect(runWindow.getByRole('button', { name: 'Run', exact: true })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
-  await page.getByRole('table', { name: 'Suites' }).getByText('plain').click();
+  await page.getByRole('table', { name: 'Evals' }).getByText('plain').click();
   await expect(liveDrawer).toContainText('10db does not know how this command runs yet');
   await expect(liveDrawer.getByRole('button', { name: 'Assess Now' })).toBeVisible();
   await expect(liveDrawer.getByRole('button', { name: 'Run', exact: true })).toHaveCount(0);
   await page.keyboard.press('Escape');
-  await page.getByRole('tab', { name: /No Eval/u }).click();
+  // The tiles filter the one table: Failing keeps the failing suite, No Eval keeps the gap's row.
+  await page.getByRole('button', { name: /failing/u }).click();
+  await expect(page.getByRole('table', { name: 'Evals' })).toContainText('ingest.mapping');
+  await expect(page.getByRole('table', { name: 'Evals' })).not.toContainText('Summarizer');
+  await page.getByRole('button', { name: /no eval/u }).click();
+  await expect(page.getByRole('table', { name: 'Evals' })).toContainText('Summarizer');
+  await expect(page.getByRole('table', { name: 'Evals' })).not.toContainText('ingest.mapping');
   await page.getByRole('button', { name: 'New Eval for Summarizer' }).click();
   const form = page.getByRole('dialog', { name: 'New Eval' });
   await expect(form.getByRole('textbox', { name: 'Behavior' })).toHaveValue('Summarizer');

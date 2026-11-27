@@ -1,5 +1,8 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createLogger } from './index';
+import { createLogger, openLogFile } from './index';
 
 const keys = ['token', 'authorization', 'mcpToken'] as const;
 const depths = [0, 1, 2] as const;
@@ -33,5 +36,25 @@ describe('createLogger', () => {
     expect(text).toContain('starting');
     expect(text).not.toContain('the-secret');
     expect(text).toContain('[redacted]');
+  });
+});
+
+describe('openLogFile', () => {
+  it('drops a line logged after the log closed instead of throwing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'daemon-log-'));
+    try {
+      const path = join(dir, 'logs', 'daemon.log');
+      const file = openLogFile(path);
+      const logger = createLogger({ level: 'info', destination: file.destination });
+      logger.info({}, 'before');
+      await file.close();
+      expect(() => {
+        logger.warn({}, 'late');
+      }).not.toThrow();
+      expect(readFileSync(path, 'utf8')).toContain('before');
+      expect(readFileSync(path, 'utf8')).not.toContain('late');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
