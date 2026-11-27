@@ -818,7 +818,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const migrationsDir = opts.migrationsDir ?? DB_MIGRATIONS_DIR;
   const backupsDir = join(opts.dataDir, 'backups');
   if (hasPendingMigrations(db, migrationsDir)) {
-    const { removed } = await backupBeforeMigrating(
+    const { removed, failed } = await backupBeforeMigrating(
       db,
       backupsDir,
       startedAt,
@@ -826,6 +826,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     );
     if (removed.length > 0) {
       logger.info({ removed: removed.length }, 'old pre-migrate backups removed');
+    }
+    if (failed.length > 0) {
+      logger.warn({ failed }, 'old pre-migrate backups could not be removed');
     }
   }
   migrateDatabase(db, migrationsDir);

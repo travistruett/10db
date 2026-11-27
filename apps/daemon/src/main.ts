@@ -189,8 +189,9 @@ function chooseAdapter(): AgentAdapter | ((logger: Logger) => AgentAdapter) {
     });
 }
 
-// The shell holds our stdin open; EOF means it is gone. While starting nothing is serving, so leave at once (an open
-// migration rolls back on the next open) rather than hold daemon.lock with no daemon.json for every later daemon.
+// The shell holds our stdin open; EOF means it is gone. While starting nothing is serving, so leave at once rather
+// than hold daemon.lock with no daemon.json for every later daemon. EOF is seen only while start-up waits on I/O (a
+// child process, the backup copy); the migration itself runs synchronously, so it never ends part-way here.
 const shellLeftDuringStart = (): void => {
   console.error('10db daemon: the shell left during start-up; exiting');
   process.exit(1);
