@@ -13,6 +13,7 @@ import { CountBadge, CountTone } from '../shell/count-badge';
 import { FrameSlotsContext, type FrameSlots } from '../shell/frame-slots';
 import { ReconnectingIndicator } from '../shell/reconnecting-indicator';
 import { PushBanner } from './push-banner';
+import { useReloadWhenStuck } from './reload-when-stuck';
 import { UnsavedGuardProvider } from '../shell/unsaved-guard';
 import { useOpenInboxCount } from '../views/inbox/inbox-count';
 import { takeDirectCard } from './deep-link';
@@ -61,6 +62,7 @@ function Places() {
  * places are below. Views draw into it as they do into the window's (`FrameSlotsContext`).
  */
 export function ServedFrame() {
+  useReloadWhenStuck();
   useEventStream();
   const { client } = useDaemon();
   // The Mac may have lost this phone's subscription while the app was closed.
