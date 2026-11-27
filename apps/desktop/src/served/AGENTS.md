@@ -34,6 +34,11 @@ share listener. It reaches only what a paired device may (`api/auth-matrix.ts`).
   you"), not cards: a flag or a Look card holds no run, so it can read 0 beside an Inbox of cards, and only the Inbox
   badge says "need you". Settings is `ThisDevice`: Forget This Device calls
   `DELETE /devices/me`, then clears the token.
+- `cant-reach-mac.tsx`: once the status has been `reconnecting` for 10 s, a card above the push banner says the
+  phone can't reach the Mac and what to check (Tailscale on the phone, the Mac awake); the list sheet's foot moves
+  up by `--cant-reach-space`. Android gets Open Tailscale (`intent://#Intent;package=com.tailscale.ipn;end`); iOS
+  can't be sent to another app from a web page, so it gets words only. The same help shows on the connecting screen
+  when the first connection has failed for 10 s (`App`'s `connectingHelp`, passed to `DaemonProvider`).
 - `push-banner.tsx`: on the Inbox, while push is Off (not blocked or unsupported), a card sits
   in the flow above the nav (the content ends above it; the list sheet's foot moves up by `--push-banner-space`)
   with Turn On and a Not Now that keeps it away on this phone (`tendb.pushBannerDismissed`). Its hook mounts only
