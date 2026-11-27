@@ -1,39 +1,30 @@
-import {
-  NewEvalOrigin,
-  type NewEvalBody,
-  type PlanEval,
-  type ProjectId,
-  type TaskDto,
-} from '@10db/contracts';
-import { Anchor, Button, Stack, Text, TextInput, Textarea } from '@mantine/core';
+import { NewEvalOrigin, type PlanEval, type ProjectId, type TaskDto } from '@10db/contracts';
+import { Anchor, Button, Stepper, Text, Tooltip } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
-import { useState, type ReactNode, type SyntheticEvent } from 'react';
+import { useState } from 'react';
 import { useNewEvalTask } from '../../daemon/evals-queries';
+import { useModels } from '../../daemon/model-queries';
+import { useProjects } from '../../daemon/queries';
 import { FormModal } from '../../shell/form-modal';
+import {
+  asBehavior,
+  initialDraft,
+  stepProblem,
+  toRequest,
+  WizardStep,
+  type EvalDraft,
+  type NewEvalPrefill,
+} from './new-eval-draft';
+import { useSuggestions } from './new-eval-suggest';
+import { CheckingStep, ExamplesStep, GoalStep, ModelsStep, ReviewStep } from './new-eval-steps';
 
-/** What the form opens with, from where New Eval was pressed. */
-export interface NewEvalPrefill {
-  readonly behavior?: string;
-  readonly decision?: string;
-  readonly evidence?: string;
-  readonly oracle?: string;
-  readonly coverageAndBar?: string;
-  readonly models?: string;
-  readonly where?: readonly string[];
-  readonly origin: NewEvalOrigin;
-}
+export { asBehavior, type NewEvalPrefill };
 
-/** The longest behavior the task's title takes (`NewEvalRequest`). */
-const BEHAVIOR_MAX = 150;
-
-/** One line cut to what a title takes, so a long objective or gap label still files. */
-export const asBehavior = (text: string): string =>
-  text.replaceAll(/\s+/gu, ' ').trim().slice(0, BEHAVIOR_MAX);
-
-/** A goal's proposed eval as the form's start: its objective is the behavior, its baseline the bar. */
+/** A goal's proposed eval as the wizard's start: its objective is the sentence, its baseline the bar. */
 export function prefillFromPlanEval(plan: PlanEval): NewEvalPrefill {
   return {
     behavior: asBehavior(plan.objective),
+    goal: plan.objective,
     ...(plan.decision === undefined ? {} : { decision: plan.decision }),
     ...(plan.oracle === undefined ? {} : { oracle: plan.oracle }),
     coverageAndBar: plan.baseline.join('\n'),
@@ -42,20 +33,18 @@ export function prefillFromPlanEval(plan: PlanEval): NewEvalPrefill {
   };
 }
 
-const FORM_ID = 'new-eval-form';
-
-const SECTIONS = [
-  ['decision', 'Decision', 'What this eval helps you decide, such as which model to ship.'],
-  ['evidence', 'Evidence', 'Where the behavior has gone wrong or been measured before.'],
-  ['oracle', 'Oracle', 'What counts as the right answer, and who or what grades it.'],
-  ['coverageAndBar', 'Coverage and Bar', 'The cases to cover and the bar a model must reach.'],
-  ['models', 'Models', 'The models to compare.'],
-  ['execution', 'Execution', 'How it runs: the free arm in the gate, the paid arm by hand.'],
+const STEPS = [
+  ['Goal', WizardStep.Goal],
+  ['Examples', WizardStep.Examples],
+  ['Checking', WizardStep.Checking],
+  ['Models', WizardStep.Models],
+  ['Review', WizardStep.Review],
 ] as const;
 
-type SectionKey = (typeof SECTIONS)[number][0];
+const LAST_STEP = WizardStep.Review;
 
-function Form({
+/** The steps and the footer of one New Eval; its state is the draft, kept while the builder goes back. */
+function Wizard({
   projectId,
   prefill,
   onClose,
@@ -67,111 +56,129 @@ function Form({
   readonly onFiled: (task: TaskDto) => void;
 }) {
   const file = useNewEvalTask(projectId);
-  const [behavior, setBehavior] = useState(prefill.behavior ?? '');
-  const [sections, setSections] = useState<Record<SectionKey, string>>({
-    decision: prefill.decision ?? '',
-    evidence: prefill.evidence ?? '',
-    oracle: prefill.oracle ?? '',
-    coverageAndBar: prefill.coverageAndBar ?? '',
-    models: prefill.models ?? '',
-    execution: '',
-  });
-  const [refusal, setRefusal] = useState<string | null>(null);
-  const submit = (event: SyntheticEvent<HTMLFormElement>): void => {
-    event.preventDefault();
-    if (behavior.trim() === '') {
-      setRefusal('Name the behavior the eval is for');
-      return;
-    }
-    setRefusal(null);
-    const request: NewEvalBody = {
-      behavior: behavior.trim(),
-      ...sections,
-      where: [...(prefill.where ?? [])],
-      origin: prefill.origin,
-    };
-    file.mutate(request, { onSuccess: onFiled });
+  const projects = useProjects();
+  const accountId = projects.data?.find((p) => p.id === projectId)?.accountId ?? null;
+  const models = useModels(accountId, accountId !== null);
+  const suggestions = useSuggestions(projectId, prefill.where ?? []);
+  const [draft, setDraft] = useState<EvalDraft>(() => initialDraft(prefill));
+  const [step, setStep] = useState<WizardStep>(WizardStep.Goal);
+  const [reached, setReached] = useState<WizardStep>(WizardStep.Goal);
+  const change = (patch: Partial<EvalDraft>): void => {
+    setDraft((now) => ({ ...now, ...patch }));
   };
-  return (
-    <FormModalBody
-      onClose={onClose}
-      pending={file.isPending}
-      error={refusal ?? file.error?.message ?? null}
-    >
-      <form id={FORM_ID} onSubmit={submit} noValidate>
-        <Stack>
-          <TextInput
-            label="Behavior"
-            maxLength={BEHAVIOR_MAX}
-            description="The task is titled Write the eval for this."
-            value={behavior}
-            onChange={(e) => {
-              setBehavior(e.currentTarget.value);
-            }}
-          />
-          {SECTIONS.map(([key, label, hint]) => (
-            <Textarea
-              key={key}
-              label={label}
-              description={hint}
-              autosize
-              minRows={1}
-              maxRows={6}
-              value={sections[key]}
-              onChange={(e) => {
-                const text = e.currentTarget.value;
-                setSections((now) => ({ ...now, [key]: text }));
-              }}
-            />
-          ))}
-          {prefill.where === undefined || prefill.where.length === 0 ? null : (
-            <Text size="sm" c="dimmed">
-              {`The lane reads ${prefill.where.join(', ')}.`}
-            </Text>
-          )}
-        </Stack>
-      </form>
-    </FormModalBody>
+  const problem = stepProblem(step, draft);
+  const goTo = (next: WizardStep): void => {
+    setStep(next);
+    setReached((now) => (next > now ? next : now));
+  };
+  const modelRows = models.data ?? [];
+  const onAccount = modelRows.filter(
+    (m) => accountId !== null && m.availableOn.includes(accountId),
   );
-}
-
-/** The modal's frame while the form is open: Cancel and Create Task, the error beside them. */
-function FormModalBody({
-  onClose,
-  pending,
-  error,
-  children,
-}: {
-  readonly onClose: () => void;
-  readonly pending: boolean;
-  readonly error: string | null;
-  readonly children: ReactNode;
-}) {
+  // A model the project's account can't reach is still a fair id to compare, but the list leads with what it can.
+  const listed = (onAccount.length > 0 ? onAccount : modelRows)
+    .slice()
+    .sort((a, b) => (b.intelligence ?? -1) - (a.intelligence ?? -1));
+  const stepProps = { draft, change };
+  const body = (() => {
+    switch (step) {
+      case WizardStep.Goal:
+        return <GoalStep {...stepProps} suggestions={suggestions} />;
+      case WizardStep.Examples:
+        return <ExamplesStep {...stepProps} suggestions={suggestions} />;
+      case WizardStep.Checking:
+        return <CheckingStep {...stepProps} suggestions={suggestions} />;
+      case WizardStep.Models:
+        return <ModelsStep {...stepProps} models={listed} />;
+      case WizardStep.Review:
+        return <ReviewStep draft={draft} models={modelRows} />;
+    }
+  })();
+  const last = step === LAST_STEP;
   return (
     <FormModal
       opened
       onClose={onClose}
       title="New Eval"
-      error={error}
+      size={640}
+      error={file.error?.message ?? null}
       actions={
         <>
-          <Button variant="default" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" form={FORM_ID} loading={pending}>
-            File Task
-          </Button>
+          {step === WizardStep.Goal ? null : (
+            <Button
+              variant="default"
+              onClick={() => {
+                goTo(STEPS[step - 1]?.[1] ?? step);
+              }}
+            >
+              Back
+            </Button>
+          )}
+          <Tooltip label={problem} disabled={problem === null} withArrow>
+            <span>
+              {last ? (
+                <Button
+                  loading={file.isPending}
+                  onClick={() => {
+                    file.mutate(toRequest(draft, prefill), { onSuccess: onFiled });
+                  }}
+                >
+                  Create Task
+                </Button>
+              ) : (
+                <Button
+                  disabled={problem !== null}
+                  onClick={() => {
+                    goTo(STEPS[step + 1]?.[1] ?? step);
+                  }}
+                >
+                  Next
+                </Button>
+              )}
+            </span>
+          </Tooltip>
         </>
       }
     >
-      {children}
+      <Stepper
+        active={step}
+        size="sm"
+        iconSize={26}
+        allowNextStepsSelect={false}
+        onStepClick={(next) => {
+          const target = STEPS[next]?.[1];
+          if (target !== undefined && target <= reached) setStep(target);
+        }}
+        mb="md"
+      >
+        {STEPS.map(([label]) => (
+          <Stepper.Step key={label} label={label} />
+        ))}
+      </Stepper>
+      {body}
+      {problem === null ? null : (
+        <Text size="xs" c="dimmed" mt="md">
+          {problem}
+        </Text>
+      )}
+      {suggestions.unavailableNote === null ? null : (
+        <Text size="xs" c="dimmed" mt="xs">
+          {suggestions.unavailableNote}
+        </Text>
+      )}
+      {suggestions.problem === null ? null : (
+        <Text size="xs" c="red" mt="xs">
+          {suggestions.problem}
+        </Text>
+      )}
     </FormModal>
   );
 }
 
 /**
- * New Eval: a short form that files a task, "Write the eval for <behavior>", whose brief is the rationale.
- * The lane drafts the cases and graders by the project's own eval skill and never runs the live arm.
+ * New Eval: a short stepper that asks, in plain words, what good looks like, for real examples, how to
+ * check them and which models to try, then files a task whose brief is the answers. The agent that takes the
+ * task writes the cases and checks by the project's own eval skill and never runs a paid model.
  */
 export function NewEvalModal({
   projectId,
@@ -195,19 +202,20 @@ export function NewEvalModal({
         opened
         onClose={close}
         title="New Eval"
+        size={640}
         actions={<Button onClick={close}>Done</Button>}
       >
         <Text size="sm">
-          Filed{' '}
+          Task created:{' '}
           <Anchor
             onClick={close}
             renderRoot={(props) => <Link {...props} to="/board" search={{ task: filed.id }} />}
           >
             {filed.title}
           </Anchor>
-          . A lane drafts the cases and never runs the live arm.
+          . An agent writes the cases and checks; it never runs paid models on its own.
         </Text>
       </FormModal>
     );
-  return <Form projectId={projectId} prefill={prefill} onClose={close} onFiled={setFiled} />;
+  return <Wizard projectId={projectId} prefill={prefill} onClose={close} onFiled={setFiled} />;
 }

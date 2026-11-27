@@ -91,6 +91,9 @@ import type {
   EvalLiveRunDto,
   EvalSuiteKey,
   NewEvalBody,
+  EvalSuggestRequest,
+  EvalSuggestResult,
+  EvalSuggestStatusDto,
   EvalManifestResult,
   EvalMarkersDto,
   EvalModelsDto,
@@ -966,6 +969,14 @@ export interface ApiServices extends PlanRecordServices {
   evals(projectId: ProjectId): Promise<EvalsDto>;
   /** Assesses the project's evals with a model now, and answers the page as it stands after. */
   assessEvals(projectId: ProjectId): Promise<EvalsDto>;
+  /** Whether the New Eval wizard has a model to ask for suggestions, and why not. */
+  evalSuggestStatus(projectId: ProjectId): EvalSuggestStatusDto;
+  /** One suggestion for a wizard step from a model of the project's account; records nothing. */
+  evalSuggest(
+    projectId: ProjectId,
+    request: EvalSuggestRequest,
+    signal?: AbortSignal,
+  ): Promise<EvalSuggestResult>;
   /** Every model the project's results graded, with its newest result per suite; nothing is run. */
   evalModels(projectId: ProjectId): Promise<EvalModelsDto>;
   /** The suites each of the project's tasks touched, with their state against the checkout's results; nothing is run. */

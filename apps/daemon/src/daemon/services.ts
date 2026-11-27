@@ -179,7 +179,13 @@ import { dropPendingPageLabels } from './page-label-guess';
 import { adoptGoal } from '../goals';
 import { classifyPath } from '../guard';
 import { taskSession } from '../chat';
-import { suitesOfTasks, type EvalLiveRuns, type EvalsAssessor, type EvalsService } from '../evals';
+import {
+  suitesOfTasks,
+  type EvalLiveRuns,
+  type EvalsAssessor,
+  type EvalSuggester,
+  type EvalsService,
+} from '../evals';
 import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import {
@@ -422,6 +428,8 @@ export function createServices(deps: {
   readonly evals: EvalsService;
   /** Assesses each project's evals with a model, on add, on a commit to eval files, and on request. */
   readonly evalsAssessor: Pick<EvalsAssessor, 'assess' | 'status'>;
+  /** Answers the New Eval wizard's suggest buttons with a model of the project's account. */
+  readonly evalSuggester: EvalSuggester;
   /** Runs a suite's live arm when the builder presses Run. */
   readonly evalLive: EvalLiveRuns;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
@@ -1029,6 +1037,11 @@ export function createServices(deps: {
       return hazardAssessmentDto(db, projectId);
     },
     evals: (projectId) => readEvalsPage(projectId),
+    evalSuggestStatus(projectId) {
+      return deps.evalSuggester.status(projectId);
+    },
+    evalSuggest: (projectId, request, signal) =>
+      deps.evalSuggester.suggest(projectId, request, signal),
     async assessEvals(projectId) {
       getProject(db, projectId);
       await deps.evalsAssessor.assess(projectId);

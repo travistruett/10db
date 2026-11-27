@@ -242,10 +242,37 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await page.getByRole('tab', { name: /No Eval/u }).click();
   await page.getByRole('button', { name: 'New Eval for Summarizer' }).click();
   const form = page.getByRole('dialog', { name: 'New Eval' });
-  await expect(form.getByRole('textbox', { name: 'Behavior' })).toHaveValue('Summarizer');
-  await form.getByRole('textbox', { name: 'Oracle' }).fill('A human-written summary per case');
-  await form.getByRole('button', { name: 'File Task' }).click();
-  await expect(form).toContainText('Filed Write the eval for Summarizer');
+  await expect(form.getByRole('textbox', { name: 'Short name' })).toHaveValue('Summarizer');
+  const next = form.getByRole('button', { name: 'Next' });
+  await expect(next).toBeDisabled();
+  await form
+    .getByRole('textbox', { name: /In one sentence/u })
+    .fill('Summaries keep every figure the source states.');
+  await next.click();
+  // Three examples, each marked Good or Bad, open the next step.
+  for (const index of [0, 1, 2]) {
+    await form.getByRole('button', { name: 'Add Example' }).click();
+    await form
+      .getByRole('textbox', { name: `Example ${String(index + 1)} input` })
+      .fill(`case ${String(index + 1)}`);
+    await form
+      .getByRole('button', { name: index === 2 ? 'Bad' : 'Good', exact: true })
+      .nth(index)
+      .click();
+  }
+  await next.click();
+  await form.getByRole('radio', { name: /A rule or test/u }).click();
+  await form
+    .getByRole('textbox', { name: /What should the check look at/u })
+    .fill('A human-written summary per case');
+  await form.getByText('Every time', { exact: true }).click();
+  await next.click();
+  await form.getByRole('textbox', { name: /A model that isn.t listed/u }).fill('acme/model-b');
+  await form.getByRole('button', { name: 'Add Model' }).click();
+  await next.click();
+  await expect(form).toContainText('What the agent will build');
+  await form.getByRole('button', { name: 'Create Task' }).click();
+  await expect(form).toContainText('Task created: Write the eval for Summarizer');
   await form.getByRole('link', { name: 'Write the eval for Summarizer' }).click();
   await expect(page).toHaveURL(/\/board/u);
   await expect(page.getByText('Write the eval for Summarizer').first()).toBeVisible();
@@ -260,4 +287,6 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   expect(filed?.description).toContain('.claude/skills/llm-eval/SKILL.md');
   expect(filed?.description).toContain('src/summarize.py');
   expect(filed?.description).toContain('Never run the live command');
+  expect(filed?.description).toContain('Bad: "case 3"');
+  expect(filed?.description).toContain('`acme/model-b`');
 });

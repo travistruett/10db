@@ -43,11 +43,23 @@
   model, and "Compare with" (a `Select`) puts a second model beside it per suite (`model-compare.ts`: the suites
   where they differ first, and the cost difference over the suites both ran with a known cost). A result from an
   older eval says so in its cell. It reads results already on disk and never runs a model.
-- New Eval (`new-eval-modal.tsx`): a button in the page header, one on each No Eval row (prefills the behavior, the
-  gap's reason as evidence and its `where` path) and one over a goal's proposed eval (`PlanEval`) in a Plan's
-  Documents tab (objective, decision, oracle, models and baseline prefill it). The modal files a task through
-  `POST /projects/:id/evals/tasks` and then links to it on the Board; the lane drafts the eval and never runs
-  the live arm.
+- New Eval (`new-eval-modal.tsx`, steps in `new-eval-steps.tsx`, state and rules in `new-eval-draft.ts`) is the app's
+  first wizard and the pattern for the next: a 640 px `FormModal` with a compact Mantine `Stepper` (Goal, Examples,
+  Checking, Models, Review), plain words with no "oracle", "arm" or "lane", a dim "why we ask" line under each
+  question and Back/Next in the footer. Next stays shut until the step's minimum is met (`stepProblem`: a name and a
+  sentence; 3 examples marked Good or Bad; a check and a bar; a model) and says why in the footer's tooltip and a
+  dim line; Back keeps every answer, and a finished step's label returns to it. Review shows what the agent will
+  build and Create Task files it through `POST /projects/:id/evals/tasks`; the success line links to the task on the
+  Board. The button is in the page header, on each No Eval row (prefills the name, the gap's reason as evidence and
+  its `where` path) and over a goal's proposed eval (`PlanEval`) in a Plan's Documents tab (objective as name and
+  sentence; decision, oracle and baseline pass through; its models become the picked ids).
+- Suggestions (`new-eval-suggest.tsx`, `eval-suggest-queries.ts`): "Tighten This" (before and after, Use This),
+  "Suggest Cases" (5 proposals that arrive unmarked; the builder adds each and marks it Good or Bad, never the AI)
+  and "Suggest a Check" (a check type and a one-line rule; never the bar). Each is one read of the project's
+  account with no tool (`POST /projects/:id/evals/suggest`). Where the daemon says it has no model to ask
+  (`GET /projects/:id/eval-suggest`: no account, or a Codex-only builder with no other account), the buttons are
+  not drawn and one dim line says why; the wizard works the same by hand. Models come from `useModels` on the
+  project's account with each one's score and price where known, plus a free-text id.
 - Run (`live-run-modal.tsx`, `LiveRunControls`): beside a suite's live command in the drawer ("Run") and in a covered
   task's Evals block ("Run now"). The window (`GET .../evals/:suiteKey/live`) shows the command as stored, whether it
   runs in the builder's containers (and which env files compose may read) or which hosts it may reach, how Stop
