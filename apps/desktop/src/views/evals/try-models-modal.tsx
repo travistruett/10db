@@ -9,6 +9,7 @@ import {
   type ProjectId,
 } from '@10db/contracts';
 import {
+  Anchor,
   Button,
   Checkbox,
   Group,
@@ -20,6 +21,7 @@ import {
   Text,
   TextInput,
 } from '@mantine/core';
+import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
   useEvalCandidates,
@@ -27,6 +29,7 @@ import {
   useLatestEvalSweep,
   useStartEvalSweep,
   useStopEvalSweep,
+  useSwitchEvalModel,
 } from '../../daemon/evals-queries';
 import { costText, dayTimeText } from './eval-figures';
 import { changedRefusal, Notes, REFUSAL_WORDS } from './live-run-modal';
@@ -89,16 +92,19 @@ const lastResult = (c: EvalCandidateDto): string =>
 /** A sweep's steps, what it spent of its cap and Stop; the end shows the verdict in words. */
 function SweepWindow({
   projectId,
+  suiteKey,
   sweep,
   onClose,
 }: {
   readonly projectId: ProjectId;
+  readonly suiteKey: string;
   readonly sweep: EvalSweepDto;
   readonly onClose: () => void;
 }) {
   const stop = useStopEvalSweep(projectId);
   const running = sweep.state === EvalSweepState.Running;
   const stopping = stop.isPending || stop.isSuccess;
+  const switchTo = useSwitchEvalModel(projectId, suiteKey);
   return (
     <Stack gap="sm" data-testid="sweep-window">
       <Group justify="space-between" wrap="nowrap">
@@ -164,6 +170,39 @@ function SweepWindow({
           {sweepVerdict(sweep)}
         </Text>
       )}
+      {sweep.state === EvalSweepState.Found && sweep.winner !== null ? (
+        switchTo.data ? (
+          <Text size="sm">
+            Task created:{' '}
+            <Anchor
+              onClick={onClose}
+              renderRoot={(props) => (
+                <Link {...props} to="/board" search={{ task: switchTo.data.id }} />
+              )}
+            >
+              {switchTo.data.title}
+            </Anchor>
+            . An agent edits the binding; the suites on the slot show "not run" until you run them.
+          </Text>
+        ) : (
+          <Group gap="xs">
+            <Button
+              size="xs"
+              loading={switchTo.isPending}
+              onClick={() => {
+                if (sweep.winner !== null) switchTo.mutate(sweep.winner);
+              }}
+            >
+              {`Switch to ${sweep.winner}`}
+            </Button>
+            {switchTo.isError ? (
+              <Text size="sm" c="red">
+                {switchTo.error.message}
+              </Text>
+            ) : null}
+          </Group>
+        )
+      ) : null}
     </Stack>
   );
 }
@@ -483,7 +522,7 @@ function Body({
   const sweep = latest.data?.id === started?.id || started === null ? latest.data : started;
   if (mode === TryMode.Window || started !== null) {
     return sweep ? (
-      <SweepWindow projectId={projectId} sweep={sweep} onClose={onClose} />
+      <SweepWindow projectId={projectId} suiteKey={suiteKey} sweep={sweep} onClose={onClose} />
     ) : (
       <Loader size="sm" />
     );

@@ -98,6 +98,13 @@
   golden changed; grader changed; model judge added; else `unclassified`) and names the line each kind came from. It
   is pure and calls no model, so it is the same on every provider. A manifest `bar` edit is an app setting, not a
   patch line, and is not read. The watchpoints' eval source (`watchpoints/eval-definition-source.ts`) uses it.
+- Switch (`switch-task.ts`, `POST /projects/:id/evals/:suiteKey/switch`, `EvalSwitchBody`): files "Switch <slot or suite>
+  to <model>" as a normal task through `makeTask`, in the areas the suite's `coveredPaths` fall in (each glob's literal
+  prefix). The brief holds the winning report and cost (the suite's latest result naming the model), every suite whose
+  latest result names the same slot (the slot comes from the body, else from that result), the project's eval skills,
+  and "edit code and run free checks only". 10db never edits the binding or runs a suite: the suites on the slot show
+  "<suite> · not run" on the task through the covered-task marker, because the assessment records the binding file
+  among `coveredPaths`.
 - New Eval (`new-eval-task.ts`, `POST /projects/:id/evals/tasks`, `NewEvalRequest`): files a normal task on the
   project's account, "Write the eval for <behavior>", through the ordinary task-create path (`createTask`). The
   wizard sends structured answers: the goal sentence, real examples each marked good or bad with a reason (the

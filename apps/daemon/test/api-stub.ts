@@ -158,6 +158,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     stopEvalLive: none,
     evalLiveRuns: none,
     newEvalTask: none,
+    switchEvalModel: none,
     getHazardAssessment: none,
     lookAgainAtHazards: none,
     undoHazardAddition: none,

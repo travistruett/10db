@@ -95,6 +95,7 @@ import type {
   EvalCandidateDto,
   EvalSuiteKey,
   NewEvalBody,
+  EvalSwitchBody,
   EvalSuggestRequest,
   EvalSuggestResult,
   EvalSuggestStatusDto,
@@ -1034,6 +1035,15 @@ export interface ApiServices extends PlanRecordServices {
    * project's eval skill and suites are read at HEAD and nothing is run.
    */
   newEvalTask(projectId: ProjectId, request: NewEvalBody): Promise<TaskDto>;
+  /**
+   * Files "Switch <slot> to <model>": an agent edits the binding and lists every suite on the slot to run
+   * before merging, in the areas the suite's covered paths fall in. Nothing is edited or run by 10db.
+   */
+  switchEvalModel(
+    projectId: ProjectId,
+    suiteKey: EvalSuiteKey,
+    request: EvalSwitchBody,
+  ): Promise<TaskDto>;
   /** What 10db added to the project's hazards by itself and why, and how many removals wait on the builder. */
   getHazardAssessment(projectId: ProjectId): HazardAssessmentDto;
   /**

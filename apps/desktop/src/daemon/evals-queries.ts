@@ -154,6 +154,24 @@ export function useNewEvalTask(projectId: ProjectId) {
   });
 }
 
+/** Files the task that switches a suite's model binding to the sweep's winner; nothing is run. */
+export function useSwitchEvalModel(projectId: ProjectId, suiteKey: string) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (model: string) =>
+      readJson(
+        await client.projects[':projectId'].evals[':suiteKey'].switch.$post({
+          param: { projectId, suiteKey: encodeURIComponent(suiteKey) },
+          // The daemon reads the slot off the suite's newest result for the model.
+          json: { model, slot: null },
+        }),
+        TaskDto,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+  });
+}
+
 /**
  * What a suite's Run would do and whether it may; read again on every project event. With `models`, the window
  * for a sweep over them: its hash covers the picks, in this order.

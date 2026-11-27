@@ -69,6 +69,9 @@
   Board. The button is in the page header, on each gap row (prefills the name, the gap's reason as evidence and
   its `where` path) and over a goal's proposed eval (`PlanEval`) in a Plan's Documents tab (objective as name and
   sentence; decision, oracle and baseline pass through; its models become the picked ids).
+- Switch: a sweep that ends Found (`try-models-modal.tsx`, `SweepWindow`) offers "Switch to <model>", which files the
+  task through `POST /projects/:id/evals/:suiteKey/switch` (the daemon finds the slot) and then links it on the Board.
+  It needs a Found sweep, which the e2e daemon cannot run (no live command), so no flow clicks it.
 - Suggestions (`new-eval-suggest.tsx`, `eval-suggest-queries.ts`): "Tighten This" (before and after, Use This),
   "Suggest Cases" (5 proposals that arrive unmarked; the builder adds each and marks it Good or Bad, never the AI)
   and "Suggest a Check" (a check type and a one-line rule; never the bar). Each is one read of the project's

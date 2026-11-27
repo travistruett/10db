@@ -98,6 +98,7 @@ import {
   RunEvalLiveBody,
   EvalSweepId,
   StartEvalSweepBody,
+  EvalSwitchBody,
   EvalSuiteQuery,
   PersonInput,
   PickSize,
@@ -1750,6 +1751,19 @@ export function createApp(deps: ApiDeps) {
         c.json(
           await deps.services.newEvalTask(
             ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+          201,
+        ),
+    )
+    .post(
+      '/projects/:projectId/evals/:suiteKey/switch',
+      validator('json', (value): EvalSwitchBody => EvalSwitchBody.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.switchEvalModel(
+            ProjectId.parse(c.req.param('projectId')),
+            EvalSuiteKey.parse(c.req.param('suiteKey')),
             c.req.valid('json'),
           ),
           201,

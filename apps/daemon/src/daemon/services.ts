@@ -625,6 +625,27 @@ export function createServices(deps: {
         areas,
       });
     },
+    async switchEvalModel(projectId, suiteKey, request) {
+      const project = getProject(db, projectId);
+      const draft = await deps.evals.draftSwitch(projectId, project.repoPath, suiteKey, request);
+      // A covered glob names its folder by the literal text before its first wildcard.
+      const named = new Set(
+        draft.coveredPaths.flatMap(
+          (glob) => classifyPath(glob.split(/[*?[{]/u)[0] ?? '', project.areas, []).areas,
+        ),
+      );
+      const areas =
+        named.size > 0
+          ? [...named]
+          : [(project.areas.find((a) => a.catchAll === true) ?? project.areas[0])?.name ?? ''];
+      return makeTask(projectId, {
+        title: draft.title,
+        why: draft.why,
+        description: draft.description,
+        acceptanceCriteria: [...draft.acceptanceCriteria],
+        areas,
+      });
+    },
     holdTask: (taskId) => deps.state.write((ctx) => holdTask(ctx, taskId)),
     settleSizing: (taskIds) => deps.sizing.settled(taskIds, deps.sizingWaitMs),
     startTask(taskId, input) {
