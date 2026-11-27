@@ -25,14 +25,21 @@ pub fn start_deadline(hung: u32) -> Duration;
   (`the daemon did not finish starting in {N} min; killing it to start another`) and
   `release_child(shared, log_dir, true, KILL_WAIT)`. Write no freeze-kill marker: that marker tells the next
   daemon a serving daemon froze, which is not what happened.
-- `run_loop` keeps a consecutive-hang count. A start-hang kill adds 1. A child that served (wrote `daemon.json`
-  naming it) resets it to 0. The next spawn's deadline is `start_deadline(count)`.
+- `wait_for_exit` returns the index's `ChildEnd`. `run_loop` keeps a consecutive-hang count: `killed_as_start_hung`
+  adds 1, `served` resets it to 0, anything else leaves it. The next spawn's deadline is `start_deadline(count)`.
 - A start-hang kill must not reset the restart backoff, although the child ran past `HEALTHY_UPTIME`. Today
   `started.elapsed() >= HEALTHY_UPTIME` resets it; skip that reset after a start-hang kill.
 - The deadline starts at spawn, not after the pre-migrate copy or the migration. A slow copy plus migration is
   exactly the case the doubling is for.
 - Killing mid-migration is safe: SQLite rolls back the open transaction on the next open. Killing mid-copy is
   task 2's `.partial`.
+
+- A `daemon.json` left by a crashed daemon whose pid the new child reuses would count as served from spawn. This
+  exists today and is rare (a reboot); leave it, don't widen the task.
+
+**Run it:** build the app with the daemon entry swapped for a script that sleeps, and `START_DEADLINE` cut to
+seconds locally (never committed). Check `logs/sidecar.log` for the kill line, then the restart with the doubled
+deadline. Say in the PR that this ran, or that it didn't.
 
 **Tests:** one pure test for `start_deadline` (0 → 10 min, 1 → 20, 3 → 80, a large count stays at 80 and never
 overflows), beside the existing `Backoff` tests. No spawned-process test: the module has none, and the wiring is
