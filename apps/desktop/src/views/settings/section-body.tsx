@@ -102,10 +102,12 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.Areas:
-      return (
+      return project ? (
+        <ProjectAreas key={project.id} project={project} />
+      ) : (
         <>
           {heading}
-          {project ? <ProjectAreas key={project.id} project={project} /> : <NoProject />}
+          <NoProject />
         </>
       );
     case SettingsSectionKey.Watchpoints:
@@ -146,36 +148,27 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.People:
-      return (
-        <>
-          {heading}
-          <PeopleSection />
-        </>
-      );
+      return <PeopleSection />;
     case SettingsSectionKey.RemoteAccess:
       return <RemoteAccessSection />;
     case SettingsSectionKey.Devices:
       return (
         <>
-          {heading}
           <DevicesSection />
           <PlannedRemainder section={section} />
         </>
       );
     case SettingsSectionKey.ProjectTrust:
-      return (
+      return project ? (
+        <ProjectTrustSection key={project.id} project={project} />
+      ) : (
         <>
           {heading}
-          {project ? <ProjectTrustSection key={project.id} project={project} /> : <NoProject />}
+          <NoProject />
         </>
       );
     case SettingsSectionKey.Trust:
-      return (
-        <>
-          {heading}
-          <TrustSection />
-        </>
-      );
+      return <TrustSection />;
     case SettingsSectionKey.Sessions:
       return (
         <>
@@ -220,19 +213,9 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.Accounts:
-      return (
-        <>
-          {heading}
-          <AccountsSection />
-        </>
-      );
+      return <AccountsSection />;
     case SettingsSectionKey.Decisions:
-      return (
-        <>
-          {heading}
-          <DecisionsSection />
-        </>
-      );
+      return <DecisionsSection />;
     case SettingsSectionKey.Playbook:
       return <PlaybookSection />;
     case SettingsSectionKey.Models:
@@ -240,7 +223,6 @@ export function SectionBody({
     case SettingsSectionKey.Team:
       return project ? (
         <>
-          {heading}
           <ProjectPlaybook key={project.id} project={project} />
           <PlannedRemainder section={section} />
         </>

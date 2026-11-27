@@ -1,5 +1,5 @@
 import { DevicePlatform, SharingState, type DeviceDto } from '@10db/contracts';
-import { Alert, Button, Loader, Stack, Table, Text } from '@mantine/core';
+import { Alert, Button, Stack, Table, Text } from '@mantine/core';
 import { IconDeviceMobile } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { useState } from 'react';
@@ -10,7 +10,9 @@ import { ConfirmModal } from '../../shell/confirm-modal';
 import { EmptyState } from '../../shell/empty-state';
 import { RaisedPanel } from '../../shell/raised-panel';
 import { fromNow, absoluteTime } from '../../shell/relative';
-import { SectionHeading } from './section-heading';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
+import { SettingsSectionKey } from './sections';
+import { SettingsPageHeader } from './settings-page';
 
 const PLATFORM_LABEL: Readonly<Record<DevicePlatform, string>> = {
   [DevicePlatform.Android]: 'Android',
@@ -29,10 +31,9 @@ export function DevicesSection() {
   const rows = devices.data ?? [];
   return (
     <Stack gap="md">
-      <SectionHeading
-        title="Devices"
-        line="Phones and Macs that can use this Mac's 10db. Each has full access. Revoke cuts one off at once."
-        action={
+      <SettingsPageHeader
+        sectionKey={SettingsSectionKey.Devices}
+        actions={
           <Button
             disabled={!ready}
             onClick={() => {
@@ -49,7 +50,9 @@ export function DevicesSection() {
           setPairing(false);
         }}
       />
-      {devices.isPending ? <Loader size="sm" /> : null}
+      {devices.isPending ? (
+        <PageLoading shape={PageLoadingShape.List} label="Reading the devices" />
+      ) : null}
       {devices.isError ? (
         <Alert color="red" title="Couldn't load devices">
           {devices.error.message}

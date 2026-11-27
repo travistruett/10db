@@ -11,6 +11,13 @@ export interface GuideStep {
   readonly picture: ReactNode;
 }
 
+/** What a part of a still sits on, as the page draws it: the content's tone inside a hairline, on the step's panel. */
+export const STILL_SURFACE = {
+  background: 'var(--mantine-color-body)',
+  border: '1px solid var(--mantine-color-default-border)',
+  borderRadius: 'var(--mantine-radius-md)',
+} as const;
+
 /** What opens a guide: its title as the link's words, and the open. A byline, an empty state and a hover card take it. */
 export interface GuideOpener {
   readonly label: string;

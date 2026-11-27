@@ -15,6 +15,7 @@ import { processLine, scopeSource } from './playbook-edits';
 import { PlaybookRowDrawer } from './playbook-row-drawer';
 import { RIGOR_LABELS } from './rigor-labels';
 import { ROLES } from './role-labels';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
 
 /**
@@ -45,11 +46,7 @@ export function PlaybookTable({
     );
   const view = playbook.data;
   if (view === undefined)
-    return (
-      <Text size="sm" c="dimmed">
-        Reading the playbook…
-      </Text>
-    );
+    return <PageLoading shape={PageLoadingShape.List} rows={4} label="Reading the playbook" />;
 
   const columns: DataTableColumn<PlaybookRowDto>[] = [
     {

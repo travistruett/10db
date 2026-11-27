@@ -1,6 +1,6 @@
 import { Box, Button, Group, Stack, Text } from '@mantine/core';
 import { IconCheck, IconDeviceDesktop, IconDeviceMobile } from '@tabler/icons-react';
-import { PageGuide, type PageGuideHandle } from '../../shell/page-guide';
+import { PageGuide, STILL_SURFACE, type PageGuideHandle } from '../../shell/page-guide';
 import { SharingIcon } from '../../shell/sharing-indicator';
 
 export const REMOTE_ACCESS_GUIDE = 'How remote access works';
@@ -8,12 +8,6 @@ export const REMOTE_ACCESS_GUIDE = 'How remote access works';
 // Stills of the setup, drawn with the same marks and words as the page and the frame's sharing icon.
 
 const ADDRESS = 'https://mac.tail4c2e.ts.net';
-
-const ON_PAGE = {
-  background: 'var(--mantine-color-body)',
-  border: '1px solid var(--mantine-color-default-border)',
-  borderRadius: 'var(--mantine-radius-md)',
-} as const;
 
 function Device({
   icon: Mark,
@@ -23,7 +17,7 @@ function Device({
   readonly name: string;
 }) {
   return (
-    <Stack gap={4} align="center" px={10} py={8} style={{ ...ON_PAGE, flex: 'none' }}>
+    <Stack gap={4} align="center" px={10} py={8} style={{ ...STILL_SURFACE, flex: 'none' }}>
       <Mark size={20} stroke={1.5} color="var(--mantine-color-dimmed)" />
       <Text fz={11}>{name}</Text>
     </Stack>
@@ -58,7 +52,7 @@ function Done({ children }: { readonly children: string }) {
 /** The page's checklist once every step is done. */
 function ChecklistPicture() {
   return (
-    <Stack gap={6} p={10} style={ON_PAGE}>
+    <Stack gap={6} p={10} style={STILL_SURFACE}>
       <Done>HTTPS is on for your tailnet</Done>
       <Done>Certificate issued</Done>
       <Done>Shared on port 4319, tailnet only</Done>
@@ -70,7 +64,7 @@ function ChecklistPicture() {
 function AddressPicture() {
   return (
     <Stack gap={8}>
-      <Group gap="xs" wrap="nowrap" p={10} style={ON_PAGE}>
+      <Group gap="xs" wrap="nowrap" p={10} style={STILL_SURFACE}>
         <Text size="xs" ff="monospace" truncate style={{ flex: 1, minWidth: 0 }}>
           {ADDRESS}
         </Text>

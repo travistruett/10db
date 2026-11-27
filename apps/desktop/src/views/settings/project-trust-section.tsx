@@ -24,7 +24,11 @@ import { previewItems } from './trust/preview-items';
 import { ProductionSystems } from './trust/production-systems';
 import { RepoMcpServers } from './trust/repo-mcp-servers';
 import { OtherAndExpected, SwitchItems } from './trust/switch-items';
+import { usePageGuide } from '../../shell/page-guide';
 import { SectionHeading } from './section-heading';
+import { SettingsSectionKey } from './sections';
+import { SettingsPageHeader } from './settings-page';
+import { TrustGuide, TRUST_GUIDE } from './trust-guide';
 
 /** The one line under each switch; the full account sits behind its info button. */
 const SHORT: Readonly<Record<TrustSwitchKey, string>> = {
@@ -178,93 +182,113 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
   const mcpServers = (app.data?.mcpServers ?? []).filter(
     (server) => server.state === YourMcpServerState.Approved,
   );
-  if (trust.isError) return <Alert color="red">{trust.error.message}</Alert>;
+  const guide = usePageGuide(TRUST_GUIDE);
+  const header = (
+    <>
+      <SettingsPageHeader
+        sectionKey={SettingsSectionKey.ProjectTrust}
+        project={project}
+        guide={guide.opener}
+      />
+      <TrustGuide guide={guide} project={project.name} />
+    </>
+  );
+  if (trust.isError)
+    return (
+      <>
+        {header}
+        <Alert color="red">{trust.error.message}</Alert>
+      </>
+    );
   return (
-    <Stack gap="lg">
-      <SettingsCard title="What Comes Along">
-        {TRUST_ROWS.map((row) => (
-          <SettingRow
-            key={row.key}
-            label={row.label}
-            description={SHORT[row.key]}
-            below={<SwitchItems label={row.label} items={items.bySwitch.get(row.key) ?? []} />}
-            help={
-              <TrustRowText
-                label={row.label}
-                description={
-                  row.key === 'web' && onOpenRouter
-                    ? `${row.description} ${OPENROUTER_WEB}`
-                    : row.description
-                }
-                providers={row.providers}
-                whileOn={
-                  (overrides?.[row.key] ?? app.data?.switches[row.key]) === true
-                    ? row.whileOn
-                    : null
-                }
-              />
-            }
-          >
-            <SegmentedControl
-              aria-label={row.label}
-              size="xs"
-              fullWidth
-              disabled={overrides === undefined}
-              value={choiceOf(overrides?.[row.key])}
-              data={choices(app.data?.switches[row.key])}
-              onChange={(value) => {
-                if (isChoice(value))
-                  set.mutate((saved) => withSwitch(saved, row.key, boolOf(value)));
-              }}
-            />
-          </SettingRow>
-        ))}
-      </SettingsCard>
-      <OtherAndExpected other={items.other} expected={items.expected} />
-      {plugins.length === 0 ? null : (
-        <SettingsCard title="Your Plugins">
-          {plugins.map((plugin) => (
-            <SettingRow key={plugin.id} label={plugin.id} description={plugin.version}>
+    <>
+      {header}
+      <Stack gap="lg">
+        <SettingsCard title="What Comes Along">
+          {TRUST_ROWS.map((row) => (
+            <SettingRow
+              key={row.key}
+              label={row.label}
+              description={SHORT[row.key]}
+              below={<SwitchItems label={row.label} items={items.bySwitch.get(row.key) ?? []} />}
+              help={
+                <TrustRowText
+                  label={row.label}
+                  description={
+                    row.key === 'web' && onOpenRouter
+                      ? `${row.description} ${OPENROUTER_WEB}`
+                      : row.description
+                  }
+                  providers={row.providers}
+                  whileOn={
+                    (overrides?.[row.key] ?? app.data?.switches[row.key]) === true
+                      ? row.whileOn
+                      : null
+                  }
+                />
+              }
+            >
               <SegmentedControl
-                aria-label={plugin.id}
+                aria-label={row.label}
                 size="xs"
                 fullWidth
                 disabled={overrides === undefined}
-                value={choiceOf(overrides?.plugins?.[plugin.id])}
-                data={choices(plugin.on)}
+                value={choiceOf(overrides?.[row.key])}
+                data={choices(app.data?.switches[row.key])}
                 onChange={(value) => {
                   if (isChoice(value))
-                    set.mutate((saved) => withPlugin(saved, plugin.id, boolOf(value)));
+                    set.mutate((saved) => withSwitch(saved, row.key, boolOf(value)));
                 }}
               />
             </SettingRow>
           ))}
         </SettingsCard>
-      )}
-      {mcpServers.length === 0 ? null : (
-        <SettingsCard title="Your MCP Servers">
-          {mcpServers.map((server) => (
-            <SettingRow key={server.key} label={server.name}>
-              <SegmentedControl
-                aria-label={server.name}
-                size="xs"
-                fullWidth
-                disabled={overrides === undefined}
-                value={choiceOf(overrides?.mcpServers?.[server.key])}
-                data={choices(undefined)}
-                onChange={(value) => {
-                  if (isChoice(value))
-                    set.mutate((saved) => withMcpServer(saved, server.key, boolOf(value)));
-                }}
-              />
-            </SettingRow>
-          ))}
-        </SettingsCard>
-      )}
-      <RepoMcpServers projectId={project.id} />
-      <ProductionSystems projectId={project.id} />
-      <StandingApprovals projectId={project.id} />
-      <AllowedInProject projectId={project.id} />
-    </Stack>
+        <OtherAndExpected other={items.other} expected={items.expected} />
+        {plugins.length === 0 ? null : (
+          <SettingsCard title="Your Plugins">
+            {plugins.map((plugin) => (
+              <SettingRow key={plugin.id} label={plugin.id} description={plugin.version}>
+                <SegmentedControl
+                  aria-label={plugin.id}
+                  size="xs"
+                  fullWidth
+                  disabled={overrides === undefined}
+                  value={choiceOf(overrides?.plugins?.[plugin.id])}
+                  data={choices(plugin.on)}
+                  onChange={(value) => {
+                    if (isChoice(value))
+                      set.mutate((saved) => withPlugin(saved, plugin.id, boolOf(value)));
+                  }}
+                />
+              </SettingRow>
+            ))}
+          </SettingsCard>
+        )}
+        {mcpServers.length === 0 ? null : (
+          <SettingsCard title="Your MCP Servers">
+            {mcpServers.map((server) => (
+              <SettingRow key={server.key} label={server.name}>
+                <SegmentedControl
+                  aria-label={server.name}
+                  size="xs"
+                  fullWidth
+                  disabled={overrides === undefined}
+                  value={choiceOf(overrides?.mcpServers?.[server.key])}
+                  data={choices(undefined)}
+                  onChange={(value) => {
+                    if (isChoice(value))
+                      set.mutate((saved) => withMcpServer(saved, server.key, boolOf(value)));
+                  }}
+                />
+              </SettingRow>
+            ))}
+          </SettingsCard>
+        )}
+        <RepoMcpServers projectId={project.id} />
+        <ProductionSystems projectId={project.id} />
+        <StandingApprovals projectId={project.id} />
+        <AllowedInProject projectId={project.id} />
+      </Stack>
+    </>
   );
 }

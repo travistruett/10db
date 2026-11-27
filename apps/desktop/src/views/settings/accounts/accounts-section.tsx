@@ -38,6 +38,9 @@ import { ACCOUNT_STATUS_LABEL, AccountStatus, accountStatus } from './account-st
 import { capShare, formatTokens, formatUsd } from './usage-text';
 import { accountUsedBy, harnessLine, usedByCount, usedByText } from './used-by';
 import { RaisedPanel } from '../../../shell/raised-panel';
+import { PageLoading, PageLoadingShape } from '../../../shell/page-loading';
+import { SettingsSectionKey } from '../sections';
+import { SettingsPageHeader } from '../settings-page';
 
 /** The same tones Overview's account rows use: ready works, anything missing needs the builder, archived is off. */
 const STATUS_TONE: Readonly<Record<AccountStatus, ConnectionTone>> = {
@@ -233,21 +236,10 @@ export function AccountsSection() {
   // Closing the drawer the address opened must not open it again, so the closed account is remembered.
   const [dismissed, setDismissed] = useState<AccountId | null>(null);
   const focusOpen = named !== undefined && dismissed !== named.id;
-  if (accounts.isPending) return <Text c="dimmed">Loading accounts…</Text>;
-  // A failed background refetch also sets isError while the last list is still here; that must not
-  // replace the table, the open drawer and an edit in progress.
-  if (accounts.data === undefined)
-    return <Text c="red">Accounts could not be loaded. Check that the daemon is running.</Text>;
-  const live = accounts.data.filter((a) => !a.archived);
-  const archived = accounts.data.filter((a) => a.archived);
-  return (
-    <Stack>
-      {accounts.isError ? (
-        <Alert color="red" role="alert">
-          Accounts could not be loaded. Check that the daemon is running.
-        </Alert>
-      ) : null}
-      <Group justify="flex-end">
+  const header = (
+    <SettingsPageHeader
+      sectionKey={SettingsSectionKey.Accounts}
+      actions={
         <Button
           ref={addButton}
           leftSection={<IconPlus size={16} stroke={1.5} />}
@@ -257,7 +249,35 @@ export function AccountsSection() {
         >
           Add Account
         </Button>
-      </Group>
+      }
+    />
+  );
+  if (accounts.isPending)
+    return (
+      <>
+        {header}
+        <PageLoading shape={PageLoadingShape.List} label="Reading the accounts" />
+      </>
+    );
+  // A failed background refetch also sets isError while the last list is still here; that must not
+  // replace the table, the open drawer and an edit in progress.
+  if (accounts.data === undefined)
+    return (
+      <>
+        {header}
+        <Text c="red">Accounts could not be loaded. Check that the daemon is running.</Text>
+      </>
+    );
+  const live = accounts.data.filter((a) => !a.archived);
+  const archived = accounts.data.filter((a) => a.archived);
+  return (
+    <Stack>
+      {header}
+      {accounts.isError ? (
+        <Alert color="red" role="alert">
+          Accounts could not be loaded. Check that the daemon is running.
+        </Alert>
+      ) : null}
       {/* No column wraps: the table scrolls sideways before a name or status breaks. Usage sits right like any number. */}
       <RaisedPanel>
         <Table.ScrollContainer minWidth={860}>

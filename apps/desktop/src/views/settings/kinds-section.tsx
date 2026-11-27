@@ -7,7 +7,6 @@ import { KindDrawer } from './kind-drawer';
 import { TiebreakOrder } from './kind-tiebreak-order';
 import { rigorLabel } from './rigor-labels';
 import { ROLES } from './role-labels';
-import { SectionHeading } from './section-heading';
 import { RaisedPanel } from '../../shell/raised-panel';
 
 /** The switches a kind has on, as the short words the list shows. */
@@ -56,16 +55,57 @@ function Pills({ words }: { readonly words: readonly string[] }) {
 
 const roleName = (role: string): string => ROLES.find((r) => r.role === role)?.label ?? role;
 
+/** The Kinds tab's two page actions, which the Playbook's header holds while the tab is open. */
+export interface KindsActions {
+  /** The drawer is open on a new kind. */
+  readonly adding: boolean;
+  readonly setAdding: (adding: boolean) => void;
+  /** The Tiebreak Order modal is open. */
+  readonly ordering: boolean;
+  readonly setOrdering: (ordering: boolean) => void;
+}
+
+/** Add Kind and Tiebreak Order, for the page header; the open drawer and modal stay the list's. */
+export function useKindsActions(): KindsActions {
+  const [adding, setAdding] = useState(false);
+  const [ordering, setOrdering] = useState(false);
+  return { adding, setAdding, ordering, setOrdering };
+}
+
+/** The Kinds tab's header controls: a quiet Tiebreak Order, then Add Kind. */
+export function KindsButtons({ actions }: { readonly actions: KindsActions }) {
+  return (
+    <>
+      <Button
+        size="xs"
+        variant="default"
+        onClick={() => {
+          actions.setOrdering(true);
+        }}
+      >
+        Tiebreak Order
+      </Button>
+      <Button
+        size="xs"
+        onClick={() => {
+          actions.setAdding(true);
+        }}
+      >
+        Add Kind
+      </Button>
+    </>
+  );
+}
+
 /**
  * The kinds of work a task can be: each with a minimum rigor, safety switches, extra steps and per-role overrides.
  * A row opens its drawer; Tiebreak Order sets which kind's override wins when a task has several.
  */
-export function KindsSection() {
+export function KindsSection({ actions }: { readonly actions: KindsActions }) {
   const kinds = useKinds();
   // The drawer edits this kind, or adds one when `adding`; closing keeps it mounted for its slide out.
   const [editing, setEditing] = useState<KindDto | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [ordering, setOrdering] = useState(false);
+  const { adding, setAdding, ordering, setOrdering } = actions;
   const list = kinds.data ?? [];
   const columns: DataTableColumn<KindDto>[] = [
     {
@@ -112,32 +152,6 @@ export function KindsSection() {
   ];
   return (
     <Stack gap="sm" component="section" aria-label="Kinds">
-      <SectionHeading
-        title="Kinds"
-        line="Sorts of work, each with its own care."
-        help="A kind is a sort of work with its own care: a floor under the rigor, switches for safety, and a stronger model for some steps."
-        action={
-          <Group gap="xs" wrap="nowrap">
-            <Button
-              variant="subtle"
-              color="gray"
-              onClick={() => {
-                setOrdering(true);
-              }}
-            >
-              Tiebreak Order…
-            </Button>
-            <Button
-              onClick={() => {
-                setEditing(null);
-                setAdding(true);
-              }}
-            >
-              Add Kind
-            </Button>
-          </Group>
-        }
-      />
       {kinds.isError ? (
         <Text size="sm" c="red" role="alert">
           {kinds.error.message}
@@ -173,9 +187,10 @@ export function KindsSection() {
       />
       {adding || editing !== null ? (
         <KindDrawer
-          // A new drawer per kind, so one kind's draft never leaks into the next.
-          key={editing?.id ?? 'new'}
-          kind={editing}
+          // A new drawer per kind, so one kind's draft never leaks into the next. Add Kind, in the page's
+          // header, can be pressed while a kind is open, and then the new one wins.
+          key={adding ? 'new' : (editing?.id ?? 'new')}
+          kind={adding ? null : editing}
           opened
           onClose={() => {
             setAdding(false);
