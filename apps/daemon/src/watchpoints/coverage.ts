@@ -11,8 +11,14 @@ import type { Git } from '../git';
 import { readLineVerdicts } from './line-reading';
 import { verdictKey, type LineCheck, type LineVerdicts } from './line-verdicts';
 
-/** The most files per watchpoint whose text is read for line patterns, the most bytes of one, and the files asked of git at once. */
+/**
+ * Bounds on reading files' text for line patterns: the most files one watchpoint may cover, the most files and
+ * bytes read in all (each file once, however many watchpoints cover it), the most bytes of one file, and the files
+ * and bytes asked of git at once. A watchpoint the bounds leave unread is `unreadable`, never counted low.
+ */
 const MAX_LINE_FILES = 10_000;
+const MAX_TOTAL_FILES = 20_000;
+const MAX_TOTAL_BYTES = 96 * 1024 * 1024;
 const MAX_FILE_BYTES = 256 * 1024;
 const READ_BATCH_FILES = 500;
 const MAX_BATCH_BYTES = 64 * 1024 * 1024;
@@ -131,32 +137,49 @@ export function createWatchpointCoverage(deps: WatchpointCoverageDeps): Watchpoi
     tracked: readonly string[],
     lineWatchpoints: readonly Watchpoint[],
   ): Promise<Map<string, Coverage>> {
-    // Each watchpoint's own first files, so a `**` watchpoint's share never crowds out another's.
-    const candidates = [
-      ...new Set(
-        lineWatchpoints.flatMap((w) =>
-          tracked
-            .filter((path) => w.globs.some((g) => areaMatches(path, g)))
-            .slice(0, MAX_LINE_FILES),
-        ),
-      ),
-    ];
+    const unreadable = new Map(lineWatchpoints.map((w) => [signature(w), NONE]));
+    const covering = new Map(
+      lineWatchpoints.map((w) => [
+        signature(w),
+        tracked.filter((path) => w.globs.some((g) => areaMatches(path, g))),
+      ]),
+    );
+    // A watchpoint over more files than the bound is not read at all: a partial count would read as a low one.
+    const readable = lineWatchpoints.filter(
+      (w) => (covering.get(signature(w))?.length ?? 0) <= MAX_LINE_FILES,
+    );
+    // Each file is read once, whichever watchpoints cover it.
+    const candidates = [...new Set(readable.flatMap((w) => covering.get(signature(w)) ?? []))];
     const signal = AbortSignal.timeout(READ_DEADLINE_MS);
     const texts = new Map<string, string>();
-    let refused = false;
+    const unread = new Set<string>();
+    let bytes = 0;
     for (let at = 0; at < candidates.length; at += READ_BATCH_FILES) {
-      const read = await deps.git.surveyTexts(
-        repoPath,
-        candidates.slice(at, at + READ_BATCH_FILES),
-        { maxBytes: MAX_FILE_BYTES, maxTotalBytes: MAX_BATCH_BYTES, signal },
-      );
-      refused ||= read.refused !== null;
+      const batch = candidates.slice(at, at + READ_BATCH_FILES);
+      if (at + batch.length > MAX_TOTAL_FILES || bytes >= MAX_TOTAL_BYTES) {
+        for (const path of batch) unread.add(path);
+        continue;
+      }
+      const read = await deps.git.surveyTexts(repoPath, batch, {
+        maxBytes: MAX_FILE_BYTES,
+        maxTotalBytes: Math.min(MAX_BATCH_BYTES, MAX_TOTAL_BYTES - bytes),
+        signal,
+      });
+      // A refused batch (a partial clone, or more bytes than the budget left) was not read, as opposed to a
+      // file left out for being binary or large, which is read and does not match.
+      if (read.refused !== null) for (const path of batch) unread.add(path);
+      bytes += read.bytes;
       for (const [path, text] of read.texts) texts.set(path, text);
     }
-    const unreadable = new Map(lineWatchpoints.map((w) => [signature(w), NONE]));
-    if (candidates.length > 0 && texts.size === 0 && refused) return unreadable;
+    const whole = new Map(
+      readable
+        .filter((w) => !(covering.get(signature(w)) ?? []).some((path) => unread.has(path)))
+        .map((w) => [signature(w), w]),
+    );
     const patches = new Map([...texts].map(([path, text]) => [path, wholeFilePatch(text)]));
-    const checks: LineCheck[] = lineWatchpoints.flatMap((w) =>
+    // The patches replace the texts, so the file text is held once.
+    texts.clear();
+    const checks: LineCheck[] = [...whole.values()].flatMap((w) =>
       [...patches]
         .filter(([path]) => w.globs.some((g) => areaMatches(path, g)))
         .map(([path, patch]) => ({ key: w.key, path, patterns: w.lines, patch, changed: true })),
@@ -166,7 +189,9 @@ export function createWatchpointCoverage(deps: WatchpointCoverageDeps): Watchpoi
     return new Map(
       lineWatchpoints.map((w) => [
         signature(w),
-        { ...coverageOf(w, tracked, verdicts), state: WatchpointCoverageState.Counted },
+        whole.has(signature(w))
+          ? { ...coverageOf(w, tracked, verdicts), state: WatchpointCoverageState.Counted }
+          : NONE,
       ]),
     );
   }
