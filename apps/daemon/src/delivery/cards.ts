@@ -31,7 +31,7 @@ import type { GateResult } from '../verify';
 import { batchCardFields } from './batch-card';
 import { maxCiFixes } from './ci-failure-action';
 import type { BlockedTask, UnmergedDependency } from './deps';
-import type { GateStepFailure } from './gate-failures';
+import { gateTailLines, type GateStepFailure } from './gate-failures';
 import {
   BY_ANSWER,
   CardTier,
@@ -778,6 +778,19 @@ export const preCheckOnlyKey = (batchId: BatchId): string => `pre-check-only:${b
 
 const RETRY = "Press Retry in a task's drawer on the Board to ship again; nothing was merged.";
 
+/** Checks that read a pull request's title, commits or labels and run no tests. */
+const NO_TEST_CHECK = /^(?:pr[-_ ]?title|semantic[-_ ]?pr|commitlint|labeler|license|cla)\b/i;
+
+/** How much of a gate's output its card reads lines from. */
+const GATE_TAIL_CHARS = 6000;
+
+/** How a ship card's title says the check failed: the failing test count when the gate named tests, else the check. */
+function gateFailureWords(check: ShipCheckName, steps: readonly GateStepFailure[]): string {
+  const tests = steps.reduce((sum, s) => sum + s.tests.length, 0);
+  if (tests === 0) return `the ${check} failed${inSteps(steps)}`;
+  return `${String(tests)} test${tests === 1 ? '' : 's'} fail${tests === 1 ? 's' : ''}${inSteps(steps)}`;
+}
+
 /** How many failing tests a gate card lists. */
 const MAX_LISTED_TESTS = 5;
 
@@ -884,11 +897,11 @@ export const shipCards = {
     const what =
       steps.length > 0
         ? stepsText(steps)
-        : `Last output:\n${gate.tail.slice(-1500)}\n\nFull log: ${gate.logPath}`;
+        : `The ${check} failed (exit ${String(gate.exitCode)}) and 10db couldn't read which tests.\n\nLast output:\n${gateTailLines(gate.tail.slice(-GATE_TAIL_CHARS))}\n\nFull log: ${gate.logPath}`;
     return {
       failure: BatchFailure.GateFailed,
       card: shipCard(batch, {
-        title: `${notShipped(batch)}: the ${check} failed (exit ${String(gate.exitCode)})${inSteps(steps)}`,
+        title: `Didn't ship: ${gateFailureWords(check, steps)} · ${batch.title}`,
         body: `${note === null ? '' : `${note}\n\n`}${reran ? `${RERAN}, and it failed again.\n\n` : ''}${what}\n\nStart a fix task in the batch (it reopens the batch), or ${RETRY.charAt(0).toLowerCase()}${RETRY.slice(1)}`,
         detail: stepsDetail(batch, steps),
       }),
@@ -1360,19 +1373,31 @@ export const prCards = {
     name: string,
     occurrences: number,
     seen?: { readonly head: string; readonly prUrl: string | null },
-  ): Card => ({
-    tier: CardTier.Ask,
-    urgency: Urgency.Normal,
-    closesWhen: BY_ANSWER,
-    title: `Flaky check: ${name} (${String(occurrences)} time${occurrences === 1 ? '' : 's'})`,
-    body: `The required check ${name} failed and then passed on a rerun of the same commit, ${String(occurrences)} time${occurrences === 1 ? '' : 's'} so far. A check that passes on a rerun hides a test that needs a code fix (never a retry in the test); find which test it is in the failed run's log.${seen === undefined ? '' : `\n\nLast seen on ${seen.head} of ${seen.prUrl ?? 'its pull request'}.`}`,
-    foldKey: prCardKey.flakyCheck(name),
-    detail: {
-      check: name,
-      occurrences,
-      ...(seen === undefined ? {} : { head: seen.head, prUrl: seen.prUrl }),
-    },
-  }),
+  ): Card => {
+    const noTests = NO_TEST_CHECK.test(name);
+    const times = `${String(occurrences)} time${occurrences === 1 ? '' : 's'}`;
+    const lastSeen =
+      seen === undefined
+        ? ''
+        : `\n\nLast seen on ${seen.head} of ${seen.prUrl ?? 'its pull request'}.`;
+    return {
+      tier: CardTier.Ask,
+      urgency: Urgency.Normal,
+      closesWhen: BY_ANSWER,
+      title: noTests
+        ? `${name} failed on the pull request's title or settings, then passed (${times})`
+        : `${name} passed only on a rerun: a test is flaky (${times})`,
+      body: noTests
+        ? `The required check ${name} runs no tests. It failed and then passed on a rerun of the same commit, ${times} so far, so the pull request's title or metadata was likely changed in between; there is no test to fix.${lastSeen}`
+        : `The required check ${name} failed and then passed on a rerun of the same commit, ${times} so far. A check that passes on a rerun hides a test that needs a code fix (never a retry in the test); find which test it is in the failed run's log.${lastSeen}`,
+      foldKey: prCardKey.flakyCheck(name),
+      detail: {
+        check: name,
+        occurrences,
+        ...(seen === undefined ? {} : { head: seen.head, prUrl: seen.prUrl }),
+      },
+    };
+  },
   /** The base branch fails checks that pull requests fail too: one card however many wait on it. */
   baseRed: (input: {
     readonly repo: string;
@@ -1383,7 +1408,7 @@ export const prCards = {
     tier: CardTier.Ask,
     urgency: Urgency.High,
     closesWhen: { by: 'withdrawn', when: 'the base passes these checks again (pr-watch)' },
-    title: `${input.branch} fails CI, and ${String(input.waiting)} pull request${input.waiting === 1 ? '' : 's'} wait on it`,
+    title: `${input.branch} is red: ${String(input.waiting)} pull request${input.waiting === 1 ? ' waits' : 's wait'} on it`,
     body: [
       `${input.repo}'s ${input.branch} fails ${input.checks.join(', ')}, and pull requests fail the same checks.`,
       `10db starts no CI fix for those pull requests: the failure is not in their changes. Fix ${input.branch} once (or revert what broke it). When ${input.branch} passes the checks, 10db merges it into each pull request that lands itself and pushes, so their checks run again on a new head (the others have their failed jobs run again). After an hour of waiting 10db treats the failure as the pull request's own and starts a fix.`,

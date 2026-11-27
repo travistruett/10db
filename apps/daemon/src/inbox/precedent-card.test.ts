@@ -127,7 +127,7 @@ describe('standing approvals proposed on one card', () => {
     });
     const card = openCard(project.id);
     if (card === undefined) throw new Error('the card is raised');
-    expect(card.title).toBe('Make 3 kinds of command routine in demo?');
+    expect(card.title).toBe('Stop skipping 3 kinds of command in demo? 9 skips in 6 runs');
     expect(card.body).not.toContain('curl');
     expect(listPrecedents(store.db, project.id)).toEqual([]);
 
@@ -147,7 +147,9 @@ describe('standing approvals proposed on one card', () => {
     expect(answered.candidates.map((c) => c.programKey)).toEqual(['node scripts/x.js']);
     const reworded = getInboxItem(store.db, card.id);
     expect(reworded.state).toBe('OPEN');
-    expect(reworded.title).toBe('Make 1 kind of command routine in demo?');
+    expect(reworded.title).toBe(
+      'Stop skipping `node scripts/x.js` with arguments like the examples in demo? 3 skips in 2 runs',
+    );
     expect(reworded.body).toContain('node scripts/x.js');
     expect(reworded.body).not.toContain('pnpm test');
 
@@ -156,7 +158,9 @@ describe('standing approvals proposed on one card', () => {
       refreshPrecedentCard(ctx, project.id, first);
     });
     const afterStale = getInboxItem(store.db, card.id);
-    expect(afterStale.title).toBe('Make 1 kind of command routine in demo?');
+    expect(afterStale.title).toBe(
+      'Stop skipping `node scripts/x.js` with arguments like the examples in demo? 3 skips in 2 runs',
+    );
     expect(afterStale.body).toBe(reworded.body);
 
     // The same answer again changes nothing.

@@ -5,11 +5,23 @@ const FLOOR_MIN = 0.5;
 
 const ACCEPTED_NOTE = 'accepted by the builder';
 
+/** What `unasked` says when the check saw only a likelihood of unrequested behaviour, never what it is. */
+export const UNASKED_NO_DETAIL = "The change may do something the task didn't ask for.";
+
+/**
+ * What a card says the change may do beyond the task, or null when the reading carries no description (a card
+ * line with nothing after the colon is noise). A stored reading may still end in its score, "(0.97)".
+ */
+export function unaskedDescription(unasked: string | null): string | null {
+  if (unasked === null) return null;
+  const text = unasked.replace(/\s*\(\d(?:\.\d+)?\)(?=\.?$)/, '').trim();
+  const bare = (t: string): string => t.replace(/\.$/, '');
+  return text === '' || bare(text) === bare(UNASKED_NO_DETAIL) ? null : text;
+}
+
 type Probabilities = Readonly<Record<string, number>> | null;
 
 const clamped = (floor: number): number => Math.max(floor, FLOOR_MIN);
-
-const pct = (p: number): string => p.toFixed(2);
 
 /**
  * The criteria the second call is asked about: every one the builder hasn't accepted that the first call did not
@@ -53,7 +65,6 @@ export function readAcceptance(input: {
   firstFloor: number;
   secondFloor: number;
 }): AcceptanceCriterionResult[] {
-  const f1 = clamped(input.firstFloor);
   const f2 = clamped(input.secondFloor);
   const asked = new Set(
     secondQuestions(input.criteria, input.accepted, input.first, input.firstFloor),
@@ -62,29 +73,19 @@ export function readAcceptance(input: {
     if (input.accepted.has(criterion))
       return result(criterion, AcceptanceVerdict.Met, ACCEPTED_NOTE);
     if (!asked.has(criterion)) {
-      const p = input.first?.[criterion] ?? f1;
-      return result(criterion, AcceptanceVerdict.Met, `read as met (${pct(p)}, first read)`);
+      return result(criterion, AcceptanceVerdict.Met, 'read as met');
     }
     const p = input.second?.[criterion];
     if (p === undefined) return result(criterion, AcceptanceVerdict.Unread, 'no answer');
     // 1 − p is compared to the floor, so a probability of exactly 1 − f is read as not met in floating point.
-    if (p >= f2)
-      return result(criterion, AcceptanceVerdict.Met, `read as met (${pct(p)}, second opinion)`);
+    if (p >= f2) return result(criterion, AcceptanceVerdict.Met, 'read as met');
     if (1 - p >= f2) {
       const j = input.judgeable?.[criterion];
       if (j !== undefined && j < f2)
-        return result(
-          criterion,
-          AcceptanceVerdict.Unclear,
-          `can't be judged from the change (${pct(j)})`,
-        );
-      return result(
-        criterion,
-        AcceptanceVerdict.NotMet,
-        `read as not met (${pct(p)}, second opinion)`,
-      );
+        return result(criterion, AcceptanceVerdict.Unclear, "can't be judged from the change");
+      return result(criterion, AcceptanceVerdict.NotMet, 'read as not met');
     }
-    return result(criterion, AcceptanceVerdict.Unclear, `unclear (${pct(p)}, second opinion)`);
+    return result(criterion, AcceptanceVerdict.Unclear, 'unclear');
   });
 }
 

@@ -1,4 +1,5 @@
 import {
+  clipText,
   Urgency,
   type InboxAnswer,
   type InboxItemDto,
@@ -10,6 +11,7 @@ import {
   findOpenByFoldKey,
   linearPostCounts,
   linearPostProblems,
+  getProject,
   getTask,
   retryLinearPosts,
   type DbReader,
@@ -33,6 +35,8 @@ export const linearReporterFoldKey = (projectId: ProjectId): string =>
   `linear-reporter:${projectId}`;
 
 const LISTED_ROWS = 10;
+/** The most characters of a reason the title carries. */
+const TITLE_REASON_MAX = 90;
 
 /** One line per row the card counts: the task, its issue, the event and the post id, so each can be found on the issue. */
 function problemLines(db: DbReader, rows: readonly LinearPostDto[]): string[] {
@@ -74,13 +78,17 @@ export function refreshReporterCard(
       ? `${String(withheld)} withheld${latest?.withheldPattern ? ` (${latest.withheldPattern})` : ''}`
       : null,
   ].filter((part) => part !== null);
+  const titleReason = clipText(
+    (reason ?? counts.join(', ')).replace(/\s+/g, ' ').trim(),
+    TITLE_REASON_MAX,
+  );
   deps.inbox.flag({
     projectId,
     tier: CardTier.Status,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
     workstreamId: null,
-    title: 'Linear Updates Need You',
+    title: `Linear updates for ${getProject(deps.state.db, projectId).name} ${held > 0 ? 'are held' : 'are not going through'}: ${titleReason}`,
     body: [
       reason === null
         ? counts.join(', ')

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { AcceptanceCriterionResult, AcceptanceVerdict } from '@10db/contracts';
-import { AcceptanceMove, acceptanceMove, readAcceptance, secondQuestions } from './read';
+import {
+  AcceptanceMove,
+  acceptanceMove,
+  readAcceptance,
+  secondQuestions,
+  unaskedDescription,
+} from './read';
 
 const A = 'adds the flag';
 const B = 'prints the help';
@@ -27,7 +33,7 @@ describe('readAcceptance', () => {
     expect(secondQuestions([A, B, C], none, first, 0.8)).toEqual([B, C]);
     const out = read({ first, second: { [B]: 0.75, [C]: 0.1 } });
     expect(verdicts(out)).toEqual(['met', 'met', 'not_met']);
-    expect(out[2]?.note).toBe('read as not met (0.10, second opinion)');
+    expect(out[2]?.note).toBe('read as not met');
   });
 
   it('reads the second at its floor: met, not met, or unclear between', () => {
@@ -39,7 +45,7 @@ describe('readAcceptance', () => {
     const second = { [A]: 0.05, [B]: 0.05, [C]: 0.9 };
     const out = read({ first: {}, second, judgeable: { [A]: 0.9, [B]: 0.25, [C]: 0.1 } });
     expect(verdicts(out)).toEqual(['not_met', 'unclear', 'met']);
-    expect(out[1]?.note).toBe("can't be judged from the change (0.25)");
+    expect(out[1]?.note).toBe("can't be judged from the change");
     expect(verdicts(read({ first: {}, second, judgeable: { [A]: 0.7, [B]: 0.7 } }))).toEqual([
       'not_met',
       'not_met',
@@ -89,5 +95,16 @@ describe('acceptanceMove', () => {
     expect(move(rs('unclear'), true, false)).toBe(AcceptanceMove.GoOn);
     expect(move(rs('met', 'unread'), false, false)).toBe(AcceptanceMove.GoOn);
     expect(move(rs('unread', 'unclear'), false, true)).toBe(AcceptanceMove.GoOnWithCard);
+  });
+});
+
+describe('unaskedDescription', () => {
+  it('has nothing to say for a reading that is only a likelihood, so the card shows no empty line', () => {
+    expect(
+      unaskedDescription("The change may do something the task didn't ask for (0.97)."),
+    ).toBeNull();
+    expect(unaskedDescription("The change may do something the task didn't ask for.")).toBeNull();
+    expect(unaskedDescription('It also logs the name.')).toBe('It also logs the name.');
+    expect(unaskedDescription(null)).toBeNull();
   });
 });
