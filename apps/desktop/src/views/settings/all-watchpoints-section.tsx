@@ -1,9 +1,10 @@
 import { STARTER_WATCHPOINTS, type Watchpoint } from '@10db/contracts';
-import { Alert, Box, Loader, Menu, Stack, Text } from '@mantine/core';
+import { Alert, Box, Menu, Skeleton, Stack, Text } from '@mantine/core';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
 import { useSetYourWatchpoints, useYourWatchpoints } from '../../daemon/watchpoint-queries';
 import { ConfirmModal } from '../../shell/confirm-modal';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
 import { SectionHeading } from './section-heading';
 import { SplitButton } from './split-button';
@@ -71,6 +72,9 @@ export function LibraryItems({
   );
 }
 
+/** The table's column titles, drawn by its placeholder while the list is read. */
+const LOADING_HEADINGS = ['Watchpoint', 'Matches', 'When It Matches', ''] as const;
+
 /** Your watchpoints, which apply in every project unless a project sets its own. */
 export function AllWatchpointsSection() {
   const yours = useYourWatchpoints();
@@ -85,7 +89,23 @@ export function AllWatchpointsSection() {
             {yours.error.message}
           </Alert>
         ) : (
-          <Loader size="sm" aria-label="Reading the watchpoints" />
+          <>
+            <SectionHeading
+              title="Watchpoints"
+              line={WATCHPOINTS_LINE}
+              help={<WatchpointsHelp />}
+              action={<Skeleton height={36} width={220} radius="sm" />}
+            />
+            <PageLoading
+              shape={PageLoadingShape.Table}
+              label="Reading the watchpoints"
+              headings={LOADING_HEADINGS}
+              rows={4}
+              cellLines={2}
+              verticalSpacing="xs"
+              horizontalSpacing="md"
+            />
+          </>
         )}
       </Stack>
     );

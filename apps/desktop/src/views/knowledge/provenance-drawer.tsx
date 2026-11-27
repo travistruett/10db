@@ -6,8 +6,9 @@ import {
   type PrincipleItem,
   type ProvenanceDto,
 } from '@10db/contracts';
-import { Alert, Anchor, Blockquote, Group, Loader, Stack, Text } from '@mantine/core';
+import { Alert, Anchor, Blockquote, Group, Stack, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { useOpenSessionNotice } from '../sessions/open-session';
 import { useProvenance, type RecordRef, type TracedRecord } from '../../daemon/knowledge-queries';
@@ -276,7 +277,9 @@ export function ProvenanceDrawer({
             {record.label}
           </Text>
         ) : null}
-        {provenance.isPending && record ? <Loader size="sm" aria-label="Loading" /> : null}
+        {provenance.isPending && record ? (
+          <PageLoading shape={PageLoadingShape.Lines} rows={6} label="Loading the record" />
+        ) : null}
         {provenance.isError ? (
           <Alert color="red" title="Couldn't load this record">
             {provenance.error.message}

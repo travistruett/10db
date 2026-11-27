@@ -1,9 +1,10 @@
-import { Button, Group, Image, Loader, Modal, Stack, Text } from '@mantine/core';
+import { Button, Group, Image, Modal, Skeleton, Stack, Text } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { DeviceChange, DeviceChangedData, EventType } from '@10db/contracts';
 import { useDevices, usePairingCode } from '../../daemon/device-queries';
 import { subscribeToEvents } from '../../daemon/events';
+import { useLoadingDelayElapsed } from '../../shell/page-loading';
 import { useNow } from '../../shell/relative';
 
 /** How long "Paired" shows before the dialog closes. */
@@ -21,6 +22,31 @@ function countdown(msLeft: number): string {
  * Pair a Device: a picture of the link, the code in large type, how long it lasts and New Code. It makes a code
  * when it opens and closes on the pairing it was waiting for (a device the list did not hold when it opened).
  */
+/** The pairing code's size on screen, which its placeholder keeps. */
+const QR_SIZE = 240;
+
+/** The modal's body while its code is made: the same lines, picture, code and buttons, after the shell's delay. */
+function PairingPlaceholder() {
+  const late = useLoadingDelayElapsed();
+  if (!late) return null;
+  return (
+    <Stack gap="md" align="center" w="100%" role="status" aria-label="Making a pairing code">
+      <Stack gap={6} align="center" w="100%">
+        <Skeleton height={14} width="55%" />
+        <Skeleton height={12} width="90%" />
+        <Skeleton height={12} width="70%" />
+      </Stack>
+      <Skeleton height={QR_SIZE} width={QR_SIZE} radius={8} />
+      <Skeleton height={38} width={QR_SIZE} />
+      <Skeleton height={12} width={120} />
+      <Group>
+        <Skeleton height={36} width={100} radius="sm" />
+        <Skeleton height={36} width={80} radius="sm" />
+      </Group>
+    </Stack>
+  );
+}
+
 export function PairDeviceModal({
   opened,
   onClose,
@@ -114,7 +140,7 @@ function PairBody({ onClose }: { readonly onClose: () => void }) {
           {code.error.message}
         </Text>
       ) : code.data === undefined ? (
-        <Loader size="sm" />
+        <PairingPlaceholder />
       ) : (
         <>
           <Stack gap={4} align="center">

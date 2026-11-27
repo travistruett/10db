@@ -1,6 +1,7 @@
 import type { HumanTouchDayDto, ProjectId } from '@10db/contracts';
-import { Alert, Loader, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Stack, Table, Text, Title } from '@mantine/core';
 import { useHumanTouch } from '../../daemon/human-touch-queries';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
 
 /** "Nov 3" for a `YYYY-MM-DD` UTC day, the way the daemon cut it. */
@@ -78,7 +79,15 @@ export function HumanTouchPanel({ projectId }: { readonly projectId: ProjectId |
           {touch.error.message}
         </Alert>
       ) : null}
-      {touch.isLoading ? <Loader size="sm" aria-label="Loading human touch" /> : null}
+      {touch.isLoading ? (
+        <PageLoading
+          shape={PageLoadingShape.Table}
+          label="Loading human touch"
+          headings={COLUMNS}
+          rows={7}
+          minWidth={720}
+        />
+      ) : null}
       {touch.isSuccess ? (
         <RaisedPanel>
           <Table.ScrollContainer minWidth={720}>

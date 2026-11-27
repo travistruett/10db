@@ -1,5 +1,5 @@
 import { AccountId, AccountKind, powersDecisions, type JudgeStatusDto } from '@10db/contracts';
-import { Anchor, Button, Group, Loader, Stack, Text } from '@mantine/core';
+import { Anchor, Button, Group, Stack, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
@@ -10,6 +10,7 @@ import { cantRunDecisions } from './accounts/used-by';
 import { ConnectionStatus, ConnectionTone } from './connection-status';
 import { useFocusTarget } from './focus-target';
 import { SettingsSectionKey } from './sections';
+import { ControlLoading } from '../../shell/page-loading';
 import { HelpText } from './help-hint';
 import { SettingRow } from './setting-row';
 
@@ -103,7 +104,7 @@ export function PaidBy({
         }
       >
         {accounts.isPending ? (
-          <Loader size="sm" aria-label="Loading accounts" />
+          <ControlLoading label="Loading accounts" />
         ) : accounts.data === undefined ? (
           <Text size="sm" c="red" role="alert">
             Accounts could not be loaded. Check that the daemon is running.

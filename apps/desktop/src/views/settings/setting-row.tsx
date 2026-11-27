@@ -65,6 +65,12 @@ export interface SettingRowProps {
 /** The control a row's description belongs to: its input, or the group of radios. */
 const CONTROL = 'textarea, input:not([type="hidden"]), [role="radiogroup"]';
 
+/** The least width of a row's text column. */
+export const SETTING_TEXT_MIN_WIDTH = 240;
+
+/** The width of a row's control column. */
+export const SETTING_CONTROL_WIDTH = 320;
+
 /** One setting: its name and one line on the left, its control on the right. */
 export function SettingRow({
   label,
@@ -86,7 +92,7 @@ export function SettingRow({
       control.setAttribute('aria-describedby', [...ids, descriptionId].join(' '));
   });
   const text = (
-    <Box flex={1} miw={240}>
+    <Box flex={1} miw={SETTING_TEXT_MIN_WIDTH}>
       <Group gap={4} wrap="nowrap">
         <Text size="sm" fw={500}>
           {label}
@@ -110,7 +116,7 @@ export function SettingRow({
       ) : (
         <Group justify="space-between" wrap="nowrap" gap="xl">
           {text}
-          <Box w={320} style={{ flex: 'none' }}>
+          <Box w={SETTING_CONTROL_WIDTH} style={{ flex: 'none' }}>
             {children}
           </Box>
         </Group>

@@ -7,9 +7,10 @@ import {
   type RigorFiguresPeriod,
   type RigorFiguresRowDto,
 } from '@10db/contracts';
-import { Alert, Loader, SegmentedControl, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, SegmentedControl, Stack, Table, Text, Title } from '@mantine/core';
 import { useState } from 'react';
 import { useRigorFigures } from '../../daemon/rigor-figures-queries';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
 
 const COLUMNS = [
@@ -95,7 +96,15 @@ export function RigorPanel({ projectId }: { readonly projectId: ProjectId | null
           {figures.error.message}
         </Alert>
       ) : null}
-      {figures.isLoading ? <Loader size="sm" aria-label="Loading work per rigor" /> : null}
+      {figures.isLoading ? (
+        <PageLoading
+          shape={PageLoadingShape.Table}
+          label="Loading work per rigor"
+          headings={COLUMNS}
+          rows={4}
+          minWidth={900}
+        />
+      ) : null}
       {figures.isSuccess ? (
         <>
           <RaisedPanel>

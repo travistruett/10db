@@ -1,7 +1,8 @@
 import type { PlanRecordPage } from '@10db/contracts';
-import { Loader, Text } from '@mantine/core';
+import { Text } from '@mantine/core';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
+import { PageLoading, PageLoadingShape } from '../../../../shell/page-loading';
 
 /**
  * What stands in for a list that has not arrived; otherwise the table, which says when it is empty or
@@ -19,7 +20,10 @@ export function RecordListStates({
   readonly none?: { readonly narrowed: boolean; readonly text: string };
   readonly children: ReactNode;
 }) {
-  if (query.isPending) return <Loader size="sm" aria-label={`Loading ${what}`} />;
+  if (query.isPending)
+    return (
+      <PageLoading shape={PageLoadingShape.Table} label={`Loading ${what}`} rows={4} columns={4} />
+    );
   if (none !== undefined && !none.narrowed && query.data?.total === 0)
     return (
       <Text size="sm" c="dimmed">

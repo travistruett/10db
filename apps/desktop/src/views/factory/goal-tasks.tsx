@@ -1,5 +1,6 @@
-import { Alert, Badge, Box, Group, Loader, Stack, Text, Tooltip } from '@mantine/core';
+import { Alert, Badge, Box, Group, Skeleton, Stack, Text, Tooltip } from '@mantine/core';
 import { Link, useNavigate } from '@tanstack/react-router';
+import { useLoadingDelayElapsed } from '../../shell/page-loading';
 import { PullRequestLink } from '../board/pull-request-link';
 import { ContextGauge } from './context-gauge';
 import { RelativeTime } from './relative-time';
@@ -15,6 +16,26 @@ export interface GoalTasksProps {
   readonly rows: readonly TaskRow[];
   readonly loading: boolean;
   readonly error: string | null;
+}
+
+/** The task rows while they load: a state dot, a title, a state and a time on each, as the rows have. */
+function TaskRowsLoading() {
+  const late = useLoadingDelayElapsed();
+  if (!late) return null;
+  return (
+    <Stack gap={2} role="status" aria-label="Loading tasks">
+      {[0, 1, 2].map((i) => (
+        <Group key={i} gap="sm" wrap="nowrap" py={4}>
+          <Skeleton height={8} width={8} circle style={{ flex: 'none' }} />
+          <Box style={{ flex: 1 }}>
+            <Skeleton height={14} width={`${String(55 - i * 10)}%`} />
+          </Box>
+          <Skeleton height={12} width={64} style={{ flex: 'none' }} />
+          <Skeleton height={12} width={88} style={{ flex: 'none' }} />
+        </Group>
+      ))}
+    </Stack>
+  );
 }
 
 /**
@@ -35,7 +56,7 @@ export function GoalTasks({ rows, loading, error }: GoalTasksProps) {
           {error}
         </Alert>
       ) : null}
-      {loading ? <Loader size="sm" aria-label="Loading tasks" /> : null}
+      {loading ? <TaskRowsLoading /> : null}
       {!loading && error === null && rows.length === 0 ? (
         <Text size="sm" c="dimmed">
           This goal has no tasks yet.

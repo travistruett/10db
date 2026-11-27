@@ -1,6 +1,7 @@
 import { CARD_TYPE_DAYS, type CardTypeDto, type ProjectId } from '@10db/contracts';
-import { Alert, Badge, Loader, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Badge, Stack, Table, Text, Title } from '@mantine/core';
 import { useCardTypes } from '../../daemon/card-types-queries';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
 
 const COLUMNS = [
@@ -54,7 +55,15 @@ export function CardTypesPanel({ projectId }: { readonly projectId: ProjectId | 
           {types.error.message}
         </Alert>
       ) : null}
-      {types.isLoading ? <Loader size="sm" aria-label="Loading Inbox card types" /> : null}
+      {types.isLoading ? (
+        <PageLoading
+          shape={PageLoadingShape.Table}
+          label="Loading Inbox card types"
+          headings={COLUMNS}
+          rows={4}
+          minWidth={720}
+        />
+      ) : null}
       {types.isSuccess ? (
         types.data.types.length === 0 ? (
           <Text size="sm" c="dimmed">

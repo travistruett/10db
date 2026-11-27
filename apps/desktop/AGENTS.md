@@ -111,7 +111,10 @@ Read the ones for what you touch, and write a view's notes there, not here. This
   into the title row with `TitleRow`, and what sits under it at the top of its content with `PageIntro` (an
   optional one-line byline cut to one line with its text as a tooltip, an optional toolbar of tabs and filters);
   workspaces keep compact headers.
-  `src/shell/page-loading.tsx` is what a page shows while it loads (after 300 ms, placeholder rows; never a lone spinner).
+  `src/shell/page-loading.tsx` is what a page, panel, drawer or modal body shows while its data loads: animated
+  placeholders shaped like what is coming (a table with its real headings, rows, fields, a log, cards), after 300 ms,
+  never a lone spinner. A spinner stays only for work in progress that labels an action. A screen with a shape of its
+  own keeps its skeleton beside its view and reuses the real component's constants, as `board-skeleton.tsx` does.
   `src/shell/count-badge.tsx` is every count: muted, or `tone` attention, in the theme's primary colour, when it
   needs the builder.
 - Factory and preview: the installed release app is the factory; it manages the 10db repo and runs its tasks.

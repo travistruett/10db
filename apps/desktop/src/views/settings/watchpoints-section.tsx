@@ -1,5 +1,5 @@
 import type { ProjectDto, ProjectWatchpointEntry, Watchpoint } from '@10db/contracts';
-import { Alert, Box, Loader, Stack, Text } from '@mantine/core';
+import { Alert, Box, Skeleton, Stack, Text } from '@mantine/core';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
 import {
@@ -9,6 +9,7 @@ import {
   useYourWatchpoints,
 } from '../../daemon/watchpoint-queries';
 import { ConfirmModal } from '../../shell/confirm-modal';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
 import { LibraryItems, WATCHPOINTS_LINE, WatchpointsHelp } from './all-watchpoints-section';
 import { SectionHeading } from './section-heading';
@@ -37,6 +38,9 @@ function noteFor(row: ProjectRow): string {
     : 'Changes apply to this project only.';
 }
 
+/** The table's column titles, drawn by its placeholder while the lists are read. */
+const LOADING_HEADINGS = ['Watchpoint', 'When It Matches', 'Last 30 Days', ''] as const;
+
 const count = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? '' : 's'}`;
 
 /** What applies in a project: your watchpoints as it has them, then its own. It never changes your list. */
@@ -55,7 +59,23 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
             {(yours.error ?? here.error)?.message}
           </Alert>
         ) : (
-          <Loader size="sm" aria-label="Reading the watchpoints" />
+          <>
+            <SectionHeading
+              title="Watchpoints"
+              line={WATCHPOINTS_LINE}
+              help={<WatchpointsHelp />}
+              action={<Skeleton height={36} width={220} radius="sm" />}
+            />
+            <PageLoading
+              shape={PageLoadingShape.Table}
+              label="Reading the watchpoints"
+              headings={LOADING_HEADINGS}
+              rows={4}
+              cellLines={3}
+              verticalSpacing="xs"
+              horizontalSpacing="xs"
+            />
+          </>
         )}
       </Stack>
     );

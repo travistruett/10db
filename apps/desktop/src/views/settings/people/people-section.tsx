@@ -6,7 +6,6 @@ import {
   Badge,
   Button,
   Group,
-  Loader,
   Modal,
   Stack,
   Table,
@@ -21,6 +20,7 @@ import {
   IconUsers,
 } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
+import { PageLoading, PageLoadingShape } from '../../../shell/page-loading';
 import { EmptyState } from '../../../shell/empty-state';
 import { useState } from 'react';
 import { usePeople, useRemovePerson, useSlackMember, useSlackStatus } from '../../../daemon/people';
@@ -178,7 +178,17 @@ export function PeopleSection() {
           )}
         </Group>
         <ConnectSlack />
-        {people.isPending ? <Loader size="sm" /> : null}
+        {people.isPending ? (
+          <PageLoading
+            shape={PageLoadingShape.Table}
+            label="Loading people"
+            headings={['Name', "How It's Sent", 'Answers', '']}
+            rows={3}
+            cellLines={2}
+            verticalSpacing="sm"
+            horizontalSpacing="md"
+          />
+        ) : null}
         {people.isError ? (
           <Alert color="red" title="Couldn't load people">
             {people.error.message}

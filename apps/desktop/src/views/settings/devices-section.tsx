@@ -1,5 +1,5 @@
 import { DevicePlatform, SharingState, type DeviceDto } from '@10db/contracts';
-import { Alert, Button, Loader, Stack, Table, Text } from '@mantine/core';
+import { Alert, Button, Stack, Table, Text } from '@mantine/core';
 import { IconDeviceMobile } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { useState } from 'react';
@@ -7,6 +7,7 @@ import { useDevices, useRevokeDevice } from '../../daemon/device-queries';
 import { useSharing } from '../../daemon/sharing-queries';
 import { PairDeviceModal } from './pair-device-modal';
 import { ConfirmModal } from '../../shell/confirm-modal';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { EmptyState } from '../../shell/empty-state';
 import { RaisedPanel } from '../../shell/raised-panel';
 import { fromNow, absoluteTime } from '../../shell/relative';
@@ -49,7 +50,17 @@ export function DevicesSection() {
           setPairing(false);
         }}
       />
-      {devices.isPending ? <Loader size="sm" /> : null}
+      {devices.isPending ? (
+        <PageLoading
+          shape={PageLoadingShape.Table}
+          label="Loading devices"
+          headings={['Device', 'Paired', 'Last Used', '']}
+          rows={3}
+          cellLines={2}
+          verticalSpacing="sm"
+          horizontalSpacing="md"
+        />
+      ) : null}
       {devices.isError ? (
         <Alert color="red" title="Couldn't load devices">
           {devices.error.message}

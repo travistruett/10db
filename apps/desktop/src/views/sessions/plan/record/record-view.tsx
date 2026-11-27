@@ -5,7 +5,6 @@ import {
   Badge,
   Container,
   Group,
-  Loader,
   Stack,
   Tabs,
   Text,
@@ -15,6 +14,7 @@ import {
 import { IconArrowLeft } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
+import { PageLoading, PageLoadingShape } from '../../../../shell/page-loading';
 import { usePlanRecord } from '../../../../daemon/plan-record-queries';
 import { useShapeView } from '../../../../daemon/shape-queries';
 import { useOpenSessionNotice } from '../../open-session';
@@ -247,7 +247,12 @@ export function RecordView({
           {record.error.message}
         </Alert>
       ) : record.data === undefined ? (
-        <Loader size="sm" aria-label="Loading the record" />
+        <PageLoading
+          shape={PageLoadingShape.Table}
+          label="Loading the record"
+          rows={5}
+          columns={4}
+        />
       ) : (
         <RecordTabs
           shapeId={shapeId}

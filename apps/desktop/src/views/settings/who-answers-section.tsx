@@ -4,7 +4,6 @@ import {
   ActionIcon,
   Button,
   Group,
-  Loader,
   Stack,
   Table,
   Text,
@@ -14,6 +13,7 @@ import {
 import { IconPencil, IconRoute, IconTrash, IconUsers } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { EmptyState } from '../../shell/empty-state';
 import { useGoals } from '../../daemon/goal-queries';
 import { useJudgeStatus } from '../../daemon/judge-queries';
@@ -96,7 +96,15 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
           </Button>
         </Group>
       </Group>
-      {rules.isPending ? <Loader size="sm" /> : null}
+      {rules.isPending ? (
+        <PageLoading
+          shape={PageLoadingShape.Table}
+          label="Loading the routes"
+          headings={['Scope', 'For', 'Questions', 'Goes To', '']}
+          rows={3}
+          verticalSpacing="xs"
+        />
+      ) : null}
       {rules.isError ? (
         <Alert color="red" title="Couldn't load the routes">
           {rules.error.message}
