@@ -8,7 +8,6 @@ import {
   Stack,
   Table,
   Text,
-  Title,
   Tooltip,
 } from '@mantine/core';
 import { IconPencil, IconRoute, IconTrash, IconUsers } from '@tabler/icons-react';
@@ -25,6 +24,7 @@ import { HelpHint } from './help-hint';
 import { RouteScope, routeRows, ruleInputs, type RouteRow } from './route-rows';
 import { SettingsSectionKey } from './sections';
 import { RaisedPanel } from '../../shell/raised-panel';
+import { SettingsPageHeader } from './settings-page';
 
 /** Settings › Question Routing: who a question goes to, by scope, most specific first. */
 export function WhoAnswersSection({ project }: { readonly project: ProjectDto }) {
@@ -54,48 +54,37 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Stack gap={2}>
-          <Group gap={4}>
-            <Title order={4}>Routes</Title>
-            <HelpHint label="Routes">
-              <Text size="sm" mb={4}>
-                A question goes to the first route that matches, most specific first.
-              </Text>
-              <Text size="sm">
-                {judgeOn
-                  ? "When none does, Jev picks from the project's categories and topics. Anything left comes to you."
-                  : "Without Jev, the lane's own category and topic decide. Anything left comes to you."}
-              </Text>
-            </HelpHint>
-          </Group>
-          <Text size="sm" c="dimmed">
-            Who answers each kind of question; the rest come to you.
-          </Text>
-        </Stack>
-        <Group gap="xs" wrap="nowrap" style={{ flex: 'none' }}>
-          <Button
-            variant="default"
-            leftSection={<IconUsers size={16} />}
-            renderRoot={(props) => (
-              <Link
-                {...props}
-                to="/settings/$section"
-                params={{ section: SettingsSectionKey.People }}
-              />
-            )}
-          >
-            Manage People
-          </Button>
-          <Button
-            onClick={() => {
-              setAdding(true);
-            }}
-          >
-            Add Route
-          </Button>
-        </Group>
-      </Group>
+      <SettingsPageHeader
+        sectionKey={SettingsSectionKey.RoutingRules}
+        project={project}
+        actions={
+          <>
+            <Button
+              variant="default"
+              leftSection={<IconUsers size={16} />}
+              renderRoot={(props) => (
+                <Link
+                  {...props}
+                  to="/settings/$section"
+                  params={{ section: SettingsSectionKey.People }}
+                />
+              )}
+            >
+              Manage People
+            </Button>
+            {/* While there are no routes, the empty state holds the add. */}
+            {rules.isSuccess && rows.length > 0 ? (
+              <Button
+                onClick={() => {
+                  setAdding(true);
+                }}
+              >
+                Add Route
+              </Button>
+            ) : null}
+          </>
+        }
+      />
       {rules.isPending ? <Loader size="sm" /> : null}
       {rules.isError ? (
         <Alert color="red" title="Couldn't load the routes">
@@ -124,7 +113,21 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
                 <Table.Tr>
                   <Table.Th w={100}>Scope</Table.Th>
                   <Table.Th>For</Table.Th>
-                  <Table.Th>Questions</Table.Th>
+                  <Table.Th>
+                    <Group gap={4} wrap="nowrap">
+                      Questions
+                      <HelpHint label="Routes">
+                        <Text size="sm" mb={4}>
+                          A question goes to the first route that matches, most specific first.
+                        </Text>
+                        <Text size="sm">
+                          {judgeOn
+                            ? "When none does, Jev picks from the project's categories and topics. Anything left comes to you."
+                            : "Without Jev, the lane's own category and topic decide. Anything left comes to you."}
+                        </Text>
+                      </HelpHint>
+                    </Group>
+                  </Table.Th>
                   <Table.Th>Goes To</Table.Th>
                   <Table.Th w={80} />
                 </Table.Tr>

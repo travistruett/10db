@@ -4,7 +4,7 @@ import {
   type InstalledPluginDto,
   type TrustSwitches,
 } from '@10db/contracts';
-import { Alert, Button, Divider, Group, Paper, Stack, Switch, Text, Title } from '@mantine/core';
+import { Alert, Button, Divider, Group, Paper, Stack, Switch, Text } from '@mantine/core';
 import { Fragment, useId } from 'react';
 import { useSetTrust, useTrust } from '../../daemon/trust-queries';
 import { HelpHint, HelpText } from './help-hint';
@@ -17,6 +17,7 @@ import {
   TENDB_NOT_READY_LABEL,
   TRUST_ROWS,
 } from './trust-rows';
+import { SectionHeading } from './section-heading';
 
 /** A row's one-line description, with the note on each agent behind an info button. */
 export function TrustRowText({
@@ -93,20 +94,17 @@ function JudgeList({
   const headingId = useId();
   return (
     <Stack gap="xs" role="region" aria-labelledby={headingId}>
-      <Stack gap={2}>
-        <Group gap={4} wrap="nowrap">
-          <Title order={5} id={headingId}>
-            Judge
-          </Title>
-          <HelpHint label="Judge">
+      <SectionHeading
+        id={headingId}
+        title="Judge"
+        line="What decides a new task's routine calls on each account."
+        help={
+          <>
             <HelpText>{JUDGE_LIST_NOTE}</HelpText>
             <HelpText>{NATIVE_JUDGE_NOTE}</HelpText>
-          </HelpHint>
-        </Group>
-        <Text size="xs" c="dimmed">
-          What decides a new task's routine calls on each account.
-        </Text>
-      </Stack>
+          </>
+        }
+      />
       <Paper withBorder radius="md" component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
         {judges.map((row, i) => (
           <Fragment key={row.accountId}>

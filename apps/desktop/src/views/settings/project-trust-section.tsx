@@ -5,7 +5,7 @@ import {
   YourMcpServerState,
   type TrustSwitchKey,
 } from '@10db/contracts';
-import { Alert, Button, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
+import { Alert, Button, SegmentedControl, Stack, Text } from '@mantine/core';
 import { useId } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
 import {
@@ -24,6 +24,7 @@ import { previewItems } from './trust/preview-items';
 import { ProductionSystems } from './trust/production-systems';
 import { RepoMcpServers } from './trust/repo-mcp-servers';
 import { OtherAndExpected, SwitchItems } from './trust/switch-items';
+import { SectionHeading } from './section-heading';
 
 /** The one line under each switch; the full account sits behind its info button. */
 const SHORT: Readonly<Record<TrustSwitchKey, string>> = {
@@ -120,15 +121,12 @@ function AllowedInProject({ projectId }: { readonly projectId: ProjectDto['id'] 
   const listed = grants.data ?? [];
   return (
     <Stack gap="xs" role="region" aria-labelledby={headingId}>
-      <Group gap={4}>
-        <Title order={4} id={headingId}>
-          Allowed in This Project
-        </Title>
-        <HelpHint label="Allowed in this project">{GRANTS_DESCRIPTION}</HelpHint>
-      </Group>
-      <Text size="sm" c="dimmed">
-        Lines you allowed from now on.
-      </Text>
+      <SectionHeading
+        id={headingId}
+        title="Allowed in This Project"
+        line="Lines you allowed from now on."
+        help={GRANTS_DESCRIPTION}
+      />
       {grants.isError ? <Alert color="red">{grants.error.message}</Alert> : null}
       {remove.isError ? <Alert color="red">{remove.error.message}</Alert> : null}
       {grants.data !== undefined && listed.length === 0 ? (

@@ -1,9 +1,10 @@
 import { AgentCopyState, ToolName, type AgentCopy } from '@10db/contracts';
-import { Badge, Box, Group, Stack, Text, Title, Tooltip } from '@mantine/core';
+import { Badge, Box, Group, Stack, Text, Tooltip } from '@mantine/core';
 import { useId } from 'react';
 import { useSystemCheck } from '../../daemon/queries';
-import { HelpHint, HelpText } from './help-hint';
+import { HelpText } from './help-hint';
 import { SettingsCard } from './setting-row';
+import { SectionHeading } from './section-heading';
 
 const TITLE = 'Harnesses';
 
@@ -46,22 +47,17 @@ export function AgentCopiesSection() {
     agent.tool === ToolName.Claude ? check.claudeCode.warning : check.codex.warning;
   return (
     <Stack gap="xs" role="region" aria-labelledby={titleId}>
-      <Stack gap={2}>
-        <Group gap={4} wrap="nowrap">
-          <Title order={4} id={titleId}>
-            {TITLE}
-          </Title>
-          <HelpHint label={TITLE}>
-            <HelpText>
-              10db runs each agent on the release it has tested. A newer release reaches you in a
-              10db update, once 10db has passed its live test on it; nothing here needs you.
-            </HelpText>
-          </HelpHint>
-        </Group>
-        <Text size="xs" c="dimmed">
-          The Claude Code and Codex releases 10db runs your sessions on.
-        </Text>
-      </Stack>
+      <SectionHeading
+        id={titleId}
+        title={TITLE}
+        line="The Claude Code and Codex releases 10db runs your sessions on."
+        help={
+          <HelpText>
+            10db runs each agent on the release it has tested. A newer release reaches you in a 10db
+            update, once 10db has passed its live test on it; nothing here needs you.
+          </HelpText>
+        }
+      />
       <SettingsCard>
         {agents.map((agent) => {
           const newer = agent.newerRelease;

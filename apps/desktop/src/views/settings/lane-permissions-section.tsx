@@ -1,7 +1,8 @@
-import { Badge, Group, Stack, Switch, Text, Title } from '@mantine/core';
+import { Badge, Group, Stack, Switch } from '@mantine/core';
 import { useLanePermissions, useSetLanePermissions } from '../../daemon/queries';
 import { HelpText } from './help-hint';
 import { SettingRow, SettingsCard } from './setting-row';
+import { SectionHeading } from './section-heading';
 
 const LABEL = 'Approve Routine Calls Automatically';
 
@@ -20,9 +21,6 @@ export function LanePermissionsSection() {
   const on = status.data?.autoMode ?? false;
   return (
     <Stack gap="xl">
-      <Text size="sm" c="dimmed">
-        How a lane's agent gets permission to run commands. Applies from the next session.
-      </Text>
       <SettingsCard>
         <SettingRow
           label={LABEL}
@@ -54,12 +52,10 @@ export function LanePermissionsSection() {
         </SettingRow>
       </SettingsCard>
       <Stack gap="xs">
-        <Stack gap={2}>
-          <Title order={4}>Still Asks You</Title>
-          <Text size="xs" c="dimmed">
-            Even with this on, these come to your Inbox.
-          </Text>
-        </Stack>
+        <SectionHeading
+          title="Still Asks You"
+          line="Even with this on, these come to your Inbox."
+        />
         <Group gap="xs">
           {STILL_ASKS.map((item) => (
             <Badge

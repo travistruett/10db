@@ -58,7 +58,6 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
   const header = {
     sectionKey: SettingsSectionKey.Watchpoints,
     project,
-    byline: 'Files whose changes you judge yourself.',
   } as const;
   if (yours.data === undefined || here.data === undefined)
     return (

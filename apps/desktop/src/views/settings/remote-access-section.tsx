@@ -6,14 +6,7 @@ import {
   type SharingStepDto,
 } from '@10db/contracts';
 import { Accordion, Box, Button, CopyButton, Group, NumberInput, Stack, Text } from '@mantine/core';
-import {
-  IconCheck,
-  IconCircle,
-  IconClock,
-  IconExternalLink,
-  IconWifi,
-  IconX,
-} from '@tabler/icons-react';
+import { IconCheck, IconCircle, IconClock, IconExternalLink, IconX } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
 import { openWebLink } from '../../desktop/tauri';
 import {
@@ -24,6 +17,7 @@ import {
 import { EmptyState } from '../../shell/empty-state';
 import { usePageGuide } from '../../shell/page-guide';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
+import { SharingIcon } from '../../shell/sharing-indicator';
 import { REMOTE_ACCESS_GUIDE, RemoteAccessGuide } from './remote-access-guide';
 import { SettingsSectionKey } from './sections';
 import { SettingsCard } from './setting-row';
@@ -36,7 +30,7 @@ const TAILSCALE_DNS_URL = 'https://login.tailscale.com/admin/dns';
 function NeedsTailscale({ onGuide }: { readonly onGuide: () => void }) {
   return (
     <EmptyState
-      icon={IconWifi}
+      icon={SharingIcon}
       title="Remote Access needs Tailscale"
       action={{
         label: 'Get Tailscale',
@@ -407,7 +401,6 @@ export function RemoteAccessSection() {
     <Stack gap="md">
       <SettingsPageHeader
         sectionKey={SettingsSectionKey.RemoteAccess}
-        byline="Reach this Mac's 10db from your phone, privately."
         // While Tailscale is missing, the empty state offers the guide.
         {...(missing ? {} : { guide: guide.opener })}
         {...(status?.enabled === true ? { actions: <StopSharing /> } : {})}

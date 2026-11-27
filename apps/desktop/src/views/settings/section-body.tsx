@@ -1,6 +1,5 @@
 import type { ProjectDto } from '@10db/contracts';
 import { Text } from '@mantine/core';
-import { TitleRow } from '../../shell/title-row';
 import { AccountsSection } from './accounts/accounts-section';
 import { AgentSkillSection } from './agent-skill-section';
 import { AllWatchpointsSection } from './all-watchpoints-section';
@@ -21,8 +20,7 @@ import { ModelsSection } from './models-section';
 import { PlaybookSection } from './playbook-section';
 import { OverviewSection } from './overview-section';
 import { PlanningSection } from './planning-section';
-import { ScopeBadge } from './settings-page';
-import { ScopeLine } from './scope-line';
+import { SettingsPageHeader } from './settings-page';
 import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
 import { ProjectGeneralForm } from './project-general-form';
@@ -31,7 +29,7 @@ import { ProjectPagesForm } from './project-pages-form';
 import { SandboxSection } from './sandbox-section';
 import { ProjectTrustSection } from './project-trust-section';
 import { WatchpointsSection } from './watchpoints-section';
-import { sectionByKey, SettingsScope, SettingsSectionKey } from './sections';
+import { sectionByKey, SettingsSectionKey } from './sections';
 import { ProjectPlaybook } from './project-playbook';
 import { SessionsSection } from './sessions-section';
 import { SelfUpdateSection } from './self-update-section';
@@ -49,16 +47,8 @@ export function SectionBody({
   readonly project: ProjectDto | null;
 }) {
   const section = sectionByKey(sectionKey);
-  const heading = (
-    <TitleRow
-      title={section.label}
-      meta={
-        section.scope === SettingsScope.App || project === null ? undefined : (
-          <ScopeBadge tile={project.name}>{project.name}</ScopeBadge>
-        )
-      }
-    />
-  );
+  // A page with its own controls, tabs or guide draws this header itself, with them in it.
+  const heading = <SettingsPageHeader sectionKey={sectionKey} project={project} />;
   switch (sectionKey) {
     case SettingsSectionKey.General:
       return (
@@ -103,10 +93,12 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.BoardColumns:
-      return (
+      return project ? (
+        <BoardColumnsSection key={project.id} project={project} />
+      ) : (
         <>
           {heading}
-          {project ? <BoardColumnsSection key={project.id} project={project} /> : <NoProject />}
+          <NoProject />
         </>
       );
     case SettingsSectionKey.Areas:
@@ -117,7 +109,6 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.Watchpoints:
-      // The page draws its own header: its Add Watchpoint and its guide sit in it.
       return project ? (
         <WatchpointsSection key={project.id} project={project} />
       ) : (
@@ -130,7 +121,6 @@ export function SectionBody({
       return (
         <>
           {heading}
-          <ScopeLine>For every project; a project can override one or add its own.</ScopeLine>
           <AllWatchpointsSection />
         </>
       );
@@ -176,11 +166,6 @@ export function SectionBody({
       return (
         <>
           {heading}
-          {project ? (
-            <ScopeLine>
-              Default follows All Projects › Trust. Changes apply from the next session.
-            </ScopeLine>
-          ) : null}
           {project ? <ProjectTrustSection key={project.id} project={project} /> : <NoProject />}
         </>
       );
@@ -188,9 +173,6 @@ export function SectionBody({
       return (
         <>
           {heading}
-          <ScopeLine>
-            For every project; a project can override it. Changes apply from the next session.
-          </ScopeLine>
           <TrustSection />
         </>
       );
@@ -198,7 +180,6 @@ export function SectionBody({
       return (
         <>
           {heading}
-          <ScopeLine>For every project.</ScopeLine>
           <SessionsSection />
         </>
       );
@@ -253,28 +234,29 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.Playbook:
-      // The page carries its own title, so the Account select sits beside it.
       return <PlaybookSection />;
     case SettingsSectionKey.Models:
       return <ModelsSection />;
     case SettingsSectionKey.Team:
-      return (
+      return project ? (
         <>
           {heading}
-          {project ? (
-            <ScopeLine>
-              {`For ${project.name} only. Use global follows All Projects › Playbook.`}
-            </ScopeLine>
-          ) : null}
-          {project ? <ProjectPlaybook key={project.id} project={project} /> : <NoProject />}
+          <ProjectPlaybook key={project.id} project={project} />
           <PlannedRemainder section={section} />
+        </>
+      ) : (
+        <>
+          {heading}
+          <NoProject />
         </>
       );
     case SettingsSectionKey.RoutingRules:
-      return (
+      return project ? (
+        <WhoAnswersSection key={project.id} project={project} />
+      ) : (
         <>
           {heading}
-          {project ? <WhoAnswersSection key={project.id} project={project} /> : <NoProject />}
+          <NoProject />
         </>
       );
   }

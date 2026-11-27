@@ -43,8 +43,11 @@ export function SectionHeading({
   line,
   help,
   action,
+  id,
 }: {
   readonly title: string;
+  /** Names a region with this heading (`aria-labelledby`). */
+  readonly id?: string;
   /** One short line under the title. */
   readonly line?: string;
   /** The longer explanation, in a card opened from an info button beside the title. */
@@ -57,7 +60,9 @@ export function SectionHeading({
       action={action}
       heading={
         <Group gap={4} wrap="nowrap">
-          <Title order={4}>{title}</Title>
+          <Title order={4} {...(id === undefined ? {} : { id })}>
+            {title}
+          </Title>
           {help === undefined ? null : <HelpHint label={title}>{help}</HelpHint>}
         </Group>
       }

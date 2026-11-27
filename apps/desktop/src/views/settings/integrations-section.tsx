@@ -1,11 +1,12 @@
-import { Group, Stack, Text, Title } from '@mantine/core';
+import { Stack } from '@mantine/core';
 import type { ReactNode } from 'react';
-import { HelpHint, HelpText } from './help-hint';
+import { HelpText } from './help-hint';
 import { AaCard } from './sign-ins/aa-card';
 import { GithubCard } from './sign-ins/github-card';
 import { FigmaCard } from './sign-ins/figma-card';
 import { LinearCard } from './sign-ins/linear-card';
 import { SlackCard } from './sign-ins/slack-card';
+import { SectionHeading } from './section-heading';
 
 /** A group of cards: a heading with at most one dim line, then the cards. */
 function CardGroup({
@@ -21,15 +22,7 @@ function CardGroup({
 }) {
   return (
     <Stack gap="sm">
-      <Stack gap={2}>
-        <Group gap={4} wrap="nowrap">
-          <Title order={5}>{title}</Title>
-          {help ? <HelpHint label={title}>{help}</HelpHint> : null}
-        </Group>
-        <Text size="xs" c="dimmed">
-          {description}
-        </Text>
-      </Stack>
+      <SectionHeading title={title} line={description} {...(help ? { help } : {})} />
       {children}
     </Stack>
   );
@@ -43,9 +36,6 @@ function CardGroup({
 export function IntegrationsSection() {
   return (
     <Stack gap="xl">
-      <Text c="dimmed" size="sm">
-        Outside services 10db uses that aren't models. Model access is in Accounts.
-      </Text>
       <CardGroup title="Used by 10db" description="10db signs in once and uses these itself.">
         <GithubCard />
         <SlackCard />

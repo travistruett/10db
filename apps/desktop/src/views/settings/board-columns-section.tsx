@@ -17,7 +17,6 @@ import {
   Table,
   Text,
   TextInput,
-  Title,
   VisuallyHidden,
 } from '@mantine/core';
 import { IconArrowDown, IconArrowUp, IconPencil, IconTrash } from '@tabler/icons-react';
@@ -30,8 +29,9 @@ import {
   useTasks,
 } from '../../daemon/queries';
 import { SYSTEM_HINT } from '../board/column-hints';
-import { HelpHint } from './help-hint';
 import { RaisedPanel } from '../../shell/raised-panel';
+import { SettingsPageHeader } from './settings-page';
+import { SettingsSectionKey } from './sections';
 
 const PLANNED = 'planned';
 
@@ -160,40 +160,26 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Stack gap={2}>
-          <Group gap={4}>
-            <Title order={4}>Columns</Title>
-            <HelpHint label="Columns">
-              <Text size="sm" mb={4}>
-                Tasks in your columns are parked: 10db never picks or starts them until you move
-                them.
-              </Text>
-              <Text size="sm">
-                The other columns follow each task&apos;s state, in the order work moves through
-                them.
-              </Text>
-            </HelpHint>
+      <SettingsPageHeader
+        sectionKey={SettingsSectionKey.BoardColumns}
+        project={project}
+        actions={
+          <Group align="flex-start" gap="xs" wrap="nowrap">
+            <TextInput
+              aria-label="New Column"
+              placeholder="New column name"
+              value={name}
+              error={nameError}
+              onChange={(e) => {
+                setName(e.currentTarget.value);
+              }}
+            />
+            <Button onClick={add} loading={create.isPending}>
+              Add Column
+            </Button>
           </Group>
-          <Text size="sm" c="dimmed">
-            Yours park tasks; the rest follow task state.
-          </Text>
-        </Stack>
-        <Group align="flex-start" gap="xs" wrap="nowrap">
-          <TextInput
-            aria-label="New Column"
-            placeholder="New column name"
-            value={name}
-            error={nameError}
-            onChange={(e) => {
-              setName(e.currentTarget.value);
-            }}
-          />
-          <Button onClick={add} loading={create.isPending}>
-            Add Column
-          </Button>
-        </Group>
-      </Group>
+        }
+      />
       {/* Your columns first, as on the board, then the state columns: listed so the order matches the
           board, but fixed, because their order is the order work moves in. */}
       <RaisedPanel>

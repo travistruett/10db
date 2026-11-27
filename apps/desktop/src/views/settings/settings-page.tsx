@@ -5,6 +5,7 @@ import type { GuideOpener } from '../../shell/page-guide';
 import { GuideLink, PageIntro } from '../../shell/page-intro';
 import { ProjectTile } from '../../shell/project-tile';
 import { TitleRow } from '../../shell/title-row';
+import { SECTION_BYLINES } from './section-bylines';
 import { sectionByKey, SettingsScope, type SettingsSectionKey } from './sections';
 
 /** The project a This Project page applies to, beside its title; an All Projects page shows none. */
@@ -46,7 +47,7 @@ export function SettingsPageHeader({
   readonly sectionKey: SettingsSectionKey;
   /** The project a This Project page shows, for its badge. */
   readonly project?: ProjectDto | null;
-  /** One line, about 90 characters at most, on what the page is for. */
+  /** A line other than the page's own in `SECTION_BYLINES`. */
   readonly byline?: ReactNode;
   readonly guide?: GuideOpener;
   /** The page's `PageTabs`. */
@@ -55,6 +56,7 @@ export function SettingsPageHeader({
   readonly actions?: ReactNode;
 }) {
   const section = sectionByKey(sectionKey);
+  const line = byline ?? SECTION_BYLINES[sectionKey];
   return (
     <>
       <TitleRow
@@ -69,7 +71,7 @@ export function SettingsPageHeader({
       />
       <Box mb="xs">
         <PageIntro
-          {...(byline === undefined ? {} : { description: byline })}
+          {...(line === undefined ? {} : { description: line })}
           {...(guide === undefined
             ? {}
             : { guide: <GuideLink onOpen={guide.onOpen}>{guide.label}</GuideLink> })}

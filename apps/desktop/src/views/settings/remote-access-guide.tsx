@@ -1,6 +1,7 @@
 import { Box, Button, Group, Stack, Text } from '@mantine/core';
-import { IconCheck, IconDeviceDesktop, IconDeviceMobile, IconWifi } from '@tabler/icons-react';
+import { IconCheck, IconDeviceDesktop, IconDeviceMobile } from '@tabler/icons-react';
 import { PageGuide, type PageGuideHandle } from '../../shell/page-guide';
+import { SharingIcon } from '../../shell/sharing-indicator';
 
 export const REMOTE_ACCESS_GUIDE = 'How remote access works';
 
@@ -78,9 +79,9 @@ function AddressPicture() {
         </Button>
       </Group>
       <Group gap={6} wrap="nowrap">
-        <IconWifi size={14} stroke={1.8} color="var(--mantine-color-green-6)" />
+        <SharingIcon size={14} stroke={1.8} color="var(--mantine-color-green-6)" />
         <Text fz={11} c="dimmed">
-          The icon at the top right turns green while it is shared.
+          This icon, at the top right, turns green while it is shared.
         </Text>
       </Group>
     </Stack>

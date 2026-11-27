@@ -1,7 +1,7 @@
-import { Box, Divider, Group, Paper, Stack, Text, Title } from '@mantine/core';
+import { Box, Divider, Group, Paper, Stack, Text } from '@mantine/core';
 import { Children, Fragment, useEffect, useId, useRef, type ReactNode } from 'react';
 import { HelpHint } from './help-hint';
-import { HeadingRow } from './section-heading';
+import { SectionHeading } from './section-heading';
 
 /** A titled card of settings rows, with a hairline between rows. */
 export function SettingsCard({
@@ -25,15 +25,11 @@ export function SettingsCard({
   return (
     <Stack gap="xs">
       {title ? (
-        <HeadingRow
-          line={description === undefined || description === '' ? undefined : description}
-          action={action}
-          heading={
-            <Group gap={4} wrap="nowrap">
-              <Title order={4}>{title}</Title>
-              {help ? <HelpHint label={title}>{help}</HelpHint> : null}
-            </Group>
-          }
+        <SectionHeading
+          title={title}
+          {...(description === undefined || description === '' ? {} : { line: description })}
+          {...(help ? { help } : {})}
+          {...(action === undefined ? {} : { action })}
         />
       ) : null}
       <Paper withBorder radius="md">

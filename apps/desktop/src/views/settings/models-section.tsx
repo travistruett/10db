@@ -63,7 +63,6 @@ export function ModelsSection() {
   const header = (
     <SettingsPageHeader
       sectionKey={SettingsSectionKey.Models}
-      byline="What the Playbook and decisions choose from, scored and priced on your account."
       tabs={
         <PageTabs
           label="Kind of model"
