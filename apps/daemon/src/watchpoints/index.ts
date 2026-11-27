@@ -1,5 +1,10 @@
 export { announceWatchpointReading, applyWatchpointAnswer, watchpointReviewReason } from './card';
-export { watchpointBuildBrief, watchpointsForAreas, watchpointReviewBrief } from './brief';
+export {
+  touchedPrincipleWatchpoints,
+  watchpointBuildBrief,
+  watchpointsForAreas,
+  watchpointReviewBrief,
+} from './brief';
 export { evalDefinitionSource } from './eval-definition-source';
 export {
   WATCHPOINT_HIT_SOURCES,
@@ -9,3 +14,15 @@ export {
 export { agentNotesOf, newestWatchpointRow, reviewerNotesOf, withNotes } from './notes';
 export { askWatchpointQuestions, questionDiff } from './question';
 export type { QuestionCandidates } from './covers';
+export {
+  coverageSubjects,
+  createWatchpointCoverage,
+  sumCoverage,
+  type WatchpointCoverageReader,
+} from './coverage';
+export {
+  announceCoverage,
+  backgroundSubjects,
+  subscribeWatchpointCoverage,
+} from './coverage-triggers';
+export { watchpointPrinciples } from './knowledge';

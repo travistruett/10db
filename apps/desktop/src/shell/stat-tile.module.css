@@ -1,0 +1,14 @@
+.toggle {
+  display: block;
+  width: 100%;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.toggle:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.toggle[data-selected] {
+  border-color: var(--tile-color, var(--mantine-color-default-border));
+}

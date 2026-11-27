@@ -128,7 +128,7 @@ describe('a required check that fails once on a head', () => {
     expect(fixBatches(root)).toEqual([]);
     expect(checksCards()).toEqual([]);
     const flaky = h.only(h.cards());
-    expect(flaky.title).toBe('Flaky check: build (1 time)');
+    expect(flaky.title).toBe('build passed only on a rerun: a test is flaky (1 time)');
     expect(flaky.body).toContain(head);
     expect(flaky.detail).toMatchObject({ head, prUrl });
     expect(getBatch(h.store.db, root.id).notices.map((n) => n.key)).toContain(

@@ -332,7 +332,7 @@ describe('shipping', () => {
     expect(onOrigin(h, batch.branch)).toBeNull();
     expect(h.gh.prCreates()).toEqual([]);
     const card = h.only(h.cards());
-    expect(card.title).toContain('the pre-check failed (exit 3)');
+    expect(card.title).toContain('the pre-check failed');
     expect(card.title).not.toContain('the gate failed');
     expect(card.body).toContain('LINT-BROKE');
   });
@@ -443,7 +443,7 @@ describe('shipping', () => {
       name: 'a failing gate',
       gate: 'echo broken >&2; exit 3',
       failure: 'gate_failed',
-      title: 'the gate failed (exit 3)',
+      title: 'the gate failed',
     },
     {
       name: 'a gate that times out',

@@ -26,6 +26,7 @@ const watchpoint = (key: string, globs: string[], over: Partial<Watchpoint> = {}
   lines: [],
   question: null,
   guidance: `check ${key}`,
+  knowledge: [],
   loudness: WatchpointLoudness.Show,
   starter: null,
   ...over,

@@ -9,7 +9,7 @@ import {
 } from '@10db/contracts';
 import type { Git } from '../git';
 import type { AssessReading, Judge, NoulQuestion } from '../judge';
-import { readAcceptance, secondQuestions } from './read';
+import { readAcceptance, secondQuestions, UNASKED_NO_DETAIL } from './read';
 
 type DiffSince = Awaited<ReturnType<Git['diffSince']>>;
 
@@ -242,9 +242,6 @@ export async function checkAcceptance(
     secondFloor: floors.second,
   });
   const unaskedP = Math.max(first?.unasked ?? 0, second?.unasked ?? 0);
-  const unasked =
-    unaskedP >= Math.max(floors.first, 0.5)
-      ? `The change may do something the task didn't ask for (${unaskedP.toFixed(2)}).`
-      : null;
+  const unasked = unaskedP >= Math.max(floors.first, 0.5) ? UNASKED_NO_DETAIL : null;
   return { criteria, unasked };
 }

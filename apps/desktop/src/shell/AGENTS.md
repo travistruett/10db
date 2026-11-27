@@ -3,6 +3,9 @@
 The window's frame and the parts every view shares. Design: `DESIGN.md` (Navigation, Page header, Surfaces,
 Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
 
+- `StatTile` (`stat-tile.tsx`) is one raised figure: a count (a dash when there is none to count), an optional note,
+  and a mark with its label. Given `onToggle` it is a toggle button (`aria-pressed`, hover, a border in its `color`
+  while `selected`): Evals' filter tiles. Factory's `GlanceTiles` use it without.
 - `AppFrame` (`app-frame.tsx`, `app-frame.module.css`) is the frame: one bar across the top 44 px and the rail down
   the left, one surface on bg1 with no line between them, round a rounded content box
   (`decisions/2026-11-19-the-content-sits-in-a-rounded-box.md`). The bar holds the traffic lights, the sidebar

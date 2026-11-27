@@ -8,6 +8,11 @@ import { CardTier } from './card-tier';
 const FOLD_KEY = 'judge-outage';
 const RESOLVED = "10db's judge answers again, or is off";
 
+/** The cause in words for a title: "OpenRouter has no credits", or "the provider can't answer". */
+function outageCause(outage: JudgeOutage): string {
+  return `${outage.provider} ${outage.cause}`;
+}
+
 /** The project the failing call belonged to, else the first project: the card is the builder's, not a project's. */
 function projectOf(state: StateStore, outage: JudgeOutage): ProjectId | undefined {
   try {
@@ -45,7 +50,7 @@ export function createJudgeOutageCard(deps: {
         tier: CardTier.Status,
         urgency: Urgency.Normal,
         closesWhen: { by: 'withdrawn', when: 'the judge answers again (judge/outage)' },
-        title: "10db's judge can't answer",
+        title: `Unattended work skips more: ${outageCause(outage)}`,
         body: [
           `Decisions run on ${outage.provider === 'the provider' ? '' : `${outage.provider}, `}${outage.model}.`,
           `${outage.provider === 'the provider' ? 'The provider' : outage.provider} ${outage.cause}.`,
