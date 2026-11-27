@@ -107,14 +107,17 @@ export function PageIntro({
     <Stack gap="sm">
       {tabs === undefined ? (
         // With no tabs the controls end the byline's row, so a page with one action spends no row on it.
-        <Group justify="space-between" align="center" wrap="nowrap" gap="xl">
-          {byline}
-          {actions === undefined ? null : (
-            <Group gap="xs" wrap="nowrap" style={{ flex: 'none', marginLeft: 'auto' }}>
-              {actions}
-            </Group>
-          )}
-        </Group>
+        // A view that passes only a toolbar gets no empty row above it.
+        byline === null && actions === undefined ? null : (
+          <Group justify="space-between" align="center" wrap="nowrap" gap="xl">
+            {byline}
+            {actions === undefined ? null : (
+              <Group gap="xs" wrap="nowrap" style={{ flex: 'none', marginLeft: 'auto' }}>
+                {actions}
+              </Group>
+            )}
+          </Group>
+        )
       ) : (
         <>
           {byline}
