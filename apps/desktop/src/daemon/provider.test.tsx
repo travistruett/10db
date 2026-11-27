@@ -1,7 +1,7 @@
 import { PROTOCOL_VERSION } from '@10db/contracts';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse, ws } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server, TEST_CONNECTION } from '../test/daemon';
 import { daemonEvent } from '../test/fixtures';
 import type { ConnectionResolver, DaemonConnection } from './connection';
@@ -185,7 +185,12 @@ describe('DaemonProvider', () => {
   });
 
   it('checks again the moment the page comes back, instead of waiting on a timer the browser held', async () => {
+    const shown = Object.getOwnPropertyDescriptor(document, 'visibilityState');
     Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    onTestFinished(() => {
+      if (shown === undefined) Reflect.deleteProperty(document, 'visibilityState');
+      else Object.defineProperty(document, 'visibilityState', shown);
+    });
     server.use(...baseHandlers());
     // Polls far apart, so only the wake can explain an answer within the test.
     renderWithDaemon(<StatusProbe />, { intervals: { healthy: 600_000, disconnected: 600_000 } });

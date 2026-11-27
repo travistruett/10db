@@ -61,6 +61,8 @@ import { trustKeys } from './trust-queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
 export const STREAM_RETRY_MAX_MS = 10_000;
+/** A page hidden this long gets a new socket when it comes back: the old one may have died unheard. */
+const STREAM_STALE_AFTER_MS = 30_000;
 /** How long the head fetch may take before the stream retries. */
 const HEAD_TIMEOUT_MS = 2_000;
 
@@ -259,6 +261,8 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
     let socket: WebSocket | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
+    let waiting = false;
+    let hiddenAt: number | null = null;
 
     function receive(raw: unknown): void {
       if (typeof raw !== 'string') return;
@@ -310,10 +314,37 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       if (stopped) return;
       const delay = Math.min(STREAM_RETRY_BASE_MS * 2 ** attempt, STREAM_RETRY_MAX_MS);
       attempt += 1;
+      waiting = true;
       timer = setTimeout(() => {
+        waiting = false;
         void open();
       }, delay);
     }
+
+    // A page coming back opens the stream at once rather than waiting out a retry's backoff, and one away for a while
+    // replaces its socket: a socket that went dead while a phone slept says nothing until TCP gives up.
+    function onVisibility(): void {
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = Date.now();
+        return;
+      }
+      const away = hiddenAt === null ? 0 : Date.now() - hiddenAt;
+      hiddenAt = null;
+      if (stopped) return;
+      if (waiting) {
+        clearTimeout(timer);
+        waiting = false;
+        attempt = 0;
+        void open();
+        return;
+      }
+      const old = socket;
+      if (old === null || away < STREAM_STALE_AFTER_MS) return;
+      socket = null;
+      old.close();
+      void open();
+    }
+    document.addEventListener('visibilitychange', onVisibility);
 
     async function open(): Promise<void> {
       let after = lastSeq.current;
@@ -367,6 +398,7 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
     return () => {
       stopped = true;
       clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
       const ws = socket;
       socket = null;
       ws?.close();
