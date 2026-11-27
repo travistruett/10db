@@ -1,48 +1,16 @@
-import { APP_URL_VARIABLE, COPY_ID_VARIABLE } from '@10db/contracts';
+import {
+  SANDBOX_INHERITED_ENV_NAMES,
+  SANDBOX_INHERITED_ENV_PREFIXES,
+  SECRET_LOOKING_ENV_NAME,
+} from '@10db/contracts';
 
-const ALLOWED_NAMES: ReadonlySet<string> = new Set([
-  'PATH',
-  'HOME',
-  'USER',
-  'LOGNAME',
-  'SHELL',
-  'TERM',
-  'LANG',
-  'TZ',
-  'TMPDIR',
-  'PNPM_HOME',
-  'CARGO_HOME',
-  'RUSTUP_HOME',
-  'NVM_DIR',
-  'NVM_BIN',
-  'NVM_INC',
-  'VOLTA_HOME',
-  'COREPACK_HOME',
-  'XDG_CONFIG_HOME',
-  'XDG_DATA_HOME',
-  'XDG_STATE_HOME',
-  'XDG_CACHE_HOME',
-  'JAVA_HOME',
-  'GOPATH',
-  'GOROOT',
-  'CLAUDE_CODE_TMPDIR',
-  'GIT_CONFIG_GLOBAL',
-  'GIT_OPTIONAL_LOCKS',
-  'TENDB_SANDBOX',
-  COPY_ID_VARIABLE,
-  APP_URL_VARIABLE,
-  'npm_config_cache',
-  'npm_config_devdir',
-  'UV_CACHE_DIR',
-  'UV_TOOL_DIR',
-  'UV_PYTHON_INSTALL_DIR',
-  'xcrun_db',
-]);
+const ALLOWED_NAMES = SANDBOX_INHERITED_ENV_NAMES;
+const ALLOWED_PREFIXES = SANDBOX_INHERITED_ENV_PREFIXES;
 
-const ALLOWED_PREFIXES = ['LC_', 'MISE_', 'pnpm_config_'] as const;
-
-// A name that reads like a secret is denied even when its prefix or its own name is allowed.
-const SECRET_LOOKING = /TOKEN|AUTH|SECRET|PASSWORD|PASSWD|KEY|CREDENTIAL|COOKIE|SESSION/i;
+/** Whether a variable name reads like a secret, which a sandboxed command never inherits. */
+export function looksSecret(name: string): boolean {
+  return SECRET_LOOKING_ENV_NAME.test(name);
+}
 
 /**
  * Names in `env` that a sandboxed command must not inherit: everything off the allowlist. `also`
@@ -56,7 +24,7 @@ export function deniedEnvNames(
   return Object.keys(env)
     .filter(
       (name) =>
-        SECRET_LOOKING.test(name) ||
+        looksSecret(name) ||
         (!ALLOWED_NAMES.has(name) &&
           !also.has(name) &&
           !ALLOWED_PREFIXES.some((prefix) => name.startsWith(prefix))),

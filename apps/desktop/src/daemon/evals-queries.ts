@@ -1,13 +1,17 @@
 import {
+  EvalCandidateDto,
   EvalLivePreviewDto,
   EvalLiveRunDto,
   EvalMarkersDto,
   EvalModelsDto,
   EvalsDto,
+  EvalSweepDto,
   EvalSuiteDetailDto,
   TaskDto,
   TaskEvalCoverageDto,
   type EvalLiveRunId,
+  type EvalSweepId,
+  type StartEvalSweepBody,
   type NewEvalBody,
   type ProjectId,
   type TaskId,
@@ -30,7 +34,11 @@ export const evalsKeys = {
   models: (projectId: ProjectId) => ['evals', projectId, 'models'] as const,
   suite: (projectId: ProjectId, key: string, run: string | null) =>
     ['evals', projectId, 'suite', key, run] as const,
-  live: (projectId: ProjectId, key: string) => ['evals', projectId, 'live', key] as const,
+  live: (projectId: ProjectId, key: string, models: readonly string[] = []) =>
+    ['evals', projectId, 'live', key, ...models] as const,
+  candidates: (projectId: ProjectId, key: string) =>
+    ['evals', projectId, 'candidates', key] as const,
+  sweep: (projectId: ProjectId, key: string) => ['evals', projectId, 'sweep', key] as const,
   liveRuns: (projectId: ProjectId, key: string | null) =>
     ['evals', projectId, 'live-runs', key] as const,
 } as const;
@@ -146,16 +154,44 @@ export function useNewEvalTask(projectId: ProjectId) {
   });
 }
 
-/** What a suite's Run would do and whether it may; read again on every project event. */
-export function useEvalLivePreview(projectId: ProjectId, suiteKey: string, enabled: boolean) {
+/** Files the task that switches a suite's model binding to the sweep's winner; nothing is run. */
+export function useSwitchEvalModel(projectId: ProjectId, suiteKey: string) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (model: string) =>
+      readJson(
+        await client.projects[':projectId'].evals[':suiteKey'].switch.$post({
+          param: { projectId, suiteKey: encodeURIComponent(suiteKey) },
+          // The daemon reads the slot off the suite's newest result for the model.
+          json: { model, slot: null },
+        }),
+        TaskDto,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+  });
+}
+
+/**
+ * What a suite's Run would do and whether it may; read again on every project event. With `models`, the window
+ * for a sweep over them: its hash covers the picks, in this order.
+ */
+export function useEvalLivePreview(
+  projectId: ProjectId,
+  suiteKey: string,
+  enabled: boolean,
+  models: readonly string[] = [],
+) {
   const { client } = useDaemon();
   return useQuery({
-    queryKey: evalsKeys.live(projectId, suiteKey),
+    queryKey: evalsKeys.live(projectId, suiteKey, models),
     enabled,
     queryFn: async () =>
       readJson(
         await client.projects[':projectId'].evals[':suiteKey'].live.$get({
           param: { projectId, suiteKey: encodeURIComponent(suiteKey) },
+          // The route takes the picks as one comma-separated value.
+          query: models.length === 0 ? {} : { models: models.join(',') },
         }),
         EvalLivePreviewDto,
       ),
@@ -204,6 +240,70 @@ export function useStopEvalLive(projectId: ProjectId) {
         param: { projectId, runId },
       });
       // The type knows only the 204; the daemon's errors (404 for a run that ended) arrive too.
+      const status: number = res.status;
+      if (status !== 204) refuse(status, await res.json().catch(() => null));
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: evalsKeys.list(projectId) }),
+  });
+}
+
+/** The models a suite may try, cheapest first, each with its estimate and last result here. */
+export function useEvalCandidates(projectId: ProjectId, suiteKey: string, enabled: boolean) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: evalsKeys.candidates(projectId, suiteKey),
+    enabled,
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId'].evals[':suiteKey'].candidates.$get({
+          param: { projectId, suiteKey: encodeURIComponent(suiteKey) },
+        }),
+        z.array(EvalCandidateDto),
+      ),
+  });
+}
+
+/** The suite's running or newest sweep; `eval.sweep_changed` reads it again. */
+export function useLatestEvalSweep(projectId: ProjectId, suiteKey: string) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: evalsKeys.sweep(projectId, suiteKey),
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId'].evals[':suiteKey'].sweeps.latest.$get({
+          param: { projectId, suiteKey: encodeURIComponent(suiteKey) },
+        }),
+        EvalSweepDto.nullable(),
+      ),
+  });
+}
+
+/** Starts a sweep with the hash the confirm window showed. A refusal throws a `DaemonRequestError` of 409. */
+export function useStartEvalSweep(projectId: ProjectId, suiteKey: string) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: StartEvalSweepBody) =>
+      readJson(
+        await client.projects[':projectId'].evals[':suiteKey'].sweeps.$post({
+          param: { projectId, suiteKey: encodeURIComponent(suiteKey) },
+          json: body,
+        }),
+        EvalSweepDto,
+      ),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: evalsKeys.list(projectId) }),
+  });
+}
+
+export function useStopEvalSweep(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (sweepId: EvalSweepId) => {
+      const res = await client.projects[':projectId'].evals.sweeps[':sweepId'].stop.$post({
+        param: { projectId, sweepId },
+      });
+      // The type knows only the 204; the daemon's errors (404 for a sweep that ended) arrive too.
       const status: number = res.status;
       if (status !== 204) refuse(status, await res.json().catch(() => null));
     },

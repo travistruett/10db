@@ -77,6 +77,7 @@ const ID_SCHEMAS = {
   Device: idSchema(['dev'], 'DeviceId'),
   PushSubscription: idSchema(['psh'], 'PushSubscriptionId'),
   EvalLiveRun: idSchema(['elr'], 'EvalLiveRunId'),
+  EvalSweep: idSchema(['esw'], 'EvalSweepId'),
 } as const;
 
 const ID_PREFIX = {
@@ -139,6 +140,7 @@ const ID_PREFIX = {
   Device: 'dev',
   PushSubscription: 'psh',
   EvalLiveRun: 'elr',
+  EvalSweep: 'esw',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -281,6 +283,8 @@ export const PushSubscriptionId = ID_SCHEMAS.PushSubscription;
 export type PushSubscriptionId = IdOf<'PushSubscription'>;
 export const EvalLiveRunId = ID_SCHEMAS.EvalLiveRun;
 export type EvalLiveRunId = IdOf<'EvalLiveRun'>;
+export const EvalSweepId = ID_SCHEMAS.EvalSweep;
+export type EvalSweepId = IdOf<'EvalSweep'>;
 /** A task's thread message is a conversation item. @alias */
 export const TaskMessageId = ConversationItemId;
 export type TaskMessageId = ConversationItemId;

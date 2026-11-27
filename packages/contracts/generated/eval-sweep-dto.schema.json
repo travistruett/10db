@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^esw_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "suiteKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "try",
+        "cheapest"
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "running",
+        "found",
+        "done",
+        "stopped"
+      ]
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "capped",
+            "unreadable",
+            "cost_unknown",
+            "interrupted",
+            "refused",
+            "by_you"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reasonText": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "capUsd": {
+      "type": "number"
+    },
+    "spentUsd": {
+      "type": "number"
+    },
+    "winner": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "running",
+              "passed",
+              "failed",
+              "unreadable",
+              "stopped",
+              "skipped"
+            ]
+          },
+          "estimateUsd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "costUsd": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "runId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^elr_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "model",
+          "state",
+          "estimateUsd",
+          "costUsd",
+          "runId"
+        ]
+      }
+    },
+    "startedAt": {
+      "type": "string"
+    },
+    "endedAt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "projectId",
+    "suiteKey",
+    "kind",
+    "state",
+    "reason",
+    "reasonText",
+    "capUsd",
+    "spentUsd",
+    "winner",
+    "steps",
+    "startedAt",
+    "endedAt"
+  ]
+}

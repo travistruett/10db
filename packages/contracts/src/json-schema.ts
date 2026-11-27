@@ -323,6 +323,11 @@ import {
   EvalLivePreviewDto,
   EvalLiveRunDto,
   RunEvalLiveBody,
+  EvalSweepDto,
+  EvalSweepChangedData,
+  EvalCandidateDto,
+  EvalSwitchBody,
+  StartEvalSweepBody,
 } from './evals';
 import { ProjectWatchpoints, ProjectWatchpointsDto, YourWatchpoints } from './watchpoints';
 import {
@@ -459,6 +464,10 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'eval-live-preview-dto': EvalLivePreviewDto,
   'eval-live-run-dto': EvalLiveRunDto,
   'run-eval-live-body': RunEvalLiveBody,
+  'eval-sweep-dto': EvalSweepDto,
+  'eval-candidate-dto': EvalCandidateDto,
+  'eval-switch-body': EvalSwitchBody,
+  'start-eval-sweep-body': StartEvalSweepBody,
   'task-eval-coverage-dto': TaskEvalCoverageDto,
   'project-watchpoints-dto': ProjectWatchpointsDto,
   'your-watchpoints': YourWatchpoints,
@@ -709,6 +718,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-settled-data': PassSettledData,
   'eval-definition-changed-data': EvalDefinitionChangedData,
   'eval-live-run-changed-data': EvalLiveRunChangedData,
+  'eval-sweep-changed-data': EvalSweepChangedData,
   'pass-preview-broken-data': PassPreviewBrokenData,
   'pass-preview-mended-data': PassPreviewMendedData,
   ...mcpSchemas,

@@ -58,6 +58,7 @@ export * from './knowledge-search';
 export { CONTRACT_SCHEMAS, renderJsonSchemas } from './json-schema';
 export * from './landing';
 export * from './local-copy';
+export * from './sandbox-env-names';
 export * from './mcp-tools';
 export * from './design-check';
 export * from './sign-in-setup';

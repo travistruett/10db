@@ -1,3 +1,4 @@
+import { createEvalCandidateList } from './eval-candidate-list';
 import { applyAcceptanceAnswer } from '../acceptance';
 import { applyWatchpointAnswer } from '../watchpoints';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -525,6 +526,7 @@ import { systemListeners, type ListenerReader } from './listening-ports';
 import { loopbackProbe, type AddressProbe } from './loopback-probe';
 import {
   createEvalLiveRuns,
+  createEvalSweeps,
   createEvalsAssessor,
   createEvalsService,
   createEvalSuggester,
@@ -1599,6 +1601,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'eval-live' }),
   });
   await evalLiveRuns.recoverAtStart();
+  const evalCandidates = createEvalCandidateList({
+    db: state.db,
+    evals: evalsService,
+    catalogue,
+    clock,
+  });
+  // A sweep a crash left `running` ends after its run did: nothing resumes.
+  const evalSweeps = createEvalSweeps({
+    state,
+    live: evalLiveRuns,
+    evals: evalsService,
+    candidates: evalCandidates,
+    logger: logger.child({ component: 'eval-sweeps' }),
+  });
+  evalSweeps.recoverAtStart();
   // A final gate that fails because the project's dev stack isn't up to date waits, with one card,
   // instead of failing the task. It wraps the limiter, so a waiting gate holds no slot.
   const gateHoldDeps = {
@@ -3347,6 +3364,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     evalsAssessor,
     evalSuggester,
     evalLive: evalLiveRuns,
+    evalSweeps,
+    evalCandidates,
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
       git.gitDirs(repoPath).catch(() => undefined);
@@ -3872,6 +3891,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         },
       );
       createdScheduler.stop();
+      // A step that settles during the rest of the stop must not start a new paid run: sweeps end first.
+      await evalSweeps.stopAll();
       stallSweep.stop();
       precedents.stop();
       // A move under way leaves its worktree and its row for the next start to finish.
@@ -3909,7 +3930,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await appStart?.stop();
       // The dev server 10db started ends with it; a builder's own is never 10db's to stop.
       await preview?.stop();
-      // Each live eval run ends `interrupted` and its stop command runs, before the store closes.
+      // Each live eval run ends `interrupted` and its stop command runs, before the store closes. The
+      // sweeps ended at the top of the stop, so none starts a step once its run is interrupted.
       await evalLiveRuns.stopAll();
       picturePruning.stop();
       await pictureCamera.close();

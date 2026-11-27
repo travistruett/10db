@@ -609,6 +609,28 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     expect(existsSync(run.tmpDir)).toBe(false);
   });
 
+  it('refuses a model env whose name or value could reach a shell or override the sandbox', async () => {
+    const refused: { name: string; value: string }[] = [
+      { name: 'PATH', value: 'a/b' },
+      { name: 'TMPDIR', value: 'a/b' },
+      { name: 'OPENAI_API_KEY', value: 'a/b' },
+      { name: 'LANG', value: 'a/b' },
+      { name: 'TENDB_COPY_ID', value: 'a/b' },
+      { name: 'BASH_ENV', value: 'a/b' },
+      { name: 'HTTPS_PROXY', value: 'a/b' },
+      { name: 'SSL_CERT_FILE', value: 'a/b' },
+      { name: 'MODELS', value: 'a b' },
+      { name: 'MODELS', value: 'a;b' },
+    ];
+    for (const modelEnv of refused)
+      await expect(sandbox().forRun(input({ modelEnv }))).rejects.toThrow(SandboxProfileError);
+    // Nothing was made for a refused run.
+    expect(readdirSync(tmpRoot)).toEqual([]);
+    await withRun(input({ modelEnv: { name: 'MODELS', value: 'anthropic/a-1:2,b@3' } }), (run) => {
+      expect(run.commandEnv['MODELS']).toBe('anthropic/a-1:2,b@3');
+    });
+  });
+
   it('leaves nothing behind when the profile is refused', async () => {
     // A .env link to the checkout's own parent would deny what every command needs.
     execFileSync('ln', ['-s', dirname(checkout), join(checkout, '.env')]);

@@ -23,7 +23,12 @@
   when every `definitionPaths` entry is tracked at HEAD and every `coveredPaths` glob holds a tracked file (matched as
   a hazard's glob, `guard`'s `classifyPath`); else it answers the untracked names and keeps nothing. A suite's `live.envFiles` entry (untracked by nature: it holds secrets) must be a regular file in the working tree (`lstat`, so no link), else it is refused the same way. `live` (contracts `EvalLiveRun`) is what a suite's Run needs from the gate sandbox (Docker, env files readable never writable, hosts, loopback, a stop command, a time limit); a manifest refuses `live` without `liveCommand`. A recording emits
   the project's change event.
-- It imports `git` (types), `guard`, `events` (types), `log` (types), `clock` (types), `preview` (the process ledger), `verify` (types) and `@10db/db`.
+- `live.models` (contracts `EvalLiveModels`) names the env var a suite's live command reads its models from and
+  the ids it takes: `'openrouter'` (ids as given, each an `EvalModelId`) or `choices` (the project's names, each with
+  its model). Its env name is refused when reserved (`isReservedEnvName`, in contracts' `sandbox-env-names.ts`: the shell's,
+  make's and tools' own variables, the names the sandbox sets or passes through, `TENDB_*` and secret-looking names). The assessor asks for it and records the file that binds a suite's model among its covered paths; an
+  invalid `live.models` is dropped from that suite alone (`assess-answer.ts`), never the whole answer.
+- It imports `catalogue` (`joinOpenRouterId`, for the candidates), `git` (types), `guard`, `events` (types), `log` (types), `clock` (types), `preview` (the process ledger), `verify` (types) and `@10db/db`.
 - Availability is kept apart from quality: a gate report's `outcomes` other than `ok` and `validation_failed`
   (the model answered, malformed) are a model's `unanswered` trials. A trend point is `evalChanged` when its
   fingerprint differs from the run before it. `definitionChangedAt` is the last commit of a suite's definition
@@ -41,6 +46,34 @@
   eval files the assessed commit didn't track, uncovered sites it didn't have (by label, path and line text, so a
   line that only moved isn't new), and manifest paths HEAD no longer tracks. It raises no Inbox item. A commit that
   can't be read any more counts no site as new.
+- Sweeps' money rules (`sweep-cost.ts`, pure): `estimateRunCost` scales the reference run's cost by output price
+  (unknown when either price or the reference is, or the reference is free) and `sweepNext` owns every end of a
+  sweep, `found` included: `cheapest` ends `found` at the first pass, `stopped`·cost_unknown at a settled step
+  whose cost is unknown, and starts the next waiting step only when its estimate is known and fits `cap - spent`,
+  else `done`·capped (`done` when nothing waits); `try` runs every step, an unknown estimate included, and ends
+  `done`·capped only before a step whose known estimate does not fit. Spent counts known costs; amounts compare
+  in whole micro-dollars so an exact fit fits. The caller sorts a `cheapest` sweep's steps by estimate
+  (cheapest first) before the first call and calls only once no step is running.
+- Candidates (`candidates.ts`, `GET /projects/:id/evals/:suite/candidates`): for an `openrouter` suite every
+  non-deprecated OpenRouter entry of the catalogue (an enabled profile reaches OpenRouter through the same entry);
+  for a `choices` suite its choices, named by the choice. Each carries the entry's output price, the joined model's
+  Intelligence, the estimate and its newest result in the suite; the list is cheapest first, unpriced last. The
+  reference for estimates is the newest run's cheapest passing model that has a cost, else its first with a cost.
+  A suite with no `live.models` has none.
+- Live runs take models and sweeps run them (`model-env.ts`, `live-runs.ts`, `sweeps.ts`, `eval_sweeps`): a run
+  started with picks sets the suite's `live.models.env` to `modelEnvValue(models, picks)` (each pick an `EvalModelId`
+  or a choice's name, joined by commas, at most ten; the one place a pick becomes a value; `BadModel` otherwise) as
+  the gate request's `modelEnv`, never on the stop command, and stores `models_json` and `sweep_id`. `previewHash`
+  covers the picks, and `stopLeftBy` hashes with the row's. While a sweep is `running` the project is `busy` for a
+  Run and for another sweep, whichever step is between runs; a step starts only while its sweep is `running`,
+  checked in the write that inserts its run. A sweep (`start`) checks the hash over its picks, sorts a `cheapest`
+  sweep's steps by estimates it computes itself, then runs one step at a time: when a step's run settles (`onSettled`,
+  after the row ended) it re-reads the sweep in one write, reads the suite's newest result since the step began that
+  names the step's model, and `sweepNext` ends the sweep or marks the next step. Before each step the suite is
+  checked against the sweep's hash. Any throw ends the sweep `stopped`·refused with its text; a Stop, an archive and
+  a daemon stop end it before its run is aborted (`stopped`·by_you or ·interrupted), so no paid run starts after
+  them; a start after a crash ends a `running` sweep `stopped`·interrupted and resumes nothing. An ended sweep never
+  changes again.
 - By Model (`models.ts`, `GET /projects/:id/eval-models`, not under `/evals/` where `models` would be a suite key):
   each model's newest result per suite, its cost for one run of each (unknown if any is) and the median of its p50s.
   A result from a run whose fingerprint differs from the suite's newest run is `olderEval`. Compare is the UI's join.
@@ -65,6 +98,13 @@
   golden changed; grader changed; model judge added; else `unclassified`) and names the line each kind came from. It
   is pure and calls no model, so it is the same on every provider. A manifest `bar` edit is an app setting, not a
   patch line, and is not read. The watchpoints' eval source (`watchpoints/eval-definition-source.ts`) uses it.
+- Switch (`switch-task.ts`, `POST /projects/:id/evals/:suiteKey/switch`, `EvalSwitchBody`): files "Switch <slot or suite>
+  to <model>" as a normal task through `makeTask`, in the areas the suite's `coveredPaths` fall in (each glob's literal
+  prefix). The brief holds the winning report and cost (the suite's latest result naming the model), every suite whose
+  latest result names the same slot (the slot comes from the body, else from that result), the project's eval skills,
+  and "edit code and run free checks only". 10db never edits the binding or runs a suite: the suites on the slot show
+  "<suite> · not run" on the task through the covered-task marker, because the assessment records the binding file
+  among `coveredPaths`.
 - New Eval (`new-eval-task.ts`, `POST /projects/:id/evals/tasks`, `NewEvalRequest`): files a normal task on the
   project's account, "Write the eval for <behavior>", through the ordinary task-create path (`createTask`). The
   wizard sends structured answers: the goal sentence, real examples each marked good or bad with a reason (the

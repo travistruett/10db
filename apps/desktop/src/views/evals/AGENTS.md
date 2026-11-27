@@ -40,8 +40,7 @@
   meta, the bar, and a verdict in plain words for the shown run (`runVerdict` in `eval-figures.ts`: which models pass
   every gate and how many each misses, counts instead of names past three models, "Cheapest that passes" when a
   passing model's cost is known, never $0 for an unknown one); an actions row, the suite's Run
-  (`LiveRunControls`) or a dim line saying 10db doesn't know how to run it yet (a second action, Try Other
-  Models, joins it later); Gates, one run's gates failing first, with a `Select` of models ("name · 7/10 gates",
+  (`LiveRunControls`, with `SweepActions` beside Run) or a dim line saying 10db doesn't know how to run it yet; Gates, one run's gates failing first, with a `Select` of models ("name · 7/10 gates",
   failing first, searchable past six) when the run has several; History (every run, newest first, eight shown,
   a click shows that run whole); Flaky Cases; and Setup (what it covers, its definition, its free and live
   commands). Each section has one dim line saying what it is. The live command is shown, and its Run is the one
@@ -70,6 +69,9 @@
   Board. The button is in the page header, on each gap row (prefills the name, the gap's reason as evidence and
   its `where` path) and over a goal's proposed eval (`PlanEval`) in a Plan's Documents tab (objective as name and
   sentence; decision, oracle and baseline pass through; its models become the picked ids).
+- Switch: a sweep that ends Found (`try-models-modal.tsx`, `SweepWindow`) offers "Switch to <model>", which files the
+  task through `POST /projects/:id/evals/:suiteKey/switch` (the daemon finds the slot) and then links it on the Board.
+  It needs a Found sweep, which the e2e daemon cannot run (no live command), so no flow clicks it.
 - Suggestions (`new-eval-suggest.tsx`, `eval-suggest-queries.ts`): "Tighten This" (before and after, Use This),
   "Suggest Cases" (5 proposals that arrive unmarked; the builder adds each and marks it Good or Bad, never the AI)
   and "Suggest a Check" (a check type and a one-line rule; never the bar). Each is one read of the project's
@@ -90,3 +92,15 @@
   a running one keeps its Stop. A suite whose manifest entry has no `live` says 10db doesn't know how the
   command runs yet and offers Assess Now (or the prompt to paste where 10db can't assess), no Run. `eval.live_run_changed` refetches the evals queries and the covered
   tasks' markers.
+- Model sweeps (`sweep-actions.tsx`, `try-models-modal.tsx`): beside Run, a suite whose live settings take models
+  (`preview.models`) offers **Try Other Models** and **Find Cheapest Passing**; one that doesn't says "This suite's command
+  doesn't take models from 10db yet" with **Let 10db Pick Models**, which files a `pick_models` New Eval task in one click.
+  The modal runs three stages. The picker lists `GET .../candidates` (model, intelligence, output price per million,
+  estimate, last result here; searchable past 40; at most 10 picks). Try starts with none picked; Find Cheapest preselects
+  the known estimates under today's cheapest pass. Both ask for the most to spend, by default three times the latest
+  run's cost to the next dollar (Try: one such run per picked model, at least three). The confirm window is the Run
+  window's parts (`Notes`, `REFUSAL_WORDS`, a refusal and no Start) over `GET .../live?models=a,b`, whose hash Start
+  posts with the models in that order, and says "Estimated $x, cap $y; one run can cost more than its estimate." The sweep
+  window shows a line a step (model, state in words, cost), spent of cap and Stop, and ends with the verdict and its
+  reason in words. The drawer finds a running or recent sweep through `sweeps/latest` and offers it again as a button on
+  the row; `eval.sweep_changed` refetches the evals queries.

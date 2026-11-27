@@ -216,6 +216,8 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'linear_post.changed': [linearPostKeys.all],
   // A live eval run started or ended: its suite's runs, and a covered task's "not run", read again.
   'eval.live_run_changed': [evalsKeys.all, evalMarkerKeys.all],
+  // A sweep started, moved to its next model or ended: its suite's sweep and runs are read again.
+  'eval.sweep_changed': [evalsKeys.all, evalMarkerKeys.all],
   // A notice that asks nothing joined Activity, and its task's drawer lists it.
   'notice.posted': [activityKeys.all],
   // A turn began or ended: what streams is read again, so an item that finished leaves it, and what the turn

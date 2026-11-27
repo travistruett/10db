@@ -7,8 +7,10 @@ import {
   type EvalCoverageSideDto,
   type EvalCoverageState,
   type EvalManifestResult,
+  type EvalLiveModels,
   type EvalModelsDto,
   type EvalsDto,
+  type EvalSwitchBody,
   type NewEvalBody,
   type EvalSuiteDetailDto,
   type HazardDef,
@@ -30,9 +32,11 @@ import {
 import { coverageOf, sideOf } from './coverage';
 import { evalDrift } from './drift';
 import { evalTaskDraft, findEvalSkills, type EvalTaskDraft } from './new-eval-task';
+import { switchTaskDraft } from './switch-task';
 import { readEvalManifest, writeEvalManifest } from './manifest-store';
 import { buildModels } from './models';
 import { createEvalsCache, readEvals, type FoundEvals } from './read-results';
+import type { ParsedRun } from './run-summary';
 
 /** A suite and the times a task's branch point and last commit were committed. */
 export interface CoverageQuery {
@@ -58,6 +62,12 @@ export interface EvalsService {
   ): Promise<EvalSuiteDetailDto>;
   /** Every model the project's results graded, with its newest result per suite. */
   models(projectId: ProjectId, repoPath: string): Promise<EvalModelsDto>;
+  /** What a suite's candidates are built from: where it takes its models from and its runs, oldest first. */
+  candidateBasis(
+    projectId: ProjectId,
+    repoPath: string,
+    key: string,
+  ): Promise<{ models: EvalLiveModels | null; runs: readonly ParsedRun[] }>;
   record(
     projectId: ProjectId,
     repoPath: string,
@@ -68,6 +78,13 @@ export interface EvalsService {
   standing(repoPath: string, queries: readonly CoverageQuery[]): Promise<CoverageStanding[]>;
   /** The task that drafts an eval for `request`: the project's eval skill and suites read at HEAD, never run. */
   draftTask(projectId: ProjectId, repoPath: string, request: NewEvalBody): Promise<EvalTaskDraft>;
+  /** The task that switches a suite's model binding, with the suite's covered paths for its areas. */
+  draftSwitch(
+    projectId: ProjectId,
+    repoPath: string,
+    key: string,
+    request: EvalSwitchBody,
+  ): Promise<EvalTaskDraft & { readonly coveredPaths: readonly string[] }>;
 }
 
 export interface EvalsDeps {
@@ -269,6 +286,17 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
     async models(projectId, repoPath) {
       return buildModels(await found(repoPath), readEvalManifest(deps.state.db, projectId));
     },
+    async candidateBasis(projectId, repoPath, key) {
+      const suite = readEvalManifest(deps.state.db, projectId)?.manifest.suites.find(
+        (s) => s.key === key,
+      );
+      if (suite === undefined) throw new NotFoundError('Eval suite', key);
+      const read = await found(repoPath);
+      return {
+        models: suite.live?.models ?? null,
+        runs: read?.suites.find((s) => s.key === key)?.runs ?? [],
+      };
+    },
     async suite(projectId, repoPath, key, run) {
       const read = await found(repoPath);
       const manifest = readEvalManifest(deps.state.db, projectId);
@@ -301,6 +329,24 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
       const suites = buildEvals(read, manifest).suites;
       const skills = read === null ? [] : await findEvalSkills(deps.git, repoPath, read.tracked);
       return evalTaskDraft(request, skills, suites);
+    },
+    async draftSwitch(projectId, repoPath, key, request) {
+      const read = await found(repoPath);
+      const manifest = readEvalManifest(deps.state.db, projectId);
+      const suites = buildEvals(read, manifest).suites;
+      const suite = suites.find((s) => s.key === key);
+      if (suite === undefined) throw new NotFoundError('Eval suite', key);
+      const skills = read === null ? [] : await findEvalSkills(deps.git, repoPath, read.tracked);
+      return {
+        ...switchTaskDraft(
+          suite,
+          request,
+          suites,
+          skills,
+          manifest?.manifest.suites.find((s) => s.key === key)?.live?.models,
+        ),
+        coveredPaths: manifest?.manifest.suites.find((s) => s.key === key)?.coveredPaths ?? [],
+      };
     },
     async record(projectId, repoPath, manifest, source = EvalManifestSource.Agent) {
       const read = await found(repoPath);
