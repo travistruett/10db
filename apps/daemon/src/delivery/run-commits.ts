@@ -1,5 +1,11 @@
 import { McpToolName, McpToolOutputs } from '@10db/contracts';
-import { getProject, listToolOpResults, type DbReader, type WorkstreamRow } from '@10db/db';
+import {
+  getProject,
+  listToolOpResults,
+  listWorkstreams,
+  type DbReader,
+  type WorkstreamRow,
+} from '@10db/db';
 import type { Git } from '../git';
 import { laneBranchOf, type LaneBranch } from './lane-branch';
 
@@ -27,12 +33,32 @@ function committedByRun(db: DbReader, row: WorkstreamRow): Set<string> {
   );
 }
 
+/** Whether another workstream of the run's batch works in the same worktree and commits on its branch. */
+function sharesWorktree(db: DbReader, row: WorkstreamRow): boolean {
+  if (row.batchId === null) return false;
+  return listWorkstreams(db, { batchId: row.batchId }).some((w) => w.id !== row.id);
+}
+
+/**
+ * Whether the run works in a batch worktree, off the builder's checkout and its lane branch, that
+ * another run of its batch commits on too: its branch's history since the base is not all its own.
+ */
+export function sharesBatchWorktree(db: DbReader, row: WorkstreamRow, checkout: string): boolean {
+  return (
+    laneBranchOf(row) === null &&
+    checkout !== getProject(db, row.projectId).repoPath &&
+    sharesWorktree(db, row)
+  );
+}
+
 /**
  * The run's commits from `base` to `head`, each range starting at its first commit's parent. The
  * builder's own checkout is shared: the builder and other tools commit on its branch too, so only the
  * commits the run's sessions made through the commit tool are the run's, and a commit of anyone
- * else's between two of them splits their history in two ranges. A worktree's branch holds only
- * 10db's commits, base merges included: every commit is the run's, in one range from `base` to `head`.
+ * else's between two of them splits their history in two ranges. A batch worktree several runs share
+ * is read the same way: its other runs, and 10db's base merges and regenerations, commit on its
+ * branch too. A worktree only this run works in holds only its own and 10db's commits: every commit
+ * is the run's, in one range from `base` to `head`.
  */
 export async function runCommits(
   deps: { readonly db: DbReader; readonly git: Pick<Git, 'commitsSince' | 'branchTip'> },
@@ -44,7 +70,10 @@ export async function runCommits(
   const lane = laneBranchOf(row);
   if (lane !== null) return laneCommits(deps.git, checkout, lane);
   const all = await deps.git.commitsSince(checkout, base, head);
-  if (checkout !== getProject(deps.db, row.projectId).repoPath)
+  if (
+    checkout !== getProject(deps.db, row.projectId).repoPath &&
+    !sharesBatchWorktree(deps.db, row, checkout)
+  )
     return { commits: all, ranges: [{ base, head }] };
   const own = committedByRun(deps.db, row);
   const ranges: CommitRange[] = [];

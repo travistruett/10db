@@ -116,9 +116,12 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(page.getByText('Share on your tailnet')).toBeVisible();
   // The bar's sharing icon shows once Tailscale is there to read, and its card holds the Share switch, off. Whether
   // the switch waits on the certificate depends on whether inbox.spec asked for one first in this shard's daemon.
-  await page.getByRole('button', { name: /^(Sharing isn't set up|Not shared)$/ }).click();
-  await expect(page.getByRole('switch', { name: 'Share on your tailnet' })).not.toBeChecked();
-  await expect(page.getByRole('link', { name: 'Remote Access settings' })).toBeVisible();
+  await page.getByRole('button', { name: /^Remote access: (not set up|off)$/ }).click();
+  const remoteCard = page.getByRole('group', { name: 'Remote access' });
+  await expect(remoteCard.getByRole('switch', { name: 'Remote access' })).not.toBeChecked();
+  // Pairing waits for sharing to be on, so the card offers only Settings.
+  await expect(remoteCard.getByRole('button', { name: /Pair/ })).toHaveCount(0);
+  await expect(remoteCard.getByRole('link', { name: 'Settings' })).toBeVisible();
   await page.keyboard.press('Escape');
   await page.goto('/settings/devices');
   await expect(page.getByText('No devices paired')).toBeVisible();

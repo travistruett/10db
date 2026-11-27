@@ -16,7 +16,9 @@ const SystemAnswer = z.looseObject({
 export async function claudeIsInstalled(page: Page): Promise<void> {
   await page.route(`${daemonUrl}/system*`, async (route) => {
     // A reload cuts off the poll in flight: it is tried once more, else dropped, and the app polls again.
-    const response = await route.fetch().catch(() => route.fetch().catch(() => null));
+    const response = await route
+      .fetch({ maxRetries: 2 })
+      .catch(() => route.fetch({ maxRetries: 2 }).catch(() => null));
     if (response === null) {
       await route.abort().catch(() => undefined);
       return;

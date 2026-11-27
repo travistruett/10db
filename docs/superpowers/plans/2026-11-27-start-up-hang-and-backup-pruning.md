@@ -128,7 +128,7 @@ Task 3 (`apps/daemon/src/main.ts`): no new export.
 | Copy completes                                | `10db-pre-migrate-*.sqlite` added | pruned to 5, copied, pruned to 5 sparing the new copy  |
 | Killed mid-copy                               | half-written `.sqlite`   | `10db-pre-migrate.partial` left, deleted before the next copy     |
 | Copy fails (disk full)                        | start fails, nothing pruned | the first prune already freed space; start fails if it still can't copy |
-| Clock stepped back (new stamp sorts oldest)   | -                        | the new copy is spared; an older one goes instead               |
+| Clock stepped back (new stamp sorts oldest)   | -                        | the new copy is spared, so 6 remain               |
 
 ## Tasks
 
