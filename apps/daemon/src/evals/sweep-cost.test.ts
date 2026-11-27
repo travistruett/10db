@@ -67,6 +67,10 @@ describe('sweepNext', () => {
     expect(
       sweepNext(plan(Kind.Try, 1, step(Step.Failed, 1, null), step(Step.Waiting, null))),
     ).toEqual({ step: 1 });
+    // try: an unknown estimate does not run once the spend has passed the cap
+    expect(
+      sweepNext(plan(Kind.Try, 1, step(Step.Failed, 2, 1.5), step(Step.Waiting, null))),
+    ).toEqual({ end: State.Done, reason: Reason.Capped });
     // try: a known estimate that does not fit ends it capped; exactly fitting runs
     expect(sweepNext(plan(Kind.Try, 2.99, step(Step.Failed, 1, 1), step(Step.Waiting, 2)))).toEqual(
       { end: State.Done, reason: Reason.Capped },
