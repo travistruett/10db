@@ -116,9 +116,11 @@ Read the ones for what you touch, and write a view's notes there, not here. This
   don't hand-edit it; work in a worktree under `../10db-worktrees.noindex/`.
 - `pnpm dev:factory` (`scripts/factory-ui.ts`) runs Vite over the installed app's daemon instead: it reads that
   daemon's `daemon.json` and `ui-token` from `~/Library/Application Support/10db`, checks over `/health` that it
-  answers the Vite origin over CORS and takes the token (`GET /projects`), and runs Vite with `--no-cors` and
-  `VITE_DAEMON_URL` and `VITE_DAEMON_TOKEN` (`factory-vite.ts`): CORS off keeps other localhost pages from reading the
-  module that inlines the token. The daemon accepts
+  answers the Vite origin over CORS and takes the token (`GET /projects`), and runs Vite with `--no-cors`,
+  `TENDB_FACTORY_DATA_DIR` and `VITE_DAEMON_FACTORY=1` (`factory-vite.ts`). The page asks the dev server for the
+  address and token on every connect (`GET /__tendb/factory-connection`, `vite.config.ts`), read fresh from the data
+  directory, so a restarted 10db is followed with no Vite restart: the provider re-resolves on every failed try. Only a
+  same-origin fetch is answered, and CORS off keeps other localhost pages from reading it. The daemon accepts
   the page only when 10db started with `TENDB_DEV_UI_ORIGIN=http://localhost:1420`, which the supervisor passes
   through (`decisions/2026-10-29-dev-ui-over-the-factory.md`). `pnpm dev:factory:enable` and `:disable`
   (`scripts/set-factory-opt-in.ts`, plan in `factory-opt-in.ts`) set and unset it with `launchctl`; they never quit

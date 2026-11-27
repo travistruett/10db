@@ -2,6 +2,7 @@ import babel from '@rolldown/plugin-babel';
 import react, { reactCompilerPreset } from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
 import { pickerSource } from './picker-source.ts';
+import { factoryConnectionRoute } from './scripts/factory-connection-route.ts';
 import { IMG_SRC_DIRECTIVE } from './window-csp.ts';
 
 // The browser modes get the window's img-src policy (window-csp.ts).
@@ -23,6 +24,15 @@ const servedAppInDev: Plugin = {
   },
 };
 
+// Under `pnpm dev:factory` the page asks the dev server for the daemon's connection on each connect.
+const factoryConnectionInDev = (dataDir: string | undefined): Plugin => ({
+  name: 'tendb-factory-connection',
+  configureServer(server) {
+    if (dataDir !== undefined && dataDir !== '')
+      server.middlewares.use(factoryConnectionRoute(dataDir));
+  },
+});
+
 // Tauri expects a fixed dev port and serves the build from ../dist.
 export default defineConfig({
   plugins: [
@@ -32,6 +42,7 @@ export default defineConfig({
     // config above the checkout, where a sandbox refuses even a stat.
     babel({ presets: [reactCompilerPreset()], targets: { safari: '18' } }),
     servedAppInDev,
+    factoryConnectionInDev(process.env['TENDB_FACTORY_DATA_DIR']),
   ],
   clearScreen: false,
   server: { port: 1420, strictPort: true, headers: pageHeaders },

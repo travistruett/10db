@@ -97,7 +97,7 @@ For the desktop window instead of a browser tab, leave `pnpm dev:factory` runnin
 `TENDB_DATA_DIR="$HOME/Library/Application Support/10db" pnpm --filter @10db/desktop dev:shell`.
 
 - Stop `pnpm dev` first: both use port 1420.
-- If 10db restarts, run `pnpm dev:factory` again (its token changes; the desktop window follows on its own).
+- If 10db restarts, the page follows on its own: it reads the new token through the dev server when it reconnects.
 - It acts on your real projects and Inbox: what you click starts, moves and removes real tasks.
 - A change that also needs a daemon change can't be previewed this way: the app's daemon is the build you installed, not your checkout.
 - `launchctl setenv` lasts until you log out or restart, and every app opened after it inherits the value, Terminal,

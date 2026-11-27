@@ -1,17 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { factoryViteCommand, viteStartFailure } from './factory-vite';
 
-const CONNECTION = {
-  url: 'http://127.0.0.1:53117',
-  token: 'factory-token-0123456789abcdefghijklmn',
-};
-
 describe('factoryViteCommand', () => {
-  it('runs Vite with CORS off, so no other localhost page can read the module that holds the token', () => {
-    expect(factoryViteCommand(CONNECTION)).toEqual({
+  it('runs Vite with CORS off, so no other localhost page can read the daemon token it serves', () => {
+    expect(factoryViteCommand('/data')).toEqual({
       file: 'pnpm',
       args: ['exec', 'vite', '--no-cors'],
-      env: { VITE_DAEMON_URL: CONNECTION.url, VITE_DAEMON_TOKEN: CONNECTION.token },
+      env: { TENDB_FACTORY_DATA_DIR: '/data', VITE_DAEMON_FACTORY: '1' },
     });
   });
 });

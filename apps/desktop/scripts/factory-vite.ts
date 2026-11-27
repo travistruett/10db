@@ -1,21 +1,23 @@
-import type { FactoryConnection } from './factory-connection';
-
 export interface ViteCommand {
   readonly file: string;
   readonly args: readonly string[];
   readonly env: Readonly<Record<string, string>>;
 }
 
+/** Where the dev server answers the factory daemon's current address and token (`vite.config.ts`). */
+export const FACTORY_CONNECTION_PATH = '/__tendb/factory-connection';
+
 /**
- * Vite over the factory's daemon. The token is inlined into the module that reads
- * `VITE_DAEMON_TOKEN`, and Vite's default CORS lets any localhost page fetch module source, so CORS is
- * off: only the page Vite serves, on its own origin, can read it.
+ * Vite over the factory's daemon. The page asks the dev server for the daemon's address and token on every
+ * connect (`FACTORY_CONNECTION_PATH`), read fresh from the data directory, so a restarted 10db, with its new
+ * token, is followed without restarting Vite. Vite's default CORS lets any localhost page fetch from it, so CORS
+ * is off: only the page Vite serves, on its own origin, can read the answer.
  */
-export function factoryViteCommand(connection: FactoryConnection): ViteCommand {
+export function factoryViteCommand(dataDir: string): ViteCommand {
   return {
     file: 'pnpm',
     args: ['exec', 'vite', '--no-cors'],
-    env: { VITE_DAEMON_URL: connection.url, VITE_DAEMON_TOKEN: connection.token },
+    env: { TENDB_FACTORY_DATA_DIR: dataDir, VITE_DAEMON_FACTORY: '1' },
   };
 }
 
