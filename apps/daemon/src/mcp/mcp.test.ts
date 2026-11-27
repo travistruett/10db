@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,21 +10,24 @@ import {
   acquireClaims,
   createTestStore,
   endSession,
+  getWorkstreamRow,
   insertBatch,
   insertKind,
   insertSession,
   insertTask,
   insertWorkstream,
+  listInbox,
   patchWorkstream,
   releaseClaims,
   seedProject,
   transitionBatch,
   type Store,
 } from '@10db/db';
-import type { BatchId, ProjectDto, WorkstreamId } from '@10db/contracts';
+import { InboxState, type BatchId, type ProjectDto, type WorkstreamId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { createTempRepo, isolatedGitEnv, seedWorkstream } from '../../test/fixtures';
+import { createTempRepo, isolatedGitEnv, seedWorkstream, waitFor } from '../../test/fixtures';
+import { claimedChanges, handOverEdits } from '../runner';
 import type { DependencyChanges, MigrationsBase } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
@@ -162,6 +166,7 @@ beforeEach(async () => {
       return own ? AbortSignal.any([sessionAbort.signal, own.signal]) : sessionAbort.signal;
     },
     claimWaits,
+    handOverClaim: (handover) => handOverEdits({ state, git }, handover),
     claimPollMs: 5,
     get claimWaitSliceMs() {
       return claimWaitSliceMs;
@@ -308,5 +313,84 @@ describe('MCP auth', () => {
       body: '{}',
     });
     expect(after.status).toBe(401);
+  });
+});
+
+describe('edits left behind in a shared checkout', () => {
+  it('does not charge the task a yield hands a claim to with the yielder’s uncommitted edits', async () => {
+    const yielder = await seedSession(['api']);
+    const taker = await seedSession(['ui'], undefined, {
+      project: yielder.project,
+      title: 'Beta',
+    });
+    mkdirSync(join(repo.path, 'src/api'), { recursive: true });
+    writeFileSync(join(repo.path, 'src/api/half.ts'), 'half done\n');
+    const yielderAsks = yielder.call('request_claim', {
+      opId: 'yielder-ui',
+      kind: 'area',
+      name: 'ui',
+      reason: 'needs ui',
+    });
+    await waitFor(() => claimWaits.holdersAwaitedBy(yielder.workstream.id).length > 0);
+    const takerAsks = taker.call('request_claim', {
+      opId: 'taker-api',
+      kind: 'area',
+      name: 'api',
+      reason: 'needs api',
+    });
+    const card = await waitFor(() =>
+      listInbox(state.db, { states: [InboxState.Open] }).find((i) =>
+        i.title.startsWith('Claim deadlock:'),
+      ),
+    );
+    const yieldOption = card.options.find((o) => o.label.startsWith('Alpha yields'));
+    expect(yieldOption?.description).toContain('remain its own');
+    inbox.answer(card.id, { choice: yieldOption?.label ?? '' });
+    expect((await yielderAsks).json).toMatchObject({ granted: false });
+    const granted = (await takerAsks).json;
+    expect(granted).toMatchObject({ granted: true });
+    expect(String(granted?.['instruction'])).toContain('src/api/half.ts');
+    const takerRow = getWorkstreamRow(state.db, taker.workstream.id);
+    expect(await claimedChanges(state.db, git, takerRow)).toEqual([]);
+    writeFileSync(join(repo.path, 'src/api/half.ts'), 'finished by the taker\n');
+    expect(await claimedChanges(state.db, git, takerRow)).toEqual(['src/api/half.ts']);
+  });
+
+  it('leaves named paths in a copy another task shares, and says why it leaves none alone', async () => {
+    const copy = createTempRepo();
+    try {
+      const s = await seedSession(['api'], { path: copy.path, branch: 'copy' });
+      const alone = await s.call('report_deviation', {
+        opId: 'leave-alone',
+        cause: 'not mine',
+        severity: 'info',
+        reason: 'someone else wrote it',
+        leaveUncommitted: ['src/api/x.ts'],
+      });
+      expect(alone.json).toMatchObject({ leftUncommitted: [] });
+      expect(String(alone.json?.['instruction'])).toContain('this task');
+      const batchId = getWorkstreamRow(state.db, s.workstream.id).batchId;
+      state.write((ctx) => {
+        const sibling = insertTask(ctx, s.project.id, {
+          title: 'Sibling',
+          acceptanceCriteria: ['it works'],
+          areas: ['ui'],
+        });
+        insertWorkstream(ctx, sibling.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          ...(batchId ? { batchId } : {}),
+        });
+      });
+      const shared = await s.call('report_deviation', {
+        opId: 'leave-shared',
+        cause: 'not mine',
+        severity: 'info',
+        reason: 'the sibling wrote it',
+        leaveUncommitted: ['src/api/x.ts'],
+      });
+      expect(shared.json).toMatchObject({ leftUncommitted: ['src/api/x.ts'], instruction: null });
+    } finally {
+      copy.cleanup();
+    }
   });
 });
