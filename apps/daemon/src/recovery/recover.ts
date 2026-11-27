@@ -297,7 +297,7 @@ export async function recoverOnStartup(opts: {
           reason: opts.cleanShutdown
             ? 'daemon restarted after a clean shutdown'
             : opts.frozenKill
-              ? 'daemon restarted after the app killed it as frozen'
+              ? 'daemon restarted after the app killed it as frozen or stuck starting'
               : 'daemon restarted',
         });
       }

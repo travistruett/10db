@@ -12,6 +12,13 @@
       "items": {
         "type": "string"
       }
+    },
+    "instruction": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

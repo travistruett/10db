@@ -17,6 +17,6 @@ export { untakenMessages } from './lane-messages';
 export { endTurnSteps, finishEndedTurn, passOfWorkstream, queueUntaken } from './pass-turn';
 export { raisePassCheck, raiseTurnFailed } from './pass-check';
 export { startTurnChecks, TURN_CHECK_TIMEOUT_MS, withTurnChecks } from './turn-checks';
-export { yieldClaimsWhileWaiting } from './claim-yield';
+export { claimedChanges, handOverEdits, yieldClaimsWhileWaiting } from './claim-yield';
 export { releaseReplacedLaneRun, subscribeLaneTakeOut } from './lane-take-out';
 export { fileFingerprint } from './start-dirt';

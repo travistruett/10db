@@ -2240,12 +2240,17 @@ export interface StartDirtEntry {
   readonly leftBy?: DeviationId;
   /** The session that named it, with `leftBy`. */
   readonly leftIn?: SessionId;
+  /**
+   * The task that held the claim over the path and left it uncommitted when this task was granted
+   * that claim in the same checkout: the edit stays that task's while the file is as it was then.
+   */
+  readonly handedBy?: WorkstreamId;
 }
 
 /**
  * What a task's checkout held uncommitted that is not the task's work: what it held when the task
- * first launched, recorded once per task, and the paths a session named since in `report_deviation`.
- * A path recorded at launch and still as it was at a step's end, or one a session named, is someone
+ * first launched, recorded once per task, the paths a session named since in `report_deviation`, and
+ * those another task left uncommitted under a claim this task was then granted. A path recorded at launch and still as it was at a step's end, or one a session named, is someone
  * else's edit in a shared checkout, which the step is not sent back to commit.
  */
 export const taskStartDirt = sqliteTable('task_start_dirt', {

@@ -72,3 +72,105 @@ export function unansweredText(unanswered: Readonly<Record<string, number>>): st
 export function rateText(rate: number): string {
   return String(Math.round(rate * 1000) / 1000);
 }
+
+/** A model's name in a run: the model, and its slot only when two bindings share the model. */
+export function modelDisplayName(
+  m: EvalModelResultDto,
+  models: readonly EvalModelResultDto[],
+): string {
+  const shared = models.filter((other) => other.model === m.model).length > 1;
+  return shared && m.slot !== null ? `${m.model} (${m.slot})` : m.model;
+}
+
+/** Past this many models the verdict counts them instead of naming each. */
+const VERDICT_NAMES_MAX = 3;
+
+interface ModelVerdict {
+  readonly name: string;
+  readonly passed: boolean;
+  readonly missed: number;
+  readonly total: number;
+  readonly cost: number | null;
+  readonly worst: EvalGateDto | null;
+}
+
+/** One model across the slots a run binds it in: it passed only if every slot did, as the Models view counts. */
+function byModel(models: readonly EvalModelResultDto[]): ModelVerdict[] {
+  const groups = new Map<string, EvalModelResultDto[]>();
+  for (const m of models) groups.set(m.model, [...(groups.get(m.model) ?? []), m]);
+  return [...groups].map(([name, slots]) => ({
+    name,
+    passed: slots.every((m) => m.passed),
+    missed: slots.reduce((n, m) => n + m.gates.filter((g) => !g.passed).length, 0),
+    total: slots.reduce((n, m) => n + m.gates.length, 0),
+    cost: slots.some((m) => m.costUsd === null)
+      ? null
+      : slots.reduce((sum, m) => sum + (m.costUsd ?? 0), 0),
+    worst: slots.map(worstGate).reduce<EvalGateDto | null>((low, g) => {
+      if (g === null) return low;
+      if (low === null) return g;
+      return (g.minimum ?? 0) - g.rate > (low.minimum ?? 0) - low.rate ? g : low;
+    }, null),
+  }));
+}
+
+const joinNames = (names: readonly string[]): string =>
+  names.length < 2
+    ? (names[0] ?? '')
+    : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1] ?? ''}`;
+
+/** What a failing model missed: a count of gates, or only that the report marks it failed. */
+const missesText = (m: ModelVerdict): string =>
+  m.missed === 0 ? 'fails' : `misses ${String(m.missed)} of ${String(m.total)}`;
+
+/** One run's outcome in plain words, from its models; the cheapest model that passes when costs are known. */
+export function runVerdict(models: readonly EvalModelResultDto[]): {
+  readonly verdict: string;
+  readonly cheapest: string | null;
+} {
+  const grouped = byModel(models);
+  const [only] = grouped;
+  if (only === undefined) return { verdict: 'No model results in this run.', cheapest: null };
+  if (grouped.length === 1) {
+    if (only.passed) return { verdict: 'Passes every gate.', cheapest: null };
+    if (only.missed === 0) return { verdict: 'Fails.', cheapest: null };
+    const w = only.worst;
+    const under =
+      w === null
+        ? ''
+        : w.minimum === null
+          ? `; furthest under: ${w.name} failed`
+          : `; furthest under: ${w.name} ${rateText(w.rate)} < ${rateText(w.minimum)}`;
+    return {
+      verdict: `Misses ${String(only.missed)} of ${String(only.total)} gates${under}.`,
+      cheapest: null,
+    };
+  }
+  const passing = grouped.filter((m) => m.passed);
+  const failing = grouped.filter((m) => !m.passed);
+  const sentences: string[] = [];
+  if (grouped.length > VERDICT_NAMES_MAX) {
+    sentences.push(
+      `${String(passing.length)} of ${String(grouped.length)} models pass every gate.`,
+    );
+  } else {
+    if (passing.length > 0)
+      sentences.push(
+        `${joinNames(passing.map((m) => m.name))} ${passing.length === 1 ? 'passes' : 'pass'} every gate.`,
+      );
+    for (const m of failing) sentences.push(`${m.name} ${missesText(m)}.`);
+  }
+  const priced = passing.flatMap((m) => (m.cost === null ? [] : [{ name: m.name, cost: m.cost }]));
+  const unpriced = passing.filter((m) => m.cost === null).map((m) => m.name);
+  const best = priced.reduce<{ name: string; cost: number } | null>(
+    (low, m) => (low === null || m.cost < low.cost ? m : low),
+    null,
+  );
+  let cheapest: string | null = null;
+  if (best !== null)
+    cheapest =
+      unpriced.length === 0
+        ? `Cheapest that passes: ${best.name} at ${costText(best.cost)} a run.`
+        : `${best.name} at ${costText(best.cost)} a run; ${joinNames(unpriced)} cost unknown.`;
+  return { verdict: sentences.join(' '), cheapest };
+}

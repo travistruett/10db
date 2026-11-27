@@ -1,22 +1,29 @@
-import { type InboxItemId, type WorkstreamId, WorkstreamState } from '@10db/contracts';
+import {
+  type ClaimKind,
+  type InboxItemId,
+  type WorkstreamId,
+  WorkstreamState,
+} from '@10db/contracts';
 import {
   activeClaims,
   getProject,
   getTask,
   getTaskStartDirt,
   getWorkstreamRow,
+  handTaskPaths,
   passAreasOf,
   passHoldingTask,
   forgetGrantedClaimOps,
   releaseClaims,
   type DbReader,
+  type StartDirtEntry,
   type WorkstreamRow,
 } from '@10db/db';
 import { checkoutOf, laneBranchOf } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { findClaimed } from '../watcher';
-import { withoutStartDirt } from './start-dirt';
+import { fileFingerprint, withoutStartDirt } from './start-dirt';
 
 /** What reading a run's uncommitted changes asks of git. */
 export type ClaimGit = Pick<Git, 'changedPaths' | 'branchTip' | 'hashOnDisk' | 'blobAt'>;
@@ -41,6 +48,61 @@ export async function claimedChanges(
   const claimed = findClaimed(changed, { areas, hazards: project.hazards }, claims);
   const start = pass ? null : getTaskStartDirt(db, row.taskId);
   return withoutStartDirt(claimed, checkout, start).sort();
+}
+
+/**
+ * Records the uncommitted edits under `claim` that `from` left in the checkout it shares with
+ * `grantee`, which was just granted that claim, as `from`'s in the grantee's task record: the
+ * grantee is not sent back to commit another task's half-done work. An edit `from` was itself handed,
+ * untouched since, stays with the task that made it, and one that is the grantee's own comes back to
+ * it. A path `from`'s record already counts as nobody's (the checkout's dirt at its launch, or one its
+ * session named as another writer's) is not handed. Separate checkouts, one task's two workstreams
+ * and a pass's page (charged with its pass's record) hand nothing. Answers the paths handed, sorted.
+ */
+export async function handOverEdits(
+  deps: { readonly state: StateStore; readonly git: Pick<Git, 'changedPaths'> },
+  handover: {
+    readonly grantee: WorkstreamId;
+    readonly from: WorkstreamId;
+    readonly claim: { readonly kind: ClaimKind; readonly name: string };
+  },
+): Promise<string[]> {
+  const db = deps.state.db;
+  const to = getWorkstreamRow(db, handover.grantee);
+  const giver = getWorkstreamRow(db, handover.from);
+  if (to.taskId === giver.taskId) return [];
+  const checkout = checkoutOf(db, to);
+  if (checkoutOf(db, giver) !== checkout) return [];
+  if (passHoldingTask(db, getTask(db, to.taskId))) return [];
+  const project = getProject(db, to.projectId);
+  const claimed = findClaimed(
+    await deps.git.changedPaths(checkout),
+    { areas: project.areas, hazards: project.hazards },
+    [handover.claim],
+  );
+  const record = new Map((getTaskStartDirt(db, giver.taskId) ?? []).map((e) => [e.path, e]));
+  const handed: { path: string; fingerprint: string | null; handedBy: WorkstreamId }[] = [];
+  for (const path of claimed.sort()) {
+    const fingerprint = fileFingerprint(checkout, path);
+    const by = handedFrom(record.get(path), fingerprint, handover.from);
+    if (by !== null && by !== handover.grantee) handed.push({ path, fingerprint, handedBy: by });
+  }
+  deps.state.write((ctx) => {
+    handTaskPaths(ctx, to.taskId, handed);
+  });
+  return handed.map((e) => e.path);
+}
+
+/** Whose edit a path the giver leaves is, by the giver's record of it; null when it is nobody's. */
+function handedFrom(
+  entry: StartDirtEntry | undefined,
+  fingerprint: string | null,
+  giver: WorkstreamId,
+): WorkstreamId | null {
+  if (entry === undefined) return giver;
+  if (entry.leftBy !== undefined) return null;
+  if (entry.fingerprint !== fingerprint) return giver;
+  return entry.handedBy ?? null;
 }
 
 /** `changed` less each path the folder holds as the run's lane tip has it; all of it off a lane. */

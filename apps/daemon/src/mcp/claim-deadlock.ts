@@ -1,7 +1,5 @@
 import {
   ClaimKind,
-  clipText,
-  INBOX_OPTION_LABEL_MAX,
   InboxAnswerRefused,
   InboxKind,
   isTerminal,
@@ -39,60 +37,52 @@ export interface DeadlockTask {
   readonly yields: readonly { readonly kind: ClaimKind; readonly name: string }[];
 }
 
-/** The start of a title a label always keeps; tasks whose titles share it are told apart by number. */
-const TITLE_KEPT = 32;
-/** The longest number tag a label gives a task, ` (task 99)`. */
-const TAG_ROOM = 10;
-const YIELDS = ' yields ';
+const WAITS = ' Waits';
 const CANCEL = 'Cancel ';
+
+/** The letter a deadlock card gives the task at `index`: A, B, C, and a number past Z. */
+export function taskLetter(index: number): string {
+  return index < 26 ? String.fromCharCode(65 + index) : `Task ${String(index + 1)}`;
+}
 
 /**
  * The answers a claim deadlock card offers, and what the daemon does for each: every task in the
- * deadlock can yield its claim (so the other gets it) or be cancelled (which frees all it holds).
- * A label fits on the card's button, so a long title is cut; the description names the whole title.
- * Tasks whose titles start alike are told apart by number, and their descriptions name the workstream.
+ * deadlock can wait (it yields its claim, so the other gets it) or be cancelled (which frees all it
+ * holds). Tasks are lettered A, B, C in the order given, so a label stays short whatever the titles
+ * are; the descriptions name each task by its whole title.
  */
 export function deadlockAnswers(tasks: readonly DeadlockTask[]): {
   readonly options: InboxOption[];
   readonly detail: Record<string, Json>;
 } {
-  const lookAlike = (t: DeadlockTask): boolean =>
-    tasks.some((o) => o !== t && o.title.slice(0, TITLE_KEPT) === t.title.slice(0, TITLE_KEPT));
-  const named = (t: DeadlockTask, room: number): string => {
-    const tag = lookAlike(t) ? ` (task ${String(tasks.indexOf(t) + 1)})` : '';
-    return `${clipText(t.title, room - tag.length)}${tag}`;
-  };
   const whole = (t: DeadlockTask): string =>
-    lookAlike(t) ? `"${t.title}" (${t.workstreamId})` : `"${t.title}"`;
+    `${taskLetter(tasks.indexOf(t))}, "${t.title}" (${t.workstreamId})`;
   const claimsOf = (t: DeadlockTask): string =>
     t.yields.map((c) => `${c.kind} ${c.name}`).join(', ');
+  const others = tasks.length > 2 ? 'the other tasks' : 'the other task';
   const choices: { choice: DeadlockChoice; description: string }[] = [];
   // A task with nothing to give up (the waits changed since the deadlock was found) gets no yield:
   // choosing it would release nothing.
   for (const t of tasks.filter((o) => o.yields.length > 0)) {
-    const claims = clipText(
-      claimsOf(t),
-      INBOX_OPTION_LABEL_MAX - YIELDS.length - TITLE_KEPT - TAG_ROOM,
-    );
     choices.push({
       choice: {
-        label: `${named(t, INBOX_OPTION_LABEL_MAX - YIELDS.length - claims.length)}${YIELDS}${claims}`,
+        label: `${taskLetter(tasks.indexOf(t))}${WAITS}`,
         action: 'yield',
         workstreamId: t.workstreamId,
         claims: [...t.yields],
       },
-      description: `Task ${whole(t)} gives up ${claimsOf(t)} so the other task gets it. It asks for it again before editing there.`,
+      description: `Task ${whole(t)} gives up ${claimsOf(t)} so ${others} get${tasks.length > 2 ? '' : 's'} it, and waits. It asks for it again before editing there. Edits it has not committed there stay as they are and remain its own: the other task is not asked to commit them, and this task commits them after it gets ${claimsOf(t)} back.`,
     });
   }
   for (const t of tasks)
     choices.push({
       choice: {
-        label: `${CANCEL}${named(t, INBOX_OPTION_LABEL_MAX - CANCEL.length)}`,
+        label: `${CANCEL}${taskLetter(tasks.indexOf(t))}`,
         action: 'cancel',
         workstreamId: t.workstreamId,
         claims: [],
       },
-      description: `Ends task ${whole(t)} and frees every claim it holds, so the other task goes on.`,
+      description: `Ends task ${whole(t)} and frees every claim it holds, so ${others} go${tasks.length > 2 ? '' : 'es'} on. Its uncommitted edits stay in its folder as they are; the other task is not asked to commit them.`,
     });
   return {
     options: choices.map(({ choice, description }) => ({ label: choice.label, description })),

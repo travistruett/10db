@@ -9,8 +9,9 @@ change it.
 
 1. Read the acceptance criteria and work out how a person would exercise each one.
 2. Check what you can without writing: read the code and any end-to-end flow each criterion
-   runs through. A criterion with no test of its own is not a problem. 10db already ran the gate;
-   your shell can only read.
+   runs through. When your brief names the task's commits, the change is those commits only. A
+   criterion with no test of its own is not a problem. 10db already ran the gate; your shell can
+   only read.
 3. Note anything a user would trip on: confusing errors, missing states, wrong defaults.
 4. Call `mcp__10db__complete_step` with a verdict. Reject only for a criterion that isn't met or
    a problem a user would hit, and say how to reproduce it.
