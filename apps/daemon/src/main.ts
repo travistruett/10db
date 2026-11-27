@@ -2,12 +2,15 @@ import { join } from 'node:path';
 import type { SystemCheckDto } from '@10db/contracts';
 import { SchemaMismatchError } from '@10db/db';
 import { CATALOGUE_SNAPSHOT_FILE } from './catalogue';
+import { systemClock } from './clock';
 import {
   AlreadyRunningError,
   aaKeyReaderFromEnv,
   catalogueSnapshotFromEnv,
   daemonOptionsFromEnv,
   startDaemon,
+  STOP_DEADLINE_MS,
+  stopWithin,
   WorktreeRootError,
 } from './daemon';
 import { EnvError, loadEnv, type DaemonEnv } from './env';
@@ -226,8 +229,16 @@ try {
     stopping = true;
     watchdog?.stop();
     agents?.stop();
-    void daemon.stop().then(() => {
-      process.exit(0);
+    stopWithin(() => daemon.stop(), {
+      clock: systemClock,
+      deadlineMs: STOP_DEADLINE_MS,
+      onStopped: () => process.exit(0),
+      onLate: () => {
+        console.error(
+          `10db daemon: shutdown did not finish within ${String(STOP_DEADLINE_MS / 1000)} s; exiting`,
+        );
+        process.exit(1);
+      },
     });
   };
   process.once('SIGINT', shutdown);

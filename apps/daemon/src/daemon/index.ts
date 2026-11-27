@@ -6,6 +6,7 @@ export {
   daemonOptionsFromEnv,
 } from './options-from-env';
 export { startDaemon, type RunningDaemon } from './start';
+export { STOP_DEADLINE_MS, stopWithin } from './stop-within';
 export {
   allSandboxRootsOf,
   openSandboxRoots,
