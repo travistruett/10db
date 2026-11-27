@@ -1,5 +1,5 @@
 import { NewEvalOrigin, evalGapPath, type EvalGapDto, type EvalSuiteDto } from '@10db/contracts';
-import { Button, Code, Stack, Text } from '@mantine/core';
+import { Button, Code, Group, Stack, Text } from '@mantine/core';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { pagerProps, TABLE_PAGE_SIZES, usePaging } from '../../shell/table-pager';
 import { RaisedPanel } from '../../shell/raised-panel';
@@ -68,7 +68,7 @@ function Dim({ children }: { readonly children: string }) {
 }
 
 /** The column headings, shared with the loading skeleton so the two line up. */
-export const EVAL_COLUMN_WIDTHS = { trend: 110, cost: 120, p50: 70, at: 120, action: 150 } as const;
+export const EVAL_COLUMN_WIDTHS = { trend: 110, cost: 120, p50: 70, at: 150 } as const;
 
 function columns(
   project: ProjectViewDto,
@@ -193,49 +193,47 @@ function columns(
       title: 'Last Run',
       textAlign: 'right',
       width: EVAL_COLUMN_WIDTHS.at,
-      render: (row) =>
-        row.kind !== 'suite' ? null : (
-          <Stack gap={2} align="flex-end">
-            <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
-              {row.suite.latest === null ? '—' : dayText(row.suite.latest.at)}
-            </Text>
-            {row.suite.definitionChangedAt === null ? null : (
-              <Text size="xs" c="dimmed" ta="right">
-                {`eval changed ${dayText(row.suite.definitionChangedAt)}`}
-              </Text>
-            )}
-          </Stack>
-        ),
-    },
-    {
-      accessor: 'action',
-      title: '',
-      textAlign: 'right',
-      width: EVAL_COLUMN_WIDTHS.action,
       render: (row) => {
         switch (row.kind) {
           case 'suite':
-            return null;
+            return (
+              <Stack gap={2} align="flex-end">
+                <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+                  {row.suite.latest === null ? '—' : dayText(row.suite.latest.at)}
+                </Text>
+                {row.suite.definitionChangedAt === null ? null : (
+                  <Text size="xs" c="dimmed" ta="right">
+                    {`eval changed ${dayText(row.suite.definitionChangedAt)}`}
+                  </Text>
+                )}
+              </Stack>
+            );
           case 'gap':
             return (
-              <Button
-                size="compact-xs"
-                variant="default"
-                aria-label={`New Eval for ${row.gap.label}`}
-                onClick={() => {
-                  onNewEval({
-                    behavior: asBehavior(row.gap.label),
-                    evidence: row.gap.why,
-                    where: [evalGapPath(row.gap.where)],
-                    origin: NewEvalOrigin.Gap,
-                  });
-                }}
-              >
-                New Eval
-              </Button>
+              <Group justify="flex-end">
+                <Button
+                  size="compact-xs"
+                  variant="default"
+                  aria-label={`New Eval for ${row.gap.label}`}
+                  onClick={() => {
+                    onNewEval({
+                      behavior: asBehavior(row.gap.label),
+                      evidence: row.gap.why,
+                      where: [evalGapPath(row.gap.where)],
+                      origin: NewEvalOrigin.Gap,
+                    });
+                  }}
+                >
+                  New Eval
+                </Button>
+              </Group>
             );
           case 'file':
-            return <AssessAction assessment={assessment} project={project} />;
+            return (
+              <Group justify="flex-end">
+                <AssessAction assessment={assessment} project={project} />
+              </Group>
+            );
         }
       },
     },

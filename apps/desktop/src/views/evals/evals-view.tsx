@@ -15,6 +15,7 @@ import {
   Paper,
   SegmentedControl,
   SimpleGrid,
+  Skeleton,
   Stack,
   Text,
   Tooltip,
@@ -354,7 +355,7 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
   if (evals.data === undefined)
     return (
       <>
-        {header()}
+        {header(<Skeleton height={10} width={120} my={5} />)}
         {evals.isError ? (
           <Text size="sm" c="red">
             {evals.error.message}

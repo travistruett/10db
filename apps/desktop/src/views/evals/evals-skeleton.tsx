@@ -9,7 +9,7 @@ const TREND_DOTS = [0, 1, 2, 3, 4, 5, 6, 7] as const;
 
 function TilePlaceholder() {
   return (
-    <Paper variant="raised" radius="md" px={16} py={14}>
+    <Paper variant="raised" radius="md" px={16} py={14} mih={78}>
       <Skeleton height={24} width={36} />
       <Group gap={6} mt={12} wrap="nowrap" align="center">
         <Skeleton height={8} width={8} circle />
@@ -113,7 +113,6 @@ export function EvalsSkeleton() {
                 </div>
               ),
             },
-            { accessor: 'action', title: '', width: EVAL_COLUMN_WIDTHS.action, render: () => null },
           ]}
         />
       </RaisedPanel>
