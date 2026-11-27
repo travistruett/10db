@@ -525,6 +525,7 @@ import {
   createEvalLiveRuns,
   createEvalsAssessor,
   createEvalsService,
+  createEvalSuggester,
   subscribeEvalAssessment,
 } from '../evals';
 import { createServices } from './services';
@@ -2969,6 +2970,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     asker: areaNamer,
     logger: logger.child({ module: 'evals' }),
   });
+  const evalSuggester = createEvalSuggester({
+    db: state.db,
+    git,
+    asker: areaNamer,
+    logger: logger.child({ module: 'evals' }),
+  });
   const unsubscribeEvalAssessment = subscribeEvalAssessment(
     bus,
     {
@@ -3327,6 +3334,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     hazards: hazardAssessor,
     evals: evalsService,
     evalsAssessor,
+    evalSuggester,
     evalLive: evalLiveRuns,
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.

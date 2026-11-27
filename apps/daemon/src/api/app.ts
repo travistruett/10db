@@ -90,6 +90,7 @@ import {
   PersonaPatch,
   EvalManifest,
   type NewEvalBody,
+  EvalSuggestRequest,
   NewEvalRequest,
   EvalSuiteKey,
   EvalLiveRunId,
@@ -1704,6 +1705,21 @@ export function createApp(deps: ApiDeps) {
         // Not tied to the request: a dropped connection must not end a run another page is waiting on.
         await deps.services.assessEvals(ProjectId.parse(c.req.param('projectId'))),
       ),
+    )
+    .get('/projects/:projectId/eval-suggest', (c) =>
+      c.json(deps.services.evalSuggestStatus(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post(
+      '/projects/:projectId/evals/suggest',
+      validator('json', (value): EvalSuggestRequest => EvalSuggestRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.evalSuggest(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+            c.req.raw.signal,
+          ),
+        ),
     )
     .get('/projects/:projectId/eval-models', async (c) =>
       c.json(await deps.services.evalModels(ProjectId.parse(c.req.param('projectId')))),
