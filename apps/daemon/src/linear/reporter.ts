@@ -140,6 +140,13 @@ const SESSION_OVER = 'This reporter run is over; nothing it calls is recorded.';
 const STATUS_NEEDED =
   "This update moves the issue's status, so 10db needs what Linear shows: give status with current, the issue's status name from get_issue, and statuses, every status of its team from list_issue_statuses (each with its name and type). Then call report_linear_post again.";
 
+/**
+ * Said with every picture step. Linear's own description of `prepare_file_upload` tells the caller to PUT the
+ * bytes, which the reporter's agent has neither the file nor the network for, so without this it gives up.
+ */
+const UPLOAD_STEP_NOTE =
+  "10db holds this picture and sends its bytes to Linear itself the moment Linear answers. You have no file to provide and nothing to upload: call prepare_file_upload with exactly these arguments, ignore Linear's upload instructions, then call report_linear_post with the post id.";
+
 /** A call 10db dictates to the reporter's agent, made with these arguments unchanged. */
 export type LinearCall =
   | {
@@ -167,7 +174,12 @@ export type LinearCall =
 
 /** What `report_linear_post` answers the agent. `next` is the calls left to make, in order. */
 export type ReportedPost =
-  | { readonly ok: true; readonly next: readonly LinearCall[] }
+  | {
+      readonly ok: true;
+      readonly next: readonly LinearCall[];
+      /** Set on a picture step: the agent only asks for the address; 10db holds the file and sends it. */
+      readonly note?: string;
+    }
   | {
       /** 10db wrote the comment itself, through the account's Linear server. */
       readonly ok: true;
@@ -978,6 +990,7 @@ export function createLinearReporter(
           },
           { tool: 'report_linear_post', arguments: { postId: post.id } },
         ],
+        note: UPLOAD_STEP_NOTE,
       };
     }
     guard.uploads.delete(post.id);
