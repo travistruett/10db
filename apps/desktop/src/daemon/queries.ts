@@ -1,10 +1,10 @@
-import { TolerantInboxPage } from './tolerant-inbox-page';
 import {
   ChangesScope,
   BatchDto,
   AgentSkillStatus,
   BoardColumnDto,
   InboxItemDto,
+  InboxPageDto,
   KeepAwakeStatus,
   LanePermissionsDto,
   PickerProposalDto,
@@ -269,7 +269,7 @@ export function useInboxPage(query: InboxPageRead) {
             ...(asked.dir === undefined ? {} : { dir: asked.dir }),
           },
         }),
-        TolerantInboxPage,
+        InboxPageDto,
       ),
     placeholderData: keepPreviousData,
   });

@@ -9,7 +9,6 @@ tokens; the app still uses the main listener.
 - The UI gets its daemon connection from `DaemonProvider` (Tauri `daemon_connection`, or
   `VITE_DAEMON_URL`/`VITE_DAEMON_TOKEN` in the browser); it also polls `/health` and owns the connecting,
   reconnecting and version-mismatch states. Use `useDaemon()` and the hooks in `src/daemon/queries.ts`.
-- An Inbox page is read with `TolerantInboxPage` (`src/daemon/tolerant-inbox-page.ts`): a card that does not parse is left out of its rows and logged, never the whole list.
 - One event stream (`useEventStream`) invalidates queries by entity type (`INVALIDATIONS`). Don't poll lists.
 - `pnpm dev:preview` serves the UI with no token for 10db to run as 10db's own preview command, under the gate's
   sandbox; Open Page hands a tab at the daemon's dev UI origin (`/health`'s `devUiOrigin`) the daemon's address and
