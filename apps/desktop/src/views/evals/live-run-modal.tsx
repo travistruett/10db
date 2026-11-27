@@ -6,11 +6,12 @@ import {
   type EvalLiveRunDto,
   type ProjectId,
 } from '@10db/contracts';
-import { Button, Code, Group, Loader, Modal, Stack, Text } from '@mantine/core';
+import { Button, Code, Group, Modal, Stack, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { z } from 'zod';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { DaemonRequestError } from '../../daemon/client';
 import {
   useEvals,
@@ -323,7 +324,7 @@ function RunModal({
           {preview.error.message}
         </Text>
       ) : (
-        <Loader size="sm" />
+        <PageLoading shape={PageLoadingShape.Lines} rows={4} label="Reading the run" />
       )}
     </Modal>
   );

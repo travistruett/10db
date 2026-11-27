@@ -3,6 +3,32 @@ import { Children, Fragment, useEffect, useId, useRef, type ReactNode } from 're
 import { HelpHint } from './help-hint';
 import { HeadingRow } from './section-heading';
 
+/** A settings card's heading: its title, an optional info button and one dimmed line, and the card's action. */
+export function SettingsCardHeading({
+  title,
+  description,
+  help,
+  action,
+}: {
+  readonly title: string;
+  readonly description?: string;
+  readonly help?: ReactNode;
+  readonly action?: ReactNode;
+}) {
+  return (
+    <HeadingRow
+      line={description === undefined || description === '' ? undefined : description}
+      action={action}
+      heading={
+        <Group gap={4} wrap="nowrap">
+          <Title order={4}>{title}</Title>
+          {help ? <HelpHint label={title}>{help}</HelpHint> : null}
+        </Group>
+      }
+    />
+  );
+}
+
 /** A titled card of settings rows, with a hairline between rows. */
 export function SettingsCard({
   title,
@@ -25,15 +51,11 @@ export function SettingsCard({
   return (
     <Stack gap="xs">
       {title ? (
-        <HeadingRow
-          line={description === undefined || description === '' ? undefined : description}
+        <SettingsCardHeading
+          title={title}
+          {...(description === undefined ? {} : { description })}
+          help={help}
           action={action}
-          heading={
-            <Group gap={4} wrap="nowrap">
-              <Title order={4}>{title}</Title>
-              {help ? <HelpHint label={title}>{help}</HelpHint> : null}
-            </Group>
-          }
         />
       ) : null}
       <Paper withBorder radius="md">
@@ -65,6 +87,12 @@ export interface SettingRowProps {
 /** The control a row's description belongs to: its input, or the group of radios. */
 const CONTROL = 'textarea, input:not([type="hidden"]), [role="radiogroup"]';
 
+/** The least width of a row's text column. */
+export const SETTING_TEXT_MIN_WIDTH = 240;
+
+/** The width of a row's control column. */
+export const SETTING_CONTROL_WIDTH = 320;
+
 /** One setting: its name and one line on the left, its control on the right. */
 export function SettingRow({
   label,
@@ -86,7 +114,7 @@ export function SettingRow({
       control.setAttribute('aria-describedby', [...ids, descriptionId].join(' '));
   });
   const text = (
-    <Box flex={1} miw={240}>
+    <Box flex={1} miw={SETTING_TEXT_MIN_WIDTH}>
       <Group gap={4} wrap="nowrap">
         <Text size="sm" fw={500}>
           {label}
@@ -110,7 +138,7 @@ export function SettingRow({
       ) : (
         <Group justify="space-between" wrap="nowrap" gap="xl">
           {text}
-          <Box w={320} style={{ flex: 'none' }}>
+          <Box w={SETTING_CONTROL_WIDTH} style={{ flex: 'none' }}>
             {children}
           </Box>
         </Group>

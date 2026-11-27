@@ -11,7 +11,9 @@ tokens; the app still uses the main listener.
   reconnecting and version-mismatch states. A page coming back (`visibilitychange` to visible, `pageshow`, `online`,
   `focus`) asks at once rather than waiting on a timer the browser held, one attempt at a time. Use `useDaemon()`
   and the hooks in `src/daemon/queries.ts`.
-- One event stream (`useEventStream`) invalidates queries by entity type (`INVALIDATIONS`). Don't poll lists. A page
+- One event stream (`useEventStream`) invalidates queries by entity type (`INVALIDATIONS`). Don't poll lists. An
+  event sent once per tool call (`session.activity`, `session.context`) names only what it changes
+  (`PER_CALL_INVALIDATIONS`), never a task or goal list: the daemon builds those on its main thread. A page
   coming back opens it at once instead of waiting out a retry, and one hidden 30 s or more gets a new socket, since
   one that died while a phone slept says nothing until TCP gives up.
 - `pnpm dev:preview` serves the UI with no token for 10db to run as 10db's own preview command, under the gate's
@@ -113,7 +115,10 @@ Read the ones for what you touch, and write a view's notes there, not here. This
   into the title row with `TitleRow`, and what sits under it at the top of its content with `PageIntro` (an
   optional one-line byline cut to one line with its text as a tooltip, an optional toolbar of tabs and filters);
   workspaces keep compact headers.
-  `src/shell/page-loading.tsx` is what a page shows while it loads (after 300 ms, placeholder rows; never a lone spinner).
+  `src/shell/page-loading.tsx` is what a page, panel, drawer or modal body shows while its data loads: animated
+  placeholders shaped like what is coming (a table with its real headings, rows, fields, a log, cards), after 300 ms,
+  never a lone spinner. A spinner stays only for work in progress that labels an action. A screen with a shape of its
+  own keeps its skeleton beside its view and reuses the real component's constants, as `board-skeleton.tsx` does.
   `src/shell/count-badge.tsx` is every count: muted, or `tone` attention, in the theme's primary colour, when it
   needs the builder.
 - Factory and preview: the installed release app is the factory; it manages the 10db repo and runs its tasks.

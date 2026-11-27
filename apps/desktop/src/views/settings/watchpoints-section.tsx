@@ -1,5 +1,5 @@
 import type { ProjectDto, ProjectWatchpointEntry, Watchpoint } from '@10db/contracts';
-import { Alert, Box, Loader, Stack, Text } from '@mantine/core';
+import { Alert, Box, Stack, Text } from '@mantine/core';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
 import {
@@ -10,10 +10,11 @@ import {
   useYourWatchpoints,
 } from '../../daemon/watchpoint-queries';
 import { ConfirmModal } from '../../shell/confirm-modal';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
 import { LibraryItems, WATCHPOINTS_LINE, WatchpointsHelp } from './all-watchpoints-section';
 import { SectionHeading } from './section-heading';
-import { SplitButton } from './split-button';
+import { SplitButton, SplitButtonLoading } from './split-button';
 import { Pill, RowActions } from './table-cells';
 import { WatchpointMatches, WatchpointName } from './watchpoint-cells';
 import { WatchpointDrawer } from './watchpoint-drawer';
@@ -39,6 +40,18 @@ function noteFor(row: ProjectRow): string {
     : 'Changes apply to this project only.';
 }
 
+/** The table's column titles and widths, which its placeholder draws too while the lists are read. */
+const WATCHPOINT_COLUMNS = {
+  // The paths sit under the name: a column of their own beside the four-way control would not fit the window.
+  label: { title: 'Watchpoint' },
+  // Wide enough for the four-way control at its widest ("Default · Show") and the cell's padding.
+  loudness: { title: 'When It Matches', width: 232 },
+  // Wide enough for its header at the window's 1200 px.
+  lastThirtyDays: { title: 'Last 30 Days', width: 112 },
+  // Edit and Remove (or its space) and the cell's padding, so neither icon is squeezed.
+  actions: { title: '', width: 80 },
+} as const;
+
 const count = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? '' : 's'}`;
 
 /** What applies in a project: your watchpoints as it has them, then its own. It never changes your list. */
@@ -59,7 +72,28 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
             {(yours.error ?? here.error)?.message}
           </Alert>
         ) : (
-          <Loader size="sm" aria-label="Reading the watchpoints" />
+          <>
+            <SectionHeading
+              title="Watchpoints"
+              line={WATCHPOINTS_LINE}
+              help={<WatchpointsHelp />}
+              action={
+                <SplitButtonLoading
+                  label="Add Watchpoint"
+                  menuLabel="More ways to add a watchpoint"
+                />
+              }
+            />
+            <PageLoading
+              shape={PageLoadingShape.Table}
+              label="Reading the watchpoints"
+              columns={Object.values(WATCHPOINT_COLUMNS)}
+              rows={4}
+              cellLines={4}
+              verticalSpacing="xs"
+              horizontalSpacing="xs"
+            />
+          </>
         )}
       </Stack>
     );
@@ -78,8 +112,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
   const columns: DataTableColumn<ProjectRow>[] = [
     {
       accessor: 'label',
-      // The paths sit under the name: a column of their own beside the four-way control would not fit the window.
-      title: 'Watchpoint',
+      ...WATCHPOINT_COLUMNS.label,
       render: (row) => (
         <Stack gap={6}>
           <WatchpointName
@@ -102,7 +135,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
     },
     {
       accessor: 'loudness',
-      title: 'When It Matches',
+      ...WATCHPOINT_COLUMNS.loudness,
       noWrap: true,
       render: (row) => (
         // A press on the control is not a press on the row.
@@ -136,9 +169,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
     },
     {
       accessor: 'lastThirtyDays',
-      title: 'Last 30 Days',
-      // Wide enough for its header at the window's 1200 px.
-      width: 112,
+      ...WATCHPOINT_COLUMNS.lastThirtyDays,
       render: (row) => {
         const found = stats?.find((s) => s.key === row.key);
         const color = found?.noisy === true ? 'yellow' : 'dimmed';
@@ -157,9 +188,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
     },
     {
       accessor: 'actions',
-      title: '',
-      // Edit and Remove (or its space) and the cell's padding, so neither icon is squeezed.
-      width: 80,
+      ...WATCHPOINT_COLUMNS.actions,
       textAlign: 'right',
       render: (row) => (
         <RowActions

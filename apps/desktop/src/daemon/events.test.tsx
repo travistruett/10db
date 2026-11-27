@@ -4,7 +4,7 @@ import { http, HttpResponse, type HttpHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderWithDaemon, server } from '../test/daemon';
 import { daemonEvent } from '../test/fixtures';
-import { eventStreamUrl, useEventStream } from './events';
+import { eventStreamUrl, invalidationsFor, useEventStream } from './events';
 import { useProjects } from './queries';
 
 function Stream({ onEvent }: { readonly onEvent?: (event: DaemonEvent) => void }) {
@@ -134,6 +134,14 @@ describe('useEventStream', () => {
       { timeout: 15_000 },
     );
     expect(new URL(urls[1] ?? 'ws://missing').searchParams.get('after')).toBe('42');
+  });
+
+  it('reads no task or goal list again for an event a session sends once per tool call', () => {
+    const ofSession = (type: DaemonEvent['type']) =>
+      invalidationsFor(daemonEvent({ type, entityType: 'session', entityId: 'ses_1' }));
+    expect(ofSession('session.activity')).toEqual([]);
+    expect(ofSession('session.context')).toEqual([['workstreams']]);
+    expect(ofSession('session.started')).toContainEqual(['tasks']);
   });
 
   it('builds ws and wss stream URLs', () => {

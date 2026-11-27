@@ -15,7 +15,6 @@ import {
   Drawer,
   Group,
   List,
-  Loader,
   NumberInput,
   Stack,
   Text,
@@ -23,6 +22,7 @@ import {
 } from '@mantine/core';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
+import { PageLoading, PageLoadingShape } from '../../../shell/page-loading';
 import { useCandidates } from '../../../daemon/queries';
 import { namesAPage } from '../../workbench/start-pass-rules';
 import { BatchCandidate } from './batch-candidate';
@@ -254,7 +254,7 @@ export function BatchSheet({ project, opened, onClose, goal }: BatchSheetProps) 
           </Alert>
         ) : null}
         {proposal.isPending && opened ? (
-          <Loader size="sm" aria-label="Loading the proposal" />
+          <PageLoading shape={PageLoadingShape.Cards} rows={3} label="Loading the proposal" />
         ) : null}
         {/* A new size is a new proposal, so the ticks and the title start over. */}
         {proposal.data ? (

@@ -1,6 +1,7 @@
 import type { EvalModelResultDto, EvalSuiteDetailDto, ProjectId } from '@10db/contracts';
-import { Code, Group, Loader, Select, Stack, Table, Text, Title } from '@mantine/core';
+import { Code, Group, Select, Stack, Table, Text, Title } from '@mantine/core';
 import { useState, type ReactNode } from 'react';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useEvalSuite } from '../../daemon/evals-queries';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { LiveRunControls } from './live-run-modal';
@@ -342,7 +343,7 @@ export function SuiteDrawer({
           {detail.error.message}
         </Text>
       ) : (
-        <Loader size="sm" />
+        <PageLoading shape={PageLoadingShape.Lines} rows={6} label="Loading the suite" />
       )}
     </SurfaceDrawer>
   );

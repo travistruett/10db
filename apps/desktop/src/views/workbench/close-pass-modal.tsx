@@ -4,8 +4,9 @@ import {
   type PassViewDto,
   type TaskId,
 } from '@10db/contracts';
-import { Box, Button, Group, List, Loader, Select, Stack, Text, Title } from '@mantine/core';
+import { Box, Button, Group, List, Select, Stack, Text, Title } from '@mantine/core';
 import { useState, type ReactNode } from 'react';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useClosePass, useClosePreview } from '../../daemon/pass-close-queries';
 import { CodeSpans } from '../../shell/code-spans';
 import { FormModal } from '../../shell/form-modal';
@@ -234,7 +235,11 @@ export function ClosePassModal({ view, onClose }: ClosePassModalProps) {
     >
       {preview === undefined ? (
         read.isPending ? (
-          <Loader size="sm" role="status" aria-label="Reading what the close settles" />
+          <PageLoading
+            shape={PageLoadingShape.List}
+            rows={4}
+            label="Reading what the close settles"
+          />
         ) : null
       ) : (
         <Stack gap="lg">

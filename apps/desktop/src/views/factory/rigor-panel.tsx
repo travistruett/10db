@@ -1,16 +1,21 @@
 import {
   ALL_RIGORS,
   RIGOR_FIGURES_PERIODS,
+  RIGORS,
   rigorTitle,
   type ProjectId,
   type RigorFiguresDto,
   type RigorFiguresPeriod,
   type RigorFiguresRowDto,
 } from '@10db/contracts';
-import { Alert, Loader, SegmentedControl, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, SegmentedControl, Stack, Table, Text, Title } from '@mantine/core';
 import { useState } from 'react';
 import { useRigorFigures } from '../../daemon/rigor-figures-queries';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
+
+/** The table's scroll width, kept by its placeholder. */
+const TABLE_MIN_WIDTH = 900;
 
 const COLUMNS = [
   'Rigor',
@@ -95,11 +100,20 @@ export function RigorPanel({ projectId }: { readonly projectId: ProjectId | null
           {figures.error.message}
         </Alert>
       ) : null}
-      {figures.isLoading ? <Loader size="sm" aria-label="Loading work per rigor" /> : null}
+      {figures.isLoading ? (
+        <PageLoading
+          shape={PageLoadingShape.Table}
+          label="Loading work per rigor"
+          columns={COLUMNS.map((title) => ({ title }))}
+          // One row for each rigor, then the total.
+          rows={RIGORS.length + 1}
+          minWidth={TABLE_MIN_WIDTH}
+        />
+      ) : null}
       {figures.isSuccess ? (
         <>
           <RaisedPanel>
-            <Table.ScrollContainer minWidth={900}>
+            <Table.ScrollContainer minWidth={TABLE_MIN_WIDTH}>
               <Table aria-label="Work per task by rigor">
                 <Table.Thead>
                   <Table.Tr>

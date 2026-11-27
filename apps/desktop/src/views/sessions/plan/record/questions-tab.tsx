@@ -16,13 +16,22 @@ const NO_SORT = { columnAccessor: 'text', direction: 'asc' } as const;
 
 const dash = (value: string | null) => value ?? '—';
 
+/** Questions list's column titles and widths, which its placeholder draws too. */
+export const QUESTION_COLUMNS = {
+  text: { title: 'Question' },
+  for: { title: 'For', width: 140 },
+  about: { title: 'About', width: 140 },
+  blocks: { title: 'Blocks', width: 160 },
+  state: { title: 'State', width: 120 },
+} as const;
+
 export function QuestionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
   const [narrowing, setNarrowing] = useState(NOT_NARROWED);
   const { query, page, paging } = useRecordPage(shapeId, 'questions', narrowing);
   const columns: DataTableColumn<PlanQuestionRow>[] = [
     {
       accessor: 'text',
-      title: 'Question',
+      ...QUESTION_COLUMNS.text,
       resizable: true,
       filtering: narrowing.q.trim() !== '',
       filter: (
@@ -46,11 +55,10 @@ export function QuestionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
         </Stack>
       ),
     },
-    { accessor: 'for', title: 'For', width: 140, toggleable: true, render: (q) => dash(q.for) },
+    { accessor: 'for', ...QUESTION_COLUMNS.for, toggleable: true, render: (q) => dash(q.for) },
     {
       accessor: 'about',
-      title: 'About',
-      width: 140,
+      ...QUESTION_COLUMNS.about,
       toggleable: true,
       render: (q) => (
         <Text size="xs" ff="monospace">
@@ -60,15 +68,13 @@ export function QuestionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
     },
     {
       accessor: 'blocks',
-      title: 'Blocks',
-      width: 160,
+      ...QUESTION_COLUMNS.blocks,
       toggleable: true,
       render: (q) => dash(q.blocks),
     },
     {
       accessor: 'state',
-      title: 'State',
-      width: 120,
+      ...QUESTION_COLUMNS.state,
       toggleable: true,
       render: (q) => (
         <Text size="sm" c="dimmed">
@@ -79,6 +85,7 @@ export function QuestionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
   ];
   return (
     <RecordListStates
+      columns={Object.values(QUESTION_COLUMNS)}
       query={query}
       what="questions"
       none={{ narrowed: narrowing.q.trim() !== '', text: 'No open questions.' }}

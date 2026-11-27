@@ -14,9 +14,9 @@ function CardPlaceholder() {
   return (
     <Paper withBorder p="md">
       <Stack gap="xs">
-        <Skeleton height={14} width="60%" animate={false} />
-        <Skeleton height={10} width="85%" animate={false} />
-        <Skeleton height={10} width="45%" animate={false} />
+        <Skeleton height={14} width="60%" />
+        <Skeleton height={10} width="85%" />
+        <Skeleton height={10} width="45%" />
       </Stack>
     </Paper>
   );
@@ -40,8 +40,8 @@ function RailPlaceholder({ empty }: { readonly empty: boolean }) {
         background: empty ? 'transparent' : 'var(--tendb-color-column)',
       }}
     >
-      <Skeleton height={12} width={12} animate={false} />
-      <Skeleton height={64} width={14} animate={false} />
+      <Skeleton height={12} width={12} />
+      <Skeleton height={64} width={14} />
     </Paper>
   );
 }
@@ -67,8 +67,8 @@ function OpenPlaceholder({ cards }: { readonly cards: number }) {
           px="sm"
           bg="var(--tendb-color-column-header)"
         >
-          <Skeleton height={14} width="40%" animate={false} />
-          <Skeleton height={12} width={12} animate={false} />
+          <Skeleton height={14} width="40%" />
+          <Skeleton height={12} width={12} />
         </Group>
         <Stack gap="xs" p="lg">
           {Array.from({ length: cards }, (_, i) => (
