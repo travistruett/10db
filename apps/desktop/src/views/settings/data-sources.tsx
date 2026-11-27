@@ -1,6 +1,7 @@
 import { CatalogueAttempt } from '@10db/contracts';
-import { Button, Popover, Stack, Text } from '@mantine/core';
+import { ActionIcon, Popover, Stack, Text, Tooltip } from '@mantine/core';
 import { IconDatabase } from '@tabler/icons-react';
+import { useState } from 'react';
 import { useBenchmarkStatus } from '../../daemon/benchmark-queries';
 import { useCatalogueStatus } from '../../daemon/model-queries';
 import { useNow } from '../../shell/relative';
@@ -9,21 +10,28 @@ import { ArtificialAnalysisStatusLine } from './artificial-analysis-status-line'
 import { catalogueLine } from './model-format';
 import { OpenRouterStatusLine } from './openrouter-status-line';
 
-/** Where the page's prices, scores and speed come from, behind one quiet button; each source's own status is in it. */
+/** Where the page's prices, scores and speed come from, behind one icon button; each source's own status is in it. */
 export function DataSources() {
   const now = useNow();
   const status = useCatalogueStatus();
+  const [opened, setOpened] = useState(false);
   return (
-    <Popover width={360} position="bottom-end" withArrow>
+    <Popover width={360} position="bottom-end" withArrow opened={opened} onChange={setOpened}>
+      {/* An icon beside the refresh, so the header's row keeps room for the tabs and the account. */}
       <Popover.Target>
-        <Button
-          variant="subtle"
-          color="gray"
-          size="compact-xs"
-          leftSection={<IconDatabase size={14} stroke={1.5} />}
-        >
-          Data Sources
-        </Button>
+        {/* The name gives way to the popover it opens, which would otherwise cover it. */}
+        <Tooltip label="Data Sources" position="bottom" disabled={opened}>
+          <ActionIcon
+            variant="default"
+            size="input-xs"
+            aria-label="Data Sources"
+            onClick={() => {
+              setOpened((open) => !open);
+            }}
+          >
+            <IconDatabase size={16} stroke={1.5} />
+          </ActionIcon>
+        </Tooltip>
       </Popover.Target>
       <Popover.Dropdown>
         <Stack gap="xs">

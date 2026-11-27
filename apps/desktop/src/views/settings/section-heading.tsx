@@ -57,9 +57,7 @@ export function SectionHeading({
       action={action}
       heading={
         <Group gap={4} wrap="nowrap">
-          <Title order={4} size="md" fw={600}>
-            {title}
-          </Title>
+          <Title order={4}>{title}</Title>
           {help === undefined ? null : <HelpHint label={title}>{help}</HelpHint>}
         </Group>
       }

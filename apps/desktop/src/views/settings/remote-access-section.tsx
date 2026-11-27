@@ -5,23 +5,15 @@ import {
   type SharingStatusDto,
   type SharingStepDto,
 } from '@10db/contracts';
+import { Accordion, Box, Button, CopyButton, Group, NumberInput, Stack, Text } from '@mantine/core';
 import {
-  Accordion,
-  Anchor,
-  Badge,
-  Box,
-  Button,
-  CopyButton,
-  Group,
-  List,
-  NumberInput,
-  Paper,
-  Skeleton,
-  Stack,
-  Text,
-  Title,
-} from '@mantine/core';
-import { IconCheck, IconCircle, IconClock, IconX } from '@tabler/icons-react';
+  IconCheck,
+  IconCircle,
+  IconClock,
+  IconExternalLink,
+  IconWifi,
+  IconX,
+} from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
 import { openWebLink } from '../../desktop/tauri';
 import {
@@ -29,82 +21,40 @@ import {
   useSetSharing,
   useSharingPolled,
 } from '../../daemon/sharing-queries';
-import { SectionHeading } from './section-heading';
+import { EmptyState } from '../../shell/empty-state';
+import { usePageGuide } from '../../shell/page-guide';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
+import { REMOTE_ACCESS_GUIDE, RemoteAccessGuide } from './remote-access-guide';
+import { SettingsSectionKey } from './sections';
 import { SettingsCard } from './setting-row';
+import { SettingsPageHeader } from './settings-page';
 
-const TAILSCALE_URL = 'https://tailscale.com';
 const TAILSCALE_DOWNLOAD_URL = 'https://tailscale.com/download';
 const TAILSCALE_DNS_URL = 'https://login.tailscale.com/admin/dns';
 
-const STATE_LABEL: Readonly<Record<SharingState, string>> = {
-  [SharingState.Off]: 'Off',
-  [SharingState.SettingUp]: 'Setting up',
-  [SharingState.Ready]: 'Ready',
-  [SharingState.Paused]: 'Paused',
-};
-
-const STATE_COLOR: Readonly<Record<SharingState, string>> = {
-  [SharingState.Off]: 'gray',
-  [SharingState.SettingUp]: 'yellow',
-  [SharingState.Ready]: 'green',
-  [SharingState.Paused]: 'orange',
-};
-
-/** A page outside 10db opens through the app's own link helper, which confirms the host. */
-function ExternalLink({ href, children }: { readonly href: string; readonly children: ReactNode }) {
+/** With no Tailscale to read there is nothing to set up yet: the page teaches instead, and offers the download. */
+function NeedsTailscale({ onGuide }: { readonly onGuide: () => void }) {
   return (
-    <Anchor
-      component="button"
-      type="button"
-      inherit
-      onClick={() => {
-        openWebLink(href).catch(() => undefined);
+    <EmptyState
+      icon={IconWifi}
+      title="Remote Access needs Tailscale"
+      action={{
+        label: 'Get Tailscale',
+        icon: IconExternalLink,
+        emphasis: 'filled',
+        onClick: () => {
+          openWebLink(TAILSCALE_DOWNLOAD_URL).catch(() => undefined);
+        },
       }}
+      extra={
+        <Button variant="default" onClick={onGuide}>
+          {REMOTE_ACCESS_GUIDE}
+        </Button>
+      }
     >
-      {children}
-    </Anchor>
-  );
-}
-
-function TailscaleLine() {
-  return (
-    <Text size="sm" c="dimmed">
-      Reach this Mac's 10db from your phone, and later another Mac. It runs over{' '}
-      <ExternalLink href={TAILSCALE_URL}>Tailscale ↗</ExternalLink>, a private network between your
-      own devices, so nothing on the internet can reach it.
-    </Text>
-  );
-}
-
-function NeedsTailscale() {
-  return (
-    <Paper withBorder radius="md" p="lg">
-      <Stack gap="md">
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Stack gap={4}>
-            <Title order={4}>Remote Access needs Tailscale</Title>
-            <Text size="sm" c="dimmed">
-              Tailscale is a private network between your own devices. Your phone reaches this Mac
-              through it, and nothing on the internet can. It's free for personal use.
-            </Text>
-          </Stack>
-          <Button
-            variant="default"
-            style={{ flex: 'none' }}
-            onClick={() => {
-              openWebLink(TAILSCALE_DOWNLOAD_URL).catch(() => undefined);
-            }}
-          >
-            Get Tailscale ↗
-          </Button>
-        </Group>
-        <List type="ordered" size="sm" spacing="xs">
-          <List.Item>Install Tailscale on this Mac and sign in.</List.Item>
-          <List.Item>Install it on your phone and sign in to the same account.</List.Item>
-          <List.Item>Come back here. 10db finds it on its own.</List.Item>
-        </List>
-      </Stack>
-    </Paper>
+      A free private network between your own devices. Install it on this Mac and your phone, and
+      10db finds it on its own.
+    </EmptyState>
   );
 }
 
@@ -373,7 +323,7 @@ function Checklist({ status }: { readonly status: SharingStatusDto }) {
   const beforeShare = status.steps.filter((s) => s.step !== SharingStep.Shared);
   const allOk = beforeShare.every((s) => s.status === SharingStepStatus.Ok);
   return (
-    <SettingsCard title="Set up" action={status.enabled ? <StopSharing /> : null}>
+    <SettingsCard>
       {beforeShare.map((step) =>
         step.step === SharingStep.Certificate ? (
           <CertificateStep key={step.step} step={step} status={status} />
@@ -414,7 +364,6 @@ function ReadyView({ status }: { readonly status: SharingStatusDto }) {
             </CopyButton>
           )}
         </Group>
-        <StopSharing />
       </Group>
       <Accordion variant="contained" radius="md">
         <Accordion.Item value="checks">
@@ -445,41 +394,41 @@ function ReadyView({ status }: { readonly status: SharingStatusDto }) {
   );
 }
 
-/** With no Tailscale to read, nothing is set up, whatever the daemon's state says. */
-function StateBadge({ status }: { readonly status: SharingStatusDto }) {
-  const state = status.steps.length === 0 ? SharingState.Off : status.state;
-  return (
-    <Badge variant="light" color={STATE_COLOR[state]}>
-      {STATE_LABEL[state]}
-    </Badge>
-  );
-}
-
-/** Settings › Remote Access: Tailscale's steps read live, then Share and Stop Sharing. */
+/**
+ * Settings › Remote Access: Tailscale's steps read live, then Share, and Stop Sharing in the header while it is on.
+ * Whether it is shared is the frame's sharing icon's to say, so the page draws no state of its own.
+ */
 export function RemoteAccessSection() {
   const sharing = useSharingPolled();
   const status = sharing.data;
+  const guide = usePageGuide(REMOTE_ACCESS_GUIDE);
+  const missing = status?.steps.length === 0;
   return (
     <Stack gap="md">
-      <SectionHeading
-        title="Remote Access"
-        action={status === undefined ? undefined : <StateBadge status={status} />}
+      <SettingsPageHeader
+        sectionKey={SettingsSectionKey.RemoteAccess}
+        byline="Reach this Mac's 10db from your phone, privately."
+        // While Tailscale is missing, the empty state offers the guide.
+        {...(missing ? {} : { guide: guide.opener })}
+        {...(status?.enabled === true ? { actions: <StopSharing /> } : {})}
       />
-      <TailscaleLine />
-      {status === undefined ? <Skeleton height={160} radius="md" /> : null}
+      {status === undefined && !sharing.isError ? (
+        <PageLoading shape={PageLoadingShape.Cards} rows={1} label="Reading Tailscale" />
+      ) : null}
       {sharing.isError ? (
         <Text size="sm" c="red">
           {sharing.error.message}
         </Text>
       ) : null}
-      {status === undefined ? null : status.steps.length === 0 ? (
-        <NeedsTailscale />
+      {status === undefined ? null : missing ? (
+        <NeedsTailscale onGuide={guide.opener.onOpen} />
       ) : status.state === SharingState.Ready ? (
         // Keyed on the port so the field starts from the saved one.
         <ReadyView key={status.port} status={status} />
       ) : (
         <Checklist key={status.port} status={status} />
       )}
+      <RemoteAccessGuide guide={guide} />
     </Stack>
   );
 }

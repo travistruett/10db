@@ -1,7 +1,5 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Anchor, Badge, Text } from '@mantine/core';
-import { Link } from '@tanstack/react-router';
-import { ProjectTile } from '../../shell/project-tile';
+import { Text } from '@mantine/core';
 import { TitleRow } from '../../shell/title-row';
 import { AccountsSection } from './accounts/accounts-section';
 import { AgentSkillSection } from './agent-skill-section';
@@ -23,6 +21,7 @@ import { ModelsSection } from './models-section';
 import { PlaybookSection } from './playbook-section';
 import { OverviewSection } from './overview-section';
 import { PlanningSection } from './planning-section';
+import { ScopeBadge } from './settings-page';
 import { ScopeLine } from './scope-line';
 import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
@@ -37,22 +36,6 @@ import { ProjectPlaybook } from './project-playbook';
 import { SessionsSection } from './sessions-section';
 import { SelfUpdateSection } from './self-update-section';
 import { TrustSection } from './trust-section';
-
-/** The project a This Project page applies to, beside its title; an All Projects page shows none. */
-function ScopeBadge({ tile, children }: { readonly tile: string; readonly children: string }) {
-  return (
-    <Badge
-      variant="light"
-      color="gray"
-      tt="none"
-      fw={500}
-      size="md"
-      leftSection={<ProjectTile name={tile} size={14} />}
-    >
-      {children}
-    </Badge>
-  );
-}
 
 function NoProject() {
   return <Text c="dimmed">Create a project on the board first.</Text>;
@@ -134,28 +117,13 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.Watchpoints:
-      return (
+      // The page draws its own header: its Add Watchpoint and its guide sit in it.
+      return project ? (
+        <WatchpointsSection key={project.id} project={project} />
+      ) : (
         <>
           {heading}
-          {project ? (
-            <ScopeLine>
-              {'Default follows '}
-              <Anchor
-                size="sm"
-                renderRoot={(props) => (
-                  <Link
-                    {...props}
-                    to="/settings/$section"
-                    params={{ section: SettingsSectionKey.AllWatchpoints }}
-                  />
-                )}
-              >
-                All Projects › Watchpoints
-              </Anchor>
-              .
-            </ScopeLine>
-          ) : null}
-          {project ? <WatchpointsSection key={project.id} project={project} /> : <NoProject />}
+          <NoProject />
         </>
       );
     case SettingsSectionKey.AllWatchpoints:
@@ -195,12 +163,7 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.RemoteAccess:
-      return (
-        <>
-          {heading}
-          <RemoteAccessSection />
-        </>
-      );
+      return <RemoteAccessSection />;
     case SettingsSectionKey.Devices:
       return (
         <>
@@ -293,7 +256,6 @@ export function SectionBody({
       // The page carries its own title, so the Account select sits beside it.
       return <PlaybookSection />;
     case SettingsSectionKey.Models:
-      // The page carries its own title, so the data sources and the refresh button sit beside it.
       return <ModelsSection />;
     case SettingsSectionKey.Team:
       return (

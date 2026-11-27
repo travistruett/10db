@@ -74,9 +74,14 @@ is mounted:
   strip across the content; the pass's name and menu: the panel's head, else the title row) reads it, and draws the
   thing once.
 - `RenderLayout` (the screen frame) has a panel host only while a section registers a panel.
-- `PageIntro` (`page-intro.tsx`): not a slot, but the top of a view's content: an optional one-line intro (13 px, a
-  sentence) and an optional toolbar of tabs and filters. A page has one header, the title row; the content never
-  repeats it. Nothing is drawn when both are absent.
+- `PageIntro` (`page-intro.tsx`): not a slot, but the top of a view's content: an optional one-line byline (13 px, a
+  sentence) ending in an optional `GuideLink`, and the view's `actions` at its right; with `PageTabs` the actions
+  move to the tabs' row, which draws one hairline under the whole row for the tabs' underline to sit on. A view
+  that lays its own row out passes `toolbar`. A page has one header, the title row; the content never repeats
+  it. Nothing is drawn when every part is absent.
+- `PageGuide` (`page-guide.tsx`): the modal that teaches how a page works, opened only by the builder through the
+  `GuideOpener` of `usePageGuide(title)` (a byline link, an empty state's button, a hover card's last line): a lead
+  sentence, up to three numbered steps with inert stills, an optional example, one scope line and Got It.
 - A host is null until the frame has mounted it, so a view draws nothing on its first pass. Outside a frame
   (a view rendered alone) every host is null and nothing is drawn.
 - Views lay out by their container's width (`useElementSize` on their own root), not the window's: the rail and
