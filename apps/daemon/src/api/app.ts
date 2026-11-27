@@ -56,6 +56,8 @@ import {
   ProjectWatchpoints,
   YourWatchpoints,
   SKILL_VERSION_HEADER,
+  ANSWERER_HEADER,
+  answererOfHeader,
   KindId,
   KindInput,
   KindOrderInput,
@@ -498,7 +500,7 @@ export function createApp(deps: ApiDeps) {
           ? origin
           : null;
       },
-      allowHeaders: ['Authorization', 'Content-Type'],
+      allowHeaders: ['Authorization', 'Content-Type', ANSWERER_HEADER],
     }),
   );
   base.use('*', hostGuard(guards));
@@ -2502,7 +2504,11 @@ export function createApp(deps: ApiDeps) {
       validator('json', (value): InboxAnswer => InboxAnswer.parse(value)),
       (c) =>
         c.json(
-          deps.services.answerInbox(InboxItemId.parse(c.req.param('id')), c.req.valid('json')),
+          deps.services.answerInbox(
+            InboxItemId.parse(c.req.param('id')),
+            c.req.valid('json'),
+            answererOfHeader(c.req.header(ANSWERER_HEADER)),
+          ),
         ),
     )
     .get('/events', (c) =>

@@ -8,6 +8,7 @@ import {
   CARD_RESOLUTION,
   ReleasedWorkstreams,
   AcceptanceChoice,
+  Answerer,
   WatchpointChoice,
   CheckChoice,
   PlanChoice,
@@ -216,7 +217,12 @@ const WORDS_LIMIT = 20_000;
 export interface InboxService {
   /** Folds into an open identical card; the returned promise never causes an unhandled rejection. */
   ask(input: AskInput): { item: InboxItemDto; answer: Promise<InboxAnswer> };
-  answer(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
+  /**
+   * Answers an open card and stores who gave the answer. The in-process callers act for the builder
+   * (their own Settings pages), so that is the default; the API names the caller's, and 10db's own rules
+   * name `rule`.
+   */
+  answer(id: InboxItemId, answer: InboxAnswer, answerer?: Answerer): InboxItemDto;
   /**
    * Answers a question as a stakeholder who replied in Slack (spec §8.3). It refuses a park choice and a
    * person who is not a recipient of the card's send, accepts words that match no option, and stores who
@@ -627,18 +633,13 @@ export function createInboxService(deps: {
   const waiters = new Map<InboxItemId, Map<SessionId, Waiter>>();
 
   /** Moves a card to `to` only from one of `from`, checked in the same transaction as the write. */
-  function transition(
-    id: InboxItemId,
-    from: readonly InboxState[],
-    to: InboxState,
-    answer?: InboxAnswer,
-  ): InboxItemDto {
+  function transition(id: InboxItemId, from: readonly InboxState[], to: InboxState): InboxItemDto {
     return deps.state.write((ctx) => {
       const current = getInboxItem(ctx.tx, id);
       if (!from.includes(current.state)) {
         throw new ConflictError(`Inbox item ${id} is already ${current.state}`);
       }
-      return updateInboxItem(ctx, id, { state: to, ...(answer ? { answer } : {}) });
+      return updateInboxItem(ctx, id, { state: to });
     });
   }
 
@@ -710,10 +711,14 @@ export function createInboxService(deps: {
     }
     for (const card of covered) {
       try {
-        service.answer(card.id, {
-          choice: PermissionChoice.AllowOnce,
-          note: 'Covered by the project rule just allowed on another lane’s card',
-        });
+        service.answer(
+          card.id,
+          {
+            choice: PermissionChoice.AllowOnce,
+            note: 'Covered by the project rule just allowed on another lane’s card',
+          },
+          Answerer.Rule,
+        );
       } catch (error) {
         // Answered meanwhile: nothing to release. Nothing here may fail the answer the builder already
         // gave, which is stored and delivered.
@@ -868,7 +873,7 @@ export function createInboxService(deps: {
       return { item, answer };
     },
 
-    answer(id, raw) {
+    answer(id, raw, answerer = Answerer.Builder) {
       const answer = InboxAnswer.parse(raw);
       const current = getInboxItem(deps.state.db, id);
       if (current.kind === InboxKind.Flag && current.state === InboxState.Open) {
@@ -935,7 +940,7 @@ export function createInboxService(deps: {
           parks || (item.kind !== InboxKind.Question && item.kind !== InboxKind.Permission);
         let updated = updateInboxItem(ctx, id, {
           state: closesDirectly ? InboxState.Resolved : InboxState.Answered,
-          answer,
+          answer: { ...answer, answerer },
         });
         if (!parks && item.kind === InboxKind.Question) {
           // Inside this transaction: an area the project lacks refuses the answer and the card stays open.
@@ -1010,7 +1015,10 @@ export function createInboxService(deps: {
         const item = getInboxItem(ctx.tx, id);
         if (item.state !== InboxState.Open)
           throw new ConflictError(`Inbox item ${id} is already ${item.state}`);
-        const updated = updateInboxItem(ctx, id, { state: InboxState.Answered, answer: recorded });
+        const updated = updateInboxItem(ctx, id, {
+          state: InboxState.Answered,
+          answer: { ...recorded, answerer: Answerer.Stakeholder },
+        });
         if (item.kind === InboxKind.Question && input.readAs !== 'own_words') {
           recordAnswerDecision(ctx, updated, recorded, getProject(ctx.tx, item.projectId), {
             handle: person.handle,

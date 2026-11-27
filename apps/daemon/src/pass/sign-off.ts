@@ -3,6 +3,7 @@ import {
   EventType,
   InboxKind,
   InboxState,
+  Answerer,
   PASS_SIGN_OFF_CHOICE,
   PassState,
   TaskMessageAuthor,
@@ -162,7 +163,7 @@ function markSigningOff(ctx: WriteContext, ws: WorkstreamId): void {
   if (item.kind === InboxKind.Check && item.state === InboxState.Open)
     updateInboxItem(ctx, item.id, {
       state: InboxState.Resolved,
-      answer: { choice: PASS_SIGN_OFF_CHOICE },
+      answer: { choice: PASS_SIGN_OFF_CHOICE, answerer: Answerer.Builder },
     });
 }
 
@@ -350,7 +351,9 @@ export function finishSignOff(
     if (item.state === InboxState.Open)
       updateInboxItem(ctx, item.id, {
         state: InboxState.Resolved,
-        ...(item.kind === InboxKind.Check ? { answer: { choice: PASS_SIGN_OFF_CHOICE } } : {}),
+        ...(item.kind === InboxKind.Check
+          ? { answer: { choice: PASS_SIGN_OFF_CHOICE, answerer: Answerer.Builder } }
+          : {}),
       });
   }
   const turn = latestPassTurn(ctx.tx, input.taskId);

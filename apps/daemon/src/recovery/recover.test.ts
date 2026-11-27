@@ -4,6 +4,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  Answerer,
   mintId,
   type NextAction,
   type ProjectDto,
@@ -716,7 +717,10 @@ describe('recoverOnStartup', () => {
     const { item } = ask(ws, 'Q2?', asked.signal);
     asked.abort();
     state.write((ctx) =>
-      updateInboxItem(ctx, item.id, { state: 'DELIVERING', answer: { choice: 'A' } }),
+      updateInboxItem(ctx, item.id, {
+        state: 'DELIVERING',
+        answer: { choice: 'A', answerer: Answerer.Builder },
+      }),
     );
     const report = await recover();
     expect(report.redelivered).toEqual([item.id]);
@@ -865,7 +869,9 @@ describe('recoverOnStartup for a project without a gate command', () => {
       if (item && cardState !== null && cardState !== 'OPEN')
         updateInboxItem(ctx, item.id, {
           state: cardState,
-          ...(cardState === 'ANSWERED' ? { answer: { choice: 'approve' } } : {}),
+          ...(cardState === 'ANSWERED'
+            ? { answer: { choice: 'approve', answerer: Answerer.Builder } }
+            : {}),
         });
       patchWorkstream(ctx, id, null, {
         nextAction: item ? { kind: 'builder_review', inboxId: item.id } : nextAction,

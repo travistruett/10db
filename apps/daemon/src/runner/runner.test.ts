@@ -40,6 +40,7 @@ import {
   MCP_APPROVAL_DETAIL,
   ReviewCardDetail,
   reviewRounds,
+  Answerer,
   type AccountId,
   type Rigor,
   type WorkstreamId,
@@ -1154,7 +1155,10 @@ describe('runner', () => {
           foldKey: null,
           targets: [{ workstreamId: workstream.id, sessionId: null }],
         });
-        updateInboxItem(ctx, item.id, { state: 'ANSWERED', answer: { choice: 'deny' } });
+        updateInboxItem(ctx, item.id, {
+          state: 'ANSWERED',
+          answer: { choice: 'deny', answerer: Answerer.Builder },
+        });
       });
     };
     denied('Read', outside);
@@ -6489,7 +6493,10 @@ describe('without a gate command', () => {
         foldKey: null,
         targets: [{ workstreamId: workstream.id, sessionId: null }],
       });
-      updateInboxItem(ctx, item.id, { state: 'ANSWERED', answer: { choice: 'allow_once' } });
+      updateInboxItem(ctx, item.id, {
+        state: 'ANSWERED',
+        answer: { choice: 'allow_once', answerer: Answerer.Builder },
+      });
     });
     const report = await recover();
     expect(report.redelivered).toHaveLength(1);

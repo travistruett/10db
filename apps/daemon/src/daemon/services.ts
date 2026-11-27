@@ -960,8 +960,8 @@ export function createServices(deps: {
       }),
     pageActivity: (query) => pageActivity(db, query),
     inboxCardContext: (id) => inboxCardContext(db, id, CARD_CONTEXT_MESSAGES),
-    answerInbox(id, answer) {
-      const item = deps.inbox.answer(id, answer);
+    answerInbox(id, answer, answerer) {
+      const item = deps.inbox.answer(id, answer, answerer);
       deps.scheduler.requestTick();
       return item;
     },

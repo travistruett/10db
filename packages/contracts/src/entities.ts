@@ -1215,11 +1215,37 @@ export const InboxAnswer = z.object({
 });
 export type InboxAnswer = z.infer<typeof InboxAnswer>;
 
+/** Who gave an answer: the builder, a stakeholder in Slack, a coordinating agent, or one of 10db's rules. */
+export const Answerer = {
+  Builder: 'builder',
+  Stakeholder: 'stakeholder',
+  Agent: 'agent',
+  Rule: 'rule',
+} as const;
+export type Answerer = (typeof Answerer)[keyof typeof Answerer];
+
+/**
+ * The header a client of `POST /inbox/:id/answer` sends to say who is answering. The builder's own app
+ * sends `builder`; a call with no header, or any other value, is an agent's. A stakeholder or a rule
+ * can't be claimed over the API: the daemon records those itself.
+ */
+export const ANSWERER_HEADER = 'x-10db-answerer';
+
+/** Who the API records for a call that sent `value` in `ANSWERER_HEADER`. */
+export function answererOfHeader(value: string | null | undefined): Answerer {
+  return value === Answerer.Builder ? Answerer.Builder : Answerer.Agent;
+}
+
 /**
  * An answer as stored. The extra keys are written by the daemon only; `InboxAnswer`, the HTTP body,
  * drops them, so a client cannot answer as someone else.
  */
 export const RecordedAnswer = InboxAnswer.extend({
+  /**
+   * Who answered. Absent only on an answer stored before this was recorded; every answer written now
+   * names one.
+   */
+  answerer: z.enum(Answerer).optional(),
   answeredBy: z.string().optional(),
   via: z.enum(['inbox', 'slack']).optional(),
   /** The answerer's own words, when they chose none of the options. */

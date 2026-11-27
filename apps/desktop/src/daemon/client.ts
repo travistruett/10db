@@ -1,4 +1,4 @@
-import { refusalText } from '@10db/contracts';
+import { ANSWERER_HEADER, Answerer, refusalText } from '@10db/contracts';
 import type { AppType } from '@10db/daemon';
 import { hc } from 'hono/client';
 import { z } from 'zod';
@@ -15,10 +15,13 @@ const readOnlyFetch: typeof fetch = (input, init) => {
     : Promise.reject(new Error(`A screen is drawn read-only: ${method} was not sent`));
 };
 
-/** What every typed client of one connection sends: its token, and only reads for a screen's frame. */
+/**
+ * What every typed client of one connection sends: its token, who it is answering for (the app is the
+ * builder's own; any other API caller is recorded as an agent), and only reads for a screen's frame.
+ */
 function clientOptions(conn: DaemonConnection) {
   return {
-    headers: { Authorization: `Bearer ${conn.token}` },
+    headers: { Authorization: `Bearer ${conn.token}`, [ANSWERER_HEADER]: Answerer.Builder },
     ...(conn.readOnly === true ? { fetch: readOnlyFetch } : {}),
     ...(conn.fetch !== undefined ? { fetch: conn.fetch } : {}),
   };
