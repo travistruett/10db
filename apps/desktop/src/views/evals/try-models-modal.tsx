@@ -4,6 +4,7 @@ import {
   EvalSweepState,
   EvalSweepStepState,
   type EvalCandidateDto,
+  type EvalLivePreviewDto,
   type EvalSweepDto,
   type ProjectId,
 } from '@10db/contracts';
@@ -348,16 +349,7 @@ function Picker({
   );
 }
 
-function Confirm({
-  projectId,
-  suiteKey,
-  kind,
-  models,
-  capUsd,
-  candidates,
-  onBack,
-  onStarted,
-}: {
+interface ConfirmProps {
   readonly projectId: ProjectId;
   readonly suiteKey: string;
   readonly kind: EvalSweepKind;
@@ -366,11 +358,11 @@ function Confirm({
   readonly candidates: readonly EvalCandidateDto[];
   readonly onBack: () => void;
   readonly onStarted: (sweep: EvalSweepDto) => void;
-}) {
-  const preview = useEvalLivePreview(projectId, suiteKey, true, models);
-  const start = useStartEvalSweep(projectId, suiteKey);
-  // The hash of what the builder was shown last; a refetch that changes it waits for another look.
-  const [seen, setSeen] = useState<string | null>(null);
+}
+
+/** Waits for the preview of these picks, then holds the window to the one it first showed. */
+function Confirm(props: ConfirmProps) {
+  const preview = useEvalLivePreview(props.projectId, props.suiteKey, true, props.models);
   if (preview.data === undefined)
     return preview.isError ? (
       <Text size="sm" c="red">
@@ -379,8 +371,24 @@ function Confirm({
     ) : (
       <Loader size="sm" />
     );
-  const data = preview.data;
-  const shownHash = seen ?? data.previewHash;
+  return <ConfirmWindow key={props.models.join(',')} {...props} data={preview.data} />;
+}
+
+function ConfirmWindow({
+  suiteKey,
+  projectId,
+  kind,
+  models,
+  capUsd,
+  candidates,
+  onBack,
+  onStarted,
+  data,
+}: ConfirmProps & { readonly data: EvalLivePreviewDto }) {
+  const start = useStartEvalSweep(projectId, suiteKey);
+  // The hash of the preview the builder was shown, held from the first load: Start always sends it, and a
+  // refetch that changes the live hash waits for the builder to accept the new window. New picks mount anew.
+  const [shownHash, setSeen] = useState(data.previewHash);
   const changed = data.previewHash !== shownHash;
   const estimates = models.map((m) => candidates.find((c) => c.model === m)?.estimateUsd ?? null);
   const known = estimates.filter((e): e is number => e !== null);
