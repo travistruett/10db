@@ -214,7 +214,17 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
           key: 'ingest.mapping',
           definitionPaths: ['evals/ingest/mapping.py'],
           liveCommand: 'echo done',
-          live: {},
+          live: {
+            models: {
+              env: 'MODELS',
+              ids: {
+                choices: [
+                  { name: 'cheap', model: 'acme/model-a' },
+                  { name: 'steady', model: 'acme/model-b' },
+                ],
+              },
+            },
+          },
         },
         { key: 'plain', liveCommand: 'echo plain' },
       ],
@@ -232,6 +242,19 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await expect(runWindow).toContainText('echo done');
   await expect(runWindow.getByTestId('live-refusal')).toContainText('runs no sandbox');
   await expect(runWindow.getByRole('button', { name: 'Run', exact: true })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  // Find Cheapest Passing: the picker lists the suite's choices, and the confirm window says what a sweep may cost
+  // and refuses to start for the same reason Run did.
+  await liveDrawer.getByRole('button', { name: 'Find Cheapest Passing' }).click();
+  const sweepWindow = page.getByRole('dialog', { name: 'Find the cheapest passing model' });
+  await expect(sweepWindow.getByTestId('candidates')).toContainText('cheap');
+  await expect(sweepWindow.getByTestId('candidates')).toContainText('steady');
+  await sweepWindow.getByRole('checkbox', { name: 'Pick cheap' }).check();
+  await sweepWindow.getByRole('textbox', { name: 'Most to spend' }).fill('5');
+  await sweepWindow.getByRole('button', { name: 'Continue' }).click();
+  await expect(sweepWindow).toContainText('one run can cost more than its estimate');
+  await expect(sweepWindow.getByTestId('live-refusal')).toContainText('runs no sandbox');
+  await expect(sweepWindow.getByRole('button', { name: 'Start' })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await page.getByRole('table', { name: 'Evals' }).getByText('plain').click();
