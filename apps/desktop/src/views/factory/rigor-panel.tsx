@@ -1,6 +1,7 @@
 import {
   ALL_RIGORS,
   RIGOR_FIGURES_PERIODS,
+  RIGORS,
   rigorTitle,
   type ProjectId,
   type RigorFiguresDto,
@@ -105,7 +106,7 @@ export function RigorPanel({ projectId }: { readonly projectId: ProjectId | null
           label="Loading work per rigor"
           columns={COLUMNS.map((title) => ({ title }))}
           // One row for each rigor, then the total.
-          rows={ALL_RIGORS.length + 1}
+          rows={RIGORS.length + 1}
           minWidth={TABLE_MIN_WIDTH}
         />
       ) : null}
