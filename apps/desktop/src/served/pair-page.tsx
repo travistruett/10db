@@ -1,6 +1,9 @@
 import { Alert, Button, Center, Loader, Stack, Text, TextInput, Title } from '@mantine/core';
 import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
+import { createDaemonClient } from '../daemon/client';
+import { readDevice } from './device-session';
 import { pairingFailureText, pairWithThisHost, takeCodeFromAddress, thisPlatform } from './pairing';
+import { PushState, usePushSwitchFor } from './push-subscription';
 
 /** Chrome's offer to install the page, held until the builder presses Install. */
 interface InstallOffer extends Event {
@@ -17,7 +20,8 @@ type Stage =
 
 /**
  * `/app/pair`: reads the code the QR link carried and pairs this phone with the Mac that served the page. With no
- * code, or one the Mac refused, it asks for the code to be typed. When it has paired it offers Install.
+ * code, or one the Mac refused, it asks for the code to be typed. When it has paired it offers notifications first,
+ * then Install.
  */
 export function PairPage() {
   const fromAddress = takeCodeFromAddress();
@@ -72,38 +76,7 @@ export function PairPage() {
       </Center>
     );
   }
-  if (stage.kind === 'paired') {
-    return (
-      <Center h="100dvh" p="lg">
-        <Stack gap="md" maw={420} w="100%">
-          <Title order={2}>Paired with {stage.host}</Title>
-          <Text size="sm">
-            You're set. When an agent needs a decision, this phone buzzes and you can answer it from
-            wherever you are, without walking back to your Mac.
-          </Text>
-          <Text size="sm" c="dimmed">
-            Install 10db to open it from your home screen in one tap.
-          </Text>
-          {installOffer === null ? null : (
-            <Button
-              onClick={() => {
-                void installOffer.prompt();
-              }}
-            >
-              Install
-            </Button>
-          )}
-          <Button
-            variant={installOffer === null ? 'filled' : 'default'}
-            component="a"
-            href="/app/inbox"
-          >
-            Open Inbox
-          </Button>
-        </Stack>
-      </Center>
-    );
-  }
+  if (stage.kind === 'paired') return <Paired host={stage.host} installOffer={installOffer} />;
   return (
     <Center h="100dvh" p="lg">
       <Stack
@@ -140,6 +113,83 @@ export function PairPage() {
         />
         <Button type="submit" disabled={code.trim() === ''}>
           Pair
+        </Button>
+      </Stack>
+    </Center>
+  );
+}
+
+/** What a paired phone does next: Turn On Notifications is the main button (Chrome needs a tap to ask), then Install. */
+function Paired({
+  host,
+  installOffer,
+}: {
+  readonly host: string;
+  readonly installOffer: InstallOffer | null;
+}) {
+  // Pairing has just stored the token; the app's own connection starts only on the next page.
+  const token = readDevice()?.token ?? '';
+  const client = createDaemonClient({ url: window.location.origin, token });
+  const push = usePushSwitchFor(client);
+  const offerPush = push.state === PushState.Off;
+  return (
+    <Center h="100dvh" p="lg">
+      <Stack gap="md" maw={420} w="100%">
+        <Title order={2}>Paired with {host}</Title>
+        <Text size="sm">
+          You're set. When an agent needs a decision, this phone buzzes and you can answer it from
+          wherever you are, without walking back to your Mac.
+        </Text>
+        {offerPush ? (
+          <Button
+            loading={push.busy}
+            onClick={() => {
+              push.toggle(true);
+            }}
+          >
+            Turn On Notifications
+          </Button>
+        ) : null}
+        {push.state === PushState.On ? (
+          <Text size="sm" c="dimmed">
+            Notifications are on. The lock screen shows only what kind of card it is and its title.
+          </Text>
+        ) : null}
+        {push.state === PushState.Blocked ? (
+          <Text size="sm" c="dimmed">
+            Notifications are blocked for this app. Allow them in the browser’s site settings.
+          </Text>
+        ) : null}
+        {push.state === PushState.Unsupported ? (
+          <Text size="sm" c="dimmed">
+            This browser can’t show notifications here. Install 10db, open it from the home screen,
+            then turn them on in This Device.
+          </Text>
+        ) : null}
+        {push.error === null ? null : (
+          <Text size="sm" c="red" role="alert">
+            {push.error}
+          </Text>
+        )}
+        <Text size="sm" c="dimmed">
+          Install 10db to open it from your home screen in one tap.
+        </Text>
+        {installOffer === null ? null : (
+          <Button
+            variant={offerPush ? 'default' : 'filled'}
+            onClick={() => {
+              void installOffer.prompt();
+            }}
+          >
+            Install
+          </Button>
+        )}
+        <Button
+          variant={offerPush || installOffer !== null ? 'default' : 'filled'}
+          component="a"
+          href="/app/inbox"
+        >
+          Open Inbox
         </Button>
       </Stack>
     </Center>

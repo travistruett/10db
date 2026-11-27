@@ -79,12 +79,17 @@ export async function resyncPush(client: DaemonClient): Promise<boolean> {
   return true;
 }
 
+/** `usePushSwitchFor` with the connected daemon's client. */
+export function usePushSwitch() {
+  return usePushSwitchFor(useDaemon().client);
+}
+
 /**
  * This browser's push subscription and the daemon's copy of it. Turning it on asks the browser's permission,
- * subscribes with the host's VAPID key and tells the Mac; turning it off drops both.
+ * subscribes with the host's VAPID key and tells the Mac; turning it off drops both. It takes its client, so the
+ * pairing page, which has no connected daemon yet, can offer it the moment the phone is paired.
  */
-export function usePushSwitch() {
-  const { client } = useDaemon();
+export function usePushSwitchFor(client: DaemonClient) {
   const [state, setState] = useState<PushState>(PushState.Loading);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -113,10 +118,14 @@ export function usePushSwitch() {
   }, [client]);
 
   async function turnOn(): Promise<void> {
+    // Asked before any await, while the tap still counts as one: WebKit may not carry it across an await.
+    const asked = 'Notification' in window ? Notification.requestPermission() : null;
     const reg = await registration();
-    if (reg === null) throw new Error('This browser cannot show notifications.');
-    if ((await Notification.requestPermission()) !== 'granted') {
-      setState(PushState.Blocked);
+    if (reg === null || asked === null) throw new Error('This browser cannot show notifications.');
+    const permission = await asked;
+    if (permission !== 'granted') {
+      // A dismissed prompt can be asked again; only a refusal is blocked.
+      setState(permission === 'denied' ? PushState.Blocked : PushState.Off);
       return;
     }
     const { key } = await readJson(await client.push.key.$get(), PushKeyDto);
