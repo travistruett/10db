@@ -7,6 +7,7 @@ import {
   type ProjectId,
 } from '@10db/contracts';
 import { Button, Code, Group, Modal, Stack, Text } from '@mantine/core';
+import type { ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { z } from 'zod';
@@ -26,12 +27,14 @@ import { costText, dayTimeText } from './eval-figures';
 
 const RefusalBody = z.object({ refusal: z.string() });
 
-const REFUSAL_WORDS: Readonly<Record<EvalLiveRefusal, string>> = {
+export const REFUSAL_WORDS: Readonly<Record<EvalLiveRefusal, string>> = {
   [EvalLiveRefusal.NoLive]: '10db does not know how this command runs yet. Assess Now to find out.',
   [EvalLiveRefusal.NoSandbox]: "This 10db runs no sandbox, so it can't run a live eval.",
   [EvalLiveRefusal.DockerOff]: "This runs in Docker and the project's Docker switch is off.",
   [EvalLiveRefusal.ManifestChanged]: 'What the suite runs changed since this window opened.',
   [EvalLiveRefusal.Busy]: 'A live eval is already running in this project.',
+  [EvalLiveRefusal.NoModels]: 'This suite takes no model from 10db.',
+  [EvalLiveRefusal.BadModel]: 'A picked model is not one this suite accepts.',
 };
 
 const STATE_WORDS: Readonly<Record<EvalLiveRunState, string>> = {
@@ -67,7 +70,7 @@ function Elapsed({ startedAt }: { readonly startedAt: string }) {
   return <>{elapsedText(startedAt, now)}</>;
 }
 
-function Notes({ preview }: { readonly preview: EvalLivePreviewDto }) {
+export function Notes({ preview }: { readonly preview: EvalLivePreviewDto }) {
   const lines: string[] = [];
   if (preview.docker) {
     lines.push(
@@ -180,36 +183,49 @@ function RunView({
 }
 
 /** True for the daemon's `manifest_changed` 409: the window refetches and says what changed instead. */
-function changedRefusal(error: unknown): boolean {
+export function changedRefusal(error: unknown): boolean {
   if (!(error instanceof DaemonRequestError) || error.status !== 409) return false;
   const body = RefusalBody.safeParse(error.body);
   return body.success && body.data.refusal === EvalLiveRefusal.ManifestChanged;
 }
 
-function Confirm({
-  projectId,
-  suiteKey,
+/**
+ * The confirm window's body, shared by Run and a model sweep: the command as stored, what it may reach, how Stop
+ * ends it, its time limit, and a refusal in words with its way out. `before` is what a sweep adds above the notes.
+ */
+export function ConfirmBody({
   preview,
-  onStarted,
+  seen,
+  onAccept,
+  verb,
+  before = null,
+  error,
+  pending,
+  onGo,
+  onBack,
 }: {
-  readonly projectId: ProjectId;
-  readonly suiteKey: string;
   readonly preview: EvalLivePreviewDto;
-  readonly onStarted: (run: EvalLiveRunDto) => void;
+  /** The hash of the preview the builder was shown and the action will send. */
+  readonly seen: string;
+  /** The builder looked at the changed window: the action now sends the new hash. */
+  readonly onAccept: () => void;
+  readonly verb: string;
+  readonly before?: ReactNode;
+  readonly error: string | null;
+  readonly pending: boolean;
+  readonly onGo: () => void;
+  readonly onBack?: () => void;
 }) {
-  const start = useStartEvalLive(projectId, suiteKey);
   const navigate = useNavigate();
-  // The hash of what the builder was shown last. A refetch that swaps the preview in place changes what Run
-  // would post, so Run waits until the builder has seen the new one.
-  const [seen, setSeen] = useState(preview.previewHash);
   const changed = preview.previewHash !== seen;
   const refusal = preview.refusal;
   return (
     <Stack gap="md">
       <Code block>{preview.command}</Code>
+      {before}
       {changed ? (
         <Text size="sm" c="yellow">
-          This window now shows what changed. Check it, then press Run.
+          {`This window now shows what changed. Check it, then press ${verb}.`}
         </Text>
       ) : null}
       {refusal !== null ? (
@@ -238,35 +254,62 @@ function Confirm({
       ) : (
         <>
           <Notes preview={preview} />
-          {start.isError && !changedRefusal(start.error) ? (
+          {error === null ? null : (
             <Text size="sm" c="red">
-              {start.error.message}
+              {error}
             </Text>
-          ) : null}
-          <Group justify="flex-end">
-            {changed ? (
-              <Button
-                variant="default"
-                onClick={() => {
-                  setSeen(preview.previewHash);
-                }}
-              >
-                Show what runs now
-              </Button>
-            ) : (
-              <Button
-                loading={start.isPending}
-                onClick={() => {
-                  start.mutate(seen, { onSuccess: onStarted });
-                }}
-              >
-                Run
-              </Button>
-            )}
-          </Group>
+          )}
         </>
       )}
+      <Group justify={onBack === undefined ? 'flex-end' : 'space-between'}>
+        {onBack === undefined ? null : (
+          <Button variant="subtle" onClick={onBack}>
+            Back
+          </Button>
+        )}
+        {refusal !== null ? null : changed ? (
+          <Button variant="default" onClick={onAccept}>
+            Show what runs now
+          </Button>
+        ) : (
+          <Button loading={pending} onClick={onGo}>
+            {verb}
+          </Button>
+        )}
+      </Group>
     </Stack>
+  );
+}
+
+function Confirm({
+  projectId,
+  suiteKey,
+  preview,
+  onStarted,
+}: {
+  readonly projectId: ProjectId;
+  readonly suiteKey: string;
+  readonly preview: EvalLivePreviewDto;
+  readonly onStarted: (run: EvalLiveRunDto) => void;
+}) {
+  const start = useStartEvalLive(projectId, suiteKey);
+  // The hash of what the builder was shown last. A refetch that swaps the preview in place changes what Run
+  // would post, so Run waits until the builder has seen the new one.
+  const [seen, setSeen] = useState(preview.previewHash);
+  return (
+    <ConfirmBody
+      preview={preview}
+      seen={seen}
+      onAccept={() => {
+        setSeen(preview.previewHash);
+      }}
+      verb="Run"
+      error={start.isError && !changedRefusal(start.error) ? start.error.message : null}
+      pending={start.isPending}
+      onGo={() => {
+        start.mutate(seen, { onSuccess: onStarted });
+      }}
+    />
   );
 }
 
@@ -391,10 +434,13 @@ export function LiveRunControls({
   projectId,
   suiteKey,
   label = 'Run',
+  beside = null,
 }: {
   readonly projectId: ProjectId;
   readonly suiteKey: string;
   readonly label?: string;
+  /** More actions on the same row as Run: the drawer's model sweeps. */
+  readonly beside?: ReactNode;
 }) {
   const preview = useEvalLivePreview(projectId, suiteKey, true);
   const runs = useEvalLiveRuns(projectId, suiteKey);
@@ -419,15 +465,18 @@ export function LiveRunControls({
   if (preview.data === undefined) return null;
   return (
     <Stack gap="xs" align="flex-start">
-      <Button
-        size="compact-sm"
-        variant="default"
-        onClick={() => {
-          setOpened(true);
-        }}
-      >
-        {label}
-      </Button>
+      <Group gap="xs">
+        <Button
+          size="compact-sm"
+          variant="default"
+          onClick={() => {
+            setOpened(true);
+          }}
+        >
+          {label}
+        </Button>
+        {beside}
+      </Group>
       <History projectId={projectId} runs={runs.data ?? []} />
       <RunModal
         projectId={projectId}

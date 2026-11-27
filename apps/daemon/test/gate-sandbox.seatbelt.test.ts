@@ -180,6 +180,14 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
       ...overrides,
     });
 
+  it('gives the command the model list in its env', async () => {
+    const result = await run('printenv MODELS', {
+      modelEnv: { name: 'MODELS', value: 'anthropic/opus-1,gpt-5' },
+    });
+    expect(result.exitCode, result.tail).toBe(0);
+    expect(result.tail).toContain('anthropic/opus-1,gpt-5');
+  });
+
   /** Runs each probe in the gate and reports which ones got through. */
   async function probe(
     probes: Record<string, string>,

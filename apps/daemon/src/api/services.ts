@@ -87,10 +87,15 @@ import type {
   FoundHostDto,
   EvalManifest,
   EvalLiveRunId,
+  EvalSweepDto,
+  EvalSweepId,
+  StartEvalSweepBody,
   EvalLivePreviewDto,
   EvalLiveRunDto,
+  EvalCandidateDto,
   EvalSuiteKey,
   NewEvalBody,
+  EvalSwitchBody,
   EvalSuggestRequest,
   EvalSuggestResult,
   EvalSuggestStatusDto,
@@ -984,6 +989,8 @@ export interface ApiServices extends PlanRecordServices {
   ): Promise<EvalSuggestResult>;
   /** Every model the project's results graded, with its newest result per suite; nothing is run. */
   evalModels(projectId: ProjectId): Promise<EvalModelsDto>;
+  /** The models a suite may try, with prices, estimates and last results; none for a suite with no `live.models`. */
+  evalCandidates(projectId: ProjectId, suiteKey: EvalSuiteKey): Promise<EvalCandidateDto[]>;
   /** The suites each of the project's tasks touched, with their state against the checkout's results; nothing is run. */
   evalMarkers(projectId: ProjectId): Promise<EvalMarkersDto>;
   /** The suites a task's change touched, with their results before and after it. */
@@ -995,13 +1002,28 @@ export interface ApiServices extends PlanRecordServices {
     run: string | undefined,
   ): Promise<EvalSuiteDetailDto>;
   /** What a suite's Run would do, and whether it may; nothing is started. */
-  evalLivePreview(projectId: ProjectId, suiteKey: EvalSuiteKey): Promise<EvalLivePreviewDto>;
+  evalLivePreview(
+    projectId: ProjectId,
+    suiteKey: EvalSuiteKey,
+    models: readonly string[],
+  ): Promise<EvalLivePreviewDto>;
   /** The click: starts the run the window showed; throws `EvalLiveRefused` (409) when it may not. */
   startEvalLive(
     projectId: ProjectId,
     suiteKey: EvalSuiteKey,
     previewHash: string,
   ): Promise<EvalLiveRunDto>;
+  /** Starts a model sweep of the suite; throws `EvalLiveRefused` (409) when it may not. */
+  startEvalSweep(
+    projectId: ProjectId,
+    suiteKey: EvalSuiteKey,
+    body: StartEvalSweepBody,
+  ): Promise<EvalSweepDto>;
+  /** The suite's newest sweep, or null. */
+  latestEvalSweep(projectId: ProjectId, suiteKey: EvalSuiteKey): EvalSweepDto | null;
+  getEvalSweep(projectId: ProjectId, sweepId: EvalSweepId): EvalSweepDto;
+  /** Ends a running sweep and aborts its running step; throws NotFoundError when it is not running. */
+  stopEvalSweep(projectId: ProjectId, sweepId: EvalSweepId): Promise<void>;
   /** Stops a running live run and settles it; throws NotFoundError when it is not running. */
   stopEvalLive(projectId: ProjectId, runId: EvalLiveRunId): Promise<void>;
   /** The project's newest live runs, of one suite or all. */
@@ -1013,6 +1035,15 @@ export interface ApiServices extends PlanRecordServices {
    * project's eval skill and suites are read at HEAD and nothing is run.
    */
   newEvalTask(projectId: ProjectId, request: NewEvalBody): Promise<TaskDto>;
+  /**
+   * Files "Switch <slot> to <model>": an agent edits the binding and lists every suite on the slot to run
+   * before merging, in the areas the suite's covered paths fall in. Nothing is edited or run by 10db.
+   */
+  switchEvalModel(
+    projectId: ProjectId,
+    suiteKey: EvalSuiteKey,
+    request: EvalSwitchBody,
+  ): Promise<TaskDto>;
   /** What 10db added to the project's hazards by itself and why, and how many removals wait on the builder. */
   getHazardAssessment(projectId: ProjectId): HazardAssessmentDto;
   /**

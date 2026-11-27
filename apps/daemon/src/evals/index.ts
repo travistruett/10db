@@ -5,5 +5,7 @@ export { readEvalManifest } from './manifest-store';
 export { coverageLinesOf, suitesOfTasks } from './task-coverage';
 export { createEvalsAssessor, type EvalsAssessor } from './assess';
 export { subscribeEvalAssessment } from './assess-triggers';
+export { buildCandidates } from './candidates';
 export { createEvalLiveRuns, type EvalLiveRuns } from './live-runs';
+export { createEvalSweeps, type EvalSweeps } from './sweeps';
 export { createEvalSuggester, type EvalSuggester } from './suggest';

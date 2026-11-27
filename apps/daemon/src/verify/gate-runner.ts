@@ -69,6 +69,12 @@ export interface GateRequest {
   /** The copy the gate's batch runs in (`copyIdForBatch`); absent or null for any other gate. */
   readonly copyId?: CopyId | null;
   /**
+   * The models a live eval run tries, set last in the sandboxed command's env and refused when the
+   * name is reserved (`SandboxProfileError`, so nothing runs). Only the live-run path passes it; an
+   * unsandboxed gate ignores it.
+   */
+  readonly modelEnv?: { readonly name: string; readonly value: string };
+  /**
    * Runs once the gate may start, after its slot and before its sandbox or command: work that must
    * not change the checkout under another running gate, such as bringing a batch's base in. A false
    * answer starts nothing, and the gate reports itself aborted.
@@ -288,6 +294,7 @@ export function createGateRunner(options: GateRunnerOptions): GateRunner {
             ? {}
             : { dotEnvReadable: request.dotEnvReadable }),
           copyId: request.copyId ?? null,
+          ...(request.modelEnv === undefined ? {} : { modelEnv: request.modelEnv }),
         });
       } catch (error) {
         if (error instanceof SandboxProfileError || error instanceof SandboxTempDirError)

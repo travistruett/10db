@@ -41,6 +41,69 @@
     "timeoutMinutes": {
       "type": "number"
     },
+    "models": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "env": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+            },
+            "ids": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "openrouter"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "choices": {
+                      "minItems": 1,
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 100,
+                            "pattern": "^@?[a-z0-9][a-z0-9._-]*(\\/[a-z0-9][a-z0-9._:-]*)?$"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "model"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "choices"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "env",
+            "ids"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "lastRunCostUsd": {
       "type": [
         "number",
@@ -59,7 +122,9 @@
             "no_sandbox",
             "docker_off",
             "manifest_changed",
-            "busy"
+            "busy",
+            "no_models",
+            "bad_model"
           ]
         },
         {
@@ -158,6 +223,7 @@
     "loopback",
     "loopbackAsked",
     "timeoutMinutes",
+    "models",
     "lastRunCostUsd",
     "previewHash",
     "refusal",

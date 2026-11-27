@@ -151,3 +151,9 @@ these stores. Add a line here when a migration adds or changes a store.
   `interrupted`), exit code, the output's tail, the cost the window showed and whether the stop command ran. Gone
   with its project. `insertEvalLiveRun` inserts only when the project has no `running` row (one write, so two clicks
   can't both start); `finishEvalLiveRun` ends a row once; `interruptRunningEvalLiveRuns` is the start's recovery.
+- Model sweeps, migration 0123 (generated): `eval_sweeps` (`store/eval-sweeps.ts`), one row per sweep of a suite's
+  models: `kind` (`try`, `cheapest`), `state` (`running`, `found`, `done`, `stopped`) with a `reason`, the spend cap,
+  the models as picked and the preview hash over them, and `steps_json` (each step's model, state, estimate, cost and
+  live run). Gone with its project. `insertEvalSweep` inserts only when the project has no `running` sweep;
+  `updateRunningEvalSweep` moves or ends a row only while it is `running`, so an ended sweep never changes again.
+  `eval_live_runs` gains `models_json` (the models a step picked) and `sweep_id` (no foreign key).

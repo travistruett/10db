@@ -59,6 +59,8 @@ import {
   type WatchpointCoverageDto,
   type ProjectId,
   type TaskInput,
+  type EvalCandidateDto,
+  type EvalSuiteKey,
 } from '@10db/contracts';
 import {
   closeTask,
@@ -184,6 +186,7 @@ import { taskSession } from '../chat';
 import {
   suitesOfTasks,
   type EvalLiveRuns,
+  type EvalSweeps,
   type EvalsAssessor,
   type EvalSuggester,
   type EvalsService,
@@ -437,6 +440,12 @@ export function createServices(deps: {
   readonly evalSuggester: EvalSuggester;
   /** Runs a suite's live arm when the builder presses Run. */
   readonly evalLive: EvalLiveRuns;
+  readonly evalSweeps: EvalSweeps;
+  /** What a suite may try, as the candidates route and a sweep's ordering read it. */
+  readonly evalCandidates: (
+    projectId: ProjectId,
+    suiteKey: EvalSuiteKey,
+  ) => Promise<EvalCandidateDto[]>;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
   /** Settings › Trust: the switches, the builder's plugins and each project's preview. */
@@ -566,8 +575,13 @@ export function createServices(deps: {
       deps.state.write((ctx) => {
         archiveProject(ctx, projectId);
       });
-      // A live eval is the builder's spend in this checkout: it ends with the project's work, its stop command run in the background.
-      void deps.evalLive.stopProject(projectId);
+      // A live eval is the builder's spend in this checkout: it ends with the project's work, its stop command run
+      // in the background. Both always run, so a sweep that fails to stop never leaves its live run going; each
+      // settles on its own and its failure is the stop's own to record.
+      void Promise.allSettled([
+        deps.evalSweeps.stopProject(projectId),
+        deps.evalLive.stopProject(projectId),
+      ]);
     },
     restoreProject(projectId) {
       deps.state.write((ctx) => {
@@ -602,6 +616,27 @@ export function createServices(deps: {
       // The task works in the areas the behavior's files fall in; with none named, in the project's catch-all or first.
       const named = new Set(
         request.where.flatMap((path) => classifyPath(path, project.areas, []).areas),
+      );
+      const areas =
+        named.size > 0
+          ? [...named]
+          : [(project.areas.find((a) => a.catchAll === true) ?? project.areas[0])?.name ?? ''];
+      return makeTask(projectId, {
+        title: draft.title,
+        why: draft.why,
+        description: draft.description,
+        acceptanceCriteria: [...draft.acceptanceCriteria],
+        areas,
+      });
+    },
+    async switchEvalModel(projectId, suiteKey, request) {
+      const project = getProject(db, projectId);
+      const draft = await deps.evals.draftSwitch(projectId, project.repoPath, suiteKey, request);
+      // A covered glob names its folder by the literal text before its first wildcard.
+      const named = new Set(
+        draft.coveredPaths.flatMap(
+          (glob) => classifyPath(glob.split(/[*?[{]/u)[0] ?? '', project.areas, []).areas,
+        ),
       );
       const areas =
         named.size > 0
@@ -1101,8 +1136,22 @@ export function createServices(deps: {
     evalSuite(projectId, key, run) {
       return deps.evals.suite(projectId, getProject(db, projectId).repoPath, key, run);
     },
-    evalLivePreview(projectId, suiteKey) {
-      return deps.evalLive.preview(projectId, suiteKey);
+    evalCandidates: (projectId, suiteKey) => deps.evalCandidates(projectId, suiteKey),
+    evalLivePreview(projectId, suiteKey, models) {
+      return deps.evalLive.preview(projectId, suiteKey, models);
+    },
+    startEvalSweep(projectId, suiteKey, body) {
+      return deps.evalSweeps.start(projectId, suiteKey, body);
+    },
+    latestEvalSweep(projectId, suiteKey) {
+      getProject(db, projectId);
+      return deps.evalSweeps.latest(projectId, suiteKey);
+    },
+    getEvalSweep(projectId, sweepId) {
+      return deps.evalSweeps.get(projectId, sweepId);
+    },
+    stopEvalSweep(projectId, sweepId) {
+      return deps.evalSweeps.stop(projectId, sweepId);
     },
     startEvalLive(projectId, suiteKey, previewHash) {
       return deps.evalLive.start(projectId, suiteKey, previewHash);

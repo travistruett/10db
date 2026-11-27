@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { PathPattern } from './entities';
-import { EvalLiveRunId, ProjectId } from './ids';
+import { EvalLiveRunId, EvalSweepId, ProjectId } from './ids';
+import { isSandboxManagedEnvName } from './sandbox-env-names';
 
 /** A result file format 10db reads. 10db defines no eval format of its own; each is a project's. */
 export const EvalResultFormat = {
@@ -16,7 +17,9 @@ export const EvalSuiteKey = z
   .string()
   .min(1)
   .max(120)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/, 'a suite key is letters, digits and . _ : / -');
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/, 'a suite key is letters, digits and . _ : / -')
+  // `/evals/sweeps/:sweepId` is a route of its own, so a suite may not take the segment.
+  .refine((key) => key !== 'sweeps', 'sweeps is a route name, not a suite key');
 export type EvalSuiteKey = z.infer<typeof EvalSuiteKey>;
 
 /** A tracked path of the repository, as a manifest names it. */
@@ -291,6 +294,78 @@ export const EvalEnvFile = z
     'a .env file inside the checkout',
   );
 
+/** Env names the shell, make or a tool reads as configuration, so a model list must never be set under one. */
+const RESERVED_ENV_NAMES = new Set([
+  'PATH',
+  'HOME',
+  'SHELL',
+  'IFS',
+  'ENV',
+  'BASH_ENV',
+  'PS4',
+  'TMPDIR',
+  'MAKEFLAGS',
+  'MFLAGS',
+  'GNUMAKEFLAGS',
+  'MAKEFILES',
+]);
+const RESERVED_ENV_PREFIXES = [
+  'GIT_',
+  'DOCKER_',
+  'COMPOSE_',
+  'LD_',
+  'DYLD_',
+  'NODE_',
+  'npm_',
+  'PYTHON',
+] as const;
+
+/**
+ * Whether a variable name is one the shell, a tool or the sandbox itself sets or reads, so a suite's model env
+ * may not use it.
+ */
+export function isReservedEnvName(name: string): boolean {
+  return (
+    RESERVED_ENV_NAMES.has(name) ||
+    RESERVED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix)) ||
+    isSandboxManagedEnvName(name)
+  );
+}
+
+/** A model id as a provider spells it: no space, quote, `$`, `;` or `,`, so it is safe on a command line. */
+export const EvalModelId = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(/^@?[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._:-]*)?$/i);
+export type EvalModelId = z.infer<typeof EvalModelId>;
+
+/** The env var a suite's command reads its models from. */
+export const EvalModelEnvName = z
+  .string()
+  .regex(/^[A-Z][A-Z0-9_]{0,63}$/)
+  .refine((n) => !isReservedEnvName(n), 'a name the shell or a tool reads');
+
+/** A project's own name for a model (ampsio's slot, orgtools' choice) and the model it is. */
+export const EvalModelChoice = z.strictObject({
+  name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+  model: EvalModelId,
+});
+export type EvalModelChoice = z.infer<typeof EvalModelChoice>;
+
+/**
+ * How a suite's command takes models: the env var it reads and the ids it accepts. `'openrouter'` passes ids as
+ * given; `choices` passes only the listed names.
+ */
+export const EvalLiveModels = z.strictObject({
+  env: EvalModelEnvName,
+  ids: z.union([
+    z.literal('openrouter'),
+    z.strictObject({ choices: z.array(EvalModelChoice).min(1).max(50) }),
+  ]),
+});
+export type EvalLiveModels = z.infer<typeof EvalLiveModels>;
+
 /**
  * What the live arm of a suite needs from the sandbox. A Docker suite reaches containers through the
  * socket and opens no host; its env files are readable, never writable. A suite without `live` has no Run.
@@ -304,6 +379,8 @@ export const EvalLiveRun = z
     /** Ends the work inside the container when the run is stopped or times out. */
     stopCommand: z.string().min(1).max(300).optional(),
     timeoutMinutes: z.number().int().min(1).max(240).default(60),
+    /** Where the suite's command reads the models to try; none means it takes no model. */
+    models: EvalLiveModels.optional(),
   })
   .refine((l) => !l.docker || l.hosts.length === 0, 'a Docker suite opens no hosts')
   .refine((l) => l.docker || l.envFiles.length === 0, 'only a Docker suite reads env files');
@@ -442,6 +519,8 @@ export const NewEvalOrigin = {
   Gap: 'gap',
   /** A goal's proposed eval in a Shape plan. */
   PlanEval: 'plan_eval',
+  /** A suite's drawer: Let 10db Pick Models, which has its live command read its models from an env var. */
+  PickModels: 'pick_models',
 } as const;
 export type NewEvalOrigin = (typeof NewEvalOrigin)[keyof typeof NewEvalOrigin];
 
@@ -539,7 +618,9 @@ export const NewEvalRequest = z.strictObject({
   pick: z.enum(EvalPick).nullable().default(null),
   /** Tracked paths the behavior lives in; the lane reads them, and they pick the task's areas. */
   where: z.array(BriefPath).max(20).default([]),
-  origin: z.enum([NewEvalOrigin.Page, NewEvalOrigin.Gap, NewEvalOrigin.PlanEval]).default('page'),
+  origin: z
+    .enum([NewEvalOrigin.Page, NewEvalOrigin.Gap, NewEvalOrigin.PlanEval, NewEvalOrigin.PickModels])
+    .default('page'),
 });
 export type NewEvalBody = z.output<typeof NewEvalRequest>;
 
@@ -634,6 +715,8 @@ export const EvalLiveRefusal = {
   DockerOff: 'docker_off',
   ManifestChanged: 'manifest_changed',
   Busy: 'busy',
+  NoModels: 'no_models',
+  BadModel: 'bad_model',
 } as const;
 export type EvalLiveRefusal = (typeof EvalLiveRefusal)[keyof typeof EvalLiveRefusal];
 
@@ -677,6 +760,8 @@ export const EvalLivePreviewDto = z.object({
   /** The suite asks for localhost; the project's switch may keep it closed. */
   loopbackAsked: z.boolean(),
   timeoutMinutes: z.number(),
+  /** How the suite takes models; null when it takes none. */
+  models: EvalLiveModels.nullable(),
   lastRunCostUsd: z.number().nullable(),
   /** Hashes what the window showed; Run refuses when anything it covers changed since. */
   previewHash: z.string(),
@@ -696,3 +781,94 @@ export const EvalLiveRunChangedData = z.object({
   state: z.enum(EvalLiveRunState),
 });
 export type EvalLiveRunChangedData = z.infer<typeof EvalLiveRunChangedData>;
+
+export const EvalSweepKind = { Try: 'try', Cheapest: 'cheapest' } as const;
+export type EvalSweepKind = (typeof EvalSweepKind)[keyof typeof EvalSweepKind];
+export const EvalSweepState = {
+  Running: 'running',
+  Found: 'found',
+  Done: 'done',
+  Stopped: 'stopped',
+} as const;
+export type EvalSweepState = (typeof EvalSweepState)[keyof typeof EvalSweepState];
+export const EvalSweepReason = {
+  Capped: 'capped',
+  Unreadable: 'unreadable',
+  CostUnknown: 'cost_unknown',
+  Interrupted: 'interrupted',
+  Refused: 'refused',
+  ByYou: 'by_you',
+} as const;
+export type EvalSweepReason = (typeof EvalSweepReason)[keyof typeof EvalSweepReason];
+export const EvalSweepStepState = {
+  Waiting: 'waiting',
+  Running: 'running',
+  Passed: 'passed',
+  Failed: 'failed',
+  Unreadable: 'unreadable',
+  Stopped: 'stopped',
+  Skipped: 'skipped',
+} as const;
+export type EvalSweepStepState = (typeof EvalSweepStepState)[keyof typeof EvalSweepStepState];
+
+/** Start a sweep: the picked models (checked against the suite's manifest when it starts) and the spend cap. */
+export const StartEvalSweepBody = z.strictObject({
+  kind: z.enum(EvalSweepKind),
+  models: z.array(z.string().min(1).max(100)).min(1).max(10),
+  capUsd: z.number().positive().max(500),
+  previewHash: z.string().min(1).max(128),
+});
+export type StartEvalSweepBody = z.infer<typeof StartEvalSweepBody>;
+
+export const EvalSweepDto = z.object({
+  id: EvalSweepId,
+  projectId: ProjectId,
+  suiteKey: EvalSuiteKey,
+  kind: z.enum(EvalSweepKind),
+  state: z.enum(EvalSweepState),
+  reason: z.enum(EvalSweepReason).nullable(),
+  reasonText: z.string().nullable(),
+  capUsd: z.number(),
+  spentUsd: z.number(),
+  winner: z.string().nullable(),
+  steps: z.array(
+    z.object({
+      model: z.string(),
+      state: z.enum(EvalSweepStepState),
+      estimateUsd: z.number().nullable(),
+      costUsd: z.number().nullable(),
+      runId: EvalLiveRunId.nullable(),
+    }),
+  ),
+  startedAt: z.string(),
+  endedAt: z.string().nullable(),
+});
+export type EvalSweepDto = z.infer<typeof EvalSweepDto>;
+
+/** A model a suite could try, with what 10db knows of it and its last result in this suite. */
+export const EvalCandidateDto = z.object({
+  model: z.string(),
+  name: z.string().nullable(),
+  intelligence: z.number().nullable(),
+  outputPrice: z.number().nullable(),
+  estimateUsd: z.number().nullable(),
+  last: z
+    .object({ passed: z.boolean(), costUsd: z.number().nullable(), at: z.string() })
+    .nullable(),
+});
+export type EvalCandidateDto = z.infer<typeof EvalCandidateDto>;
+
+export const EvalSwitchBody = z.strictObject({
+  model: EvalModelId,
+  slot: z.string().min(1).max(100).nullable(),
+});
+export type EvalSwitchBody = z.infer<typeof EvalSwitchBody>;
+
+/** `eval.sweep_changed`: a sweep started, moved to its next step or ended. */
+export const EvalSweepChangedData = z.object({
+  projectId: ProjectId,
+  suiteKey: EvalSuiteKey,
+  sweepId: EvalSweepId,
+  state: z.enum(EvalSweepState),
+});
+export type EvalSweepChangedData = z.infer<typeof EvalSweepChangedData>;

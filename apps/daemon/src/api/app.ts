@@ -96,6 +96,9 @@ import {
   EvalLiveRunId,
   EvalLiveRefused,
   RunEvalLiveBody,
+  EvalSweepId,
+  StartEvalSweepBody,
+  EvalSwitchBody,
   EvalSuiteQuery,
   PersonInput,
   PickSize,
@@ -314,6 +317,17 @@ const macOnly = {
 } as const;
 const OPEN_PATHS = new Set(['/health', '/mcp']);
 /** A page of a conversation's items starts after this `seq`. */
+const EvalLiveModelsWire = z.strictObject({ models: z.string().optional() });
+// The picked models, comma-separated; each is checked against the suite when it is used.
+const EvalLiveModelsQuery = z.strictObject({
+  models: z
+    .string()
+    .max(1100)
+    .transform((v) => (v === '' ? [] : v.split(',')))
+    .pipe(z.array(z.string().min(1).max(100)).max(10))
+    .optional(),
+});
+
 const ConversationItemsQuery = z.object({
   afterSeq: z.coerce.number().int().nonnegative().optional(),
 });
@@ -1753,6 +1767,19 @@ export function createApp(deps: ApiDeps) {
           201,
         ),
     )
+    .post(
+      '/projects/:projectId/evals/:suiteKey/switch',
+      validator('json', (value): EvalSwitchBody => EvalSwitchBody.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.switchEvalModel(
+            ProjectId.parse(c.req.param('projectId')),
+            EvalSuiteKey.parse(c.req.param('suiteKey')),
+            c.req.valid('json'),
+          ),
+          201,
+        ),
+    )
     .get(
       '/projects/:projectId/evals/live/runs',
       validator('query', (value) =>
@@ -1773,9 +1800,68 @@ export function createApp(deps: ApiDeps) {
       );
       return c.body(null, 204);
     })
-    .get('/projects/:projectId/evals/:suiteKey/live', async (c) =>
+    .get('/projects/:projectId/evals/sweeps/:sweepId', (c) =>
       c.json(
-        await deps.services.evalLivePreview(
+        deps.services.getEvalSweep(
+          ProjectId.parse(c.req.param('projectId')),
+          EvalSweepId.parse(c.req.param('sweepId')),
+        ),
+      ),
+    )
+    .post('/projects/:projectId/evals/sweeps/:sweepId/stop', async (c) => {
+      await deps.services.stopEvalSweep(
+        ProjectId.parse(c.req.param('projectId')),
+        EvalSweepId.parse(c.req.param('sweepId')),
+      );
+      return c.body(null, 204);
+    })
+    .get('/projects/:projectId/evals/:suiteKey/candidates', async (c) =>
+      c.json(
+        await deps.services.evalCandidates(
+          ProjectId.parse(c.req.param('projectId')),
+          EvalSuiteKey.parse(c.req.param('suiteKey')),
+        ),
+      ),
+    )
+    .get(
+      '/projects/:projectId/evals/:suiteKey/live',
+      // The validated query keeps `models` as the wire string, so the typed client's input is that string;
+      // the handler reads the picks from the same schema's output.
+      validator('query', (value): { models?: string } => {
+        const { models } = EvalLiveModelsWire.parse(value);
+        EvalLiveModelsQuery.parse({ models });
+        return models === undefined ? {} : { models };
+      }),
+      async (c) =>
+        c.json(
+          await deps.services.evalLivePreview(
+            ProjectId.parse(c.req.param('projectId')),
+            EvalSuiteKey.parse(c.req.param('suiteKey')),
+            EvalLiveModelsQuery.parse(c.req.valid('query')).models ?? [],
+          ),
+        ),
+    )
+    .post(
+      '/projects/:projectId/evals/:suiteKey/sweeps',
+      validator('json', (value): StartEvalSweepBody => StartEvalSweepBody.parse(value)),
+      async (c) => {
+        try {
+          const sweep = await deps.services.startEvalSweep(
+            ProjectId.parse(c.req.param('projectId')),
+            EvalSuiteKey.parse(c.req.param('suiteKey')),
+            c.req.valid('json'),
+          );
+          return c.json(sweep, 201);
+        } catch (error) {
+          if (error instanceof EvalLiveRefused)
+            return c.json({ refusal: error.refusal, message: error.message }, 409);
+          throw error;
+        }
+      },
+    )
+    .get('/projects/:projectId/evals/:suiteKey/sweeps/latest', (c) =>
+      c.json(
+        deps.services.latestEvalSweep(
           ProjectId.parse(c.req.param('projectId')),
           EvalSuiteKey.parse(c.req.param('suiteKey')),
         ),

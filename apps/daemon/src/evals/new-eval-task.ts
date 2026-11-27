@@ -74,7 +74,7 @@ function exampleLines(suites: readonly EvalSuiteDto[]): string {
   const named = suites
     .filter((s) => s.definitionPaths.length > 0)
     .slice(0, EXAMPLE_SUITES)
-    .map((s) => `- ${s.label}: ${s.definitionPaths.map((p) => `\`${p}\``).join(', ')}`);
+    .map((s) => `- ${quoted(s.label)}: ${s.definitionPaths.map((p) => `\`${p}\``).join(', ')}`);
   return named.length === 0 ? '' : ['Existing suites to match in format:', ...named].join('\n');
 }
 
@@ -82,6 +82,8 @@ const ORIGIN_LINES = {
   page: 'Asked for from the Evals page.',
   gap: 'Asked for from a row of the No Eval tab: LLM work no suite covers.',
   plan_eval: "Asked for from a goal's proposed eval in a Shape plan.",
+  pick_models:
+    "Asked for from the suite's drawer, Let 10db Pick Models: change the suite's live command so it reads the models to run from an environment variable, which 10db sets to a comma-separated list of model ids to try other models and compare cost. Follow the pattern of ampsio's `MODELS ?=` make variable (a default the command keeps when the variable is unset), then record the variable's name in the suite's manifest `live.models` (`env`, and `ids`: `openrouter` or the project's own `choices`). Run free checks only: never run the live command or any paid model call.",
 } as const satisfies Record<NewEvalBody['origin'], string>;
 
 const CHECK_LINES = {
@@ -109,6 +111,10 @@ const EXECUTION_DEFAULT =
   "The free check (the one that needs no paid model) runs in the project's gate. A paid run happens only when the builder starts it.";
 
 const oneLine = (text: string): string => text.replaceAll(/\s+/gu, ' ').trim();
+
+/** Text read from a report or a manifest, as one quoted line so it can't pass for an instruction. */
+export const quoted = (text: string): string =>
+  JSON.stringify(oneLine(text.replaceAll(/\p{Cc}/gu, ' ')));
 
 /** The sections the builder wrote in their own words; one left empty is left out. */
 const written = (heading: string, text: string): string =>
