@@ -27,7 +27,9 @@ only process that writes the database.
   `updated_at` as ISO text.
   Settings-style tables keyed by a natural key are the first exception; append-only record tables
   (`events`, `tool_ops`, `evidence`, `handoffs`, `sources`; `created_at` only, none for `events`),
-  immutable once written, are the second. Join tables keyed by their two foreign keys (`task_deps`)
+  immutable once written, are the second. `events` is the one that is pruned: the nightly run deletes a finished
+  task's `session.context` and `session.activity` rows after 14 days (`deleteSessionEventsEndedBefore`,
+  `docs/architecture/decisions/2026-11-27-finished-sessions-lose-their-context-and-activity-events-after-14-days.md`). Join tables keyed by their two foreign keys (`task_deps`)
   have no ID or timestamps.
 - Every state change writes its row and appends its event in one transaction (M1a adds the helper). `composeKnowledgeText` is an exception: it composes stored Knowledge text at daemon start and appends no event (see Knowledge repositories in `docs/architecture/db-storage.md`).
 - Full-text search lives in one module so the storage engine can change later.
