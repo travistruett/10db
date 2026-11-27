@@ -128,6 +128,7 @@ import {
   type LiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
+  handOverEdits,
   type Runner,
   type RunnerOptions,
   subscribeLaneTakeOut,
@@ -574,6 +575,7 @@ export async function createTestEngine(
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
       awayFor: (id) => live.get(id)?.away,
+      handOverClaim: (handover) => handOverEdits({ state, git }, handover),
       // As the daemon does: a builder message the MCP side writes goes to the page's session.
       deliverMessage: (taskId, messageId) =>
         created.deliverMessage(taskId, messageId, { redo: false }),

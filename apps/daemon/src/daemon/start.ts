@@ -421,6 +421,7 @@ import {
   createLiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
+  handOverEdits,
   type Runner,
   type RunnerLimits,
   type StopPassLane,
@@ -3623,6 +3624,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       },
       awayFor: (id) => live.get(id)?.away,
       claimWaits,
+      handOverClaim: (handover) => handOverEdits({ state, git }, handover),
       deliverMessage: (taskId, messageId) =>
         createdRunner.deliverMessage(taskId, messageId, { redo: false }),
       migrationsBase,

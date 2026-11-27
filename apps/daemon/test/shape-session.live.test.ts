@@ -49,6 +49,7 @@ import {
   shapeAgentModels,
   shapeSystemPrompt,
 } from '../src/shape';
+import { handOverEdits } from '../src/runner';
 import { createClaudeAdapter, type SessionEvent, type ShapeToolRequest } from '../src/sessions';
 import { createTempRepo, testPolicy } from './fixtures';
 import { textPdf } from './pdf';
@@ -252,6 +253,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
         log: silentLogger,
         waitObserverFor: () => undefined,
         askedToHandOff: () => undefined,
+        handOverClaim: (handover) => handOverEdits({ state, git: createGit() }, handover),
         sessionSignal: () => undefined,
         // A plan's session is a chat's: the endpoint serves a chat's conversation only with its chat tools.
         chatTools: () => notOffered,

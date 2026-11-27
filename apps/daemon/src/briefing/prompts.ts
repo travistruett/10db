@@ -968,7 +968,7 @@ function actionSection(input: PromptInput): string {
         : gate;
     }
     case 'uncommitted':
-      return `Your step ended with changes in your claims that are not committed:\n${bullets(input.action.paths)}\nCommit each one through mcp__10db__commit, naming every path, then end your turn. 10db runs the gate once they are committed. A path this task never changed (another writer is editing this checkout) is not yours to commit: name it in mcp__10db__report_deviation's leaveUncommitted, saying whose it looks to be, and end your turn.`;
+      return `Your step ended with changes in your claims that are not committed:\n${bullets(input.action.paths)}\nCommit each one through mcp__10db__commit, naming every path, then end your turn. 10db runs the gate once they are committed. A path this task never changed (the builder, or another task in this copy, edited it) is not yours to commit: name it in mcp__10db__report_deviation's leaveUncommitted, saying whose it looks to be, and end your turn.`;
     case 'merge':
       return mergeSection(input.action.base, input.action.paths);
     case 'verify':
