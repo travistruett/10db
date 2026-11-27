@@ -77,6 +77,15 @@ function DecisionDrawer({
   );
 }
 
+/** Decisions list's column titles and widths, which its placeholder draws too. */
+export const DECISION_COLUMNS = {
+  question: { title: 'Question' },
+  choice: { title: 'Choice' },
+  lasting: { title: 'Lasting', width: 120 },
+  decidedAt: { title: 'Decided', width: 120 },
+  state: { title: 'State', width: 130 },
+} as const;
+
 export function DecisionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
   const [narrowing, setNarrowing] = useState(NOT_NARROWED);
   const [open, setOpen] = useState<PlanDecisionRow | null>(null);
@@ -85,7 +94,7 @@ export function DecisionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
   const columns: DataTableColumn<PlanDecisionRow>[] = [
     {
       accessor: 'question',
-      title: 'Question',
+      ...DECISION_COLUMNS.question,
       resizable: true,
       filtering: narrowing.q.trim() !== '',
       filter: (
@@ -104,7 +113,7 @@ export function DecisionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
     },
     {
       accessor: 'choice',
-      title: 'Choice',
+      ...DECISION_COLUMNS.choice,
       resizable: true,
       toggleable: true,
       render: (d) => (
@@ -115,23 +124,20 @@ export function DecisionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
     },
     {
       accessor: 'lasting',
-      title: 'Lasting',
-      width: 120,
+      ...DECISION_COLUMNS.lasting,
       toggleable: true,
       render: (d) => lastingText(d.lasting),
     },
     {
       accessor: 'decidedAt',
-      title: 'Decided',
-      width: 120,
+      ...DECISION_COLUMNS.decidedAt,
       noWrap: true,
       toggleable: true,
       render: (d) => d.decidedAt ?? 'Not yet',
     },
     {
       accessor: 'state',
-      title: 'State',
-      width: 130,
+      ...DECISION_COLUMNS.state,
       toggleable: true,
       filtering: narrowing.state !== ANY,
       filter: (
@@ -153,6 +159,7 @@ export function DecisionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
   ];
   return (
     <RecordListStates
+      columns={Object.values(DECISION_COLUMNS)}
       query={query}
       what="decisions"
       none={{

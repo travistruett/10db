@@ -7,20 +7,10 @@ import {
   type ShapeAttachmentId,
   type ShapeId,
 } from '@10db/contracts';
-import {
-  Alert,
-  Box,
-  Button,
-  Group,
-  Loader,
-  NavLink,
-  ScrollArea,
-  Select,
-  Stack,
-  Text,
-} from '@mantine/core';
+import { Alert, Box, Button, Group, NavLink, ScrollArea, Select, Stack, Text } from '@mantine/core';
 import dayjs from 'dayjs';
 import { useEffect, useRef, useState } from 'react';
+import { PageLoading, PageLoadingShape } from '../../../../shell/page-loading';
 import { Markdown } from '../../../../conversation';
 import { usePlanRevision } from '../../../../daemon/plan-record-queries';
 import { NewEvalModal, prefillFromPlanEval } from '../../../evals/new-eval-modal';
@@ -153,7 +143,8 @@ function Body({
         {revision.error.message}
       </Alert>
     );
-  if (body === undefined) return <Loader size="sm" aria-label="Loading the document" />;
+  if (body === undefined)
+    return <PageLoading shape={PageLoadingShape.Lines} rows={8} label="Loading the document" />;
   const plan = kind === 'eval' ? proposedEval(body) : null;
   return (
     <Box ref={drawn}>

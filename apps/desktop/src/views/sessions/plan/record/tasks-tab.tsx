@@ -19,6 +19,13 @@ const NO_SORT = { columnAccessor: 'title', direction: 'asc' } as const;
 export const refLabel = (ref: NonNullable<PlanTaskRow['planRef']>): string =>
   `${ref.document}#${ref.section} · revision ${String(ref.revision)}`;
 
+/** Tasks list's column titles and widths, which its placeholder draws too. */
+export const TASK_COLUMNS = {
+  title: { title: 'Task' },
+  planRef: { title: 'Section', width: 260 },
+  state: { title: 'State', width: 240 },
+} as const;
+
 export function TasksTab({
   shapeId,
   projectId,
@@ -47,7 +54,7 @@ export function TasksTab({
   const columns: DataTableColumn<PlanTaskRow>[] = [
     {
       accessor: 'title',
-      title: 'Task',
+      ...TASK_COLUMNS.title,
       resizable: true,
       filtering: narrowing.q.trim() !== '',
       filter: (
@@ -62,8 +69,7 @@ export function TasksTab({
     },
     {
       accessor: 'planRef',
-      title: 'Section',
-      width: 260,
+      ...TASK_COLUMNS.planRef,
       toggleable: true,
       render: (t) =>
         t.planRef === null ? (
@@ -91,8 +97,7 @@ export function TasksTab({
     },
     {
       accessor: 'state',
-      title: 'State',
-      width: 240,
+      ...TASK_COLUMNS.state,
       toggleable: true,
       render: (t) => {
         const row = states.get(t.taskId);
@@ -122,6 +127,7 @@ export function TasksTab({
   ];
   return (
     <RecordListStates
+      columns={Object.values(TASK_COLUMNS)}
       query={query}
       what="tasks"
       none={{

@@ -12,6 +12,7 @@ import {
 import { IconCheck } from '@tabler/icons-react';
 import { DaemonRequestError } from '../../daemon/client';
 import { useDecisionModels, usePatchJudge } from '../../daemon/judge-queries';
+import { ControlLoading } from '../../shell/page-loading';
 import { formatDecisionUsd } from './decision-numbers';
 
 /** What a model costs, per million tokens; decision models answer in a few tokens, so most charge for input only. */
@@ -94,7 +95,7 @@ export function DecisionModelPicker({
         )}
       </Stack>
     );
-  if (offered.isPending) return <Loader size="sm" aria-label="Loading models" />;
+  if (offered.isPending) return <ControlLoading label="Loading models" />;
   if (offered.isError)
     return (
       <Stack gap={2} align="flex-start">

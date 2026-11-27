@@ -1,9 +1,10 @@
-import { Button, Group, Image, Loader, Modal, Stack, Text } from '@mantine/core';
+import { Button, Group, Image, Modal, Skeleton, Stack, Text } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { DeviceChange, DeviceChangedData, EventType } from '@10db/contracts';
 import { useDevices, usePairingCode } from '../../daemon/device-queries';
 import { subscribeToEvents } from '../../daemon/events';
+import { useLoadingDelayElapsed } from '../../shell/page-loading';
 import { useNow } from '../../shell/relative';
 
 /** How long "Paired" shows before the dialog closes. */
@@ -15,6 +16,35 @@ const grouped = (code: string): string => `${code.slice(0, 4)} ${code.slice(4)}`
 function countdown(msLeft: number): string {
   const seconds = Math.max(0, Math.ceil(msLeft / 1000));
   return `${String(Math.floor(seconds / 60))}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+/** The pairing code's size on screen, which its placeholder keeps. */
+const QR_SIZE = 240;
+
+/** The modal's body while its code is made: the same lines, picture, code and buttons, after the shell's delay. */
+function PairingPlaceholder() {
+  const late = useLoadingDelayElapsed();
+  if (!late) return null;
+  return (
+    <Stack gap="md" align="center" w="100%" role="status" aria-label="Making a pairing code">
+      <Stack gap={6} align="center" w="100%">
+        <Skeleton height={14} width="55%" />
+        <Skeleton height={12} width="90%" />
+        <Skeleton height={12} width="70%" />
+      </Stack>
+      <Skeleton height={QR_SIZE} width={QR_SIZE} radius={8} />
+      <Skeleton visible width="fit-content">
+        <Text ff="monospace" fz={32} fw={700} style={{ letterSpacing: '0.12em' }}>
+          0000 0000
+        </Text>
+      </Skeleton>
+      <Skeleton height={12} width={120} />
+      <Group>
+        <Skeleton height={36} width={100} radius="sm" />
+        <Skeleton height={36} width={80} radius="sm" />
+      </Group>
+    </Stack>
+  );
 }
 
 /**
@@ -61,7 +91,7 @@ function PairBody({ onClose }: { readonly onClose: () => void }) {
   const { mutate } = code;
 
   const draw = (url: string): void => {
-    QRCode.toDataURL(url, { margin: 1, width: 240, errorCorrectionLevel: 'M' }).then(
+    QRCode.toDataURL(url, { margin: 1, width: QR_SIZE, errorCorrectionLevel: 'M' }).then(
       setPicture,
       () => {
         setPicture(null);
@@ -114,7 +144,7 @@ function PairBody({ onClose }: { readonly onClose: () => void }) {
           {code.error.message}
         </Text>
       ) : code.data === undefined ? (
-        <Loader size="sm" />
+        <PairingPlaceholder />
       ) : (
         <>
           <Stack gap={4} align="center">
@@ -129,8 +159,8 @@ function PairBody({ onClose }: { readonly onClose: () => void }) {
           {picture === null ? null : (
             <Image
               src={picture}
-              w={240}
-              h={240}
+              w={QR_SIZE}
+              h={QR_SIZE}
               alt="QR code that opens the pairing page on this Mac"
               style={{
                 imageRendering: 'pixelated',
