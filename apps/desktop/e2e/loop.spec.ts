@@ -419,6 +419,10 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const promptsHere = page.getByRole('radiogroup', { name: 'When Prompts matches' });
   // Default names what All Projects has now.
   await expect(promptsHere.getByText('Default · Ask', { exact: true })).toBeVisible();
+  // The Matches column counts what each watchpoint covers in the checkout: the run's file landed under Greetings.
+  await expect(
+    page.getByRole('row', { name: /Greetings/ }).getByText(/^[1-9]\d* files?$/),
+  ).toBeVisible();
   await expectAccessible(page, 'project watchpoints, dark');
   await promptsHere.getByText('Off', { exact: true }).click();
   await expect

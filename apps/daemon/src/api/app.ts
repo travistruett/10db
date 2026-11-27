@@ -2433,6 +2433,9 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .get('/projects/:projectId/watchpoints/coverage', async (c) =>
+      c.json(await deps.services.watchpointCoverage(ProjectId.parse(c.req.param('projectId')))),
+    )
     .get('/projects/:projectId/watchpoints/stats', (c) =>
       c.json(deps.services.watchpointStats(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -2536,6 +2539,9 @@ export function createApp(deps: ApiDeps) {
       (c) => c.json(deps.services.setKeepAwake(c.req.valid('json').mode)),
     )
     .get('/settings/watchpoints', (c) => c.json(deps.services.yourWatchpoints()))
+    .get('/settings/watchpoints/coverage', async (c) =>
+      c.json(await deps.services.yourWatchpointCoverage()),
+    )
     .put(
       '/settings/watchpoints',
       validator('json', (value): YourWatchpoints => YourWatchpoints.parse(value)),
