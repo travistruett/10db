@@ -9,9 +9,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import type { CopyId, PermissionRuleDto, ProjectDto } from '@10db/contracts';
+import {
+  isReservedEnvName,
+  type CopyId,
+  type PermissionRuleDto,
+  type ProjectDto,
+} from '@10db/contracts';
 import { prepareCommandEnv, withCopyId } from './command-env';
 import { dockerAccess, dockerEnvNames } from './docker-access';
+import { isAllowlistedName, looksSecret } from './env-allowlist';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
 import { isEqualOrUnder, pathsEqual } from './protected-reads';
@@ -82,6 +88,13 @@ export interface GateRunInput {
   readonly dotEnvReadable?: readonly string[];
   /** The copy the gate's batch runs in (`copyIdForBatch`); absent or null for any other gate. */
   readonly copyId?: CopyId | null;
+  /**
+   * One variable set last in the command's env: the models a live eval run tries. Only the live-run
+   * path passes it. The name is refused when the shell, a tool or the sandbox reads it, when it
+   * reads like a secret, or when the command already has it; the value is a model list, nothing
+   * a shell treats as syntax.
+   */
+  readonly modelEnv?: { readonly name: string; readonly value: string };
   /**
    * A pass's commit or merge the builder allowed, which runs here so the hooks it starts are
    * contained: the checkout's own git dir opens for writing, but for what git reads to run a
@@ -194,6 +207,31 @@ function openableDotEnv(checkout: string, file: string): string {
 }
 
 /** One gate run under the sandbox: the process to spawn, and its own temp dir. */
+/** A model value is a comma list of model ids: no space, quote, `$`, `;` or backslash. */
+const MODEL_ENV_VALUE = /^[A-Za-z0-9._/:@,-]{1,1100}$/;
+const MODEL_ENV_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
+
+/** Refuses a model env that could reach a shell or override a sandbox variable, before anything is made. */
+function checkModelEnvShape(modelEnv: { readonly name: string; readonly value: string }): void {
+  const { name, value } = modelEnv;
+  if (
+    !MODEL_ENV_NAME.test(name) ||
+    isReservedEnvName(name) ||
+    isAllowlistedName(name) ||
+    looksSecret(name) ||
+    name.startsWith('TENDB_')
+  )
+    throw new SandboxProfileError(
+      'modelEnv',
+      `${name}: a variable the sandbox does not let a model list use`,
+    );
+  if (!MODEL_ENV_VALUE.test(value))
+    throw new SandboxProfileError(
+      'modelEnv',
+      `${name}: the models are not a plain list of model ids`,
+    );
+}
+
 export interface GateRun {
   /** srt's host, which starts the network proxy and runs the command under the profile. */
   readonly file: string;
@@ -254,6 +292,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
   const { filesRoot } = deps;
   return {
     async forRun(input) {
+      if (input.modelEnv !== undefined) checkModelEnvShape(input.modelEnv);
       checkRuntime(
         deps.runtime,
         projectWritableRoots(input.checkouts, laneRootsOf({ ...deps, tmpRoot })),
@@ -326,6 +365,15 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           },
           input.copyId ?? null,
         );
+        if (input.modelEnv !== undefined) {
+          const { name, value } = input.modelEnv;
+          if (name in commandEnv)
+            throw new SandboxProfileError(
+              'modelEnv',
+              `${name}: the command already has this variable`,
+            );
+          commandEnv[name] = value;
+        }
         const opened = (input.dotEnvReadable ?? []).map((file) => openableDotEnv(checkout, file));
         if (opened.length > 0 && docker === null)
           throw new SandboxProfileError(

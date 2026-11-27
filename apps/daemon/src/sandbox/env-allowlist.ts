@@ -44,6 +44,16 @@ const ALLOWED_PREFIXES = ['LC_', 'MISE_', 'pnpm_config_'] as const;
 // A name that reads like a secret is denied even when its prefix or its own name is allowed.
 const SECRET_LOOKING = /TOKEN|AUTH|SECRET|PASSWORD|PASSWD|KEY|CREDENTIAL|COOKIE|SESSION/i;
 
+/** Whether a variable name reads like a secret, which a sandboxed command never inherits. */
+export function looksSecret(name: string): boolean {
+  return SECRET_LOOKING.test(name);
+}
+
+/** Whether a name is one a sandboxed command inherits from the daemon's env. */
+export function isAllowlistedName(name: string): boolean {
+  return ALLOWED_NAMES.has(name) || ALLOWED_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
 /**
  * Names in `env` that a sandboxed command must not inherit: everything off the allowlist. `also`
  * names more that the caller allows for this command (a project with Docker on adds `DOCKER_HOST`);
@@ -56,7 +66,7 @@ export function deniedEnvNames(
   return Object.keys(env)
     .filter(
       (name) =>
-        SECRET_LOOKING.test(name) ||
+        looksSecret(name) ||
         (!ALLOWED_NAMES.has(name) &&
           !also.has(name) &&
           !ALLOWED_PREFIXES.some((prefix) => name.startsWith(prefix))),
