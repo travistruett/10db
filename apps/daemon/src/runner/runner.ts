@@ -188,6 +188,7 @@ import {
   taskHasRunASession,
   listToolOpResults,
   listPrecedents,
+  listPrinciples,
 } from '@10db/db';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -271,6 +272,7 @@ import { claimedChanges as claimedChangesOf, yieldClaimsWhileWaiting } from './c
 import { anotherWritersRound, readStartDirt, withoutStartDirt } from './start-dirt';
 import {
   answerUnattended,
+  areaMatches,
   judgePreToolUse,
   stringField,
   type GuardVerdict,
@@ -412,6 +414,8 @@ import {
   WATCHPOINT_HIT_SOURCES,
   evalDefinitionSource,
   watchpointHitsAfter,
+  watchpointPrinciples,
+  touchedPrincipleWatchpoints,
   watchpointReviewBrief,
   watchpointsForAreas,
   type WatchpointChangeReader,
@@ -3579,15 +3583,42 @@ export function createRunner(opts: RunnerOptions): Runner {
       readYourWatchpoints(db),
       readProjectWatchpoints(db, row.projectId),
     );
+    // The principles each watchpoint's Knowledge topics resolve to, read once for the step.
+    const principles = watchpointPrinciples(
+      watchpoints,
+      watchpoints.some((w) => w.knowledge.length > 0)
+        ? listPrinciples(db, { projectId: row.projectId })
+        : [],
+      task.areas,
+    );
     const watchpointBuild =
       step.role === StepRole.Implement
-        ? watchpointBuildBrief(watchpointsForAreas(watchpoints, task.areas, project.areas))
+        ? watchpointBuildBrief(
+            watchpointsForAreas(watchpoints, task.areas, project.areas),
+            principles,
+          )
         : null;
     const reading = newestWatchpointRow(listEvidence(db, id));
-    const watchpointReview =
-      (step.role === StepRole.Review || step.role === StepRole.Qa) && reading !== null
-        ? watchpointReviewBrief(reading.detail, agentNotesOf(db, id))
-        : null;
+    const reviewing = step.role === StepRole.Review || step.role === StepRole.Qa;
+    // A watchpoint that only asks a question makes no hit, so what its principles hold a change to is given when the
+    // change touches its paths.
+    const touchedPrinciples =
+      reviewing && principles.size > 0
+        ? touchedPrincipleWatchpoints(
+            watchpoints,
+            principles,
+            await ownChangedFiles(row, checkout),
+            areaMatches,
+          )
+        : [];
+    const watchpointReview = reviewing
+      ? watchpointReviewBrief(
+          reading?.detail ?? null,
+          agentNotesOf(db, id),
+          principles,
+          touchedPrinciples,
+        )
+      : null;
     // A Review or QA step in a copy its batch's other runs commit on is shown only this run's commits.
     let changeUnderReview: string | null = null;
     if (
@@ -5071,6 +5102,24 @@ export function createRunner(opts: RunnerOptions): Runner {
       (lane === null ? null : await opts.git.branchTip(checkout, lane.lane)) ??
       (await opts.git.head(checkout));
     return { head, ...(await runCommits({ db, git: opts.git }, row, checkout, base, head)) };
+  }
+
+  /** The files the run's own work changed, or none when they can't be read. */
+  async function ownChangedFiles(row: WorkstreamRow, checkout: string): Promise<string[]> {
+    try {
+      const head = await opts.git.head(checkout);
+      const { ranges } = await ownWork(
+        row,
+        checkout,
+        getWorkstreamRow(db, row.id).baseHead ?? head,
+      );
+      const files = await Promise.all(
+        ranges.map((r) => opts.git.filesChangedBetween(checkout, r.base, r.head)),
+      );
+      return [...new Set(files.flat())];
+    } catch {
+      return [];
+    }
   }
 
   /**

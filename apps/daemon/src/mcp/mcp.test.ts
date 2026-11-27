@@ -343,7 +343,9 @@ describe('edits left behind in a shared checkout', () => {
         i.title.startsWith('Claim deadlock:'),
       ),
     );
-    const yieldOption = card.options.find((o) => o.label.startsWith('Alpha yields'));
+    const yieldOption = card.options.find(
+      (o) => o.label.endsWith(' Waits') && o.description.includes(yielder.workstream.id),
+    );
     expect(yieldOption?.description).toContain('remain its own');
     inbox.answer(card.id, { choice: yieldOption?.label ?? '' });
     expect((await yielderAsks).json).toMatchObject({ granted: false });

@@ -90,6 +90,7 @@ import {
   PersonaPatch,
   EvalManifest,
   type NewEvalBody,
+  EvalSuggestRequest,
   NewEvalRequest,
   EvalSuiteKey,
   EvalLiveRunId,
@@ -1341,10 +1342,13 @@ export function createApp(deps: ApiDeps) {
     .post(
       '/devices/pair',
       validator('json', (value) => PairRequest.parse(value)),
-      (c) =>
-        deps.remote
-          ? c.json(deps.remote.devices.pair(c.req.valid('json')))
-          : c.json({ error: 'not_implemented' }, 501),
+      async (c) => {
+        if (!deps.remote) return c.json({ error: 'not_implemented' }, 501);
+        // Serve replaces a forged header on the share listener; the main listener's value is the client's.
+        const forwarded = c.req.header('X-Forwarded-For')?.split(',').at(-1)?.trim();
+        const peer = listenerOf(c.env) === Listener.Share && forwarded ? forwarded : null;
+        return c.json(await deps.remote.devices.pair(c.req.valid('json'), peer));
+      },
     )
     // The calling device's own routes come before `/devices/:deviceId`, which would read `me` as an id.
     .delete('/devices/me', (c) => {
@@ -1701,6 +1705,21 @@ export function createApp(deps: ApiDeps) {
         // Not tied to the request: a dropped connection must not end a run another page is waiting on.
         await deps.services.assessEvals(ProjectId.parse(c.req.param('projectId'))),
       ),
+    )
+    .get('/projects/:projectId/eval-suggest', (c) =>
+      c.json(deps.services.evalSuggestStatus(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post(
+      '/projects/:projectId/evals/suggest',
+      validator('json', (value): EvalSuggestRequest => EvalSuggestRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.evalSuggest(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+            c.req.raw.signal,
+          ),
+        ),
     )
     .get('/projects/:projectId/eval-models', async (c) =>
       c.json(await deps.services.evalModels(ProjectId.parse(c.req.param('projectId')))),
@@ -2430,6 +2449,9 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .get('/projects/:projectId/watchpoints/coverage', async (c) =>
+      c.json(await deps.services.watchpointCoverage(ProjectId.parse(c.req.param('projectId')))),
+    )
     .get('/projects/:projectId/watchpoints/stats', (c) =>
       c.json(deps.services.watchpointStats(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -2533,6 +2555,9 @@ export function createApp(deps: ApiDeps) {
       (c) => c.json(deps.services.setKeepAwake(c.req.valid('json').mode)),
     )
     .get('/settings/watchpoints', (c) => c.json(deps.services.yourWatchpoints()))
+    .get('/settings/watchpoints/coverage', async (c) =>
+      c.json(await deps.services.yourWatchpointCoverage()),
+    )
     .put(
       '/settings/watchpoints',
       validator('json', (value): YourWatchpoints => YourWatchpoints.parse(value)),
