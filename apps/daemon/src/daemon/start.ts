@@ -177,6 +177,8 @@ import {
   createSharingService,
   createTailscaleRun,
   findTailscaleCli,
+  readTailnetName,
+  TAILNET_NAME_TIMEOUT_MS,
   lsofHolderOf,
   startShareListener,
 } from '../sharing';
@@ -3525,11 +3527,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   const deviceSockets = createSocketRegistry();
   const sharingLog = logger.child({ component: 'sharing' });
+  const tailscaleCli = () =>
+    opts.tailscaleOff ? null : (opts.tailscaleCli ?? findTailscaleCli(existsSync));
   const sharing = createSharingService({
     state,
     clock,
     log: sharingLog,
-    cli: opts.tailscaleOff ? () => null : () => opts.tailscaleCli ?? findTailscaleCli(existsSync),
+    cli: tailscaleCli,
     run: createTailscaleRun,
     listen: (sharePort) =>
       startShareListener({
@@ -3556,6 +3560,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     codes: createPairingCodes({ clock }),
     sockets: deviceSockets,
     sharing: () => sharing.status(),
+    tailnetName: async (ip) => {
+      const cli = tailscaleCli();
+      const name =
+        cli === null
+          ? null
+          : await readTailnetName(createTailscaleRun(cli), ip, TAILNET_NAME_TIMEOUT_MS);
+      if (name === null) sharingLog.debug({}, 'no tailnet name for the pairing device');
+      return name;
+    },
   });
   const streamTickets = createTickets({ clock });
   const vapidKeys = createVapidKeyStore(opts.keychain ?? unavailableKeychain);

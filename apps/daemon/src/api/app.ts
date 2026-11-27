@@ -1341,10 +1341,13 @@ export function createApp(deps: ApiDeps) {
     .post(
       '/devices/pair',
       validator('json', (value) => PairRequest.parse(value)),
-      (c) =>
-        deps.remote
-          ? c.json(deps.remote.devices.pair(c.req.valid('json')))
-          : c.json({ error: 'not_implemented' }, 501),
+      async (c) => {
+        if (!deps.remote) return c.json({ error: 'not_implemented' }, 501);
+        // Serve replaces a forged header on the share listener; the main listener's value is the client's.
+        const forwarded = c.req.header('X-Forwarded-For')?.split(',').at(-1)?.trim();
+        const peer = listenerOf(c.env) === Listener.Share && forwarded ? forwarded : null;
+        return c.json(await deps.remote.devices.pair(c.req.valid('json'), peer));
+      },
     )
     // The calling device's own routes come before `/devices/:deviceId`, which would read `me` as an id.
     .delete('/devices/me', (c) => {
