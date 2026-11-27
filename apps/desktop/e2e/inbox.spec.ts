@@ -198,9 +198,7 @@ test('an acceptance card shows what it could not confirm and what Keep As Is doe
   await expect(page.getByText('The greeting names the user')).toBeVisible();
   await expect(page.getByText('It is one line')).toHaveCount(0);
   await expect(
-    page.getByText(
-      'Already shipped. 2 criteria unconfirmed, 1 extra behaviour. Keep As Is changes nothing; Send Back files a fix task.',
-    ),
+    page.getByText('Already shipped. Keep As Is changes nothing; Send Back files a fix task.'),
   ).toBeVisible();
   await page.getByRole('button', { name: /^Keep As Is/ }).click();
   await expect(rowsOf(page).filter({ hasText: title })).toHaveCount(0);

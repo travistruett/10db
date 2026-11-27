@@ -624,7 +624,8 @@ export function createToolHandlers(
             category: QuestionCategory.Product,
             urgency: Urgency.Low,
             // The declared kinds ride on the card, so accepting it files a task that has them.
-            detail: { proposalId, kinds: taskKinds.map((k) => k.key) },
+            // Its proposal kind too, so the card can say what accepting does.
+            detail: { proposalId, proposalKind: input.kind, kinds: taskKinds.map((k) => k.key) },
             foldKey: null,
             targets: [],
           });

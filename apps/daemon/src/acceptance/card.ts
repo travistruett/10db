@@ -40,7 +40,7 @@ function bodyOf(
       : ['', `It may also do something the task didn't ask for: ${detail.unasked}`]),
     ...coverageSection(evalLines),
     '',
-    'Accept the work as it is, or send it back with a note.',
+    'Keep it as it is, or send it back with a note.',
   ].join('\n');
 }
 

@@ -187,7 +187,7 @@ export function CheckCard({
         framed={framed}
         start={[viewTask]}
         error={failure}
-        decision={decisionLine(item, { commits: changes.data?.commits.length ?? null })}
+        decision={decisionLine(item)}
         sendBack={{
           label: 'What Needs to Change',
           description: 'The agent gets this note with the work.',

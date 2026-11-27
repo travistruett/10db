@@ -6166,7 +6166,7 @@ describe('without a gate command', () => {
     expectWaitingForTheBuilder(id, 'Alpha', 1);
     expect(countLanes(engine.store.db).byProject.get(task.projectId) ?? 0).toBe(0);
     expect(openChecks()[0]?.body).toBe(
-      '1 commit is ready. Approve to finish the task, or send it back with a note.',
+      '1 commit is ready. Approve and Finish lands it, or send it back with a note.',
     );
     neverDone(id, task.id);
   };

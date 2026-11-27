@@ -408,7 +408,7 @@ export function InboxCard({
           link === null ? null : <ExternalLink url={link} label="Open on GitHub" asButton />,
         ]}
         error={error ?? batch.error}
-        decision={closesItself ? null : decisionLine(item, { batch: batch.offers })}
+        decision={decisionLine(item, { batch: batch.offers, closesItself, count })}
         noteRef={noteRef}
         note={
           hasOptions
