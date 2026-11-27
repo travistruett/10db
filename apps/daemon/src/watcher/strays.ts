@@ -29,6 +29,21 @@ export function isSensitivePath(rel: string): boolean {
   return SENSITIVE_BASENAME.test(rel.slice(rel.lastIndexOf('/') + 1));
 }
 
+const GUARDRAIL_DIRECTORIES = ['.github/workflows', '.github/rulesets'] as const;
+const GUARDRAIL_BASENAME = /^(AGENTS\.md|CLAUDE\.md|lefthook\.ya?ml|\.lefthook\.ya?ml)$/;
+
+/**
+ * Paths the builder alone owns, whose change is the builder's to keep or revert (the git guard, hooks, agent
+ * instructions and rules, CI workflows, secrets): the sensitive paths above, plus the agent instructions of
+ * any folder and the files that decide what a push or a commit runs. A write outside every claim to one of
+ * these is a card; to any other path it is a notice in Activity.
+ */
+export function isGuardrailPath(rel: string): boolean {
+  if (isSensitivePath(rel)) return true;
+  if (GUARDRAIL_DIRECTORIES.some((dir) => rel === dir || rel.startsWith(`${dir}/`))) return true;
+  return GUARDRAIL_BASENAME.test(rel.slice(rel.lastIndexOf('/') + 1));
+}
+
 /** The file lefthook keeps in `.git/info` to decide whether to reinstall its hooks. */
 export const LEFTHOOK_CHECKSUM_PATH = '.git/info/lefthook.checksum';
 /** What lefthook writes there: a hash and a timestamp, nothing that runs or hides anything. */

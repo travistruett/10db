@@ -95,6 +95,7 @@ import {
   foreignBulkFoldKey,
   isAlwaysIgnored,
   isConfigFile,
+  isGuardrailPath,
   isLefthookChecksum,
   isSensitivePath,
   splitSensitive,
@@ -286,6 +287,7 @@ export function createWatcher(deps: {
     strayTimers.get(root)?.cancel();
     strayTimers.delete(root);
     seenConfigs.delete(root);
+    noticedStrays.delete(root);
   }
 
   function configTextOf(root: string, rel: string): string | null {
@@ -443,6 +445,46 @@ export function createWatcher(deps: {
     });
   }
 
+  // The paths a notice has already said were written outside every claim, per checkout: a path is
+  // told once, however many batches report it while it stays uncommitted.
+  const noticedStrays = new Map<string, Set<string>>();
+
+  /**
+   * Posts the Activity notice for writes outside every claim to paths that are no guardrail: one notice
+   * for a path, one for several, and none for a path already told. Nothing is asked of the builder.
+   */
+  function noteQuietStrays(
+    project: ProjectDto,
+    site: Site,
+    paths: readonly string[],
+    left: ReadonlyMap<string, readonly EndedRun[]>,
+    during: string,
+  ): void {
+    const told = noticedStrays.get(site.root) ?? new Set<string>();
+    noticedStrays.set(site.root, told);
+    const fresh = paths.filter((rel) => !told.has(rel));
+    if (fresh.length === 0) return;
+    for (const rel of fresh) told.add(rel);
+    const listed = fresh.slice(0, BULK_LISTED);
+    const single = fresh.length === 1 ? fresh[0] : undefined;
+    const line = (rel: string): string => {
+      const leavers = left.get(rel) ?? [];
+      return `${labelled(site, rel)}${leavers.length === 0 ? '' : leftNote(leavers)}`;
+    };
+    deps.inbox.notice({
+      tier: CardTier.Notice,
+      projectId: project.id,
+      taskId: null,
+      key: single === undefined ? bulkFoldKey(site.scope) : strayFoldKey(site.scope, single),
+      tone: 'info',
+      line:
+        single === undefined
+          ? `${String(fresh.length)} writes outside every claim`
+          : `A write outside every claim: ${single}`,
+      body: `${listed.map(line).join('\n')}${fresh.length > listed.length ? `\n…and ${String(fresh.length - listed.length)} more` : ''}${during}\nNothing is asked of you: commit the work, or a claim over it settles it.`,
+    });
+  }
+
   const leftNote = (runs: readonly EndedRun[]): string =>
     `\nLeft by the failed ${runs.length === 1 ? 'run' : 'runs'} of ${runs.map((run) => `"${run.title}"`).join(' and ')}, which named it`;
 
@@ -480,7 +522,17 @@ export function createWatcher(deps: {
         ? ''
         : `\nWritten while ${titles.join(' and ')} ${titles.length === 1 ? 'was' : 'were'} working`;
     // A write that can change what runs gets its own card, so a bulk card never buries it.
-    const { sensitive, ordinary } = splitSensitive(raised, (rel) => rel);
+    const { sensitive, ordinary: unguarded } = splitSensitive(raised, (rel) => rel);
+    // Any other path is the lane's own work or the builder's hand edit, and committing it or a claim over
+    // it settles it: it asks nothing, so it is a notice. A guardrail path is still the builder's card.
+    const ordinary = unguarded.filter(isGuardrailPath);
+    noteQuietStrays(
+      project,
+      site,
+      unguarded.filter((rel) => !isGuardrailPath(rel)),
+      left,
+      during,
+    );
     const single = (rel: string): void => {
       const note = notes.get(rel);
       // A failed run that named the path as it failed, written no later than it failed, left it: the card names that
@@ -1076,7 +1128,7 @@ export function createWatcher(deps: {
     // Every claim the lane holds counts in its own checkout, the one its per-copy claims are scoped to.
     const claims = activeClaims(db, lane).map((c) => ({ kind: c.kind, name: c.name }));
     const covered = (paths: readonly string[]): boolean =>
-      paths.every((p) => !isSensitivePath(p)) && findStrays(paths, project, claims).length === 0;
+      paths.every((p) => !isGuardrailPath(p)) && findStrays(paths, project, claims).length === 0;
     let unlistedCovered: boolean | null = null;
     /**
      * Whether nothing the lane has changed since its base lies outside the claims, bar the sensitive paths
@@ -1214,7 +1266,7 @@ export function createWatcher(deps: {
     const due: string[] = [];
     for (const rel of rels) {
       if (
-        isSensitivePath(rel) ||
+        isGuardrailPath(rel) ||
         findOpenByFoldKey(db, project.id, strayFoldKey(site.scope, rel)) !== undefined
       ) {
         held.delete(rel);
@@ -1297,7 +1349,7 @@ export function createWatcher(deps: {
         const root = checkoutOfScope(scope);
         let reason: string | null = null;
         if (root === null || !existsSync(root)) reason = 'Its checkout no longer exists.';
-        else if (!(paths ?? []).some(isSensitivePath)) {
+        else if (!(paths ?? []).some(isGuardrailPath)) {
           if (!couldBeOwned(item)) reason = 'No unfinished task could own the write.';
           else if (
             (await deps.git.changedPaths(root, partial ? undefined : (paths ?? []))).length === 0

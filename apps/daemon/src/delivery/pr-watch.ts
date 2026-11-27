@@ -44,7 +44,7 @@ import { CHECKS_START_MS, ciRerunStep } from './ci-rerun';
 import { queuePassSettle, settleClosedPass } from './pass-settle';
 import { recordPassPullRequest, watchedAsPass } from './pass-watch';
 import { clearCiStop, endFixesOfEndedPullRequests, type FixEnds } from './ci-stop';
-import { ghCall, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
+import { ghCall, postIn, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
 import {
   baseNotices,
   cancelledNoticeHead,
@@ -1094,14 +1094,9 @@ export function createPrWatch(input: {
     });
   }
 
-  /** Raises the flaky-check card for `name`, or counts one more time on the open one, in the caller's write. */
+  /** Posts the flaky-check notice for `name` in the caller's write: a flake asks nothing of the builder. */
   function countFlaky(write: WriteContext, root: BatchDto, name: string, head: string): void {
-    const open = findOpenByFoldKey(write.tx, root.projectId, prCardKey.flakyCheck(name));
-    const seen = open?.detail?.['occurrences'];
-    const before = typeof seen === 'number' ? seen : 0;
-    const card = prCards.flakyCheck(name, before + 1, { head, prUrl: root.prUrl });
-    if (open === undefined) raiseIn(write, root.projectId, card);
-    else rewriteIn(write, root.projectId, card);
+    postIn(write, root.projectId, prCards.flakyCheck(name, { head, prUrl: root.prUrl }));
   }
 
   /** Takes off the failed-check rerun notices for any head but `keepHead`: a new commit starts over. */

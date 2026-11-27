@@ -2,6 +2,7 @@ import { InboxState } from '@10db/contracts';
 import { createTestStore, listInbox, seedProject, type Store } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
+import { noticesPosted } from '../../test/notices-posted';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createInboxService, createJudgeOutageCard } from '../inbox';
 
@@ -63,6 +64,8 @@ function build() {
   });
 }
 
+const notices = () => noticesPosted(state.db).filter((n) => n.key === 'judge-outage');
+
 const cards = () =>
   listInbox(state.db, { states: [InboxState.Open, InboxState.Resolved] }).filter(
     (c) => c.title === "10db's judge can't answer",
@@ -81,19 +84,23 @@ afterEach(() => {
 });
 
 describe('a judge outage', () => {
-  it('raises one card for a lasting failure, keeps it single, closes it after three answers, and raises a dead account at once', async () => {
+  it('posts one notice for a lasting 5xx and no card, then raises a dead account as a card at once, closes it after three answers, and raises another', async () => {
     const judge = build();
     status = 500;
     for (let i = 0; i < 4; i += 1) await judge.choose(request);
+    expect(notices()).toHaveLength(0);
+    for (let i = 0; i < 4; i += 1) await judge.choose(request);
     expect(cards()).toHaveLength(0);
-    await judge.choose(request);
-    expect(cards()).toMatchObject([{ state: InboxState.Open }]);
-    expect(cards()[0]?.body).not.toContain('OpenRouter OpenRouter');
-    expect(cards()[0]?.body).toContain('Decisions run on OpenRouter, typesafe/jev-1.13.');
+    expect(notices()).toHaveLength(1);
+    expect(notices()[0]?.body).not.toContain('OpenRouter OpenRouter');
+    expect(notices()[0]?.body).toContain('Decisions run on OpenRouter, typesafe/jev-1.13.');
 
+    // No credits is the builder's to fix: a card, though a notice for the 5xx is already out.
     status = 402;
     for (let i = 0; i < 6; i += 1) await judge.choose(request);
-    expect(cards()).toHaveLength(1);
+    expect(cards()).toMatchObject([{ state: InboxState.Open }]);
+    expect(cards()[0]?.body).toContain('says the account has no credits');
+    expect(notices()).toHaveLength(1);
 
     status = 200;
     await judge.choose(request);
@@ -128,9 +135,19 @@ describe('a judge outage', () => {
     await judge.choose(request);
     clock.advance(119 * 1000);
     await judge.choose(request);
-    expect(cards()).toHaveLength(0);
+    expect(notices()).toHaveLength(0);
     clock.advance(1000);
     await judge.choose(request);
+    expect(notices()).toHaveLength(1);
+    expect(cards()).toHaveLength(0);
+  });
+
+  it('cards a 401 at once, with no notice', async () => {
+    const judge = build();
+    status = 401;
+    await judge.choose(request);
     expect(cards()).toMatchObject([{ state: InboxState.Open }]);
+    expect(cards()[0]?.body).toContain('rejected the key');
+    expect(notices()).toHaveLength(0);
   });
 });

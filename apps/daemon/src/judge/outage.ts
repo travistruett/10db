@@ -43,11 +43,19 @@ export interface JudgeOutage {
   readonly cause: string;
   /** What clears it, as a clause: "add credits or check the key on that account". */
   readonly fix: string;
+  /**
+   * The cause won't clear without the builder (no key, no credits, a refused or expired sign-in): the
+   * sink raises a card at once. Otherwise it is a timeout or a 5xx that may clear alone: a notice.
+   */
+  readonly hard: boolean;
   readonly taskId?: TaskId;
   readonly workstreamId?: WorkstreamId;
 }
 
-/** Where an outage is told: the Inbox card, raised once and resolved when the judge answers. */
+/**
+ * Where an outage is told: an Inbox card for a hard cause, resolved when the judge answers, and an
+ * Activity notice for a transient one.
+ */
 export interface JudgeOutageSink {
   raise(outage: JudgeOutage): void;
   /** Closes the outage's card; called on the first answer after a failure, and once after a start. */
@@ -151,6 +159,7 @@ export function createJudgeOutageWatch(deps: {
   let failingSince = 0;
   let warned = false;
   let raised = false;
+  let raisedHard = false;
   let answersSinceRaise = 0;
   let clearedAt: number | null = null;
   // A card left open by a daemon that stopped during an outage is looked for once, at the first answer.
@@ -159,6 +168,7 @@ export function createJudgeOutageWatch(deps: {
   const close = (): void => {
     deps.sink.clear();
     raised = false;
+    raisedHard = false;
     answersSinceRaise = 0;
     clearedAt = deps.clock.now().getTime();
   };
@@ -199,18 +209,21 @@ export function createJudgeOutageWatch(deps: {
           "10db's judge is failing; the rules decide until it answers again",
         );
       }
-      if (raised) return;
+      // A transient outage already told as a notice doesn't hide a hard cause that follows it.
+      if (raised && (raisedHard || !hard)) return;
       const failed = calls.filter((c) => !c.ok).length;
       const mostFail = failed >= OUTAGE_FAILURES && failed > calls.length - failed;
       const lasting = mostFail || now - failingSince >= OUTAGE_SILENCE_MS;
       const cooling = clearedAt !== null && now - clearedAt < OUTAGE_COOLDOWN_MS;
-      if (cooling || (!hard && !lasting)) return;
+      if (!raised && (cooling || (!hard && !lasting))) return;
       raised = true;
+      raisedHard = hard;
       deps.sink.raise({
         provider,
         model: health.model,
         cause,
         fix,
+        hard,
         ...(health.taskId === undefined ? {} : { taskId: health.taskId }),
         ...(health.workstreamId === undefined ? {} : { workstreamId: health.workstreamId }),
       });

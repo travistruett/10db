@@ -1,8 +1,10 @@
 import {
   CARD_RELEASED_WORKSTREAMS,
+  CARD_RESOLVES_WHEN,
   ReleasedWorkstreams,
   Urgency,
   WORKSTREAM_FAILED_TITLE_PREFIX,
+  type BatchId,
   type InboxOption,
   type ProjectId,
   type TaskId,
@@ -31,6 +33,8 @@ export interface FailedRun {
   readonly id: WorkstreamId;
   readonly taskId: TaskId;
   readonly projectId: ProjectId;
+  /** The batch the run was in: the card closes itself once it is over (`batch_over`). */
+  readonly batchId?: BatchId | null;
 }
 
 /** What the card says of the run that failed last, and what its answers act on. */
@@ -62,6 +66,9 @@ export function flagFailedRun(ctx: WriteContext, run: FailedRun, content: Failed
     ...content.detail,
     ...(runs > 1 ? { [FAILED_RUNS]: runs } : {}),
     ...(released.length > 0 ? { [CARD_RELEASED_WORKSTREAMS]: released } : {}),
+    ...(run.batchId === undefined || run.batchId === null
+      ? {}
+      : { [CARD_RESOLVES_WHEN]: { event: 'batch_over', batchId: run.batchId } }),
   };
   const task = getTask(ctx.tx, run.taskId);
   const card = flagCard(ctx, {

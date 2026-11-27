@@ -21,6 +21,7 @@ import {
   type ProjectDto,
   type TaskDto,
   type WorkstreamDto,
+  type WorkstreamId,
 } from '@10db/contracts';
 import {
   acquireClaims,
@@ -42,6 +43,7 @@ import {
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { noticesPosted } from '../../test/notices-posted';
 import {
   createTempRepo,
   isolatedGitEnv,
@@ -53,7 +55,14 @@ import {
 import { ManualClock, systemClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
-import { createInboxService, stampFile, trustedWrites, type InboxService } from '../inbox';
+import {
+  BY_ANSWER,
+  CardTier,
+  createInboxService,
+  stampFile,
+  trustedWrites,
+  type InboxService,
+} from '../inbox';
 import { silentLogger, type Logger } from '../log';
 import { createWatcher, systemWatch, type WatchFn, type Watcher } from './index';
 
@@ -147,6 +156,9 @@ const openFlags = (): InboxItemDto[] =>
 const VERSION_LINE = /\nVersion [0-9a-f]{12}$/;
 const flags = (): InboxItemDto[] =>
   openFlags().map((i) => ({ ...i, body: i.body.replace(VERSION_LINE, '') }));
+// A write outside every claim to a path that is no guardrail asks nothing: it is a notice in Activity.
+const strayNotices = () => noticesPosted(base.db).filter((n) => n.key.startsWith('stray-write:'));
+const noticedPaths = (): string[] => strayNotices().map((n) => n.body.split('\n')[0] ?? '');
 const emit = (rel: string) => {
   fake.open.get(repo.path)?.onChange(rel);
 };
@@ -156,34 +168,46 @@ const touch = (rel: string) => {
 };
 
 describe('watcher', () => {
-  it('flags a write outside every claim once, naming the only active workstream', async () => {
+  // Value: protects=a write outside every claim to a path that is no guardrail is a notice in Activity,
+  // told once, and raises no card, while a guardrail path (agent instructions) still raises its card;
+  // fails_when=a stray to an ordinary path cards the builder again, or a guardrail path goes quiet;
+  // why_new=escaped bug: 58 stray-write cards were answered with a choice that changed nothing;
+  // no_claim=the notice says nothing of who wrote the path beyond the lanes working
+  it('tells a write outside every claim to an ordinary path once as a notice and raises no card, but cards a guardrail path', async () => {
     const { workstream } = running();
     watcher.sync();
     touch('src/api/fine.ts');
     touch('docs/stray.md');
+    touch('docs/AGENTS.md');
     emit('src/api/fine.ts');
     emit('docs/stray.md');
     emit('docs/stray.md');
+    emit('docs/AGENTS.md');
     clock.advance(500);
     await watcher.flush();
     emit('docs/stray.md');
     await watcher.flush();
 
+    expect(noticedPaths()).toEqual(['docs/stray.md']);
+    expect(strayNotices()[0]).toMatchObject({
+      line: 'A write outside every claim: docs/stray.md',
+      projectId: project.id,
+    });
     const open = flags();
     expect(open).toHaveLength(1);
     expect(open[0]).toMatchObject({
       title: 'Write outside every claim',
-      body: 'docs/stray.md',
+      body: 'docs/AGENTS.md',
       targets: [{ workstreamId: workstream.id, sessionId: null }],
     });
-    expect(open[0]?.detail).toMatchObject({ path: 'docs/stray.md', candidates: [workstream.id] });
+    expect(open[0]?.detail).toMatchObject({ path: 'docs/AGENTS.md', candidates: [workstream.id] });
   });
 
-  // Value: protects=an ordinary write outside every claim cards only once it has outlasted the wait, and a
-  // sensitive one at once; fails_when=a stray that settles within the wait still raises a card, or the wait
-  // holds back a sensitive path's card; why_new=claims (core): six copy cards for make api-client's generated
-  // files each closed by themselves within two minutes; no_claim=the step end cards what still waits
-  it("holds an ordinary write outside every claim for the wait and cards it only if it hasn't settled, while a sensitive write cards at once", async () => {
+  // Value: protects=an ordinary write outside every claim is told only once it has outlasted the wait, and a
+  // sensitive one is carded at once; fails_when=a stray that settles within the wait is still told, or the
+  // wait holds back a sensitive path's card; why_new=claims (core): six copy cards for make api-client's
+  // generated files each closed by themselves within two minutes; no_claim=the step end tells what still waits
+  it("holds an ordinary write outside every claim for the wait and tells it only if it hasn't settled, while a sensitive write cards at once", async () => {
     watcher.stop();
     watcher = createWatcher({
       state,
@@ -203,6 +227,7 @@ describe('watcher', () => {
     clock.advance(500);
     await watcher.flush();
     expect(flags().map((c) => c.body)).toEqual(['.mcp.json']);
+    expect(noticedPaths()).toEqual([]);
 
     // One of the writes is committed within the wait, which settles it.
     execFileSync('git', ['add', 'docs/settled.md'], { cwd: repo.path, env: isolatedGitEnv() });
@@ -214,6 +239,7 @@ describe('watcher', () => {
     clock.advance(3 * 60_000 - 1_000);
     await watcher.flush();
     expect(flags()).toHaveLength(1);
+    expect(noticedPaths()).toEqual([]);
     // The batch that reads the held write again fails, as git can't read the checkout: the write still
     // waits, and is read again after another wait.
     const gitDir = join(repo.path, '.git');
@@ -227,14 +253,15 @@ describe('watcher', () => {
     expect(flags()).toHaveLength(1);
     clock.advance(3 * 60_000);
     await watcher.flush();
-    expect(flags().map((c) => c.body)).toEqual(['.mcp.json', 'docs/stray.md']);
+    expect(flags().map((c) => c.body)).toEqual(['.mcp.json']);
+    expect(noticedPaths()).toEqual(['docs/stray.md']);
   });
 
-  // Value: protects=a stray card names the run that left the file; fails_when=a failed run's leftover is pinned
+  // Value: protects=a stray notice names the run that left the file; fails_when=a failed run's leftover is pinned
   // on whichever lanes are running; why_new=escaped bug: a Diagnostic run's .proof file carded two other lanes;
   // no_claim=a run that never named the file is found
   it('names the failed run whose skipped call named a leftover file, not the lanes running now', async () => {
-    const lane = running();
+    running();
     const left = seedWorkstream(base, { project, title: 'Diagnostic', areas: ['api'] });
     const named = ['docs/notes.md.proof', 'docs/later.md'];
     base.write((ctx) => {
@@ -271,23 +298,36 @@ describe('watcher', () => {
     }
     await watcher.flush();
 
-    const byPath = new Map(flags().map((card) => [card.detail?.['path'], card]));
-    expect(byPath.get('docs/notes.md.proof')).toMatchObject({
-      body: 'docs/notes.md.proof\nLeft by the failed run of "Diagnostic", which named it',
-      targets: [{ workstreamId: left.workstream.id, sessionId: null }],
-      detail: { candidates: [left.workstream.id, lane.workstream.id] },
-    });
-    // A path the run named only as part of a longer name is not its.
-    expect(byPath.get('docs/notes.md')?.detail?.['candidates']).toEqual([lane.workstream.id]);
-    expect(byPath.get('docs/later.md')?.detail?.['candidates']).toEqual([lane.workstream.id]);
+    // The one notice names the leftover's run; a path the run named only as part of a longer name, or
+    // wrote after failing, is not its.
+    const lines = strayNotices().flatMap((n) => n.body.split('\n'));
+    expect(lines).toContain('docs/notes.md.proof');
+    expect(lines).toContain('Left by the failed run of "Diagnostic", which named it');
+    expect(lines.filter((line) => line.startsWith('Left by'))).toHaveLength(1);
+    expect(lines.indexOf('Left by the failed run of "Diagnostic", which named it')).toBe(
+      lines.indexOf('docs/notes.md.proof') + 1,
+    );
+    expect(lines).toContain('docs/notes.md');
+    expect(lines).toContain('docs/later.md');
+    expect(flags()).toEqual([]);
   });
 
   describe('a stray card with nothing left to do', () => {
-    const raiseStray = async (rel: string) => {
+    // The card an earlier daemon raised for an ordinary path, which is a notice now: it still closes.
+    const raiseStray = (rel: string, workstreamId: WorkstreamId) => {
       watcher.sync();
       touch(rel);
-      emit(rel);
-      await watcher.flush();
+      inbox.flag({
+        projectId: project.id,
+        workstreamId,
+        tier: CardTier.Ask,
+        urgency: 'high',
+        closesWhen: BY_ANSWER,
+        title: 'Write outside every claim',
+        body: rel,
+        detail: { path: rel, candidates: [workstreamId] },
+        foldKey: `stray-write:${project.id}:${rel}`,
+      });
       expect(flags()).toHaveLength(1);
     };
     const commit = (rel: string) => {
@@ -300,16 +340,13 @@ describe('watcher', () => {
 
     it('closes once its path is committed and clean or no unfinished task could own it, but not while a lane could', async () => {
       const { task, workstream } = running();
-      await raiseStray('docs/stray.md');
+      raiseStray('docs/stray.md', workstream.id);
       expect(await watcher.resolveSettledStrays()).toBe(0);
       commit('docs/stray.md');
       expect(await watcher.resolveSettledStrays()).toBe(1);
       expect(flags()).toEqual([]);
 
-      touch('docs/other.md');
-      emit('docs/other.md');
-      await watcher.flush();
-      expect(flags()).toHaveLength(1);
+      raiseStray('docs/other.md', workstream.id);
       base.write((ctx) => {
         transitionWorkstream(ctx, workstream.id, { to: WorkstreamState.Failed, fence: null });
       });
@@ -321,15 +358,23 @@ describe('watcher', () => {
       });
       expect(await watcher.resolveSettledStrays()).toBe(1);
     });
+
+    it('stays open for a guardrail path, committed or not, until the builder answers', async () => {
+      const { workstream } = running();
+      raiseStray('docs/AGENTS.md', workstream.id);
+      commit('docs/AGENTS.md');
+      expect(await watcher.resolveSettledStrays()).toBe(0);
+      expect(flags()).toHaveLength(1);
+    });
   });
 
-  it('flags a write under a nested node_modules that git reports', async () => {
+  it('tells a write under a nested node_modules that git reports', async () => {
     running();
     watcher.sync();
     touch('src/node_modules/index.js');
     emit('src/node_modules/index.js');
     await watcher.flush();
-    expect(flags().map((f) => f.body)).toEqual(['src/node_modules/index.js']);
+    expect(noticedPaths()).toEqual(['src/node_modules/index.js']);
   });
 
   it.each(['.git/info/exclude', '.git/hooks/pre-commit', '.git/config'])(
@@ -361,7 +406,7 @@ describe('watcher', () => {
     touch('docs/a.md');
     emit('docs/a.md');
     await watcher.flush();
-    expect(flags().map((f) => f.body)).toEqual(['docs/a.md']);
+    expect(noticedPaths()).toEqual(['docs/a.md']);
     expect(existsSync(marker)).toBe(false);
   });
 
@@ -503,14 +548,16 @@ describe('watcher', () => {
     const { workstream } = running();
     touch('src/api/ok.ts');
     touch('docs/stray.md');
-    expect(await watcher.stepEnd(workstream.id)).toEqual(['docs/stray.md']);
+    touch('docs/AGENTS.md');
+    expect(await watcher.stepEnd(workstream.id)).toEqual(['docs/AGENTS.md', 'docs/stray.md']);
+    expect(noticedPaths()).toEqual(['docs/stray.md']);
     expect(flags()).toEqual([
       expect.objectContaining({
-        body: 'docs/stray.md',
+        body: 'docs/AGENTS.md',
         targets: [{ workstreamId: workstream.id, sessionId: null }],
       }),
     ]);
-    expect(flags()[0]?.detail).toMatchObject({ path: 'docs/stray.md' });
+    expect(flags()[0]?.detail).toMatchObject({ path: 'docs/AGENTS.md' });
   });
 });
 
@@ -533,7 +580,7 @@ describe('watcher on the real file system', () => {
       // FSEvents can take a moment to start delivering; keep writing until a flag appears.
       await waitFor(() => {
         writeFileSync(join(repo.path, 'docs', 'real.md'), String(Date.now()));
-        return flags().find((f) => f.body.split('\n')[0] === 'docs/real.md');
+        return noticedPaths().find((path) => path === 'docs/real.md');
       }, 15_000);
     } finally {
       real.stop();
@@ -624,41 +671,30 @@ describe('worktree checkouts', () => {
     writeAt(a.path, 'src/ui/x.ts');
     writeAt(b.path, 'src/ui/x.ts');
     await watcher.flush();
-    const open = flags();
-    expect(open).toHaveLength(1);
-    expect(open[0]).toMatchObject({
-      title: 'Write outside every claim',
-      body: `${b.path}: src/ui/x.ts`,
-      targets: [{ workstreamId: b.workstream.id, sessionId: null }],
-    });
-    expect(open[0]?.detail).toMatchObject({ path: 'src/ui/x.ts', candidates: [b.workstream.id] });
+    expect(noticedPaths()).toEqual([`${b.path}: src/ui/x.ts`]);
+    expect(flags()).toEqual([]);
   });
 
-  it('raises two cards when two worktrees write the same stray path', async () => {
+  it('tells each of two worktrees that write the same stray path', async () => {
     const a = inWorktree('Alpha', 'api');
     const b = inWorktree('Beta', 'api');
     watcher.sync();
     writeAt(a.path, 'docs/stray.md');
     writeAt(b.path, 'docs/stray.md');
     await watcher.flush();
-    expect(
-      flags()
-        .map((f) => f.body)
-        .sort(),
-    ).toEqual([`${a.path}: docs/stray.md`, `${b.path}: docs/stray.md`].sort());
+    expect(noticedPaths().sort()).toEqual(
+      [`${a.path}: docs/stray.md`, `${b.path}: docs/stray.md`].sort(),
+    );
   });
 
   it("does not let a worktree batch's area claim excuse a write in the main checkout", async () => {
-    const shared = running('Alpha', ['api']);
+    running('Alpha', ['api']);
     inWorktree('Beta', 'ui');
     watcher.sync();
     touch('src/ui/x.ts');
     emit('src/ui/x.ts');
     await watcher.flush();
-    const open = flags();
-    expect(open).toHaveLength(1);
-    expect(open[0]).toMatchObject({ title: 'Write outside every claim', body: 'src/ui/x.ts' });
-    expect(open[0]?.detail).toMatchObject({ candidates: [shared.workstream.id] });
+    expect(noticedPaths()).toEqual(['src/ui/x.ts']);
   });
 
   describe('a lane holding the whole-repo area in its own copy', () => {
@@ -681,11 +717,9 @@ describe('worktree checkouts', () => {
       writeAt(lane.path, 'docs/stray.md');
       writeAt(idle.path, 'docs/stray.md');
       await watcher.flush();
-      expect(
-        flags()
-          .map((f) => f.body)
-          .sort(),
-      ).toEqual([`${lane.path}: docs/stray.md`, `${idle.path}: docs/stray.md`].sort());
+      expect(noticedPaths().sort()).toEqual(
+        [`${lane.path}: docs/stray.md`, `${idle.path}: docs/stray.md`].sort(),
+      );
     });
 
     it('still flags sensitive paths whatever the claims say', async () => {
@@ -720,7 +754,7 @@ describe('worktree checkouts', () => {
     writeFileSync(join(a.path, 'src/ui/x.ts'), 'x');
     writeFileSync(join(a.path, 'src/api.ts'), 'x');
     expect(await watcher.stepEnd(a.workstream.id)).toEqual(['src/api.ts']);
-    expect(flags().map((f) => f.body)).toEqual([`${a.path}: src/api.ts`]);
+    expect(noticedPaths()).toEqual([`${a.path}: src/api.ts`]);
   });
 });
 

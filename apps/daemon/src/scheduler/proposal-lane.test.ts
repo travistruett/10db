@@ -10,7 +10,6 @@ import {
   insertInboxItem,
   insertProposal,
   insertSource,
-  listInbox,
   listTasks,
   seedProject,
   transitionWorkstream,
@@ -18,6 +17,7 @@ import {
 import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTempRepo, seedWorkstream } from '../../test/fixtures';
+import { noticesPosted } from '../../test/notices-posted';
 import { createAccountPauses, createAccountRuntime } from '../accounts';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore } from '../events';
@@ -171,23 +171,21 @@ describe('a lane for a task filed from a proposal', () => {
       writeFileSync(join(repo.path, rel), 'x');
       open.get(repo.path)?.(rel);
     };
+    // A write outside every claim to an ordinary path is a notice in Activity, not a card.
     const strays = () =>
-      listInbox(state.db, { states: ['OPEN'] }).filter(
-        (i) => i.kind === 'flag' && i.title === 'Write outside every claim',
-      );
+      noticesPosted(state.db)
+        .filter((n) => n.key.startsWith('stray-write:'))
+        .map((n) => n.body.split('\n')[0]);
 
     write('src/api/handler.ts');
     clock.advance(500);
     await watcher.flush();
     expect(strays()).toEqual([]);
 
-    // The watcher is looking: a write in an area the lane doesn't hold is still flagged.
+    // The watcher is looking: a write in an area the lane doesn't hold is still reported.
     write('src/ui/page.ts');
     clock.advance(500);
     await watcher.flush();
-    // A stamped card ends its body with the short stamp of the version it shows.
-    expect(strays().map((i) => i.body.replace(/\nVersion [0-9a-f]{12}$/, ''))).toEqual([
-      'src/ui/page.ts',
-    ]);
+    expect(strays()).toEqual(['src/ui/page.ts']);
   });
 });

@@ -217,6 +217,7 @@ import {
   readPnpmVersion,
   recoverBatches,
   closeFinishedSkippedCards,
+  resolveOverBatchCards,
   closeGoneMergedWorktreeCards,
   createHandMadeFolderLook,
   removeMergedBranches,
@@ -2551,6 +2552,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const unsubscribeSettled = bus.subscribe((event) => {
     if (event.type === EventType.TaskChanged) {
       closeFinishedSkippedCards(state.db, inbox);
+    } else if (event.type === EventType.BatchUpdated) {
+      // A failed run's card has nothing left to decide once its pull request merged or its batch is gone.
+      resolveOverBatchCards(state.db, inbox);
     } else if (
       event.type === EventType.WorkstreamChanged &&
       [WorkstreamState.Done, WorkstreamState.Failed, WorkstreamState.Cancelled].some(
@@ -2586,7 +2590,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // Cards an earlier daemon left open that have nothing left to do close now, so a backlog clears
   // without the builder. The stray-write cards close once the watcher has been synced, below.
   const closedAtStart =
-    closeFinishedSkippedCards(state.db, inbox) + closeGoneMergedWorktreeCards(state.db, inbox);
+    closeFinishedSkippedCards(state.db, inbox) +
+    closeGoneMergedWorktreeCards(state.db, inbox) +
+    resolveOverBatchCards(state.db, inbox);
   if (closedAtStart > 0)
     logger.info({ closed: closedAtStart }, 'closed open cards with nothing left');
   // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets

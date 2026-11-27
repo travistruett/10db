@@ -1,22 +1,33 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConflictError, InboxKind, mintId, type BatchId, type WorkstreamId } from '@10db/contracts';
+import {
+  CARD_RESOLVES_WHEN,
+  ConflictError,
+  InboxKind,
+  mintId,
+  WORKSTREAM_FAILED_TITLE_PREFIX,
+  type BatchId,
+  type WorkstreamId,
+} from '@10db/contracts';
 import {
   getBatch,
   getEvidence,
   getInboxItem,
   getWorkstream,
+  getWorkstreamRow,
   insertToolOp,
   listEvidence,
+  listInbox,
   listToolOps,
   listWorkstreams,
+  recordPullRequestStatus,
   setTaskStatus,
   setWorkstreamNotice,
   transitionBatch,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
-import { createInboxService, type InboxService } from '../inbox';
+import { createInboxService, flagFailedRun, type InboxService } from '../inbox';
 import {
   afterMarkersResolved,
   commitResultAsStored,
@@ -26,7 +37,7 @@ import {
 } from '../team';
 import { leftOutCards, shipCards } from './cards';
 import { raise } from './context';
-import { batchCardFields, createBatchCardAnswers } from './index';
+import { batchCardFields, createBatchCardAnswers, resolveOverBatchCards } from './index';
 import { leftOutNotices } from './notices';
 
 let h: DeliveryHarness;
@@ -215,6 +226,59 @@ async function failedInBatch(
 }
 
 describe('the failed workstream card', () => {
+  /** The card the runner raises for the failed run, through its own writer. */
+  function raisedFailure(run: WorkstreamId) {
+    const row = getWorkstreamRow(h.store.db, run);
+    h.state.write((w) => {
+      flagFailedRun(w, row, { body: 'The gate failed 4 times' });
+    });
+    const cards = listInbox(h.store.db, { states: ['OPEN'] }).filter(
+      (c) =>
+        c.title.startsWith(WORKSTREAM_FAILED_TITLE_PREFIX) &&
+        c.targets.some((t) => t.workstreamId === run) &&
+        c.detail?.[CARD_RESOLVES_WHEN] !== undefined,
+    );
+    return h.only(cards).id;
+  }
+
+  // Value: protects=a failed run's card closes by itself once its pull request merged or its batch is
+  // gone; fails_when=the card stays open with nothing left to decide, waiting for the builder;
+  // why_new=escaped bug: failed-run cards of merged and abandoned batches were answered with a choice
+  // that changed nothing; no_claim=a batch whose pull request is open or unknown keeps its card
+  it.each([
+    [
+      'its pull request merges',
+      (batchId: BatchId) => {
+        h.state.write((w) => {
+          recordPullRequestStatus(w, batchId, {
+            state: 'merged',
+            checks: 'passing',
+            failingChecks: [],
+            checkedAt: new Date().toISOString(),
+            unknownReason: null,
+          });
+        });
+      },
+    ],
+    [
+      'its batch is abandoned',
+      (batchId: BatchId) => {
+        h.state.write((w) => {
+          transitionBatch(w, batchId, { to: 'ABANDONED', reason: 'abandoned' });
+        });
+      },
+    ],
+  ])('closes by itself when %s, and not before', async (_name, end) => {
+    const { batchId, failed } = await failedInBatch('DONE');
+    const cardId = raisedFailure(failed);
+    expect(resolveOverBatchCards(h.store.db, inbox)).toBe(0);
+    expect(getInboxItem(h.store.db, cardId).state).toBe('OPEN');
+
+    end(batchId);
+    expect(resolveOverBatchCards(h.store.db, inbox)).toBe(1);
+    expect(getInboxItem(h.store.db, cardId).state).toBe('RESOLVED');
+  });
+
   it('does nothing for Later, leaves other flag cards alone, and retries the workstream, reopening a failed batch', async () => {
     const { card, batchId, failed } = await failedInBatch('DONE');
     expect(inbox.answer(card.id, { choice: 'Later' }).state).toBe('RESOLVED');
