@@ -9,8 +9,9 @@ Starts after PR B (`feat/evals-drawer`, the drawer's action row) has merged to `
 **Implements:** calls the candidates, preview `?models=`, sweep start/stop/get routes (index, Interfaces).
 
 - The action row gets **Try Other Models** and **Find Cheapest Passing** when the suite has `live.models`; without
-  it, one dim line "This suite doesn't take a model from 10db yet" and **File a Task to Add It** (a slice 3 task:
-  "Let <suite> read its models from an env var", naming the live command).
+  it, one dim line "This suite's command doesn't take models from 10db yet" and **Let 10db Pick Models** (a slice 3
+  task: "Let <suite> read its models from an env var", naming the live command and, as the pattern, ampsio's
+  `MODELS ?=` and orgtools' `run_eval` front door).
 - The picker: a table of candidates (model, intelligence, price, estimate, its last result here), multi-select for
   Try; Find Cheapest preselects every known-estimate candidate cheaper than today's cheapest pass and asks for a cap
   (default: 3 × the latest run's cost, rounded up to a dollar). Then the existing confirm window, with the models

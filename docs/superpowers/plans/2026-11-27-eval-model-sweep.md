@@ -18,9 +18,12 @@ the PR's Evals block offers **Check the Slot**, which runs those suites on the n
 
 **How a suite takes a model.** The manifest records, per suite, the env var its live command reads for models
 (`live.models`). ampsio already works: its Makefile says `MODELS ?=`, so an env `MODELS=google/gemini-3.8-flash`
-reaches `make eval TASK=… ` as `--models …`. orgtools' commands take `--models` with their own names
-(`gemini_3_7_flash`) and no make variable, so its suites have no `live.models` yet; the drawer says so and offers
-a task that adds the variable (one Makefile line per command). Assess Now records `live.models` when it reads one.
+reaches `make eval TASK=… ` as `--models …`. orgtools works once its task `tsk_01a21eb6-a18b-7330-aefe-b488689f3843`
+lands ("Every eval runs through one command that takes its models from the environment": `run_eval --task <name>
+--repeat n`, models from a `MODELS` env var). orgtools calls providers directly and keeps its own names
+(`gemini_3_7_flash`), so its `live.models` lists `choices` that map each name to the model it is. A suite whose
+harness has no models var shows **Let 10db Pick Models**, a task that adds one. Assess Now records `live.models`
+when it reads one.
 
 **What it buys.** "Is there a cheaper model that still passes?" becomes one click and a cap, not an afternoon.
 

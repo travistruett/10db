@@ -17,7 +17,8 @@ the contracts' generated files (by the repo's generate command, never by hand).
   mapping to OpenRouter ids; it records nothing when unsure. The answer parser drops an invalid `live.models` from
   that suite only, never the whole answer.
 - The skill's "Assess a project's evals" step documents `live.models` with ampsio's line as the example
-  (`{ "env": "MODELS", "ids": "openrouter" }`).
+  (`{ "env": "MODELS", "ids": "openrouter" }`) and orgtools' once its `run_eval` front door lands
+  (`{ "env": "MODELS", "ids": { "choices": [{ "name": "gemini_3_7_flash", "model": "google/gemini-3.7-flash" }] } }`).
 
 **Rows:** none (schema only).
 
