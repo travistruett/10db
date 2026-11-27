@@ -114,6 +114,12 @@ function SharingCard({
         </Text>
         <Switch
           aria-label="Share on your tailnet"
+          // The card's tone is the off track's own: off, the track takes the border's tone so its shape shows.
+          styles={
+            shared
+              ? undefined
+              : { track: { backgroundColor: 'var(--mantine-color-default-border)' } }
+          }
           checked={shared}
           disabled={switchBlocked || set.isPending}
           onChange={(event) => {
@@ -137,12 +143,12 @@ function SharingCard({
       ) : null}
       {status.state === SharingState.Ready && status.url !== null ? (
         <Group gap="xs" wrap="nowrap">
-          <Text ff="monospace" size="xs" style={{ overflowWrap: 'anywhere', minWidth: 0 }}>
+          <Text ff="monospace" size="xs" style={{ overflowWrap: 'anywhere', minWidth: 0, flex: 1 }}>
             {status.url}
           </Text>
           <CopyButton value={status.url}>
             {({ copied, copy }) => (
-              <Button size="compact-xs" variant="default" onClick={copy}>
+              <Button size="compact-xs" variant="default" onClick={copy} style={{ flex: 'none' }}>
                 {copied ? 'Copied' : 'Copy'}
               </Button>
             )}
