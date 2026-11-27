@@ -7,7 +7,7 @@ Read the index's brief and Global Constraints first. Size: Core (deletes backups
 nearest `AGENTS.md` with one line on what is kept.
 
 **Implements** (from the index's Interfaces, exactly): `preMigrateBackupsKept: 5` in `DEFAULTS`;
-`backupBeforeMigrating`; `pruneBackups`' optional `spare`; `backupDatabase`'s fixed `10db-<label>.partial` and rename.
+`backupBeforeMigrating`; `pruneBackups`' optional `spare`; `backupDatabase`'s fixed `10db-<label>.partial`, removed with its `-journal` and `-wal` before each copy, and the rename.
 
 **State-table rows:** the second table, all rows.
 
@@ -25,7 +25,7 @@ nearest `AGENTS.md` with one line on what is kept.
 **Tests:** extend `backups.test.ts` on its rung (a temp directory, a real SQLite file). One test of
 `backupBeforeMigrating`: seed 6 `10db-pre-migrate-*.sqlite` files and 2 `10db-nightly-*.sqlite` files, call it, and
 assert the 5 newest pre-migrate names remain (the new copy among them), both nightly ones remain, the new copy opens
-as SQLite, and no `.partial` is left. Prove it goes red with the prune removed from `backupBeforeMigrating`. The
+as SQLite, and no `.partial` is left. Seed a junk `10db-pre-migrate.partial` first, so the test also shows a leftover never blocks a copy. Prove it goes red with the prune removed from `backupBeforeMigrating`. The
 commit carries a value card (`why_new=data loss: backups`).
 
 **Spec:** the Fable uptime audit's item B (recorded in the 2026-11-27 hand-off and in #948's report).

@@ -98,9 +98,11 @@ export async function backupBeforeMigrating(
 export function pruneBackups(dir: string, label: string, keep: number, spare?: string): string[];
 ```
 
-`backupDatabase` keeps its signature. It writes `10db-<label>.partial` (one fixed name per label, overwritten each
-time; the instance lock makes the daemon its only writer) and renames it to the stamped `.sqlite` name once SQLite's
-backup resolves. `pruneBackups` already ignores names that don't end in `.sqlite`.
+`backupDatabase` keeps its signature. It writes `10db-<label>.partial` (one fixed name per label; the instance lock
+makes the daemon its only writer) and renames it to the stamped `.sqlite` name once SQLite's backup resolves. Before
+the backup it removes any leftover `10db-<label>.partial` and its `-journal` and `-wal` (`rmSync` with `force`):
+SQLite's backup opens an existing destination as a database, and a half-written one could refuse every later copy.
+`pruneBackups` already ignores names that don't end in `.sqlite`.
 
 Task 3 (`apps/daemon/src/main.ts`): no new export.
 
@@ -124,7 +126,7 @@ Task 3 (`apps/daemon/src/main.ts`): no new export.
 | Start with pending migrations                 | Today                    | After                                                           |
 | --------------------------------------------- | ------------------------ | --------------------------------------------------------------- |
 | Copy completes                                | `10db-pre-migrate-*.sqlite` added | pruned to 5, copied, pruned to 5 sparing the new copy  |
-| Killed mid-copy                               | half-written `.sqlite`   | `10db-pre-migrate.partial` left, overwritten by the next copy   |
+| Killed mid-copy                               | half-written `.sqlite`   | `10db-pre-migrate.partial` left, deleted before the next copy     |
 | Copy fails (disk full)                        | start fails, nothing pruned | the first prune already freed space; start fails if it still can't copy |
 | Clock stepped back (new stamp sorts oldest)   | -                        | the new copy is spared; an older one goes instead               |
 
