@@ -52,7 +52,8 @@ function ModelTable({
   readonly onPick: (model: string) => void;
 }) {
   const paging = usePaging('models', TABLE_PAGE_SIZES[0]);
-  const from = (paging.page - 1) * paging.pageSize;
+  const page = Math.min(paging.page, Math.max(1, Math.ceil(models.length / paging.pageSize)));
+  const from = (page - 1) * paging.pageSize;
   // A short list shows whole, with no pager.
   const paged = models.length > TABLE_PAGE_SIZES[0];
   return (
@@ -60,7 +61,7 @@ function ModelTable({
       <DataTable<EvalModelDto>
         aria-label="Models"
         records={paged ? models.slice(from, from + paging.pageSize) : [...models]}
-        {...(paged ? pagerProps({ ...paging, total: models.length }, TABLE_PAGE_SIZES) : {})}
+        {...(paged ? pagerProps({ ...paging, page, total: models.length }, TABLE_PAGE_SIZES) : {})}
         idAccessor="model"
         backgroundColor="transparent"
         verticalSpacing="sm"
