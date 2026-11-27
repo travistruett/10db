@@ -14,6 +14,8 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   server, the live acceptance daemon and `scripts/dev.sh` set it (`dev.sh` as a default, so
   `TENDB_BENCHMARKS=on pnpm dev:window` turns it on for one run, as it does `TENDB_SLACK` and `TENDB_JUDGE`), and `tests/repo/src/benchmarks-off.test.ts`
   checks they do. A new launcher of a throwaway daemon sets it too.
+- `TENDB_PARENT_STDIN=1` makes the end of stdin mean the shell is gone: `main.ts` listens before `startDaemon`, exits 1 if it
+  ends while starting (nothing is serving, and an open migration rolls back), and stops as for SIGTERM once serving.
 - `TENDB_CATALOGUE=off` keeps a daemon from fetching the model catalogue from models.dev
   (`catalogueSync` in `daemonOptionsFromEnv`); the stored copy and the release snapshot are still read. It also turns
   off the account-list refresh that follows each fetch, so a daemon test never spawns a probe.
