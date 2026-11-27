@@ -1,5 +1,5 @@
 import { HealthResponse, PROTOCOL_VERSION } from '@10db/contracts';
-import { Center, Loader, Stack, Text, Tooltip } from '@mantine/core';
+import { Box, Center, Loader, Stack, Text, Tooltip } from '@mantine/core';
 import { createContext, use, useEffect, useState, type ReactNode } from 'react';
 import { VersionMismatch } from '../shell/version-mismatch';
 import { createDaemonClient, readJson, type DaemonClient } from './client';
@@ -83,6 +83,8 @@ const StatusContext = createContext<DaemonStatus>({ kind: 'connecting', lastErro
 export interface DaemonProviderProps {
   readonly resolve: ConnectionResolver;
   readonly intervals?: DaemonIntervals;
+  /** What the connecting screen adds once the first connection has failed for `CONNECTING_HELP_AFTER_MS`. */
+  readonly connectingHelp?: ReactNode;
   readonly children: ReactNode;
 }
 
@@ -90,7 +92,26 @@ function sameConnection(a: DaemonConnection, b: DaemonConnection): boolean {
   return a.url === b.url && a.token === b.token;
 }
 
-function ConnectingScreen({ lastError }: { readonly lastError: string | null }) {
+/** How long the first connection may fail before the connecting screen shows its help. */
+const CONNECTING_HELP_AFTER_MS = 10_000;
+
+function ConnectingScreen({
+  lastError,
+  help,
+}: {
+  readonly lastError: string | null;
+  readonly help: ReactNode;
+}) {
+  const [helpDue, setHelpDue] = useState(false);
+  useEffect(() => {
+    if (help === undefined || help === null) return undefined;
+    const timer = setTimeout(() => {
+      setHelpDue(true);
+    }, CONNECTING_HELP_AFTER_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [help]);
   return (
     <Center h="100vh">
       <Stack align="center" gap="xs">
@@ -105,6 +126,11 @@ function ConnectingScreen({ lastError }: { readonly lastError: string | null }) 
             </Text>
           </Tooltip>
         )}
+        {helpDue && lastError !== null ? (
+          <Box maw={420} px="md" mt="sm">
+            {help}
+          </Box>
+        ) : null}
       </Stack>
     </Center>
   );
@@ -119,6 +145,7 @@ function ConnectingScreen({ lastError }: { readonly lastError: string | null }) 
 export function DaemonProvider({
   resolve,
   intervals = DEFAULT_INTERVALS,
+  connectingHelp,
   children,
 }: DaemonProviderProps) {
   const [value, setValue] = useState<DaemonValue | null>(null);
@@ -251,7 +278,12 @@ export function DaemonProvider({
     );
   }
   if (value === null)
-    return <ConnectingScreen lastError={status.kind === 'connecting' ? status.lastError : null} />;
+    return (
+      <ConnectingScreen
+        lastError={status.kind === 'connecting' ? status.lastError : null}
+        help={connectingHelp}
+      />
+    );
   return (
     <StatusContext value={status}>
       <DaemonContext value={value}>{children}</DaemonContext>

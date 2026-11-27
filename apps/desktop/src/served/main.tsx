@@ -4,6 +4,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@mantine/core/styles.css';
 import { App } from '../app';
+import { CantReachMacHelp } from './cant-reach-mac';
 import { cssVariablesResolver, theme } from '../theme';
 import { readDevice } from './device-session';
 import { PairPage } from './pair-page';
@@ -46,6 +47,7 @@ function Served() {
       router={createServedRouter()}
       queryClient={new QueryClient()}
       resolve={resolveServedConnection}
+      connectingHelp={<CantReachMacHelp />}
     />
   );
 }
