@@ -221,6 +221,26 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'conversation.state': [liveKeys.all, chatWorkKeys.all],
 };
 
+/**
+ * What to refetch for an event a session sends once per tool call, in place of its entity type's entries. Those
+ * read every task and goal again, megabytes the daemon builds on its main thread, so a working lane's calls
+ * would keep the daemon too busy to answer anything else.
+ */
+const PER_CALL_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly QueryKey[]>>> = {
+  // Written into its pass's cached page (`writePassActivity`); nothing a list shows follows it.
+  'session.activity': [],
+  // The context a run has used, which its workstream's row carries.
+  'session.context': [['workstreams']],
+};
+
+/** Every query an event makes stale. */
+export function invalidationsFor(event: DaemonEvent): readonly QueryKey[] {
+  return [
+    ...(PER_CALL_INVALIDATIONS[event.type] ?? INVALIDATIONS[event.entityType] ?? []),
+    ...(EVENT_INVALIDATIONS[event.type] ?? []),
+  ];
+}
+
 /** The stream's address: the cursor and a one-use ticket, never the token. */
 export function eventStreamUrl(conn: DaemonConnection, after: number, ticket: string): string {
   const url = new URL('/events/stream', conn.url);
@@ -284,10 +304,7 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       // The daemon sends each seq once; a resend at a reconnect seam is ignored.
       if (lastSeq.current !== null && event.seq <= lastSeq.current) return;
       lastSeq.current = event.seq;
-      for (const queryKey of [
-        ...(INVALIDATIONS[event.entityType] ?? []),
-        ...(EVENT_INVALIDATIONS[event.type] ?? []),
-      ])
+      for (const queryKey of invalidationsFor(event))
         void queryClient.invalidateQueries({ queryKey });
       applyInboxEvent(queryClient, client, event);
       // A lane's design check, or its verdict, was kept: only that task's drawer asks again.

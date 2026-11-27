@@ -11,7 +11,9 @@ tokens; the app still uses the main listener.
   reconnecting and version-mismatch states. A page coming back (`visibilitychange` to visible, `pageshow`, `online`,
   `focus`) asks at once rather than waiting on a timer the browser held, one attempt at a time. Use `useDaemon()`
   and the hooks in `src/daemon/queries.ts`.
-- One event stream (`useEventStream`) invalidates queries by entity type (`INVALIDATIONS`). Don't poll lists. A page
+- One event stream (`useEventStream`) invalidates queries by entity type (`INVALIDATIONS`). Don't poll lists. An
+  event sent once per tool call (`session.activity`, `session.context`) names only what it changes
+  (`PER_CALL_INVALIDATIONS`), never a task or goal list: the daemon builds those on its main thread. A page
   coming back opens it at once instead of waiting out a retry, and one hidden 30 s or more gets a new socket, since
   one that died while a phone slept says nothing until TCP gives up.
 - `pnpm dev:preview` serves the UI with no token for 10db to run as 10db's own preview command, under the gate's
