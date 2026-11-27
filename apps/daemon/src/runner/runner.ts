@@ -5104,12 +5104,6 @@ export function createRunner(opts: RunnerOptions): Runner {
     return { head, ...(await runCommits({ db, git: opts.git }, row, checkout, base, head)) };
   }
 
-  /**
-   * What a passing check left out of the run's own changes. A worktree's own changes are those since
-   * the base it holds (the base merge brought the rest in); a shared checkout's are the files of the
-   * run's own commits, less what it held uncommitted when the task started. A command that claims no
-   * folder reads no git.
-   */
   /** The files the run's own work changed, or none when they can't be read. */
   async function ownChangedFiles(row: WorkstreamRow, checkout: string): Promise<string[]> {
     try {
@@ -5128,6 +5122,12 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
   }
 
+  /**
+   * What a passing check left out of the run's own changes. A worktree's own changes are those since
+   * the base it holds (the base merge brought the rest in); a shared checkout's are the files of the
+   * run's own commits, less what it held uncommitted when the task started. A command that claims no
+   * folder reads no git.
+   */
   async function coverageOf(
     row: WorkstreamRow,
     checkout: string,

@@ -55,7 +55,12 @@ export function CoverageCount({ coverage }: { readonly coverage: WatchpointCover
       </Text>
     );
   const files = `${String(coverage.files)} file${coverage.files === 1 ? '' : 's'}`;
-  if (coverage.asks) return <Text size="xs">{`Asks about ${files}`}</Text>;
+  if (coverage.asks)
+    return (
+      <Text size="xs">
+        {coverage.files === coverage.repoFiles ? 'Asks about every file' : `Asks about ${files}`}
+      </Text>
+    );
   return <Text size="xs">{coverage.partial ? `At least ${files}` : files}</Text>;
 }
 

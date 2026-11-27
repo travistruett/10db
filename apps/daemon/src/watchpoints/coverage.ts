@@ -260,8 +260,11 @@ export function createWatchpointCoverage(deps: WatchpointCoverageDeps): Watchpoi
     try {
       commit = await deps.git.commitAt(project.repoPath, 'HEAD');
     } catch {
-      // An empty repository has no HEAD and holds no file.
-      return 'empty';
+      // No HEAD: an empty repository holds no file, but a missing folder or a failed read is not that.
+      const survey = await deps.git.survey(project.repoPath, 0).catch(() => null);
+      return survey !== null && !('refused' in survey) && survey.files.length === 0
+        ? 'empty'
+        : 'unreadable';
     }
     const survey = await deps.git.survey(project.repoPath, 0);
     if ('refused' in survey) return 'unreadable';
@@ -309,9 +312,10 @@ export function createWatchpointCoverage(deps: WatchpointCoverageDeps): Watchpoi
           return new Map(fresh.map((w) => [signature(w), NONE]));
         })
         .then(async (results) => {
-          for (const w of fresh) held.pending.delete(signature(w));
           // Counts read while HEAD moved belong to no HEAD held here: leave them out and say so, so the page asks again.
           if (!(await moved())) for (const [sig, result] of results) held.done.set(sig, result);
+          // Pending clears only after the counts are stored, so a read in between joins this job.
+          for (const w of fresh) held.pending.delete(signature(w));
           announce(project.id);
         })
         .catch((error: unknown) => {

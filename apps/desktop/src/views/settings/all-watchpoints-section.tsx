@@ -114,7 +114,7 @@ export function LibraryItems({
           <Text size="xs" c="dimmed">
             {found.state === WatchpointCoverageState.Unreadable ||
             (found.partial && found.files === 0)
-              ? 'Not counted'
+              ? 'Not counted in full'
               : fitLine(found)}
           </Text>
         )}
@@ -145,10 +145,17 @@ export function LibraryItems({
     c.found?.state === WatchpointCoverageState.Counting;
   const hasFiles = (c: { found: WatchpointCoverage | undefined }) =>
     c.found?.state === WatchpointCoverageState.Counted && c.found.files > 0;
+  // A count that could not be made in full is not "nothing here": it sits in Fits, after the counted ones.
+  const notInFull = (c: { found: WatchpointCoverage | undefined }) =>
+    c.found?.state === WatchpointCoverageState.Unreadable ||
+    (c.found?.partial === true && c.found.files === 0);
   // Starters that only ask the judge a question are never ranked by count: their paths say what they ask about.
-  const fits = counts
-    .filter((c) => (counting(c) || hasFiles(c)) && c.found?.asks !== true)
-    .toSorted((a, b) => (b.found?.files ?? 0) - (a.found?.files ?? 0));
+  const fits = [
+    ...counts
+      .filter((c) => (counting(c) || hasFiles(c)) && c.found?.asks !== true)
+      .toSorted((a, b) => (b.found?.files ?? 0) - (a.found?.files ?? 0)),
+    ...counts.filter((c) => notInFull(c) && c.found?.asks !== true),
+  ];
   const asks = counts.filter((c) => (counting(c) || hasFiles(c)) && c.found?.asks === true);
   const none = counts.filter((c) => !fits.includes(c) && !asks.includes(c));
   return (
