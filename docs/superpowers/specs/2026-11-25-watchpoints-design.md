@@ -228,8 +228,10 @@ field on every provider.
   - The project's own have Show or Ask, and only they can be removed here. A project page never writes your list.
   - The paths sit under the name, so the table fits the 1200 px window; Last 30 Days is the project's counts.
 - Hold is not offered in either control until S5; the type keeps it.
-- The drawer edits Name, Why It Matters, Matches These Paths, Lines, What to Check and When It Matches. The
-  matching-file count read from the checkout is not built: no route counts a glob's files yet.
+- The drawer edits Name, Why It Matters, Matches These Paths, Lines, Question, What to Check, Knowledge and When It
+  Matches. The Matches column and the drawer show the files each watchpoint covers in the checkout (`GET
+  /projects/:projectId/watchpoints/coverage`, and `/settings/watchpoints/coverage` summed over the projects), counted
+  by the daemon with no model; Add Watchpoint lists the starters that fit first.
 
 **For You** (mock-up 2). It is the first section of the drawer's Overview when the newest watchpoint row has hits, and
 it is absent otherwise. It mirrors `TaskSkips`: it fetches `/workstreams/:id/watchpoint-hits` itself and returns null

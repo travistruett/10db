@@ -535,6 +535,44 @@ const BriefPath = RepoPath.refine(
   'no control characters or backticks',
 );
 
+/** The most examples the wizard files; more are added by the agent that writes the eval. */
+export const MAX_NEW_EVAL_CASES = 30;
+
+/** Which way a result is judged, in the builder's words. */
+export const EvalCheckKind = { Rule: 'rule', Judge: 'judge', Review: 'review' } as const;
+export type EvalCheckKind = (typeof EvalCheckKind)[keyof typeof EvalCheckKind];
+
+/** How often a model must pass for the eval to count it as good. */
+export const EvalBarChoice = {
+  EveryTime: 'every_time',
+  NineInTen: 'nine_in_ten',
+  SevenInTen: 'seven_in_ten',
+} as const;
+export type EvalBarChoice = (typeof EvalBarChoice)[keyof typeof EvalBarChoice];
+
+/** What to do when several models clear the bar. */
+export const EvalPick = { Cheapest: 'cheapest_passing', Best: 'best_score' } as const;
+export type EvalPick = (typeof EvalPick)[keyof typeof EvalPick];
+
+export const EvalCaseVerdict = { Good: 'good', Bad: 'bad' } as const;
+export type EvalCaseVerdict = (typeof EvalCaseVerdict)[keyof typeof EvalCaseVerdict];
+
+/** One real input, as the builder marked it. Only the builder marks good or bad; a suggestion arrives unmarked. */
+export const EvalCaseInput = z.strictObject({
+  input: RationaleText.min(1).max(1000),
+  verdict: z.enum(EvalCaseVerdict),
+  reason: RationaleText.max(300).default(''),
+});
+export type EvalCaseInput = z.output<typeof EvalCaseInput>;
+
+/** A model id as the model list gives it: one line, no backtick. */
+const ModelIdText = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .refine((m) => !/[\p{Cc}`]/u.test(m), 'no control characters or backticks');
+
 /**
  * What the New Eval form sends: the rationale an eval is written from, which becomes the brief of a task
  * that drafts it. Only the behavior is required; each other section reads "not stated" when empty.
@@ -554,6 +592,22 @@ export const NewEvalRequest = z.strictObject({
   coverageAndBar: RationaleText.default(''),
   models: RationaleText.default(''),
   execution: RationaleText.default(''),
+  /** What a good result looks like, in the builder's words; the wizard's first step. */
+  goal: RationaleText.default(''),
+  /** Real examples the builder marked good or bad, each with one line on why. */
+  cases: z.array(EvalCaseInput).max(MAX_NEW_EVAL_CASES).default([]),
+  /** How a result is checked; null when the builder left it to the agent. */
+  check: z.enum(EvalCheckKind).nullable().default(null),
+  /** The one-line rule a check follows, when the builder or a suggestion gave one. */
+  checkRule: RationaleText.max(400).default(''),
+  /** How often a model must pass; null when not chosen. */
+  bar: z.enum(EvalBarChoice).nullable().default(null),
+  /** Model ids to compare, each as the project's models list them. */
+  modelIds: z.array(ModelIdText).max(12).default([]),
+  /** The most one run may cost, in dollars; null for no cap. */
+  costCapUsd: z.number().min(0).max(10_000).nullable().default(null),
+  /** What to do when several models pass; null when not chosen. */
+  pick: z.enum(EvalPick).nullable().default(null),
   /** Tracked paths the behavior lives in; the lane reads them, and they pick the task's areas. */
   where: z.array(BriefPath).max(20).default([]),
   origin: z
@@ -561,6 +615,78 @@ export const NewEvalRequest = z.strictObject({
     .default('page'),
 });
 export type NewEvalBody = z.output<typeof NewEvalRequest>;
+
+/** What a suggestion is shown beside: the behavior so far and the cases the builder has entered. */
+const SuggestContext = {
+  behavior: RationaleText.min(1).max(600),
+  /** Tracked paths the behavior lives in; the model reads them at HEAD, bounded. */
+  where: z.array(BriefPath).max(10).default([]),
+};
+
+/** A case as the model is shown it: input and the builder's mark, if any. */
+const SuggestCaseInput = z.strictObject({
+  input: RationaleText.max(1000),
+  verdict: z.enum(EvalCaseVerdict).nullable().default(null),
+  reason: RationaleText.max(300).default(''),
+});
+
+/** One question to the project's model from the New Eval wizard: no chat, no tool, one answer. */
+export const EvalSuggestRequest = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('tighten'), ...SuggestContext }),
+  z.strictObject({
+    kind: z.literal('cases'),
+    ...SuggestContext,
+    cases: z.array(SuggestCaseInput).max(MAX_NEW_EVAL_CASES).default([]),
+  }),
+  z.strictObject({
+    kind: z.literal('check'),
+    ...SuggestContext,
+    cases: z.array(SuggestCaseInput).max(MAX_NEW_EVAL_CASES).default([]),
+  }),
+]);
+export type EvalSuggestRequest = z.output<typeof EvalSuggestRequest>;
+
+/** A proposed example: unmarked, since only the builder says whether a result is good or bad. */
+export const EvalSuggestedCase = z.strictObject({
+  input: z.string().min(1).max(1000),
+  /** What makes this input worth testing, in a line. */
+  reason: z.string().max(300),
+});
+export type EvalSuggestedCase = z.infer<typeof EvalSuggestedCase>;
+
+/** The model's answer, by what was asked; or why there is none. */
+export const EvalSuggestResult = z.discriminatedUnion('ok', [
+  z.strictObject({
+    ok: z.literal(true),
+    answer: z.discriminatedUnion('kind', [
+      z.strictObject({ kind: z.literal('tighten'), behavior: z.string().min(1).max(600) }),
+      z.strictObject({
+        kind: z.literal('cases'),
+        cases: z.array(EvalSuggestedCase).min(1).max(10),
+      }),
+      z.strictObject({
+        kind: z.literal('check'),
+        check: z.enum(EvalCheckKind),
+        rule: z.string().max(400),
+      }),
+    ]),
+  }),
+  z.strictObject({
+    ok: z.literal(false),
+    /** The project has no model to ask at all; the wizard hides its suggest buttons. */
+    unavailable: z.boolean(),
+    message: z.string(),
+  }),
+]);
+export type EvalSuggestResult = z.infer<typeof EvalSuggestResult>;
+
+/** Whether the project has a model the wizard can ask, and when not, why. */
+export const EvalSuggestStatusDto = z.strictObject({
+  available: z.boolean(),
+  /** Why not, when it is not available; null when it is. */
+  reason: z.string().nullable(),
+});
+export type EvalSuggestStatusDto = z.infer<typeof EvalSuggestStatusDto>;
 
 /** Where a live run is. */
 export const EvalLiveRunState = {

@@ -99,14 +99,28 @@
   is pure and calls no model, so it is the same on every provider. A manifest `bar` edit is an app setting, not a
   patch line, and is not read. The watchpoints' eval source (`watchpoints/eval-definition-source.ts`) uses it.
 - New Eval (`new-eval-task.ts`, `POST /projects/:id/evals/tasks`, `NewEvalRequest`): files a normal task on the
-  project's account, "Write the eval for <behavior>", through the ordinary task-create path (`createTask`). Its brief
-  holds the six rationale sections (Decision, Evidence, Oracle, Coverage and bar, Models, Execution), the paths
-  the behavior lives in, the project's eval skills and a few existing suites as format examples, and forbids the
-  live command and any paid model call. The skills are the tracked `.claude/skills/*/SKILL.md` and
-  `.agents/skills/*/SKILL.md` at HEAD whose front matter name or description mentions evals; the brief gives
-  each one's name and file path, so a Claude or Codex lane uses it by name or reads the file. With none, it points
-  at the existing eval files. The task's areas are those the `where` paths fall in, else the catch-all or the first
-  area. It reads, files a task and runs nothing.
+  project's account, "Write the eval for <behavior>", through the ordinary task-create path (`createTask`). The
+  wizard sends structured answers: the goal sentence, real examples each marked good or bad with a reason (the
+  builder's marks; the brief says never to change one), the check kind and rule, the bar (every time, 9 in 10,
+  7 in 10), model ids, a cost cap and cheapest-or-best. The brief renders them as sections and keeps the older
+  free-text ones (Decision, Evidence, Oracle, Coverage and bar, Models) only when filled, so a Plan's PlanEval
+  still files. Execution is not asked: the brief states the default (the free check runs in the gate; a paid run
+  only when the builder starts it). It also holds the paths the behavior lives in, the project's eval skills and a
+  few existing suites as format examples, and forbids the live command and any paid model call. An AI judge's
+  brief says to measure its agreement with the builder's marks first. The skills are the tracked
+  `.claude/skills/*/SKILL.md` and `.agents/skills/*/SKILL.md` at HEAD whose front matter name or description
+  mentions evals; the brief gives each one's name and file path, so a Claude or Codex lane uses it by name or
+  reads the file. With none, it points at the existing eval files. The task's areas are those the `where` paths
+  fall in, else the catch-all or the first area. It reads, files a task and runs nothing.
+- Suggestions (`suggest.ts`, `suggest-prompt.ts`, `suggest-answer.ts`, `POST /projects/:id/evals/suggest`,
+  `GET /projects/:id/eval-suggest`): the wizard's three buttons (`kind`: `tighten`, `cases`, `check`) are one
+  question each, asked the assessment's way: the area namer's model on the project's account (the efficient tier;
+  a Codex account is asked on the default non-Codex account), text in and no tool, with up to 4 of the `where`
+  files read at HEAD (24 KB each, 64 KB in all, 200 lines). The builder's words and the files are data between
+  markers. The reply is parsed with zod and shown, never recorded: cases arrive unmarked, a check never sets the
+  bar. `unavailable` is only for a model that can't be asked at all (no model, no default account, or a Codex-only
+  builder), which the status route reports up front so the wizard hides its buttons and says why; a slow or
+  unusable answer is a message the builder can retry. Tests use the pure parser; none calls a model.
 - Assessing (`assess.ts`, `assess-prompt.ts`, `assess-triggers.ts`; modelled on `hazards/`): `createEvalsAssessor`
   picks files at HEAD (the project's eval skills, eval definition files, `claude plugin eval` prompts, the files the
   stock call patterns find, root `AGENTS.md`/`Makefile`/`package.json`/`README.md`; at most 60 files, 48 KB each, 300 KB

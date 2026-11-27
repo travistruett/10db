@@ -1,4 +1,11 @@
-import type { EvalSuiteDto, NewEvalBody } from '@10db/contracts';
+import {
+  EvalBarChoice,
+  EvalCaseVerdict,
+  EvalCheckKind,
+  EvalPick,
+  type EvalSuiteDto,
+  type NewEvalBody,
+} from '@10db/contracts';
 import type { Git } from '../git';
 
 /** A project's own skill for writing evals, found at HEAD. */
@@ -79,6 +86,84 @@ const ORIGIN_LINES = {
     "Asked for from the suite's drawer, Let 10db Pick Models: change the suite's live command so it reads the models to run from an environment variable, which 10db sets to a comma-separated list of model ids to try other models and compare cost. Follow the pattern of ampsio's `MODELS ?=` make variable (a default the command keeps when the variable is unset), then record the variable's name in the suite's manifest `live.models` (`env`, and `ids`: `openrouter` or the project's own `choices`). Run free checks only: never run the live command or any paid model call.",
 } as const satisfies Record<NewEvalBody['origin'], string>;
 
+const CHECK_LINES = {
+  [EvalCheckKind.Rule]:
+    'A rule or test: an exact answer, a contains or does-not-contain check, or a command that passes. Prefer this; it is the cheapest and the most reliable.',
+  [EvalCheckKind.Judge]:
+    "An AI judge reads each result. Before trusting it, run it on the good and bad examples above and report how often it agrees with the builder's marks; fix the judge's instructions until it does.",
+  [EvalCheckKind.Review]:
+    'The builder reads the results. Leave a short review list instead of an automatic grade.',
+} as const satisfies Record<EvalCheckKind, string>;
+
+const BAR_LINES = {
+  [EvalBarChoice.EveryTime]: 'Every time: a model must pass every case.',
+  [EvalBarChoice.NineInTen]: '9 in 10: a model must pass at least 90% of the cases.',
+  [EvalBarChoice.SevenInTen]: '7 in 10: a model must pass at least 70% of the cases.',
+} as const satisfies Record<EvalBarChoice, string>;
+
+const PICK_LINES = {
+  [EvalPick.Cheapest]: 'When several models pass, prefer the cheapest.',
+  [EvalPick.Best]: 'When several models pass, prefer the best score.',
+} as const satisfies Record<EvalPick, string>;
+
+/** The default the brief states: a free check in the gate, and a paid run only on the builder's click. */
+const EXECUTION_DEFAULT =
+  "The free check (the one that needs no paid model) runs in the project's gate. A paid run happens only when the builder starts it.";
+
+const oneLine = (text: string): string => text.replaceAll(/\s+/gu, ' ').trim();
+
+/** The sections the builder wrote in their own words; one left empty is left out. */
+const written = (heading: string, text: string): string =>
+  text === '' ? '' : section(heading, text);
+
+function caseLines(cases: NewEvalBody['cases']): string {
+  if (cases.length === 0) return '';
+  const row = (c: NewEvalBody['cases'][number]): string =>
+    `- ${c.verdict === EvalCaseVerdict.Good ? 'Good' : 'Bad'}: ${JSON.stringify(oneLine(c.input))}${c.reason === '' ? '' : ` (${oneLine(c.reason)})`}`;
+  return [
+    section(
+      'Real examples',
+      'The builder marked each one. Use them as cases; never change a mark.',
+    ),
+    ...cases.map(row),
+  ].join('\n');
+}
+
+function modelLines(request: NewEvalBody): string {
+  const parts = [
+    request.modelIds.length === 0
+      ? ''
+      : ['Models to compare:', ...request.modelIds.map((m) => `- \`${m}\``)].join('\n'),
+    request.costCapUsd === null
+      ? ''
+      : `Keep one paid run under $${String(request.costCapUsd)}; the eval must say what a run costs.`,
+    request.pick === null ? '' : PICK_LINES[request.pick],
+  ].filter((part) => part !== '');
+  return parts.length === 0 ? '' : section('Models and cost', parts.join('\n'));
+}
+
+function checkLines(request: NewEvalBody): string {
+  if (request.check === null && request.checkRule === '') return written('Oracle', request.oracle);
+  return section(
+    'How to tell good from bad',
+    [
+      request.check === null ? '' : CHECK_LINES[request.check],
+      request.checkRule === '' ? '' : `The check looks at: ${oneLine(request.checkRule)}`,
+      request.oracle,
+    ]
+      .filter((part) => part !== '')
+      .join('\n'),
+  );
+}
+
+function barLines(request: NewEvalBody): string {
+  if (request.bar === null) return written('Coverage and bar', request.coverageAndBar);
+  return section(
+    'The bar',
+    [BAR_LINES[request.bar], request.coverageAndBar].filter((p) => p !== '').join('\n'),
+  );
+}
+
 /** The task that has a lane draft one eval: its rationale as the brief, and never the paid run. */
 export function evalTaskDraft(
   request: NewEvalBody,
@@ -91,12 +176,15 @@ export function evalTaskDraft(
       : ['The code the eval is about:', ...request.where.map((p) => `- \`${p}\``)].join('\n');
   const description = [
     ORIGIN_LINES[request.origin],
-    section('Decision', request.decision),
-    section('Evidence', request.evidence),
-    section('Oracle', request.oracle),
-    section('Coverage and bar', request.coverageAndBar),
-    section('Models', request.models),
-    section('Execution', request.execution),
+    written('What it should do well', request.goal),
+    written('Decision', request.decision),
+    written('Evidence', request.evidence),
+    caseLines(request.cases),
+    checkLines(request),
+    barLines(request),
+    written('Models', request.models),
+    modelLines(request),
+    section('Execution', [EXECUTION_DEFAULT, request.execution].filter((p) => p !== '').join('\n')),
     where,
     skillLines(skills),
     exampleLines(suites),

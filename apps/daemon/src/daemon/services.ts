@@ -55,6 +55,8 @@ import {
   effectiveWatchpoints,
   type PrecedentScope,
   type ProjectWatchpointsDto,
+  type Watchpoint,
+  type WatchpointCoverageDto,
   type ProjectId,
   type TaskInput,
   type EvalCandidateDto,
@@ -186,9 +188,11 @@ import {
   type EvalLiveRuns,
   type EvalSweeps,
   type EvalsAssessor,
+  type EvalSuggester,
   type EvalsService,
 } from '../evals';
 import type { Git } from '../git';
+import { coverageSubjects, sumCoverage, type WatchpointCoverageReader } from '../watchpoints';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import {
   earlierMcpApproval,
@@ -424,12 +428,16 @@ export function createServices(deps: {
   readonly listeners: ListenerReader;
   /** Whether something answers at a loopback address, for the Workbench setup's app address. */
   readonly probe: AddressProbe;
+  /** Counts the files each watchpoint covers in a project's checkout; kept warm by the daemon. */
+  readonly watchpointCoverage: Pick<WatchpointCoverageReader, 'read'>;
   /** Works out each project's hazards from its repository. */
   readonly hazards: Pick<HazardAssessor, 'assess'>;
   /** Reads each project's committed eval results and keeps the manifest an agent recorded. */
   readonly evals: EvalsService;
   /** Assesses each project's evals with a model, on add, on a commit to eval files, and on request. */
   readonly evalsAssessor: Pick<EvalsAssessor, 'assess' | 'status'>;
+  /** Answers the New Eval wizard's suggest buttons with a model of the project's account. */
+  readonly evalSuggester: EvalSuggester;
   /** Runs a suite's live arm when the builder presses Run. */
   readonly evalLive: EvalLiveRuns;
   readonly evalSweeps: EvalSweeps;
@@ -456,6 +464,13 @@ export function createServices(deps: {
     const entries = readProjectWatchpoints(db, projectId);
     return { effective: effectiveWatchpoints(readYourWatchpoints(db), entries), entries };
   };
+  const watchpointCoverage = deps.watchpointCoverage;
+  const coverageIn = (
+    project: { id: ProjectId; repoPath: string },
+    applying: readonly Watchpoint[],
+    yours: readonly Watchpoint[],
+  ): Promise<WatchpointCoverageDto> =>
+    watchpointCoverage.read(project, coverageSubjects(applying, yours));
   const restarts = createFailedRestarts(deps);
   const catalogueStatus = (): CatalogueStatusDto => ({
     ...deps.catalogue.status(),
@@ -1002,6 +1017,19 @@ export function createServices(deps: {
       return effectiveWatchpointsOf(projectId);
     },
     watchpointHits: (id) => watchpointHitsOf(db, id),
+    watchpointCoverage: (projectId) =>
+      coverageIn(
+        getProject(db, projectId),
+        effectiveWatchpointsOf(projectId).effective,
+        readYourWatchpoints(db),
+      ),
+    yourWatchpointCoverage: async () => {
+      const yours = readYourWatchpoints(db);
+      return sumCoverage(
+        await Promise.all(listActiveProjects(db).map((project) => coverageIn(project, yours, []))),
+        coverageSubjects(yours),
+      );
+    },
     watchpointStats: (projectId) => {
       getProject(db, projectId);
       return watchpointStats(db, projectId, deps.clock.now());
@@ -1044,6 +1072,11 @@ export function createServices(deps: {
       return hazardAssessmentDto(db, projectId);
     },
     evals: (projectId) => readEvalsPage(projectId),
+    evalSuggestStatus(projectId) {
+      return deps.evalSuggester.status(projectId);
+    },
+    evalSuggest: (projectId, request, signal) =>
+      deps.evalSuggester.suggest(projectId, request, signal),
     async assessEvals(projectId) {
       getProject(db, projectId);
       await deps.evalsAssessor.assess(projectId);

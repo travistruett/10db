@@ -35,6 +35,7 @@
         "workstream.created",
         "workstream.changed",
         "eval.definition_changed",
+        "watchpoint.coverage_landed",
         "eval.live_run_changed",
         "eval.sweep_changed",
         "workstream.wait_changed",

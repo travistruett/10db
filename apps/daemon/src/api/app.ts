@@ -90,6 +90,7 @@ import {
   PersonaPatch,
   EvalManifest,
   type NewEvalBody,
+  EvalSuggestRequest,
   NewEvalRequest,
   EvalSuiteKey,
   EvalLiveRunId,
@@ -1707,6 +1708,21 @@ export function createApp(deps: ApiDeps) {
         await deps.services.assessEvals(ProjectId.parse(c.req.param('projectId'))),
       ),
     )
+    .get('/projects/:projectId/eval-suggest', (c) =>
+      c.json(deps.services.evalSuggestStatus(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post(
+      '/projects/:projectId/evals/suggest',
+      validator('json', (value): EvalSuggestRequest => EvalSuggestRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.evalSuggest(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+            c.req.raw.signal,
+          ),
+        ),
+    )
     .get('/projects/:projectId/eval-models', async (c) =>
       c.json(await deps.services.evalModels(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -2500,6 +2516,9 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .get('/projects/:projectId/watchpoints/coverage', async (c) =>
+      c.json(await deps.services.watchpointCoverage(ProjectId.parse(c.req.param('projectId')))),
+    )
     .get('/projects/:projectId/watchpoints/stats', (c) =>
       c.json(deps.services.watchpointStats(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -2603,6 +2622,9 @@ export function createApp(deps: ApiDeps) {
       (c) => c.json(deps.services.setKeepAwake(c.req.valid('json').mode)),
     )
     .get('/settings/watchpoints', (c) => c.json(deps.services.yourWatchpoints()))
+    .get('/settings/watchpoints/coverage', async (c) =>
+      c.json(await deps.services.yourWatchpointCoverage()),
+    )
     .put(
       '/settings/watchpoints',
       validator('json', (value): YourWatchpoints => YourWatchpoints.parse(value)),

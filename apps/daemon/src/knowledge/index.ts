@@ -32,3 +32,4 @@ export {
   withdrawPrincipleRecord,
 } from './records';
 export { renderDecisionIndex, renderDecisions, renderRules } from './render';
+export { mostSpecific } from './scope';

@@ -95,6 +95,9 @@ import type {
   EvalCandidateDto,
   EvalSuiteKey,
   NewEvalBody,
+  EvalSuggestRequest,
+  EvalSuggestResult,
+  EvalSuggestStatusDto,
   EvalManifestResult,
   EvalMarkersDto,
   EvalModelsDto,
@@ -139,6 +142,7 @@ import type {
   ProjectWatchpointsDto,
   ProjectWatchpoints,
   WatchpointHitsDto,
+  WatchpointCoverageDto,
   WatchpointStatsDto,
   YourWatchpoints,
   KeepAwakeStatus,
@@ -866,6 +870,10 @@ export interface ApiServices extends PlanRecordServices {
   setProjectWatchpoints(projectId: ProjectId, entries: ProjectWatchpoints): ProjectWatchpointsDto;
   /** The run's newest watchpoint reading with the agent's and reviewer's notes on each file. */
   watchpointHits(id: WorkstreamId): WatchpointHitsDto;
+  /** The tracked files each applying watchpoint and each starter covers in the project's checkout. */
+  watchpointCoverage(projectId: ProjectId): Promise<WatchpointCoverageDto>;
+  /** The same for the builder's own list and the starters, summed across the active projects. */
+  yourWatchpointCoverage(): Promise<WatchpointCoverageDto>;
   /** Each watchpoint's last 30 days in the project: tasks hit, cards raised and waved through. */
   watchpointStats(projectId: ProjectId): WatchpointStatsDto[];
   /** Settings › Agent skill: the shipped skill's switch, installed copy and links. */
@@ -970,6 +978,14 @@ export interface ApiServices extends PlanRecordServices {
   evals(projectId: ProjectId): Promise<EvalsDto>;
   /** Assesses the project's evals with a model now, and answers the page as it stands after. */
   assessEvals(projectId: ProjectId): Promise<EvalsDto>;
+  /** Whether the New Eval wizard has a model to ask for suggestions, and why not. */
+  evalSuggestStatus(projectId: ProjectId): EvalSuggestStatusDto;
+  /** One suggestion for a wizard step from a model of the project's account; records nothing. */
+  evalSuggest(
+    projectId: ProjectId,
+    request: EvalSuggestRequest,
+    signal?: AbortSignal,
+  ): Promise<EvalSuggestResult>;
   /** Every model the project's results graded, with its newest result per suite; nothing is run. */
   evalModels(projectId: ProjectId): Promise<EvalModelsDto>;
   /** The models a suite may try, with prices, estimates and last results; none for a suite with no `live.models`. */
