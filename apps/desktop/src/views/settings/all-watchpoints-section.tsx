@@ -1,5 +1,5 @@
 import { STARTER_WATCHPOINTS, type Watchpoint } from '@10db/contracts';
-import { Alert, Box, Menu, Skeleton, Stack, Text } from '@mantine/core';
+import { Alert, Box, Menu, Stack, Text } from '@mantine/core';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
 import { useSetYourWatchpoints, useYourWatchpoints } from '../../daemon/watchpoint-queries';
@@ -7,7 +7,7 @@ import { ConfirmModal } from '../../shell/confirm-modal';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
 import { SectionHeading } from './section-heading';
-import { SplitButton } from './split-button';
+import { SplitButton, SplitButtonLoading } from './split-button';
 import { RowActions } from './table-cells';
 import { WatchpointMatches, WatchpointName } from './watchpoint-cells';
 import { WatchpointDrawer } from './watchpoint-drawer';
@@ -72,8 +72,14 @@ export function LibraryItems({
   );
 }
 
-/** The table's column titles, drawn by its placeholder while the list is read. */
-const LOADING_HEADINGS = ['Watchpoint', 'Matches', 'When It Matches', ''] as const;
+/** The table's column titles and widths, which its placeholder draws too while the list is read. */
+const WATCHPOINT_COLUMNS = {
+  label: { title: 'Watchpoint' },
+  globs: { title: 'Matches' },
+  // Wide enough for its header at the window's 1200 px; the control itself is narrower.
+  loudness: { title: 'When It Matches', width: 160 },
+  actions: { title: '', width: 90 },
+} as const;
 
 /** Your watchpoints, which apply in every project unless a project sets its own. */
 export function AllWatchpointsSection() {
@@ -94,14 +100,19 @@ export function AllWatchpointsSection() {
               title="Watchpoints"
               line={WATCHPOINTS_LINE}
               help={<WatchpointsHelp />}
-              action={<Skeleton height={36} width={220} radius="sm" />}
+              action={
+                <SplitButtonLoading
+                  label="Add Watchpoint"
+                  menuLabel="More ways to add a watchpoint"
+                />
+              }
             />
             <PageLoading
               shape={PageLoadingShape.Table}
               label="Reading the watchpoints"
-              headings={LOADING_HEADINGS}
+              columns={Object.values(WATCHPOINT_COLUMNS)}
               rows={4}
-              cellLines={2}
+              cellLines={3}
               verticalSpacing="xs"
               horizontalSpacing="md"
             />
@@ -122,20 +133,18 @@ export function AllWatchpointsSection() {
   const columns: DataTableColumn<Watchpoint>[] = [
     {
       accessor: 'label',
-      title: 'Watchpoint',
+      ...WATCHPOINT_COLUMNS.label,
       render: (row) => <WatchpointName watchpoint={row} />,
     },
     {
       accessor: 'globs',
-      title: 'Matches',
+      ...WATCHPOINT_COLUMNS.globs,
       render: (row) => <WatchpointMatches watchpoint={row} />,
     },
     {
       accessor: 'loudness',
-      title: 'When It Matches',
+      ...WATCHPOINT_COLUMNS.loudness,
       noWrap: true,
-      // Wide enough for its header at the window's 1200 px; the control itself is narrower.
-      width: 160,
       render: (row) => (
         // A press on the control is not a press on the row.
         <Box
@@ -156,8 +165,7 @@ export function AllWatchpointsSection() {
     },
     {
       accessor: 'actions',
-      title: '',
-      width: 90,
+      ...WATCHPOINT_COLUMNS.actions,
       textAlign: 'right',
       render: (row) => (
         <RowActions

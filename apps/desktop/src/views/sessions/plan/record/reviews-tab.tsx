@@ -89,6 +89,16 @@ export function linesOf(
 
 const NO_SORT = { columnAccessor: 'reviewer', direction: 'asc' } as const;
 
+/** Reviews list's column titles and widths, which its placeholder draws too. */
+export const REVIEW_COLUMNS = {
+  reviewer: { title: 'Reviewer', width: 110 },
+  severity: { title: 'Severity', width: 90 },
+  text: { title: 'Note' },
+  outcome: { title: 'Outcome' },
+  state: { title: 'State', width: 90 },
+  actions: { title: '', width: 190 },
+} as const;
+
 export function ReviewsTab({
   shapeId,
   titles,
@@ -114,8 +124,7 @@ export function ReviewsTab({
   const columns: DataTableColumn<Line>[] = [
     {
       accessor: 'reviewer',
-      title: 'Reviewer',
-      width: 110,
+      ...REVIEW_COLUMNS.reviewer,
       resizable: true,
       render: (line) =>
         line.kind === 'group' ? (
@@ -128,8 +137,7 @@ export function ReviewsTab({
     },
     {
       accessor: 'severity',
-      title: 'Severity',
-      width: 90,
+      ...REVIEW_COLUMNS.severity,
       toggleable: true,
       render: finding((row) => (
         <Stack gap={2}>
@@ -144,7 +152,7 @@ export function ReviewsTab({
     },
     {
       accessor: 'text',
-      title: 'Note',
+      ...REVIEW_COLUMNS.text,
       resizable: true,
       filtering: narrowing.q.trim() !== '',
       filter: (
@@ -163,7 +171,7 @@ export function ReviewsTab({
     },
     {
       accessor: 'outcome',
-      title: 'Outcome',
+      ...REVIEW_COLUMNS.outcome,
       resizable: true,
       toggleable: true,
       hidden: !hasOutcome,
@@ -187,8 +195,7 @@ export function ReviewsTab({
     },
     {
       accessor: 'state',
-      title: 'State',
-      width: 90,
+      ...REVIEW_COLUMNS.state,
       toggleable: true,
       filtering: narrowing.state !== ANY,
       filter: (
@@ -209,8 +216,7 @@ export function ReviewsTab({
     },
     {
       accessor: 'actions',
-      title: '',
-      width: 190,
+      ...REVIEW_COLUMNS.actions,
       // An open note is acted on here: settled by Dismiss, or handed to the session by Ask to Fix.
       render: finding((row) =>
         row.state !== ShapeFindingState.Open ? null : (
@@ -244,6 +250,7 @@ export function ReviewsTab({
   ];
   return (
     <RecordListStates
+      columns={Object.values(REVIEW_COLUMNS)}
       query={query}
       what="reviews"
       none={{ narrowed, text: 'No review notes yet. Ask for a review from ⋯ on the Plan.' }}

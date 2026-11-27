@@ -18,6 +18,9 @@ export interface GoalTasksProps {
   readonly error: string | null;
 }
 
+/** The width of a row's last-activity column. */
+const ACTIVITY_WIDTH = 88;
+
 /** The task rows while they load: a state dot, a title, a state and a time on each, as the rows have. */
 function TaskRowsLoading() {
   const late = useLoadingDelayElapsed();
@@ -31,7 +34,7 @@ function TaskRowsLoading() {
             <Skeleton height={14} width={`${String(55 - i * 10)}%`} />
           </Box>
           <Skeleton height={12} width={64} style={{ flex: 'none' }} />
-          <Skeleton height={12} width={88} style={{ flex: 'none' }} />
+          <Skeleton height={12} width={ACTIVITY_WIDTH} style={{ flex: 'none' }} />
         </Group>
       ))}
     </Stack>
@@ -97,7 +100,7 @@ export function GoalTasks({ rows, loading, error }: GoalTasksProps) {
                   </Badge>
                 ) : null}
                 {row.prUrl ? <PullRequestLink url={row.prUrl} /> : null}
-                <Box w={88} ta="right" c="dimmed">
+                <Box w={ACTIVITY_WIDTH} ta="right" c="dimmed">
                   {row.activity === null ? null : <RelativeTime at={row.activity} />}
                 </Box>
               </Group>

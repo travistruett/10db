@@ -7,6 +7,9 @@ import { useDraft } from '../settings-drafts';
 
 const DEFAULT_REMIND_HOURS = 4;
 
+const CARD_TITLE = "When Someone Hasn't Answered";
+const CARD_DESCRIPTION = 'Hours are real time: a timer due while the Mac sleeps fires on wake.';
+
 function Hours() {
   return (
     <Text size="sm" c="dimmed" aria-hidden>
@@ -33,15 +36,20 @@ export function StakeholderTimers() {
         {timers.error.message}
       </Alert>
     );
-  if (current === undefined) return <SettingRowsLoading rows={2} label="Loading the timers" />;
+  if (current === undefined)
+    return (
+      <SettingRowsLoading
+        title={CARD_TITLE}
+        description={CARD_DESCRIPTION}
+        rows={2}
+        label="Loading the timers"
+      />
+    );
   const remind = current.remindAfterHours ?? DEFAULT_REMIND_HOURS;
   const back = current.returnAfterHours;
   return (
     <Stack gap="xs">
-      <SettingsCard
-        title="When Someone Hasn't Answered"
-        description="Hours are real time: a timer due while the Mac sleeps fires on wake."
-      >
+      <SettingsCard title={CARD_TITLE} description={CARD_DESCRIPTION}>
         <SettingRow
           label="Remind Them After"
           description="One reminder in their thread; off never nudges."

@@ -20,6 +20,17 @@ const PLATFORM_LABEL: Readonly<Record<DevicePlatform, string>> = {
   [DevicePlatform.Other]: 'Other',
 };
 
+/** The table's column titles, which its placeholder draws too while the devices load. */
+const DEVICE_COLUMNS = {
+  device: { title: 'Device' },
+  paired: { title: 'Paired' },
+  lastUsed: { title: 'Last Used' },
+  actions: { title: '' },
+} as const;
+
+/** The table's scroll width, kept by its placeholder. */
+const DEVICES_MIN_WIDTH = 560;
+
 /** Settings › Devices: the phones and Macs paired to this Mac, each with Revoke. */
 export function DevicesSection() {
   const devices = useDevices();
@@ -54,7 +65,8 @@ export function DevicesSection() {
         <PageLoading
           shape={PageLoadingShape.Table}
           label="Loading devices"
-          headings={['Device', 'Paired', 'Last Used', '']}
+          columns={Object.values(DEVICE_COLUMNS)}
+          minWidth={DEVICES_MIN_WIDTH}
           rows={3}
           cellLines={2}
           verticalSpacing="sm"
@@ -73,13 +85,13 @@ export function DevicesSection() {
       ) : null}
       {rows.length > 0 ? (
         <RaisedPanel>
-          <Table.ScrollContainer minWidth={560}>
+          <Table.ScrollContainer minWidth={DEVICES_MIN_WIDTH}>
             <Table verticalSpacing="sm" horizontalSpacing="md">
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>Device</Table.Th>
-                  <Table.Th>Paired</Table.Th>
-                  <Table.Th>Last Used</Table.Th>
+                  <Table.Th>{DEVICE_COLUMNS.device.title}</Table.Th>
+                  <Table.Th>{DEVICE_COLUMNS.paired.title}</Table.Th>
+                  <Table.Th>{DEVICE_COLUMNS.lastUsed.title}</Table.Th>
                   <Table.Th aria-label="Actions" />
                 </Table.Tr>
               </Table.Thead>

@@ -9,24 +9,26 @@ import { Alert, Anchor, SegmentedControl, Stack, Table, Text, Title } from '@man
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useAcceptanceFigures } from '../../daemon/acceptance-queries';
-import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
+import { LoadingTable, useLoadingDelayElapsed } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
 
 const ACCEPTANCE_LISTS = ['Completed', 'Sent back', 'Sent to you'] as const;
 
 /** The three run lists while they load: each list's own title over a few rows of its three columns. */
 function AcceptanceLoading() {
+  const late = useLoadingDelayElapsed();
   return (
     <Stack gap="xs" role="status" aria-label="Loading acceptance counts">
       {ACCEPTANCE_LISTS.map((label) => (
         <Stack key={label} gap={4}>
           <Title order={4}>{label}</Title>
-          <PageLoading
-            shape={PageLoadingShape.Table}
-            label={`Loading ${label.toLowerCase()} runs`}
-            columns={3}
-            rows={2}
-          />
+          {late ? (
+            <LoadingTable
+              columns={[{ title: '' }, { title: '' }, { title: '' }]}
+              headingRow={false}
+              rows={2}
+            />
+          ) : null}
         </Stack>
       ))}
     </Stack>

@@ -3,6 +3,32 @@ import { Children, Fragment, useEffect, useId, useRef, type ReactNode } from 're
 import { HelpHint } from './help-hint';
 import { HeadingRow } from './section-heading';
 
+/** A settings card's heading: its title, an optional info button and one dimmed line, and the card's action. */
+export function SettingsCardHeading({
+  title,
+  description,
+  help,
+  action,
+}: {
+  readonly title: string;
+  readonly description?: string;
+  readonly help?: ReactNode;
+  readonly action?: ReactNode;
+}) {
+  return (
+    <HeadingRow
+      line={description === undefined || description === '' ? undefined : description}
+      action={action}
+      heading={
+        <Group gap={4} wrap="nowrap">
+          <Title order={4}>{title}</Title>
+          {help ? <HelpHint label={title}>{help}</HelpHint> : null}
+        </Group>
+      }
+    />
+  );
+}
+
 /** A titled card of settings rows, with a hairline between rows. */
 export function SettingsCard({
   title,
@@ -25,15 +51,11 @@ export function SettingsCard({
   return (
     <Stack gap="xs">
       {title ? (
-        <HeadingRow
-          line={description === undefined || description === '' ? undefined : description}
+        <SettingsCardHeading
+          title={title}
+          {...(description === undefined ? {} : { description })}
+          help={help}
           action={action}
-          heading={
-            <Group gap={4} wrap="nowrap">
-              <Title order={4}>{title}</Title>
-              {help ? <HelpHint label={title}>{help}</HelpHint> : null}
-            </Group>
-          }
         />
       ) : null}
       <Paper withBorder radius="md">

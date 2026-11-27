@@ -83,54 +83,85 @@ function LogRow({ index }: { readonly index: number }) {
   );
 }
 
-function TableOutline({
-  headings,
-  bareColumns,
+/** One column of a table: its title and, where the loaded table fixes it, its width. */
+export interface PageLoadingColumn {
+  readonly title: string;
+  readonly width?: number | string;
+}
+
+/** A placeholder bar in a line of text of the given size, as tall as that line, so what holds it is as tall as the loaded text. */
+export function LoadingTextLine({
+  size,
+  width,
+  bar,
+}: {
+  readonly size: 'sm' | 'xs';
+  readonly width: string;
+  readonly bar: number;
+}) {
+  return (
+    <Box fz={size} lh={size} h="1lh" style={{ display: 'flex', alignItems: 'center' }}>
+      <Skeleton height={bar} width={width} />
+    </Box>
+  );
+}
+
+/**
+ * A raised table of placeholder rows under the loaded table's own column titles and widths. Pass the loaded
+ * table's spacing and scroll width so its rows and columns land where the real ones do.
+ */
+export function LoadingTable({
+  columns,
   rows,
-  cellLines,
+  cellLines = 1,
+  headingRow = true,
   verticalSpacing,
   horizontalSpacing,
   minWidth,
 }: {
-  readonly headings: readonly string[];
-  readonly minWidth: number | undefined;
-  readonly bareColumns: number;
+  readonly columns: readonly PageLoadingColumn[];
   readonly rows: number;
-  readonly cellLines: number;
-  readonly verticalSpacing: MantineSpacing | undefined;
-  readonly horizontalSpacing: MantineSpacing | undefined;
+  /** Lines in the first cell: a name over its detail. */
+  readonly cellLines?: number;
+  /** False for a table that draws no heading row. */
+  readonly headingRow?: boolean;
+  readonly verticalSpacing?: MantineSpacing;
+  readonly horizontalSpacing?: MantineSpacing;
+  readonly minWidth?: number;
 }) {
-  const columns = Array.from({ length: Math.max(headings.length, bareColumns) }, (_, column) => ({
-    heading: headings[column] ?? '',
-    column,
-  }));
   return (
-    <RaisedPanel>
-      <Table.ScrollContainer minWidth={minWidth ?? 0}>
-        <Table
-          {...(verticalSpacing === undefined ? {} : { verticalSpacing })}
-          {...(horizontalSpacing === undefined ? {} : { horizontalSpacing })}
-        >
-          {headings.length === 0 ? null : (
-            <Table.Thead>
-              <Table.Tr>
-                {columns.map(({ heading, column }) => (
-                  <Table.Th key={`${heading}-${String(column)}`}>{heading}</Table.Th>
-                ))}
-              </Table.Tr>
-            </Table.Thead>
-          )}
-          <Table.Tbody>
-            {Array.from({ length: rows }, (_, row) => (
-              <Table.Tr key={row}>
-                {columns.map(({ heading, column }) => (
-                  <Table.Td key={`${heading}-${String(column)}`}>
-                    {/* The first column carries the row's name, so it is the one with more lines. */}
-                    <Stack gap={6}>
-                      {Array.from({ length: column === 0 ? cellLines : 1 }, (_, line) => (
-                        <Skeleton
+    <Box className={SKELETON_ON_PANEL}>
+      <RaisedPanel>
+        <Table.ScrollContainer minWidth={minWidth ?? 0}>
+          <Table
+            {...(verticalSpacing === undefined ? {} : { verticalSpacing })}
+            {...(horizontalSpacing === undefined ? {} : { horizontalSpacing })}
+          >
+            {headingRow ? (
+              <Table.Thead>
+                <Table.Tr>
+                  {columns.map((column, index) => (
+                    <Table.Th
+                      key={index}
+                      {...(column.width === undefined ? {} : { w: column.width })}
+                    >
+                      {column.title}
+                    </Table.Th>
+                  ))}
+                </Table.Tr>
+              </Table.Thead>
+            ) : null}
+            <Table.Tbody>
+              {Array.from({ length: rows }, (_, row) => (
+                <Table.Tr key={row}>
+                  {columns.map((_column, column) => (
+                    <Table.Td key={column}>
+                      {/* The first column carries the row's name, so it is the one with more lines. */}
+                      {Array.from({ length: column === 0 ? cellLines : 1 }, (_line, line) => (
+                        <LoadingTextLine
                           key={line}
-                          height={line === 0 ? 12 : 10}
+                          size={line === 0 ? 'sm' : 'xs'}
+                          bar={line === 0 ? 12 : 10}
                           width={
                             column === 0
                               ? line === 0
@@ -140,15 +171,15 @@ function TableOutline({
                           }
                         />
                       ))}
-                    </Stack>
-                  </Table.Td>
-                ))}
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      </Table.ScrollContainer>
-    </RaisedPanel>
+                    </Table.Td>
+                  ))}
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
+      </RaisedPanel>
+    </Box>
   );
 }
 
@@ -174,8 +205,7 @@ export function PageLoading({
   shape,
   rows,
   label,
-  headings = [],
-  columns = 0,
+  columns = [],
   cellLines = 1,
   verticalSpacing,
   horizontalSpacing,
@@ -186,10 +216,8 @@ export function PageLoading({
   readonly rows?: number;
   /** What assistive tech hears, such as "Loading the pages". */
   readonly label: string;
-  /** A table's real column headings, which the loaded table draws too. */
-  readonly headings?: readonly string[];
-  /** A table with no heading row: how many columns its rows have. */
-  readonly columns?: number;
+  /** A table's columns, the same array the loaded table draws its headings and widths from. */
+  readonly columns?: readonly PageLoadingColumn[];
   /** Lines in a table's first cell: a name over its detail. */
   readonly cellLines?: number;
   /** The loaded table's own spacing, so its rows are as tall as the real ones. */
@@ -205,15 +233,14 @@ export function PageLoading({
   switch (shape) {
     case PageLoadingShape.Table:
       return (
-        <Box role="status" aria-label={label} className={SKELETON_ON_PANEL}>
-          <TableOutline
-            headings={headings}
-            bareColumns={columns}
+        <Box role="status" aria-label={label}>
+          <LoadingTable
+            columns={columns}
             rows={count}
             cellLines={cellLines}
-            verticalSpacing={verticalSpacing}
-            horizontalSpacing={horizontalSpacing}
-            minWidth={minWidth}
+            {...(verticalSpacing === undefined ? {} : { verticalSpacing })}
+            {...(horizontalSpacing === undefined ? {} : { horizontalSpacing })}
+            {...(minWidth === undefined ? {} : { minWidth })}
           />
         </Box>
       );

@@ -4,6 +4,9 @@ import { useCardTypes } from '../../daemon/card-types-queries';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
 
+/** The table's scroll width, kept by its placeholder. */
+const TABLE_MIN_WIDTH = 720;
+
 const COLUMNS = [
   'Card type',
   ...[CARD_TYPE_DAYS.Week, CARD_TYPE_DAYS.Month].flatMap((days) =>
@@ -59,9 +62,9 @@ export function CardTypesPanel({ projectId }: { readonly projectId: ProjectId | 
         <PageLoading
           shape={PageLoadingShape.Table}
           label="Loading Inbox card types"
-          headings={COLUMNS}
+          columns={COLUMNS.map((title) => ({ title }))}
           rows={4}
-          minWidth={720}
+          minWidth={TABLE_MIN_WIDTH}
         />
       ) : null}
       {types.isSuccess ? (
@@ -71,7 +74,7 @@ export function CardTypesPanel({ projectId }: { readonly projectId: ProjectId | 
           </Text>
         ) : (
           <RaisedPanel>
-            <Table.ScrollContainer minWidth={720}>
+            <Table.ScrollContainer minWidth={TABLE_MIN_WIDTH}>
               <Table aria-label="Inbox Card Types">
                 <Table.Thead>
                   <Table.Tr>

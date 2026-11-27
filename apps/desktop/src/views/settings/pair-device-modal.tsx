@@ -18,10 +18,6 @@ function countdown(msLeft: number): string {
   return `${String(Math.floor(seconds / 60))}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
-/**
- * Pair a Device: a picture of the link, the code in large type, how long it lasts and New Code. It makes a code
- * when it opens and closes on the pairing it was waiting for (a device the list did not hold when it opened).
- */
 /** The pairing code's size on screen, which its placeholder keeps. */
 const QR_SIZE = 240;
 
@@ -37,7 +33,11 @@ function PairingPlaceholder() {
         <Skeleton height={12} width="70%" />
       </Stack>
       <Skeleton height={QR_SIZE} width={QR_SIZE} radius={8} />
-      <Skeleton height={38} width={QR_SIZE} />
+      <Skeleton visible width="fit-content">
+        <Text ff="monospace" fz={32} fw={700} style={{ letterSpacing: '0.12em' }}>
+          0000 0000
+        </Text>
+      </Skeleton>
       <Skeleton height={12} width={120} />
       <Group>
         <Skeleton height={36} width={100} radius="sm" />
@@ -47,6 +47,10 @@ function PairingPlaceholder() {
   );
 }
 
+/**
+ * Pair a Device: a picture of the link, the code in large type, how long it lasts and New Code. It makes a code
+ * when it opens and closes on the pairing it was waiting for (a device the list did not hold when it opened).
+ */
 export function PairDeviceModal({
   opened,
   onClose,
@@ -87,7 +91,7 @@ function PairBody({ onClose }: { readonly onClose: () => void }) {
   const { mutate } = code;
 
   const draw = (url: string): void => {
-    QRCode.toDataURL(url, { margin: 1, width: 240, errorCorrectionLevel: 'M' }).then(
+    QRCode.toDataURL(url, { margin: 1, width: QR_SIZE, errorCorrectionLevel: 'M' }).then(
       setPicture,
       () => {
         setPicture(null);
@@ -155,8 +159,8 @@ function PairBody({ onClose }: { readonly onClose: () => void }) {
           {picture === null ? null : (
             <Image
               src={picture}
-              w={240}
-              h={240}
+              w={QR_SIZE}
+              h={QR_SIZE}
               alt="QR code that opens the pairing page on this Mac"
               style={{
                 imageRendering: 'pixelated',

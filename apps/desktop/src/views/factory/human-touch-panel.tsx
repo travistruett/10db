@@ -18,6 +18,9 @@ function perTask(value: number | null): string {
   return value === null ? '–' : String(Number(value.toFixed(1)));
 }
 
+/** The table's scroll width, kept by its placeholder. */
+const TABLE_MIN_WIDTH = 720;
+
 const COLUMNS = [
   'Day',
   'Permission',
@@ -83,14 +86,14 @@ export function HumanTouchPanel({ projectId }: { readonly projectId: ProjectId |
         <PageLoading
           shape={PageLoadingShape.Table}
           label="Loading human touch"
-          headings={COLUMNS}
+          columns={COLUMNS.map((title) => ({ title }))}
           rows={7}
-          minWidth={720}
+          minWidth={TABLE_MIN_WIDTH}
         />
       ) : null}
       {touch.isSuccess ? (
         <RaisedPanel>
-          <Table.ScrollContainer minWidth={720}>
+          <Table.ScrollContainer minWidth={TABLE_MIN_WIDTH}>
             <Table aria-label="How often a person was needed">
               <Table.Thead>
                 <Table.Tr>

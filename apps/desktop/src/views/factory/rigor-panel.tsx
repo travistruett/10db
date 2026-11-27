@@ -13,6 +13,9 @@ import { useRigorFigures } from '../../daemon/rigor-figures-queries';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
 
+/** The table's scroll width, kept by its placeholder. */
+const TABLE_MIN_WIDTH = 900;
+
 const COLUMNS = [
   'Rigor',
   'Tasks done',
@@ -100,15 +103,16 @@ export function RigorPanel({ projectId }: { readonly projectId: ProjectId | null
         <PageLoading
           shape={PageLoadingShape.Table}
           label="Loading work per rigor"
-          headings={COLUMNS}
-          rows={4}
-          minWidth={900}
+          columns={COLUMNS.map((title) => ({ title }))}
+          // One row for each rigor, then the total.
+          rows={ALL_RIGORS.length + 1}
+          minWidth={TABLE_MIN_WIDTH}
         />
       ) : null}
       {figures.isSuccess ? (
         <>
           <RaisedPanel>
-            <Table.ScrollContainer minWidth={900}>
+            <Table.ScrollContainer minWidth={TABLE_MIN_WIDTH}>
               <Table aria-label="Work per task by rigor">
                 <Table.Thead>
                   <Table.Tr>

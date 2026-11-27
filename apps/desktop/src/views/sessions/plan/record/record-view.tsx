@@ -161,6 +161,27 @@ function RecordTabs({
   );
 }
 
+/**
+ * The record while it loads: its real tab list, with no counts yet, over a placeholder in the shape of
+ * the Plan panel it opens on.
+ */
+function RecordLoading({ tab }: { readonly tab: RecordTab }) {
+  return (
+    <Tabs value={tab} keepMounted={false}>
+      <Tabs.List>
+        {RECORD_TABS.map((t) => (
+          <Tabs.Tab key={t.tab} value={t.tab}>
+            {t.label}
+          </Tabs.Tab>
+        ))}
+      </Tabs.List>
+      <Tabs.Panel value={tab} pt="md">
+        <PageLoading shape={PageLoadingShape.List} rows={5} label="Loading the record" />
+      </Tabs.Panel>
+    </Tabs>
+  );
+}
+
 export function RecordView({
   shapeId,
   search,
@@ -247,12 +268,7 @@ export function RecordView({
           {record.error.message}
         </Alert>
       ) : record.data === undefined ? (
-        <PageLoading
-          shape={PageLoadingShape.Table}
-          label="Loading the record"
-          rows={5}
-          columns={4}
-        />
+        <RecordLoading tab={tab} />
       ) : (
         <RecordTabs
           shapeId={shapeId}
