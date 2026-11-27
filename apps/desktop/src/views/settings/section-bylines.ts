@@ -15,8 +15,7 @@ export const SECTION_BYLINES: Readonly<Partial<Record<SettingsSectionKey, string
   [SettingsSectionKey.Planning]: "How Plan treats this project's work before a lane starts it.",
   [SettingsSectionKey.Areas]: 'The parts of this project, and the files that are risky to change.',
   [SettingsSectionKey.Watchpoints]: 'Files whose changes you judge yourself.',
-  [SettingsSectionKey.RoutingRules]:
-    'Who answers each kind of question. The first route that matches wins.',
+  [SettingsSectionKey.RoutingRules]: 'Who answers each kind of question; the first match wins.',
   [SettingsSectionKey.Linear]: "Whether this project's work reports to Linear.",
   [SettingsSectionKey.Team]: "Who does this project's work. Use Global follows All Projects.",
   [SettingsSectionKey.Billing]:
@@ -36,13 +35,13 @@ export const SECTION_BYLINES: Readonly<Partial<Record<SettingsSectionKey, string
   [SettingsSectionKey.LanePermissions]:
     "How a lane's agent gets permission to run commands. Applies next session.",
   [SettingsSectionKey.Trust]: 'What agents may do unasked in every project. Applies next session.',
-  [SettingsSectionKey.AllWatchpoints]: 'Files whose changes you judge yourself, in every project.',
+  [SettingsSectionKey.AllWatchpoints]: 'Files whose changes you judge yourself.',
   [SettingsSectionKey.Integrations]:
     "Outside services 10db uses that aren't models. Models are in Accounts.",
   [SettingsSectionKey.People]:
     "Who answers your projects' questions, and how 10db reaches each one.",
   [SettingsSectionKey.RemoteAccess]: "Reach this Mac's 10db from your phone, privately.",
-  [SettingsSectionKey.Devices]: 'Phones and Macs paired with this Mac. Each has full access.',
+  [SettingsSectionKey.Devices]: 'Paired phones and Macs; each has full access.',
   [SettingsSectionKey.Updates]: 'How 10db and the agents it runs stay up to date.',
   [SettingsSectionKey.AgentSkill]:
     'Lets a Claude Code or Codex session in any repo work with 10db.',
