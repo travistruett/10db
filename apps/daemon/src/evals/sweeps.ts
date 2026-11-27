@@ -11,7 +11,6 @@ import {
   mintId,
   NotFoundError,
   type EvalCandidateDto,
-  type EvalLiveModels,
   type EvalLiveRunDto,
   type EvalManifestSuite,
   type EvalSuiteKey,
@@ -39,6 +38,7 @@ import type { Logger } from '../log';
 import { previewHash, refusalText, type EvalLiveRuns } from './live-runs';
 import { readEvalManifest } from './manifest-store';
 import { modelEnvValue } from './model-env';
+import { aliasesOf } from './model-aliases';
 import type { EvalsService } from './service';
 import { sweepNext } from './sweep-cost';
 
@@ -118,13 +118,6 @@ function dtoOf(row: EvalSweepRow): EvalSweepDto {
     startedAt: row.startedAt,
     endedAt: row.endedAt,
   };
-}
-
-/** The names a result may call a pick: the pick itself and, for a choice, the model it maps to. */
-function aliasesOf(models: EvalLiveModels | undefined, pick: string): string[] {
-  if (models === undefined || models.ids === 'openrouter') return [pick];
-  const choice = models.ids.choices.find((c) => c.name === pick);
-  return choice === undefined ? [pick] : [...new Set([choice.name, choice.model])];
 }
 
 /** The steps as a sweep leaves them: a step that was running is `stopped`, every one still waiting `skipped`. */

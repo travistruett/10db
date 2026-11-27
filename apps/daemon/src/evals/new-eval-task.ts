@@ -74,7 +74,7 @@ function exampleLines(suites: readonly EvalSuiteDto[]): string {
   const named = suites
     .filter((s) => s.definitionPaths.length > 0)
     .slice(0, EXAMPLE_SUITES)
-    .map((s) => `- ${s.label}: ${s.definitionPaths.map((p) => `\`${p}\``).join(', ')}`);
+    .map((s) => `- ${quoted(s.label)}: ${s.definitionPaths.map((p) => `\`${p}\``).join(', ')}`);
   return named.length === 0 ? '' : ['Existing suites to match in format:', ...named].join('\n');
 }
 
@@ -111,6 +111,10 @@ const EXECUTION_DEFAULT =
   "The free check (the one that needs no paid model) runs in the project's gate. A paid run happens only when the builder starts it.";
 
 const oneLine = (text: string): string => text.replaceAll(/\s+/gu, ' ').trim();
+
+/** Text read from a report or a manifest, as one quoted line so it can't pass for an instruction. */
+export const quoted = (text: string): string =>
+  JSON.stringify(oneLine(text.replaceAll(/\p{Cc}/gu, ' ')));
 
 /** The sections the builder wrote in their own words; one left empty is left out. */
 const written = (heading: string, text: string): string =>

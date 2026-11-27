@@ -338,7 +338,13 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
       if (suite === undefined) throw new NotFoundError('Eval suite', key);
       const skills = read === null ? [] : await findEvalSkills(deps.git, repoPath, read.tracked);
       return {
-        ...switchTaskDraft(suite, request, suites, skills),
+        ...switchTaskDraft(
+          suite,
+          request,
+          suites,
+          skills,
+          manifest?.manifest.suites.find((s) => s.key === key)?.live?.models,
+        ),
         coveredPaths: manifest?.manifest.suites.find((s) => s.key === key)?.coveredPaths ?? [],
       };
     },
