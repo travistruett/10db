@@ -34,10 +34,24 @@ export interface LogFile {
 export function openLogFile(path: string): LogFile {
   const sonic = pino.destination({ dest: path, mkdir: true, sync: false });
   let usable = true;
+  // Set by the first error. A stream whose open failed never emits `close` or `ready`, so `end()` would wait for
+  // good; close resolves at once instead.
+  let failed = false;
+  let opened = false;
+  sonic.once('ready', () => {
+    opened = true;
+  });
   let timer: { cancel(): void } | null = null;
   let closing: Promise<void> | null = null;
   sonic.on('error', (error: unknown) => {
     usable = false;
+    // pino's own listener emits the first error again; it is reported once.
+    if (failed) return;
+    failed = true;
+    // A stream that never opened would throw from pino's flush at exit; pino quiets a broken pipe the same way.
+    if (!opened) {
+      sonic.flushSync = () => undefined;
+    }
     process.stderr.write(`10db: the daemon log failed: ${String(error)}\n`);
   });
   const destination: DestinationStream = {
@@ -71,6 +85,10 @@ export function openLogFile(path: string): LogFile {
       timer?.cancel();
       usable = false;
       closing ??= new Promise<void>((resolve) => {
+        if (failed) {
+          resolve();
+          return;
+        }
         sonic.once('close', () => {
           resolve();
         });
