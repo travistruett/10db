@@ -1,42 +1,50 @@
 import {
   EvalAssessmentState,
   NewEvalOrigin,
-  evalGapPath,
   type EvalCallSiteCountDto,
   type EvalDriftDto,
-  type EvalGapDto,
   type EvalsDto,
   type ProjectViewDto,
 } from '@10db/contracts';
-import { Button, Code, Container, Group, Paper, Stack, Tabs, Text, Tooltip } from '@mantine/core';
-import { IconFlask, IconListCheck, IconPlus } from '@tabler/icons-react';
-import { DataTable } from 'mantine-datatable';
+import {
+  Box,
+  Button,
+  Code,
+  Container,
+  Group,
+  Paper,
+  SegmentedControl,
+  SimpleGrid,
+  Stack,
+  Text,
+  Tooltip,
+} from '@mantine/core';
+import { IconFlask, IconPlus } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
 import { useEvals } from '../../daemon/evals-queries';
 import { ContentWidth } from '../../shell/content-width';
-import { CountBadge } from '../../shell/count-badge';
 import { EmptyState } from '../../shell/empty-state';
 import { absoluteTime, fromNow, useNow } from '../../shell/relative';
 import { PageIntro } from '../../shell/page-intro';
-import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
-import { RaisedPanel } from '../../shell/raised-panel';
+import { StatTile } from '../../shell/stat-tile';
 import { TitleRow } from '../../shell/title-row';
 import { useSelectedProject } from '../../shell/selected-project';
 import { AssessAction, useEvalAssessment, type EvalAssessment } from './assess-action';
 import { ByModel } from './by-model';
-import { asBehavior, NewEvalModal, type NewEvalPrefill } from './new-eval-modal';
+import { EvalFilter, EvalsTable, evalRows, rowMatches, suiteFilter } from './evals-table';
+import { EvalsSkeleton } from './evals-skeleton';
+import { NewEvalModal, type NewEvalPrefill } from './new-eval-modal';
 import { SuiteDrawer } from './suite-drawer';
-import { SuiteTable } from './suite-table';
 
-const EvalsTab = { Suites: 'suites', Models: 'models', Gaps: 'gaps' } as const;
-type EvalsTab = (typeof EvalsTab)[keyof typeof EvalsTab];
-const isEvalsTab = (value: string | null): value is EvalsTab =>
-  value === EvalsTab.Suites || value === EvalsTab.Models || value === EvalsTab.Gaps;
+const EvalsPage = { Evals: 'evals', Models: 'models' } as const;
+type EvalsPage = (typeof EvalsPage)[keyof typeof EvalsPage];
+const isEvalsPage = (value: string): value is EvalsPage =>
+  value === EvalsPage.Evals || value === EvalsPage.Models;
 
 /** How many unlinked eval files show before the rest fold away. */
 const UNLINKED_SHOWN = 6;
 
-/** How the page reads: what is found and, in words, when it was last assessed. */
+/** When the evals were last assessed, in words, with the exact time and commit in a tooltip. */
 function Byline({ evals }: { readonly evals: EvalsDto }) {
   const now = useNow();
   const assessing = evals.assessment.state === EvalAssessmentState.Assessing;
@@ -46,34 +54,16 @@ function Byline({ evals }: { readonly evals: EvalsDto }) {
       ? 'Not assessed yet'
       : `Assessed ${fromNow(evals.assessedAt, now)}`;
   const commit = evals.commit === null ? null : evals.commit.slice(0, 7);
-  const withResults = evals.suites.filter((s) => s.latest !== null);
-  const failing = withResults.filter((s) => s.latest?.passed === false).length;
-  const found =
-    evals.suites.length === 0
-      ? evals.unlinked.length === 0
-        ? null
-        : `${counted(evals.unlinked.length, 'eval file', 'eval files')}, none linked to a suite yet`
-      : [
-          counted(evals.suites.length, 'suite', 'suites'),
-          `${String(withResults.length - failing)} passing`,
-          ...(failing > 0 ? [`${String(failing)} failing`] : []),
-          ...(withResults.length < evals.suites.length
-            ? [`${String(evals.suites.length - withResults.length)} with no results`]
-            : []),
-        ].join(' · ');
   return (
-    <>
-      {found === null ? null : `${found} · `}
-      <Tooltip
-        label={
-          evals.assessedAt === null
-            ? 'Suites are found by file names until the evals are assessed.'
-            : `${absoluteTime(evals.assessedAt)}${commit === null ? '' : ` · read at ${commit}`}`
-        }
-      >
-        <span>{when}</span>
-      </Tooltip>
-    </>
+    <Tooltip
+      label={
+        evals.assessedAt === null
+          ? 'Suites are found by file names until the evals are assessed.'
+          : `${absoluteTime(evals.assessedAt)}${commit === null ? '' : ` · read at ${commit}`}`
+      }
+    >
+      <span>{when}</span>
+    </Tooltip>
   );
 }
 
@@ -213,21 +203,6 @@ function PathList({ paths }: { readonly paths: readonly string[] }) {
   );
 }
 
-function Unlinked({ paths }: { readonly paths: readonly string[] }) {
-  if (paths.length === 0) return null;
-  return (
-    <Stack gap={6}>
-      <Text size="sm" fw={600} c="var(--mantine-color-bright)">
-        Eval Files Not Linked to a Suite
-      </Text>
-      <Text size="xs" c="dimmed">
-        Found by file name; no suite uses them yet.
-      </Text>
-      <PathList paths={paths} />
-    </Stack>
-  );
-}
-
 /** What each call pattern found at HEAD, so a pattern that is too broad shows. */
 function callSitesText(counts: readonly EvalCallSiteCountDto[]): string {
   return counts
@@ -236,117 +211,6 @@ function callSitesText(counts: readonly EvalCallSiteCountDto[]): string {
         `${c.label} ${c.count === null ? 'refused by git' : `${String(c.count)}${c.capped ? '+' : ''}`}`,
     )
     .join(' · ');
-}
-
-function Gaps({
-  gaps,
-  callSites,
-  project,
-  assessment,
-  said,
-  onNewEval,
-}: {
-  readonly gaps: readonly EvalGapDto[] | null;
-  readonly callSites: readonly EvalCallSiteCountDto[];
-  readonly project: ProjectViewDto;
-  readonly assessment: EvalAssessment;
-  /** Why 10db can't assess or the last assessment changed nothing, when it did not. */
-  readonly said: string | null;
-  readonly onNewEval: (prefill: NewEvalPrefill) => void;
-}) {
-  if (gaps === null)
-    return (
-      <EmptyState
-        icon={IconListCheck}
-        title={assessment.busy ? 'Assessing your evals…' : 'Not assessed yet'}
-        extra={
-          assessment.busy ? undefined : <AssessAction assessment={assessment} project={project} />
-        }
-      >
-        {assessment.busy
-          ? 'Reading the code that calls a model to find what has no eval.'
-          : (said ?? 'Assess Now to find the LLM work that has no eval.')}
-      </EmptyState>
-    );
-  if (gaps.length === 0)
-    return (
-      <EmptyState icon={IconListCheck} title="Every LLM task has an eval">
-        Every model call found is covered by a suite.
-      </EmptyState>
-    );
-  return (
-    <Stack gap={6}>
-      {callSites.length === 0 ? null : (
-        <Text size="xs" c="dimmed">
-          {`Sites found at HEAD by call pattern: ${callSitesText(callSites)}`}
-        </Text>
-      )}
-      <RaisedPanel>
-        <DataTable<EvalGapDto>
-          aria-label="LLM work with no eval"
-          records={[...gaps]}
-          idAccessor={(gap) => `${gap.where}|${gap.label}`}
-          backgroundColor="transparent"
-          verticalSpacing="sm"
-          horizontalSpacing="md"
-          columns={[
-            {
-              accessor: 'label',
-              title: 'LLM Work',
-              render: (gap) => (
-                <Text size="sm" fw={500} c="var(--mantine-color-bright)">
-                  {gap.label}
-                </Text>
-              ),
-            },
-            {
-              accessor: 'where',
-              title: 'Where',
-              render: (gap) => (
-                <Stack gap={2} align="flex-start">
-                  <Code>{gap.where}</Code>
-                  <Text size="xs" c="dimmed">
-                    {gap.source === 'found' ? 'found at HEAD' : 'assessed'}
-                  </Text>
-                </Stack>
-              ),
-            },
-            {
-              accessor: 'why',
-              title: 'Why It Counts',
-              render: (gap) => (
-                <Text size="sm" c="dimmed">
-                  {gap.why}
-                </Text>
-              ),
-            },
-            {
-              accessor: 'newEval',
-              title: '',
-              textAlign: 'right',
-              render: (gap) => (
-                <Button
-                  size="compact-xs"
-                  variant="default"
-                  aria-label={`New Eval for ${gap.label}`}
-                  onClick={() => {
-                    onNewEval({
-                      behavior: asBehavior(gap.label),
-                      evidence: gap.why,
-                      where: [evalGapPath(gap.where)],
-                      origin: NewEvalOrigin.Gap,
-                    });
-                  }}
-                >
-                  New Eval
-                </Button>
-              ),
-            },
-          ]}
-        />
-      </RaisedPanel>
-    </Stack>
-  );
 }
 
 /** A project with no eval file and no result: write one, or have 10db look for the ones it already has. */
@@ -380,13 +244,68 @@ function NoEvals({
   );
 }
 
+/** A small filled dot in a tile's color; decorative, the label beside it carries the meaning. */
+function TileDot({ color }: { readonly color: string }) {
+  return (
+    <Box
+      component="span"
+      aria-hidden
+      w={8}
+      h={8}
+      style={{
+        display: 'inline-block',
+        flex: 'none',
+        borderRadius: '50%',
+        background: `var(--mantine-color-${color}-filled)`,
+      }}
+    />
+  );
+}
+
+const TILES = [
+  { filter: EvalFilter.Passing, color: 'green', label: 'Passing' },
+  { filter: EvalFilter.Failing, color: 'red', label: 'Failing' },
+  { filter: EvalFilter.NotRun, color: 'gray', label: 'Not Run Yet' },
+  { filter: EvalFilter.NoEval, color: 'yellow', label: 'No Eval' },
+] as const;
+
+/** The four counts, each a toggle that narrows the table to what it counts; the active one clears itself. */
+function EvalTiles({
+  counts,
+  filter,
+  onFilter,
+}: {
+  readonly counts: Readonly<Record<EvalFilter, number>>;
+  readonly filter: EvalFilter | null;
+  readonly onFilter: (filter: EvalFilter | null) => void;
+}) {
+  return (
+    <SimpleGrid component="section" aria-label="Evals at a glance" cols={4} spacing={12}>
+      {TILES.map((tile) => (
+        <StatTile
+          key={tile.filter}
+          n={counts[tile.filter]}
+          mark={<TileDot color={tile.color} />}
+          label={tile.label}
+          color={tile.color}
+          selected={filter === tile.filter}
+          onToggle={() => {
+            onFilter(filter === tile.filter ? null : tile.filter);
+          }}
+        />
+      ))}
+    </SimpleGrid>
+  );
+}
+
 function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
   const evals = useEvals(project.id);
   const assessment = useEvalAssessment(
     evals.data?.assessment ?? { state: EvalAssessmentState.Idle, reason: null },
     project.id,
   );
-  const [tab, setTab] = useState<EvalsTab>(EvalsTab.Suites);
+  const [page, setPage] = useState<EvalsPage>(EvalsPage.Evals);
+  const [filter, setFilter] = useState<EvalFilter | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [newEval, setNewEval] = useState<NewEvalPrefill | null>(null);
   const header = (description?: ReactNode) => (
@@ -395,43 +314,32 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
         title="Evals"
         meta={project.name}
         actions={
-          <Button
-            size="xs"
-            leftSection={<IconPlus size={14} stroke={1.5} />}
-            onClick={() => {
-              setNewEval({ origin: NewEvalOrigin.Page });
-            }}
-          >
-            New Eval
-          </Button>
+          <>
+            <SegmentedControl
+              size="xs"
+              aria-label="Evals view"
+              value={page}
+              data={[
+                { value: EvalsPage.Evals, label: 'Evals' },
+                { value: EvalsPage.Models, label: 'Models' },
+              ]}
+              onChange={(next) => {
+                if (isEvalsPage(next)) setPage(next);
+              }}
+            />
+            <Button
+              size="xs"
+              leftSection={<IconPlus size={14} stroke={1.5} />}
+              onClick={() => {
+                setNewEval({ origin: NewEvalOrigin.Page });
+              }}
+            >
+              New Eval
+            </Button>
+          </>
         }
       />
-      <PageIntro
-        {...(description === undefined ? {} : { description })}
-        toolbar={
-          <Tabs
-            value={tab}
-            onChange={(next) => {
-              if (isEvalsTab(next)) setTab(next);
-            }}
-          >
-            <Tabs.List>
-              <Tabs.Tab value={EvalsTab.Suites}>Suites</Tabs.Tab>
-              <Tabs.Tab value={EvalsTab.Models}>By Model</Tabs.Tab>
-              <Tabs.Tab
-                value={EvalsTab.Gaps}
-                rightSection={
-                  evals.data?.gaps && evals.data.gaps.length > 0 ? (
-                    <CountBadge count={evals.data.gaps.length} phrase="with no eval" />
-                  ) : undefined
-                }
-              >
-                No Eval
-              </Tabs.Tab>
-            </Tabs.List>
-          </Tabs>
-        }
-      />
+      <PageIntro {...(description === undefined ? {} : { description })} />
     </>
   );
   const newEvalModal = (
@@ -452,24 +360,39 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
             {evals.error.message}
           </Text>
         ) : (
-          <PageLoading shape={PageLoadingShape.List} label="Loading the suites" />
+          <EvalsSkeleton />
         )}
         {newEvalModal}
       </>
     );
   const data = evals.data;
+  const gaps = data.gaps ?? [];
+  const rows = evalRows(data.suites, data.gaps, data.unlinked);
+  const counts: Record<EvalFilter, number> = {
+    [EvalFilter.Passing]: 0,
+    [EvalFilter.Failing]: 0,
+    [EvalFilter.NotRun]: 0,
+    [EvalFilter.NoEval]: gaps.length + data.unlinked.length,
+  };
+  for (const suite of data.suites) counts[suiteFilter(suite)] += 1;
+  const nothing = rows.length === 0;
   return (
     <>
       {header(<Byline evals={data} />)}
-      {tab === EvalsTab.Suites ? (
+      {page === EvalsPage.Models ? (
+        <ByModel projectId={project.id} />
+      ) : (
         <Stack gap="md">
-          {data.suites.length === 0 && data.unlinked.length === 0 ? null : (
-            <AssessmentNotice evals={data} assessment={assessment} project={project} />
+          {nothing ? null : (
+            <>
+              <EvalTiles counts={counts} filter={filter} onFilter={setFilter} />
+              <AssessmentNotice evals={data} assessment={assessment} project={project} />
+            </>
           )}
           {data.drift === null ? null : (
             <SinceAssessment drift={data.drift} assessment={assessment} project={project} />
           )}
-          {data.suites.length === 0 && data.unlinked.length === 0 ? (
+          {nothing ? (
             <NoEvals
               evals={data}
               assessment={assessment}
@@ -478,28 +401,27 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
                 setNewEval({ origin: NewEvalOrigin.Page });
               }}
             />
-          ) : data.suites.length === 0 ? null : (
-            <SuiteTable
-              suites={data.suites}
-              openKey={open}
-              onOpen={(suite) => {
-                setOpen(suite.key);
-              }}
-            />
+          ) : (
+            <Stack gap={6}>
+              {filter === EvalFilter.NoEval && data.callSites.length > 0 ? (
+                <Text size="xs" c="dimmed">
+                  {`Sites found at HEAD by call pattern: ${callSitesText(data.callSites)}`}
+                </Text>
+              ) : null}
+              <EvalsTable
+                rows={rows.filter((row) => rowMatches(row, filter))}
+                filter={filter}
+                openKey={open}
+                project={project}
+                assessment={assessment}
+                onOpen={(suite) => {
+                  setOpen(suite.key);
+                }}
+                onNewEval={setNewEval}
+              />
+            </Stack>
           )}
-          <Unlinked paths={data.unlinked} />
         </Stack>
-      ) : tab === EvalsTab.Models ? (
-        <ByModel projectId={project.id} />
-      ) : (
-        <Gaps
-          gaps={data.gaps}
-          callSites={data.callSites}
-          project={project}
-          assessment={assessment}
-          said={assessment.failure ?? (assessment.unavailable ? data.assessment.reason : null)}
-          onNewEval={setNewEval}
-        />
       )}
       {newEvalModal}
       <SuiteDrawer
