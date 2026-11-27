@@ -332,9 +332,12 @@ export function transitionWorkstream(
   checkFence(row, opts.fence);
   if (!canTransition(row.state, opts.to))
     throw new ConflictError(`Cannot move workstream from ${row.state} to ${opts.to}`);
+  // A run that starts (first, or again after an answer, a review or a pause) begins work now, so its
+  // silence counts from here, not from its last activity before it waited.
+  const started = opts.to === WorkstreamState.Starting ? { lastActivityAt: ctx.now } : {};
   ctx.tx
     .update(schema.workstreams)
-    .set({ ...opts.patch, state: opts.to, updatedAt: ctx.now })
+    .set({ ...started, ...opts.patch, state: opts.to, updatedAt: ctx.now })
     .where(eq(schema.workstreams.id, id))
     .run();
   ctx.emit({

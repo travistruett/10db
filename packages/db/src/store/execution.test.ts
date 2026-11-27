@@ -76,6 +76,22 @@ describe('workstreams', () => {
     ]);
   });
 
+  it('counts a run that starts again as active from then, not from before its wait', () => {
+    // A run resumed by an answer got a Stuck card at once: its last activity predated the wait.
+    const { ws } = seedWorkstream();
+    store.write((ctx) => {
+      transitionWorkstream(ctx, ws.id, { to: S.Starting, fence: null });
+      transitionWorkstream(ctx, ws.id, { to: S.Running, fence: null });
+      return transitionWorkstream(ctx, ws.id, { to: S.WaitingHuman, fence: null });
+    });
+    nowMs += 30 * 60_000;
+    store.write((ctx) => {
+      transitionWorkstream(ctx, ws.id, { to: S.Queued, fence: null, reason: 'answer arrived' });
+      return transitionWorkstream(ctx, ws.id, { to: S.Starting, fence: null });
+    });
+    expect(getWorkstreamRow(store.db, ws.id).lastActivityAt).toBe(new Date(nowMs).toISOString());
+  });
+
   it('rejects a forbidden transition', () => {
     const { ws } = seedWorkstream();
     expect(() =>
