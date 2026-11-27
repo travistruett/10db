@@ -18,6 +18,19 @@ export type ConnectionResolver = () => Promise<DaemonConnection>;
 const DaemonConnectionSchema = z.object({ url: z.url(), token: z.string().min(1) });
 
 const DEV_DAEMON_URL = 'http://127.0.0.1:4317';
+/** Where `pnpm dev:factory`'s Vite answers the factory daemon's connection (`scripts/factory-vite.ts`). */
+const FACTORY_CONNECTION_PATH = '/__tendb/factory-connection';
+
+/**
+ * The factory daemon's address and token, read fresh by the dev server on every connect, so a restarted 10db is
+ * followed without restarting Vite. A refusal throws, and the provider asks again on its next try.
+ */
+async function factoryConnection(): Promise<DaemonConnection> {
+  const response = await fetch(FACTORY_CONNECTION_PATH, { cache: 'no-store' });
+  if (!response.ok)
+    throw new Error(`The dev server has no 10db daemon to offer (${String(response.status)})`);
+  return DaemonConnectionSchema.parse(await response.json());
+}
 /** Where a dev UI tab keeps the connection Open in Browser handed it, for its reloads. */
 const HANDED_KEY = 'tendb.connection';
 
@@ -54,7 +67,8 @@ function keptHandOff(): DaemonConnection | null {
 
 /**
  * In the app, the shell reads the port and token the running daemon announced. In a browser
- * (Vite dev, Playwright), they come from VITE_DAEMON_URL and VITE_DAEMON_TOKEN.
+ * (Vite dev, Playwright), they come from the dev server under `pnpm dev:factory`, or from
+ * VITE_DAEMON_URL and VITE_DAEMON_TOKEN.
  */
 export const resolveConnection: ConnectionResolver = async () => {
   if (isTauri()) return DaemonConnectionSchema.parse(await invoke('daemon_connection'));
@@ -63,6 +77,7 @@ export const resolveConnection: ConnectionResolver = async () => {
   // A fresh hand-off first, then the dev server's own token, then what this tab was handed before.
   const handed = takeHandOff();
   if (handed !== null) return handed;
+  if (import.meta.env.VITE_DAEMON_FACTORY === '1') return factoryConnection();
   const token = import.meta.env.VITE_DAEMON_TOKEN;
   if (token) return { url: import.meta.env.VITE_DAEMON_URL ?? DEV_DAEMON_URL, token };
   const kept = keptHandOff();

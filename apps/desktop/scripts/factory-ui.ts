@@ -26,9 +26,9 @@ try {
 }
 
 console.log(
-  `10db dev UI over the factory's daemon at ${connection.url}. Open ${VITE_ORIGIN}. It acts on your real data; when 10db restarts, its token changes, so run this again.`,
+  `10db dev UI over the factory's daemon at ${connection.url}. Open ${VITE_ORIGIN}. It acts on your real data, and follows 10db's restarts on its own.`,
 );
-const command = factoryViteCommand(connection);
+const command = factoryViteCommand(factoryDataDir);
 const vite = spawn(command.file, [...command.args], {
   cwd: desktop,
   stdio: 'inherit',
