@@ -40,6 +40,18 @@ function sharesWorktree(db: DbReader, row: WorkstreamRow): boolean {
 }
 
 /**
+ * Whether the run works in a batch worktree, off the builder's checkout and its lane branch, that
+ * another run of its batch commits on too: its branch's history since the base is not all its own.
+ */
+export function sharesBatchWorktree(db: DbReader, row: WorkstreamRow, checkout: string): boolean {
+  return (
+    laneBranchOf(row) === null &&
+    checkout !== getProject(db, row.projectId).repoPath &&
+    sharesWorktree(db, row)
+  );
+}
+
+/**
  * The run's commits from `base` to `head`, each range starting at its first commit's parent. The
  * builder's own checkout is shared: the builder and other tools commit on its branch too, so only the
  * commits the run's sessions made through the commit tool are the run's, and a commit of anyone
@@ -58,7 +70,10 @@ export async function runCommits(
   const lane = laneBranchOf(row);
   if (lane !== null) return laneCommits(deps.git, checkout, lane);
   const all = await deps.git.commitsSince(checkout, base, head);
-  if (checkout !== getProject(deps.db, row.projectId).repoPath && !sharesWorktree(deps.db, row))
+  if (
+    checkout !== getProject(deps.db, row.projectId).repoPath &&
+    !sharesBatchWorktree(deps.db, row, checkout)
+  )
     return { commits: all, ranges: [{ base, head }] };
   const own = committedByRun(deps.db, row);
   const ranges: CommitRange[] = [];

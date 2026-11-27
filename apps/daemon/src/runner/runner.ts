@@ -194,6 +194,7 @@ import {
   briefedFromHandoff,
   buildContextPack,
   buildSessionPrompt,
+  changeUnderReviewBrief,
   compactionReinjection,
   contextPackedEvent,
   denialsForLane,
@@ -231,6 +232,7 @@ import {
   checkoutOf,
   diffOfRanges,
   runCommits,
+  sharesBatchWorktree,
   fileFlakyTests,
   flakeNote,
   gateNote,
@@ -3559,6 +3561,22 @@ export function createRunner(opts: RunnerOptions): Runner {
       (step.role === StepRole.Review || step.role === StepRole.Qa) && reading !== null
         ? watchpointReviewBrief(reading.detail, agentNotesOf(db, id))
         : null;
+    // A Review or QA step in a copy its batch's other runs commit on is shown only this run's commits.
+    let changeUnderReview: string | null = null;
+    if (
+      (step.role === StepRole.Review || step.role === StepRole.Qa) &&
+      sharesBatchWorktree(db, row, checkout)
+    ) {
+      try {
+        changeUnderReview = changeUnderReviewBrief(await ownWork(row, checkout, baseHead));
+      } catch (err) {
+        opts.logger.warn(
+          { workstreamId: id, err },
+          "could not read the run's commits for its review brief",
+        );
+        changeUnderReview = changeUnderReviewBrief(null);
+      }
+    }
     const prompt = buildSessionPrompt({
       provider,
       linearIssue: linearIssue === null ? null : snapshotSection(linearIssue),
@@ -3629,6 +3647,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       acceptance,
       watchpoints: watchpointBuild,
       watchpointReview,
+      changeUnderReview,
       revisedBy: reviser
         ? {
             role: reviser.role,

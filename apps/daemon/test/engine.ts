@@ -134,7 +134,13 @@ import {
 } from '../src/runner';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { createGateRunner } from '../src/verify';
-import { retryWorkstream, seedTeam, startTaskWithPlan } from '../src/team';
+import {
+  insertPlannedWorkstream,
+  planForStart,
+  retryWorkstream,
+  seedTeam,
+  startTaskWithPlan,
+} from '../src/team';
 import { measureForTests } from './catalogue';
 import { seedProfiles } from './seed-profiles';
 import { createMemoryKeychain, createTempRepo, tempDir } from './fixtures';
@@ -741,7 +747,9 @@ export async function createTestEngine(
         }),
       );
       const workstream = plan
-        ? startTaskWithPlan(state, task.id)
+        ? state.write((ctx) =>
+            insertPlannedWorkstream(ctx, task.id, planForStart(ctx.tx, task.id), batchId ?? null),
+          )
         : state.write((ctx) =>
             insertWorkstream(ctx, task.id, {
               first: { model: 'claude-sonnet-5-5', effort: 'medium' },

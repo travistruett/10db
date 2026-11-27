@@ -21,6 +21,8 @@ import {
   InboxAnswerRefused,
   InboxKind,
   LEFT_OUT_NOTICE_KEY,
+  McpToolName,
+  McpToolOutputs,
   mintId,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
   MIGRATIONS_UNCARRIED_NOTICE_KEY,
@@ -70,6 +72,7 @@ import {
   listSessions,
   listSkipsForWorkstream,
   listTaskThread,
+  listToolOpResults,
   listWorkstreams,
   patchAccount,
   replaceAccountModels,
@@ -2425,6 +2428,8 @@ describe('flows', () => {
     expect(ws(workstream.id).state).toBe('DONE');
     expect(ws(workstream.id).steps.map((s) => s.status)).toEqual(['done', 'done']);
     expect(engine.adapter.prompts[1]?.prompt).toContain('Your step: 2 of 2, review, as Reviewer.');
+    // A task whose branch is its own is reviewed on its diff, with no commit list.
+    expect(engine.adapter.prompts[1]?.prompt).not.toContain('other tasks also commit to');
     expect(
       listEvidence(engine.store.db, workstream.id).filter((e) => e.kind === 'gate'),
     ).toHaveLength(1);
@@ -3903,6 +3908,67 @@ describe('a worktree batch two tasks share', () => {
     );
     expect(cards).toEqual([]);
     expect(ws(beta.id).state).toBe('DONE');
+  });
+
+  it("a task's review is shown only its own commits, with a sibling's out of scope", async () => {
+    const complete = { opId: 'op-wt-rev-b2', summary: 'Looks right.', verdict: 'approve' };
+    const book: FakeScriptBook = {
+      // Beta's first gate fails, so its run starts before Alpha's commit and reviews after it.
+      Beta: [
+        [turn],
+        [write('src/ui/beta.txt'), commit('op-wt-rev-b1', ['src/ui/beta.txt']), turn],
+        [{ do: 'mcp', tool: 'complete_step', args: complete }, turn],
+      ],
+      Alpha: [[write('src/api/alpha.txt'), commit('op-wt-rev-a1', ['src/api/alpha.txt']), turn]],
+    };
+    engine = await createTestEngine(book, {
+      workspaceMode: 'worktree',
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      gateCommand: 'test -f src/ui/beta.txt -o -f src/api/alpha.txt',
+    });
+    worktrees = tempDir('runner-shared-review');
+    const path = join(worktrees.path, 'wt');
+    execFileSync('git', ['-C', engine.repoPath, 'worktree', 'add', '-q', '-b', 'batch/two', path], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    const batch = engine.state.write((ctx) => {
+      const inserted = insertBatch(ctx, {
+        projectId: engine.project.id,
+        title: 'Two tasks',
+        baseBranch: 'main',
+        worktreePath: realpathSync(path),
+      });
+      return transitionBatch(ctx, inserted.id, {
+        to: 'OPEN',
+        patch: { branch: 'batch/two', baseSha: 'x' },
+      });
+    });
+    const beta = engine.addTask('Beta', ['ui'], [], { flow: 'standard' }, batch.id).workstream;
+    engine.launch(beta.id);
+    await engine.runner.idle();
+    expect(ws(beta.id).state).toBe('QUEUED');
+    const alpha = engine.addTask('Alpha', ['api'], [], undefined, batch.id).workstream;
+    engine.launch(alpha.id);
+    await engine.runner.idle();
+    for (let i = 0; i < 3 && ws(beta.id).state !== 'DONE'; i += 1) {
+      engine.launch(beta.id);
+      await engine.runner.idle();
+    }
+    expect(ws(beta.id).state).toBe('DONE');
+    const shaOf = (id: WorkstreamId): string => {
+      const [result] = listToolOpResults(engine.store.db, id, McpToolName.Commit);
+      return McpToolOutputs.commit.parse(result).sha;
+    };
+    const own = shaOf(beta.id);
+    const sibling = shaOf(alpha.id);
+    const review = engine.adapter.prompts.find((p) =>
+      p.prompt.includes('Your step: 2 of 2, review'),
+    )?.prompt;
+    expect(review).toContain(own.slice(0, 12));
+    expect(review).toContain('out of scope');
+    expect(review).not.toContain(sibling.slice(0, 12));
   });
 
   it('a run is asked once about a watchpoint the builder answered, however many steps read it', async () => {
