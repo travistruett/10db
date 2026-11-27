@@ -316,6 +316,17 @@ const macOnly = {
 } as const;
 const OPEN_PATHS = new Set(['/health', '/mcp']);
 /** A page of a conversation's items starts after this `seq`. */
+const EvalLiveModelsWire = z.strictObject({ models: z.string().optional() });
+// The picked models, comma-separated; each is checked against the suite when it is used.
+const EvalLiveModelsQuery = z.strictObject({
+  models: z
+    .string()
+    .max(1100)
+    .transform((v) => (v === '' ? [] : v.split(',')))
+    .pipe(z.array(z.string().min(1).max(100)).max(10))
+    .optional(),
+});
+
 const ConversationItemsQuery = z.object({
   afterSeq: z.coerce.number().int().nonnegative().optional(),
 });
@@ -1800,25 +1811,19 @@ export function createApp(deps: ApiDeps) {
     )
     .get(
       '/projects/:projectId/evals/:suiteKey/live',
-      validator('query', (value) =>
-        z
-          .strictObject({
-            // The picked models, comma-separated; each is checked against the suite when it is used.
-            models: z
-              .string()
-              .max(1100)
-              .transform((v) => (v === '' ? [] : v.split(',')))
-              .pipe(z.array(z.string().min(1).max(100)).max(10))
-              .optional(),
-          })
-          .parse(value),
-      ),
+      // The validated query keeps `models` as the wire string, so the typed client's input is that string;
+      // the handler reads the picks from the same schema's output.
+      validator('query', (value): { models?: string } => {
+        const { models } = EvalLiveModelsWire.parse(value);
+        EvalLiveModelsQuery.parse({ models });
+        return models === undefined ? {} : { models };
+      }),
       async (c) =>
         c.json(
           await deps.services.evalLivePreview(
             ProjectId.parse(c.req.param('projectId')),
             EvalSuiteKey.parse(c.req.param('suiteKey')),
-            c.req.valid('query').models ?? [],
+            EvalLiveModelsQuery.parse(c.req.valid('query')).models ?? [],
           ),
         ),
     )
