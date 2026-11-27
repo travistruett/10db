@@ -323,8 +323,9 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
 
     // A page coming back opens the stream at once rather than waiting out a retry's backoff, and one away for a while
     // replaces its socket: a socket that went dead while a phone slept says nothing until TCP gives up.
-    function onVisibility(): void {
-      if (document.visibilityState === 'hidden') {
+    function onVisibility(event: Event): void {
+      // iOS may suspend a page with only `pagehide`, and a page restored from the back-forward cache says `pageshow`.
+      if (event.type === 'pagehide' || document.visibilityState === 'hidden') {
         hiddenAt = Date.now();
         return;
       }
@@ -345,6 +346,8 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       void open();
     }
     document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', onVisibility);
+    window.addEventListener('pageshow', onVisibility);
 
     async function open(): Promise<void> {
       let after = lastSeq.current;
@@ -399,6 +402,8 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       stopped = true;
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', onVisibility);
+      window.removeEventListener('pageshow', onVisibility);
       const ws = socket;
       socket = null;
       ws?.close();

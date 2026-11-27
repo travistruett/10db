@@ -2,8 +2,8 @@ import { createDaemonClient } from '../daemon/client';
 import { resolveConnection, type ConnectionResolver } from '../daemon/connection';
 import { forgetDevice, isForgetting, readDevice } from './device-session';
 
-/** How long the connect's `/events/head` lookup may take; below the provider's whole-attempt deadline. */
-const HEAD_TIMEOUT_MS = 5_000;
+/** How long the connect's `/events/head` lookup may take: with the health check's 5 s it fits the 8 s attempt. */
+const HEAD_TIMEOUT_MS = 3_000;
 
 export class NotPairedError extends Error {
   override readonly name = 'NotPairedError';
