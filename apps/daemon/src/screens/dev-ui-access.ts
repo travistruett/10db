@@ -103,6 +103,8 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/system': 'A system check runs commands on the machine.',
   '/github': 'A GitHub status check runs gh on the machine.',
   '/workstreams/:id/changes': "A lane's changes are read by running git in its copy.",
+  '/projects/:projectId/eval-suggest':
+    "Only the 10db app's New Eval wizard asks whether the project has a model to ask.",
   '/projects/:projectId/eval-markers':
     "A task's suites are read from result files in the checkout, which a lane's pass may be writing.",
   '/tasks/:taskId/eval-coverage':

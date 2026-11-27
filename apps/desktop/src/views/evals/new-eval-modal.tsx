@@ -8,6 +8,8 @@ import { useProjects } from '../../daemon/queries';
 import { FormModal } from '../../shell/form-modal';
 import {
   asBehavior,
+  asGoal,
+  firstProblem,
   initialDraft,
   stepProblem,
   toRequest,
@@ -24,7 +26,7 @@ export { asBehavior, type NewEvalPrefill };
 export function prefillFromPlanEval(plan: PlanEval): NewEvalPrefill {
   return {
     behavior: asBehavior(plan.objective),
-    goal: plan.objective,
+    goal: asGoal(plan.objective),
     ...(plan.decision === undefined ? {} : { decision: plan.decision }),
     ...(plan.oracle === undefined ? {} : { oracle: plan.oracle }),
     coverageAndBar: plan.baseline.join('\n'),
@@ -66,7 +68,12 @@ function Wizard({
   const change = (patch: Partial<EvalDraft>): void => {
     setDraft((now) => ({ ...now, ...patch }));
   };
-  const problem = stepProblem(step, draft);
+  const earlier = firstProblem(draft);
+  // On Review every step is checked again, since an earlier one may have been changed since it passed.
+  const problem =
+    step === LAST_STEP && earlier !== null
+      ? `Back on ${STEPS[earlier.step][0]}: ${earlier.problem}`
+      : stepProblem(step, draft);
   const goTo = (next: WizardStep): void => {
     setStep(next);
     setReached((now) => (next > now ? next : now));
@@ -91,7 +98,7 @@ function Wizard({
       case WizardStep.Models:
         return <ModelsStep {...stepProps} models={listed} />;
       case WizardStep.Review:
-        return <ReviewStep draft={draft} models={modelRows} />;
+        return <ReviewStep draft={draft} prefill={prefill} models={modelRows} />;
     }
   })();
   const last = step === LAST_STEP;
@@ -118,6 +125,7 @@ function Wizard({
             <span>
               {last ? (
                 <Button
+                  disabled={problem !== null}
                   loading={file.isPending}
                   onClick={() => {
                     file.mutate(toRequest(draft, prefill), { onSuccess: onFiled });
@@ -147,7 +155,9 @@ function Wizard({
         allowNextStepsSelect={false}
         onStepClick={(next) => {
           const target = STEPS[next]?.[1];
-          if (target !== undefined && target <= reached) setStep(target);
+          // A step opens only when every step before it still holds.
+          const open = STEPS.every(([, s]) => s >= (target ?? 0) || stepProblem(s, draft) === null);
+          if (target !== undefined && target <= reached && open) setStep(target);
         }}
         mb="md"
       >

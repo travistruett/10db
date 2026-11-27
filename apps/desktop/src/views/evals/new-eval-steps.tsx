@@ -21,6 +21,7 @@ import {
   Text,
   TextInput,
   Textarea,
+  Tooltip,
   type ComboboxItem,
 } from '@mantine/core';
 import { IconX } from '@tabler/icons-react';
@@ -35,6 +36,7 @@ import {
   GOAL_MAX,
   MIN_CASES,
   cleanModelId,
+  type NewEvalPrefill,
   markedCases,
   type EvalDraft,
 } from './new-eval-draft';
@@ -65,8 +67,11 @@ function Proposal({
   children,
   onUse,
   onDismiss,
+  blocked = null,
 }: {
   readonly children: ReactNode;
+  /** Why Use This is shut, when it is. */
+  readonly blocked?: string | null;
   readonly onUse: () => void;
   readonly onDismiss: () => void;
 }) {
@@ -81,9 +86,13 @@ function Proposal({
       <Stack gap="xs">
         {children}
         <Group gap="xs">
-          <Button size="compact-xs" onClick={onUse}>
-            Use This
-          </Button>
+          <Tooltip label={blocked} disabled={blocked === null} withArrow>
+            <span>
+              <Button size="compact-xs" disabled={blocked !== null} onClick={onUse}>
+                Use This
+              </Button>
+            </span>
+          </Tooltip>
           <Button size="compact-xs" variant="default" onClick={onDismiss}>
             Dismiss
           </Button>
@@ -263,7 +272,7 @@ export function ExamplesStep({
   change,
   suggestions,
 }: StepProps & { readonly suggestions: Suggestions }) {
-  const [proposed, setProposed] = useState<readonly EvalSuggestedCase[]>([]);
+  const [proposed, setProposed] = useState<readonly { key: number; row: EvalSuggestedCase }[]>([]);
   const addRow = (input = ''): void => {
     change({ cases: [...draft.cases, { id: newCaseId(), input, verdict: null, reason: '' }] });
   };
@@ -275,7 +284,8 @@ export function ExamplesStep({
         .filter((c) => c.input.trim() !== '')
         .map((c) => ({ input: c.input, verdict: c.verdict, reason: c.reason })),
     });
-    if (answer?.kind === 'cases') setProposed(answer.cases);
+    if (answer?.kind === 'cases')
+      setProposed(answer.cases.map((row) => ({ key: newCaseId(), row })));
   };
   const unmarked = draft.cases.filter((c) => c.input.trim() !== '' && c.verdict === null).length;
   return (
@@ -326,19 +336,24 @@ export function ExamplesStep({
       ) : null}
       {proposed.map((p) => (
         <Proposal
-          key={p.input}
+          key={p.key}
+          blocked={
+            draft.cases.length >= MAX_NEW_EVAL_CASES
+              ? `The list is full at ${String(MAX_NEW_EVAL_CASES)} examples.`
+              : null
+          }
           onUse={() => {
-            addRow(p.input);
+            addRow(p.row.input);
             setProposed((now) => now.filter((x) => x !== p));
           }}
           onDismiss={() => {
             setProposed((now) => now.filter((x) => x !== p));
           }}
         >
-          <Text size="sm">{p.input}</Text>
-          {p.reason === '' ? null : (
+          <Text size="sm">{p.row.input}</Text>
+          {p.row.reason === '' ? null : (
             <Text size="xs" c="dimmed">
-              {p.reason}
+              {p.row.reason}
             </Text>
           )}
         </Proposal>
@@ -576,6 +591,7 @@ export function ModelsStep({
         placeholder="No cap"
         prefix="$"
         min={0}
+        max={10_000}
         decimalScale={2}
         allowNegative={false}
         hideControls
@@ -619,9 +635,11 @@ function Line({ label, children }: { readonly label: string; readonly children: 
 
 export function ReviewStep({
   draft,
+  prefill,
   models,
 }: {
   readonly draft: EvalDraft;
+  readonly prefill: NewEvalPrefill;
   readonly models: readonly ModelRowDto[];
 }) {
   const marked = markedCases(draft);
@@ -633,6 +651,20 @@ export function ReviewStep({
       <Why>Nothing runs yet. This is the brief the agent gets; go back to change any of it.</Why>
       <Line label="Task">{`Write the eval for ${draft.name.trim()}`}</Line>
       <Line label="What it should do well">{draft.goal.trim()}</Line>
+      {(
+        [
+          ['Decision', prefill.decision],
+          ['Why we are asking', prefill.evidence],
+          ['Expected answer', prefill.oracle],
+          ['Baseline and bar', prefill.coverageAndBar],
+        ] as const
+      ).map(([label, text]) =>
+        text === undefined || text.trim() === '' ? null : (
+          <Line key={label} label={label}>
+            {text}
+          </Line>
+        ),
+      )}
       <Line label="Examples">
         {`${String(marked.length)} real examples: ${String(good)} good, ${String(marked.length - good)} bad`}
       </Line>

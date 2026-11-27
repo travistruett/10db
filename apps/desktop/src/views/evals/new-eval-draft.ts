@@ -58,7 +58,17 @@ export type WizardStep = (typeof WizardStep)[keyof typeof WizardStep];
 
 /** One line cut to what a title takes, so a long objective or gap label still files. */
 export const asBehavior = (text: string): string =>
-  text.replaceAll(/\s+/gu, ' ').trim().slice(0, BEHAVIOR_MAX);
+  text
+    .replaceAll(/[\p{Cc}\s]+/gu, ' ')
+    .trim()
+    .slice(0, BEHAVIOR_MAX);
+
+/** One line cut to what the wizard's sentence takes, so a long plan objective still files. */
+export const asGoal = (text: string): string =>
+  text
+    .replaceAll(/[\p{Cc}\s]+/gu, ' ')
+    .trim()
+    .slice(0, GOAL_MAX);
 
 /** A model id typed or pasted as free text: one line, no backtick, which a brief can't carry. */
 export const cleanModelId = (text: string): string =>
@@ -117,6 +127,20 @@ export function stepProblem(step: WizardStep, draft: EvalDraft): string | null {
   }
 }
 
+/** The first step whose minimum is not met, with why; null when every step is. */
+export function firstProblem(draft: EvalDraft): { step: WizardStep; problem: string } | null {
+  for (const step of [
+    WizardStep.Goal,
+    WizardStep.Examples,
+    WizardStep.Checking,
+    WizardStep.Models,
+  ] as const) {
+    const problem = stepProblem(step, draft);
+    if (problem !== null) return { step, problem };
+  }
+  return null;
+}
+
 /** The request the daemon files; examples with no mark are left out, the rest of the draft goes as written. */
 export function toRequest(draft: EvalDraft, prefill: NewEvalPrefill): NewEvalBody {
   return {
@@ -136,7 +160,7 @@ export function toRequest(draft: EvalDraft, prefill: NewEvalPrefill): NewEvalBod
           : [{ input: c.input.trim(), verdict: c.verdict, reason: c.reason.trim() }],
       ),
     check: draft.check,
-    checkRule: draft.checkRule.trim(),
+    checkRule: draft.check === EvalCheckKind.Review ? '' : draft.checkRule.trim(),
     bar: draft.bar,
     modelIds: [...draft.modelIds],
     costCapUsd: draft.costCap,

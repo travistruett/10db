@@ -8,8 +8,10 @@ import {
   type ProjectId,
 } from '@10db/contracts';
 import { defaultAccountId, getAccountRow, getProject, type DbReader } from '@10db/db';
+import { basename } from 'node:path';
 import { askWithin, type AreaNamer } from '../folders';
 import type { Git } from '../git';
+import { isSecretFileName } from '../guard';
 import type { Logger } from '../log';
 import { CODEX_NO_QUESTIONS, CompletionError, NO_DEFAULT_ACCOUNT } from '../sessions';
 import type { AssessFile } from './assess-prompt';
@@ -62,6 +64,33 @@ const cut = (line: string): string =>
   line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS - 1)}…` : line;
 
 /**
+ * The files a suggestion reads: the paths a gap names, at HEAD and bounded. A secret file (`.env*`, keys) is never
+ * read, however it is named: `where` comes from an assessment or an agent's manifest, and a lane's sandbox keeps
+ * those files from the agent too.
+ */
+export async function readSuggestionFiles(
+  git: Pick<Git, 'surveyTexts'>,
+  repoPath: string,
+  where: readonly string[],
+): Promise<AssessFile[]> {
+  const wanted = [...new Set(where.map(evalGapPath))]
+    .filter((path) => !isSecretFileName(basename(path)))
+    .slice(0, MAX_FILES);
+  if (wanted.length === 0) return [];
+  const read = await git.surveyTexts(repoPath, wanted, {
+    maxBytes: MAX_FILE_BYTES,
+    maxTotalBytes: MAX_TOTAL_BYTES,
+  });
+  return wanted.flatMap((path): AssessFile[] => {
+    const text = read.texts.get(path);
+    if (text === undefined) return [];
+    const lines = text.split('\n');
+    if (lines.at(-1) === '') lines.pop();
+    return [{ path, lines: lines.slice(0, MAX_LINES).map(cut) }];
+  });
+}
+
+/**
  * Answers the New Eval wizard's suggest buttons: one question to a model of the project's account (the
  * assessment's way of asking: text in, no tool, the efficient tier) with the files the gap names read at HEAD.
  * The answer is parsed and shown for the builder to accept; nothing is recorded.
@@ -79,22 +108,6 @@ export function createEvalSuggester(deps: EvalSuggesterDeps): EvalSuggester {
     return { available: true, reason: null };
   };
 
-  async function readFiles(repoPath: string, where: readonly string[]): Promise<AssessFile[]> {
-    const wanted = [...new Set(where.map(evalGapPath))].slice(0, MAX_FILES);
-    if (wanted.length === 0) return [];
-    const read = await deps.git.surveyTexts(repoPath, wanted, {
-      maxBytes: MAX_FILE_BYTES,
-      maxTotalBytes: MAX_TOTAL_BYTES,
-    });
-    return wanted.flatMap((path): AssessFile[] => {
-      const text = read.texts.get(path);
-      if (text === undefined) return [];
-      const lines = text.split('\n');
-      if (lines.at(-1) === '') lines.pop();
-      return [{ path, lines: lines.slice(0, MAX_LINES).map(cut) }];
-    });
-  }
-
   return {
     status,
     async suggest(projectId, request, signal) {
@@ -111,7 +124,9 @@ export function createEvalSuggester(deps: EvalSuggesterDeps): EvalSuggester {
         }
       };
       try {
-        const files = await readFiles(project.repoPath, request.where).catch(() => []);
+        const files = await readSuggestionFiles(deps.git, project.repoPath, request.where).catch(
+          () => [],
+        );
         const reply = await askWithin(
           capture,
           evalSuggestPrompt(request, files),

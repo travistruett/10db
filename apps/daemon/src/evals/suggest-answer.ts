@@ -1,4 +1,4 @@
-import { EvalCheckKind, EvalSuggestedCase, type EvalSuggestResult } from '@10db/contracts';
+import { EvalCheckKind, type EvalSuggestResult } from '@10db/contracts';
 import { z } from 'zod';
 import { modelJson } from '../folders';
 
@@ -10,9 +10,21 @@ export type SuggestAnswer =
   | { readonly ok: true; readonly answer: Extract<EvalSuggestResult, { ok: true }>['answer'] }
   | { readonly ok: false; readonly reason: string };
 
-const Tighten = z.object({ behavior: z.string().trim().min(1).max(600) });
-const Cases = z.object({ cases: z.array(EvalSuggestedCase).min(1).max(10) });
-const Check = z.object({ check: z.enum(EvalCheckKind), rule: z.string().trim().max(400) });
+/** One line with no control character, so an accepted suggestion can never be refused by the New Eval request. */
+const line = (max: number, min = 0) =>
+  z
+    .string()
+    .transform((text) => text.replaceAll(/[\p{Cc}\s]+/gu, ' ').trim())
+    .pipe(z.string().min(min).max(max));
+
+const Tighten = z.object({ behavior: line(600, 1) });
+const Cases = z.object({
+  cases: z
+    .array(z.object({ input: line(1000, 1), reason: line(300) }))
+    .min(1)
+    .max(10),
+});
+const Check = z.object({ check: z.enum(EvalCheckKind), rule: line(400) });
 
 const UNUSABLE = "The model's answer could not be used, so nothing changed.";
 
