@@ -79,12 +79,17 @@ export async function resyncPush(client: DaemonClient): Promise<boolean> {
   return true;
 }
 
+/** `usePushSwitchFor` with the connected daemon's client. */
+export function usePushSwitch() {
+  return usePushSwitchFor(useDaemon().client);
+}
+
 /**
  * This browser's push subscription and the daemon's copy of it. Turning it on asks the browser's permission,
- * subscribes with the host's VAPID key and tells the Mac; turning it off drops both.
+ * subscribes with the host's VAPID key and tells the Mac; turning it off drops both. It takes its client, so the
+ * pairing page, which has no connected daemon yet, can offer it the moment the phone is paired.
  */
-export function usePushSwitch() {
-  const { client } = useDaemon();
+export function usePushSwitchFor(client: DaemonClient) {
   const [state, setState] = useState<PushState>(PushState.Loading);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

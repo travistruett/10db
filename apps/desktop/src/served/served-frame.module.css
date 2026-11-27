@@ -120,3 +120,14 @@
   top: -6px;
   left: 14px;
 }
+
+/* The Inbox's offer of notifications floats over the list, just above the nav, so neither the list sheet nor the
+   card covers it and nothing under it moves when it shows. */
+.pushBanner {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + 8px);
+  z-index: 22;
+  box-shadow: var(--mantine-shadow-md);
+}

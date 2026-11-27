@@ -16,7 +16,9 @@ share listener. It reaches only what a paired device may (`api/auth-matrix.ts`).
   per connect because `/health` answers a revoked token with its public form. The stream takes tickets as the window's
   does (`daemon/events.ts`).
 - `pair-page.tsx` / `pairing.ts`: `/app/pair#code=` posts the code to `POST /devices/pair` without a credential, keeps
-  the answer, and offers Install (`beforeinstallprompt`). The fragment is cleaned from the address on first read.
+  the answer, then makes Turn On Notifications its main button (a tap, which Chrome needs to ask; `usePushSwitchFor`
+  with a client built from the stored token, since no daemon is connected yet), then Install
+  (`beforeinstallprompt`) and Open Inbox. The fragment is cleaned from the address on first read.
 - `served-frame.tsx`: the narrow layout with none of the window's chrome (no traffic lights, drag regions or rail):
   views draw into the same `FrameSlotsContext`. A view's panel (the Inbox's list) is a sheet that shows first; picking
   a row closes it. The routes keep the window's ids (`/inbox`, `/factory`, `/settings/$section`) so views that read
@@ -25,6 +27,8 @@ share listener. It reaches only what a paired device may (`api/auth-matrix.ts`).
   (`views/factory/live-passes.ts`). A seeded card with no task is not a run, so "need you" can read 0 beside an
   Inbox of cards: that is the window's number too. Settings is `ThisDevice`: Forget This Device calls
   `DELETE /devices/me`, then clears the token.
+- `push-banner.tsx`: on the Inbox, while push is Off (not blocked or unsupported), a card floats over the list
+  above the nav with Turn On and a Not Now that keeps it away on this phone (`tendb.pushBannerDismissed`).
 - Push (`push-subscription.ts`, the switch on This Device): permission, then `GET /push/key`,
   `pushManager.subscribe`, `PUT /devices/me/push`; off deletes both. It needs the worker (`getRegistration`), so it
   reads "can't show notifications" in a dev page, which registers none.

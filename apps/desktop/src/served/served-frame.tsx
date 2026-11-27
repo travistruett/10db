@@ -12,6 +12,7 @@ import { useEventStream } from '../daemon/events';
 import { CountBadge, CountTone } from '../shell/count-badge';
 import { FrameSlotsContext, type FrameSlots } from '../shell/frame-slots';
 import { ReconnectingIndicator } from '../shell/reconnecting-indicator';
+import { PushBanner } from './push-banner';
 import { UnsavedGuardProvider } from '../shell/unsaved-guard';
 import { useOpenInboxCount } from '../views/inbox/inbox-count';
 import { takeDirectCard } from './deep-link';
@@ -129,6 +130,7 @@ export function ServedFrame() {
             <div ref={setTitleHost} className={classes['titleHost']} />
             <ReconnectingIndicator />
           </div>
+          <PushBanner />
           <div className={classes['content']}>
             <main className={classes['main']}>
               <Outlet />
