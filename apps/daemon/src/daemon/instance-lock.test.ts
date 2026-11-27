@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -43,6 +43,31 @@ describe('acquireInstanceLock', () => {
     const again = await acquireInstanceLock(dir.path);
     again.release();
   });
+
+  // A crash before the server listened leaves a lock and no daemon.json; after a reboot its pid is another process's.
+  it.skipIf(SANDBOXED)(
+    'takes over a lock whose pid now belongs to a process started after the lock was written',
+    async () => {
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)'], {
+        stdio: 'ignore',
+      });
+      holder = child;
+      await once(child, 'spawn');
+      const path = join(dir.path, 'daemon.lock');
+      writeFileSync(path, String(child.pid));
+      const anHourAgo = new Date(Date.now() - 3_600_000);
+      utimesSync(path, anHourAgo, anHourAgo);
+
+      const lock = await acquireInstanceLock(dir.path);
+
+      expect(readFileSync(path, 'utf8')).toBe(String(process.pid));
+      // The stranger is left alone.
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+      lock.release();
+    },
+    20_000,
+  );
 
   // `/bin/ps` is setuid and does not run under the sandbox, so the lock can't identify the holder there.
   it.skipIf(SANDBOXED)(

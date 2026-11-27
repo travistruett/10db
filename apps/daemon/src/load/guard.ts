@@ -106,6 +106,11 @@ export const DEFAULT_OVERLOAD_FACTOR = 2;
 export const DEFAULT_SUSTAINED_MS = 5 * 60_000;
 /** Lower than the level that starts an overload, so a load hovering at the edge doesn't flap. */
 export const DEFAULT_CLEAR_FACTOR = 1.5;
+/**
+ * How long a sample waits to learn what is using the CPU. Past it the sample goes on with no names: a
+ * read that never ends would otherwise end the sampling, and the hold on new work with it would never lift.
+ */
+export const CULPRITS_WAIT_MS = 20_000;
 
 interface Episode {
   readonly cores: number;
@@ -137,14 +142,31 @@ export function createLoadGuard(opts: LoadGuardOptions): LoadGuard {
   }
 
   async function culpritsNow(): Promise<readonly Culprit[]> {
+    let giveUp: () => void = () => undefined;
+    const late = new Promise<null>((resolve) => {
+      giveUp = () => {
+        resolve(null);
+      };
+    });
+    const wait = opts.clock.setTimeout(() => {
+      giveUp();
+    }, CULPRITS_WAIT_MS);
     try {
-      return await opts.culprits();
+      const found = await Promise.race([opts.culprits(), late]);
+      if (found !== null) return found;
+      opts.logger.warn(
+        { waitedMs: CULPRITS_WAIT_MS },
+        'gave up reading what is using the CPU; sampling goes on',
+      );
+      return [];
     } catch (error) {
       opts.logger.warn(
         { err: error instanceof Error ? error.message : String(error) },
         'could not read what is using the CPU',
       );
       return [];
+    } finally {
+      wait.cancel();
     }
   }
 

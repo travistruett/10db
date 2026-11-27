@@ -84,15 +84,21 @@ export function parseLsof(output: string): Map<number, string[]> {
   return files;
 }
 
+/** How long `ps` or `lsof` may run. Together they stay under the guard's `CULPRITS_WAIT_MS`. */
+const SNAPSHOT_TIMEOUT_MS = 8_000;
+
 /** `ps` and `lsof`, run for the same user and nothing else; both are read-only. */
 export function systemProcessSnapshot(): ProcessSnapshot {
   const env = { LC_ALL: 'C', PATH: '/usr/bin:/bin:/usr/sbin:/sbin' };
   const maxBuffer = 32 * 1024 * 1024;
+  // Both are asked while the Mac is overloaded, when either can stall; a stalled one is killed, not awaited.
+  const bounds = { timeout: SNAPSHOT_TIMEOUT_MS, killSignal: 'SIGKILL' } as const;
   return {
     async rows() {
       const { stdout } = await run('/bin/ps', ['-Ao', 'pid=,ppid=,pgid=,pcpu=,command='], {
         env,
         maxBuffer,
+        ...bounds,
       });
       return parsePs(stdout);
     },
@@ -102,6 +108,7 @@ export function systemProcessSnapshot(): ProcessSnapshot {
         const { stdout } = await run('/usr/sbin/lsof', ['-p', pids.join(','), '-Fn'], {
           env,
           maxBuffer,
+          ...bounds,
         });
         return parseLsof(stdout);
       } catch (error) {
