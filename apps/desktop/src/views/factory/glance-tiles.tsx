@@ -71,7 +71,7 @@ export function GlanceTiles({
       <Tile
         n={f.needsYou}
         mark={<StatusDot color="yellow" />}
-        label={`${plural(f.needsYou, 'needs', 'need')} you`}
+        label={`${plural(f.needsYou, 'run waits', 'runs wait')} on you`}
       />
       <Tile
         n={f.failed}

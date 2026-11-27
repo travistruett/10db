@@ -28,8 +28,9 @@ share listener. It reaches only what a paired device may (`api/auth-matrix.ts`).
   a row closes it. The routes keep the window's ids (`/inbox`, `/factory`, `/settings/$section`) so views that read
   `from: '/inbox'` work. An address the phone lacks says it is in the window.
 - Factory is `FactoryGlance`: the window's five figures, read-only, counting Workbench passes as the window does
-  (`views/factory/live-passes.ts`). A seeded card with no task is not a run, so "need you" can read 0 beside an
-  Inbox of cards: that is the window's number too. Settings is `ThisDevice`: Forget This Device calls
+  (`views/factory/live-passes.ts`). Its first tile counts runs that wait on the builder ("runs wait on
+  you"), not cards: a flag or a Look card holds no run, so it can read 0 beside an Inbox of cards, and only the Inbox
+  badge says "need you". Settings is `ThisDevice`: Forget This Device calls
   `DELETE /devices/me`, then clears the token.
 - Push (`push-subscription.ts`, the switch on This Device): permission, then `GET /push/key`,
   `pushManager.subscribe`, `PUT /devices/me/push`; off deletes both. It needs the worker (`getRegistration`), so it
