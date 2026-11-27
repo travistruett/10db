@@ -277,10 +277,8 @@ test('a question Mark asked back reaches the Inbox, and the Board says the task 
 
   // The answer restarts the run with no fake script, so it may fail on its own within a second. Cancel
   // it so later specs see no stray lane; a 409 means it already ended.
-  // Retried: a request on a keep-alive socket the daemon has just closed is reset, and a cancel twice is still 409.
   const cancelled = await request.post(`${daemonUrl}/workstreams/${run?.id ?? ''}/cancel`, {
     headers: auth,
-    maxRetries: 2,
   });
   expect([200, 409]).toContain(cancelled.status());
 });
