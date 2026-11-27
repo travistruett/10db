@@ -40,7 +40,7 @@
   `recordWatchpointReading` emits `eval.definition_changed` per such file whose classification is new to the run's
   newest earlier reading; with no watchpoint covering the file there is no hit and no event.
 - The runner calls it after a passing gate (`watchpointReadingAfter` in `runner.ts`), beside `acceptanceAfter`, and in
-  `finishWithoutGate`. The base is read again after the gate (its base update moves it). The change is the run's own commits (`runCommits`), so in a copy other tasks share, their commits are not read. The row is written in the
+  `finishWithoutGate`. The base is read again after the gate (its base update moves it). The change is the run's own commits (`runCommits`), so in a copy other tasks share, their commits are not read. A Review or QA step in such a copy (`sharesBatchWorktree`) is briefed with the same commits as the change under review (`changeUnderReviewBrief`), the rest of the branch out of scope. The row is written in the
   write that moves the run on, never on an acceptance send-back; a reading that hits nothing is written only to
   retire an earlier one that did, so the newest row is always the current reading.
 - `notes.ts` joins the notes: the agent's from the run's `commit` tool ops (newest per path), the reviewer's from the

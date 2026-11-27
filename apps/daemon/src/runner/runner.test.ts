@@ -101,6 +101,7 @@ import {
   RESULT_NUDGE,
 } from '../briefing';
 import { createLauncher } from '../environment';
+import { startTaskWithPlan } from '../team';
 import { setProjectLiveSystems } from '../trust';
 import { announceWatchpointReading } from '../watchpoints';
 import { recoverOnStartup, systemProcesses } from '../recovery';
@@ -2732,6 +2733,39 @@ describe('flows', () => {
         followUpTaskId: filed?.id,
         followUpTitle: filed?.title,
       });
+    });
+
+    it('files no follow-up of a follow-up that ships at the limit too, and raises one card instead', async () => {
+      const again = (n: number) => [
+        [turn],
+        [
+          reject(`op-flow-06${String(n)}0`, `1. BLOCKING the scope is wrong, round ${String(n)}`),
+          turn,
+        ],
+      ];
+      engine = await createTestEngine({
+        Alpha: [...[1, 2, 3, 4].flatMap(round)],
+        'Resolve the open findings of "Alpha"': [...[1, 2, 3, 4].flatMap(again)],
+      });
+      engine.state.write((ctx) =>
+        setPlaybook(ctx, null, { rows: [{ rigor: 'standard', reviewRounds: 3 }] }),
+      );
+      const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+      const [filed] = filedFor(task.id);
+      if (filed === undefined) throw new Error('no follow-up filed');
+      const followUp = startTaskWithPlan(engine.state, filed.id);
+      await until(followUp.id, (s) => s === 'DONE' || s === 'FAILED', 20);
+      expect(ws(followUp.id)).toMatchObject({ state: 'DONE', failureReason: null });
+      expect(filedFor(task.id).filter((t) => t.id !== filed.id)).toEqual([]);
+      expect(step(followUp.id, 1)?.shippedAtLimit).toBeUndefined();
+      const cards = listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (item) =>
+          item.kind === InboxKind.Flag && item.targets.some((t) => t.workstreamId === followUp.id),
+      );
+      expect(cards).toHaveLength(1);
+      expect(cards[0]?.title).toBe(`Findings repeat: ${filed.title}`);
+      expect(cards[0]?.body).toContain('round 4');
     });
 
     describe('when a QA step follows the review', () => {
