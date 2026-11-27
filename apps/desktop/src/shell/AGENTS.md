@@ -30,7 +30,7 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   Access's) at the row's end (`order: 3`, after the actions), shown whenever Tailscale is there to read
   (`steps.length > 0`): green when shared, orange when paused, grey otherwise, its name the state in words. It stays
   in place in every state, so nothing moves when sharing changes; sharing never draws in the rail. Its hover card
-  (opened by a hover, a click or focus) says the state, copies the address once shared, holds the Share switch
+  (opened by a hover, a tap or keyboard focus; kept mounted, so a pending Turn on Tailscale and its error survive the pointer leaving) says the state, copies the address once shared, holds the Share switch
   (`useSetSharing`, disabled with the step it waits on), Turn on Tailscale when the connected step failed
   (`POST /sharing/connect`, the CLI's words on a refusal) and a link to Remote Access.
 - The panel column and the content are a Mantine `Splitter`: the panel's hairline is the handle, and the builder

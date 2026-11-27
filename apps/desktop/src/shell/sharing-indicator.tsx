@@ -64,7 +64,7 @@ function shareBlocker(status: SharingStatusDto): string | null {
 /**
  * Sharing this Mac on the tailnet, at the bar's right: an icon whenever Tailscale is there to read (green while
  * shared, orange while paused, grey otherwise), in the same place in every state so nothing moves. Its hover card,
- * which a click or focus also opens, says the state, copies the address and turns sharing on and off.
+ * which a tap or keyboard focus also opens, says the state, copies the address and turns sharing on and off.
  */
 export function SharingIndicator() {
   const status = useSharing().data;
@@ -72,7 +72,17 @@ export function SharingIndicator() {
   if (status === undefined || status.steps.length === 0) return null;
   const line = stateLine(status);
   return (
-    <HoverCard position="bottom-end" width={300} withArrow openDelay={150} closeDelay={200}>
+    // Kept mounted, so a Turn on Tailscale still running, and the sign-in its refusal names, survive the pointer
+    // leaving the card.
+    <HoverCard
+      position="bottom-end"
+      width={300}
+      withArrow
+      openDelay={150}
+      closeDelay={200}
+      events={{ touch: true }}
+      keepMounted
+    >
       <HoverCard.Target>
         <ActionIcon
           variant="subtle"

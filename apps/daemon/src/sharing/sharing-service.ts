@@ -449,6 +449,7 @@ export function createSharingService(deps: {
     },
     connect() {
       return enqueue(async () => {
+        if (closed) throw new SharingRefusedError('10db is shutting down');
         const cli = deps.cli();
         if (cli === null) throw new SharingRefusedError('Tailscale is not installed');
         const result = await deps.run(cli)(['up'], UP_TIMEOUT_MS);
@@ -465,9 +466,10 @@ export function createSharingService(deps: {
             said === '' ? `tailscale up exited with ${String(result.code)}` : said,
           );
         }
-        await refresh();
-        // A share that paused while Tailscale was down comes back now rather than on the monitor's next tick.
-        if (settings.enabled() && !closed) {
+        // A share that paused while Tailscale was down comes back now rather than on the monitor's next tick; both
+        // read Tailscale again first.
+        if (!settings.enabled()) await refresh();
+        else {
           if (listener !== null) await monitorTick();
           else await startSharing();
           scheduleMonitor();
