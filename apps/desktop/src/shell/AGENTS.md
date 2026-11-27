@@ -33,7 +33,11 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   in place in every state, so nothing moves when sharing changes; sharing never draws in the rail. Its hover card
   (opened by a hover, a tap or keyboard focus; kept mounted, so a pending Turn on Tailscale and its error survive the pointer leaving) says the state, copies the address once shared, holds the Share switch
   (`useSetSharing`, disabled with the step it waits on), Turn on Tailscale when the connected step failed
-  (`POST /sharing/connect`, the CLI's words on a refusal) and a link to Remote Access.
+  (`POST /sharing/connect`, the CLI's words on a refusal) and a link to Remote Access. Where a view draws no
+  actions the icon is the row's end, right under the × of a Settings drawer (Mantine's `Drawer`, which covers the
+  title row). When the drawer leaves, the browser reports the still pointer as entering the icon, so the icon's
+  wrapper stops `mouseenter` and `mousemove` at the place of the last pointer event seen outside it
+  (`resting-pointer.ts`); the card opens once the pointer really moves on the icon, or arrives from elsewhere.
 - The panel column and the content are a Mantine `Splitter`: the panel's hairline is the handle, and the builder
   drags the panel between 240 and 480 px (340 until dragged, and again on a double-click of the handle; `PANEL_WIDTH` and its bounds in `shell-layout.ts`).
   One width for every section, remembered (`panel-width.ts`, `tendb.shell.panelWidth`); a sheet takes it too.
