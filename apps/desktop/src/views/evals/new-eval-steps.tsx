@@ -670,7 +670,9 @@ export function ReviewStep({
       </Line>
       <Line label="How it tells good from bad">
         {draft.check === null ? '' : CHECK_LABEL[draft.check]}
-        {draft.checkRule.trim() === '' ? '' : `: ${draft.checkRule.trim()}`}
+        {draft.check === EvalCheckKind.Review || draft.checkRule.trim() === ''
+          ? ''
+          : `: ${draft.checkRule.trim()}`}
       </Line>
       <Line label="How often it must pass">{draft.bar === null ? '' : BAR_LABEL[draft.bar]}</Line>
       <Line label="Models">

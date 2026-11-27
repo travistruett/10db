@@ -64,7 +64,7 @@ const cut = (line: string): string =>
   line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS - 1)}…` : line;
 
 /**
- * The files a suggestion reads: the paths a gap names, at HEAD and bounded. A secret file (`.env*`, keys) is never
+ * The files a suggestion reads: the paths a gap names, at HEAD and bounded. A secret file (`.env*`) is never
  * read, however it is named: `where` comes from an assessment or an agent's manifest, and a lane's sandbox keeps
  * those files from the agent too.
  */
