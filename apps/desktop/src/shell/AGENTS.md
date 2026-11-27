@@ -32,7 +32,8 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   read (`steps.length > 0`): green when shared, orange when paused, grey otherwise, its name `Remote access: <state>`.
   It stays in place in every state, so nothing moves when sharing changes; sharing never draws in the rail. Its hover
   card (a group named Remote access; opened by a hover, a tap or keyboard focus; kept mounted, so a pending Turn on
-  Tailscale, its error and an open Pair a Device survive the pointer leaving) says what sharing gets the builder in
+  Tailscale and its error survive the pointer leaving; the Pair a Device dialog sits beside the card, not in it,
+  because a closed card hides its portals too) says what sharing gets the builder in
   each state, lists the paired devices once shared, offers Pair a phone (the Pair a Device dialog), holds the switch
   (`useSetSharing`, disabled with the step it waits on), Turn on Tailscale when the connected step failed
   (`POST /sharing/connect`, the CLI's words on a refusal) and a Settings link to Remote Access. It shows no address:

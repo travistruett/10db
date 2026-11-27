@@ -291,6 +291,9 @@ test("a card is answered from a phone paired from the bar's Remote access card",
     await expect(remoteCard.getByText(/answer the Inbox/)).toBeVisible();
     await remoteCard.getByRole('button', { name: /^Pair (a|another) phone$/ }).click();
     const dialog = page.getByRole('dialog', { name: 'Pair a Device' });
+    // The pointer moves onto the dialog, as a person's does to read the code: the card closes, the dialog stays.
+    await dialog.hover();
+    await expect(remoteCard).toBeHidden();
     const label = await dialog.getByLabel(/^Pairing code /).getAttribute('aria-label');
     const code = (label ?? '').replace(/^Pairing code /, '').replace(' ', '');
     expect(code).toMatch(/^[0-9A-Z]{8}$/);

@@ -103,56 +103,75 @@ function shareBlocker(status: SharingStatusDto): string | null {
 export function SharingIndicator() {
   const status = useSharing().data;
   const devices = useDevices();
+  const [pairing, setPairing] = useState(false);
   // With no steps to read Tailscale is missing, so nothing is set up, as Remote Access reads it.
   if (status === undefined || status.steps.length === 0) return null;
   const name = STATE_NAME[status.state];
   return (
-    // Kept mounted, so a Turn on Tailscale still running, the sign-in its refusal names, and an open Pair a Device
-    // dialog survive the pointer leaving the card.
-    <HoverCard
-      position="bottom-end"
-      width={320}
-      withArrow
-      openDelay={150}
-      closeDelay={200}
-      events={{ touch: true }}
-      keepMounted
-      // Mounted with the page, the list may have failed while the daemon was still connecting; opening asks again.
-      onOpen={() => {
-        if (!devices.isSuccess) void devices.refetch();
-      }}
-    >
-      <HoverCard.Target>
-        <ActionIcon
-          variant="subtle"
-          color="gray"
-          aria-label={name}
-          // Just before the view's actions, which stay at the row's end where a click on them leaves the pointer: a
-          // card opened under a resting pointer would cover the page below. The margin keeps it right where a view
-          // drew no title row.
-          style={{ flex: 'none', order: 2, marginLeft: 'auto' }}
-        >
-          <IconDeviceMobile size={16} stroke={1.8} color={ICON_COLOR[status.state]} />
-        </ActionIcon>
-      </HoverCard.Target>
-      <HoverCard.Dropdown>
-        <SharingCard status={status} devices={devices.data ?? null} />
-      </HoverCard.Dropdown>
-    </HoverCard>
+    <>
+      {/* Kept mounted, so a Turn on Tailscale still running and the sign-in its refusal names survive the pointer
+          leaving the card. */}
+      <HoverCard
+        position="bottom-end"
+        width={320}
+        withArrow
+        openDelay={150}
+        closeDelay={200}
+        events={{ touch: true }}
+        keepMounted
+        // Mounted with the page, the list may have failed while the daemon was still connecting; opening asks again.
+        onOpen={() => {
+          if (!devices.isSuccess) void devices.refetch();
+        }}
+      >
+        <HoverCard.Target>
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            aria-label={name}
+            // Just before the view's actions, which stay at the row's end where a click on them leaves the pointer: a
+            // card opened under a resting pointer would cover the page below. The margin keeps it right where a view
+            // drew no title row.
+            style={{ flex: 'none', order: 2, marginLeft: 'auto' }}
+          >
+            <IconDeviceMobile size={16} stroke={1.8} color={ICON_COLOR[status.state]} />
+          </ActionIcon>
+        </HoverCard.Target>
+        <HoverCard.Dropdown>
+          <SharingCard
+            status={status}
+            devices={devices.data ?? null}
+            onPair={() => {
+              setPairing(true);
+            }}
+          />
+        </HoverCard.Dropdown>
+      </HoverCard>
+      {/* Beside the card, not in it: a closed card hides what it holds, portals included, so the dialog would vanish
+          as the pointer moved onto it. */}
+      <PairDeviceModal
+        opened={pairing}
+        onClose={() => {
+          setPairing(false);
+        }}
+      />
+    </>
   );
 }
 
 function SharingCard({
   status,
   devices,
+  onPair,
 }: {
   readonly status: SharingStatusDto;
   readonly devices: readonly DeviceDto[] | null;
+  readonly onPair: () => void;
 }) {
   const set = useSetSharing();
   const connect = useConnectTailscale();
-  const paired = devices?.length ?? null;
-  const [pairing, setPairing] = useState(false);
+  // The card speaks of phones, so a paired Mac doesn't count toward "your phone".
+  const paired = devices?.filter((d) => d.platform !== DevicePlatform.Macos).length ?? null;
   const blocker = shareBlocker(status);
   const shared = status.enabled;
   const ready = status.state === SharingState.Ready;
@@ -231,13 +250,7 @@ function SharingCard({
       ) : null}
       <Group justify="space-between" wrap="nowrap">
         {ready ? (
-          <Button
-            size="compact-sm"
-            variant={paired === 0 ? 'filled' : 'default'}
-            onClick={() => {
-              setPairing(true);
-            }}
-          >
+          <Button size="compact-sm" variant={paired === 0 ? 'filled' : 'default'} onClick={onPair}>
             {paired === null || paired === 0 ? 'Pair a phone' : 'Pair another phone'}
           </Button>
         ) : (
@@ -256,12 +269,6 @@ function SharingCard({
           Settings
         </Anchor>
       </Group>
-      <PairDeviceModal
-        opened={pairing}
-        onClose={() => {
-          setPairing(false);
-        }}
-      />
     </Stack>
   );
 }
