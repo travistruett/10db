@@ -29,12 +29,13 @@ function argumentsOf(text: string, open: number): string {
 }
 
 /** Every `request.<method>(` call in the e2e specs and helpers; this harness's own tests are not requests. */
-function requestCalls(method: 'get' | 'post'): RequestCall[] {
+function requestCalls(method: 'get' | 'post' | 'routeFetch'): RequestCall[] {
   const calls: RequestCall[] = [];
+  const pattern = method === 'routeFetch' ? '\\broute\\.fetch\\(' : `\\brequest\\.${method}\\(`;
   for (const file of readdirSync(dir)) {
     if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue;
     const text = readFileSync(join(dir, file), 'utf8');
-    for (const match of text.matchAll(new RegExp(`\\brequest\\.${method}\\(`, 'g'))) {
+    for (const match of text.matchAll(new RegExp(pattern, 'g'))) {
       const start = match.index;
       calls.push({
         where: `${file}:${String(text.slice(0, start).split('\n').length)}`,
@@ -50,6 +51,14 @@ describe('the e2e request fixture', () => {
     const reads = requestCalls('get');
     expect(reads.length).toBeGreaterThan(0);
     expect(reads.filter((call) => !RETRIES.test(call.args)).map((call) => call.where)).toEqual([]);
+  });
+
+  it('gives every route.fetch a retry, since it reuses the same keep-alive sockets', () => {
+    const fetches = requestCalls('routeFetch');
+    expect(fetches.length).toBeGreaterThan(0);
+    expect(fetches.filter((call) => !RETRIES.test(call.args)).map((call) => call.where)).toEqual(
+      [],
+    );
   });
 
   it('gives no POST a retry', () => {
