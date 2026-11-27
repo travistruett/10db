@@ -121,14 +121,24 @@ export function withChoice(
 
 /**
  * Finds a watchpoint's count in a coverage query. While the query is on its way there is none (the count shows a
- * skeleton); a query that failed answers every key as not counted, so no skeleton waits forever.
+ * skeleton). A failed query, or an answer with no entry for the key, reads as not counted, so no skeleton waits forever.
  */
 export function coverageLookup(query: {
   readonly data: readonly WatchpointCoverage[] | undefined;
   readonly isError: boolean;
 }): (key: string) => WatchpointCoverage | undefined {
-  return (key) =>
-    query.isError
-      ? { key, files: 0, examples: [], state: WatchpointCoverageState.Unreadable }
-      : query.data?.find((c) => c.key === key);
+  const notCounted = (key: string): WatchpointCoverage => ({
+    key,
+    files: 0,
+    examples: [],
+    state: WatchpointCoverageState.Unreadable,
+    asks: false,
+    partial: false,
+    repoFiles: 0,
+  });
+  return (key) => {
+    if (query.isError) return notCounted(key);
+    if (query.data === undefined) return undefined;
+    return query.data.find((c) => c.key === key) ?? notCounted(key);
+  };
 }

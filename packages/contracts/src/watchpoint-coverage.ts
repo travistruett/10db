@@ -18,6 +18,15 @@ export const WatchpointCoverage = z.object({
   files: z.int().nonnegative(),
   examples: z.array(z.string()).max(MAX_COVERAGE_EXAMPLES),
   state: z.enum(WatchpointCoverageState),
+  /**
+   * The watchpoint only asks the judge a question (it has a question and no line patterns), so its paths say which
+   * files it asks about, not which files it finds something in.
+   */
+  asks: z.boolean(),
+  /** Some covered file could not be read in full and may match too, so `files` is a floor: "at least N". */
+  partial: z.boolean(),
+  /** How many tracked files the project holds, so a count of all of them can read as "every file". */
+  repoFiles: z.int().nonnegative(),
 });
 export type WatchpointCoverage = z.infer<typeof WatchpointCoverage>;
 

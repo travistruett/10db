@@ -42,13 +42,21 @@ export function CoverageCount({ coverage }: { readonly coverage: WatchpointCover
         Not counted
       </Text>
     );
-  return coverage.files === 0 ? (
-    <Text size="xs" c="dimmed">
-      No files here
-    </Text>
-  ) : (
-    <Text size="xs">{`${String(coverage.files)} file${coverage.files === 1 ? '' : 's'}`}</Text>
-  );
+  if (coverage.files === 0 && !coverage.partial)
+    return (
+      <Text size="xs" c="dimmed">
+        No files here
+      </Text>
+    );
+  if (coverage.files === 0)
+    return (
+      <Text size="xs" c="dimmed">
+        Not counted
+      </Text>
+    );
+  const files = `${String(coverage.files)} file${coverage.files === 1 ? '' : 's'}`;
+  if (coverage.asks) return <Text size="xs">{`Asks about ${files}`}</Text>;
+  return <Text size="xs">{coverage.partial ? `At least ${files}` : files}</Text>;
 }
 
 /** The paths a watchpoint covers in brief, how many line patterns narrow them, and how many files that covers. */

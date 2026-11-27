@@ -67,7 +67,7 @@ export function useJustAdded() {
   useEffect(() => {
     if (added === null) return undefined;
     document
-      .querySelector(`[data-watchpoint-key="${added.key}"]`)
+      .querySelector(`[data-watchpoint-key="${CSS.escape(added.key)}"]`)
       ?.scrollIntoView({ block: 'center' });
     const timer = setTimeout(() => {
       setAdded(null);
@@ -83,7 +83,18 @@ export function useJustAdded() {
     },
     note:
       added === null ? null : (
-        <Text size="sm" role="status">
+        // Stays in view while the page scrolls to the new row.
+        <Text
+          size="sm"
+          role="status"
+          py={6}
+          style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 3,
+            background: 'var(--mantine-color-body)',
+          }}
+        >
           {`Added ${added.label}.`}
         </Text>
       ),

@@ -1,9 +1,9 @@
 import {
   effectiveWatchpoints,
   EventType,
-  type ProjectId,
+  ProjectId,
+  WorkstreamId,
   type Watchpoint,
-  type WorkstreamId,
 } from '@10db/contracts';
 import { getProject, readProjectWatchpoints, readYourWatchpoints, type DbReader } from '@10db/db';
 import type { EventBus, StateStore } from '../events';
@@ -24,7 +24,10 @@ export function backgroundSubjects(
     const project = getProject(db, projectId);
     const yours = readYourWatchpoints(db);
     const here = effectiveWatchpoints(yours, readProjectWatchpoints(db, projectId));
-    return { project, watchpoints: [...coverageSubjects(here), ...coverageSubjects(yours)] };
+    return {
+      project,
+      watchpoints: [...coverageSubjects(here, yours), ...coverageSubjects(yours)],
+    };
   } catch {
     return null;
   }
@@ -53,9 +56,12 @@ export function subscribeWatchpointCoverage(
 ): () => void {
   return bus.subscribe((event) => {
     if (event.type === EventType.ProjectCreated) {
-      coverage.schedule(event.entityId as ProjectId);
+      const projectId = ProjectId.safeParse(event.entityId);
+      if (projectId.success) coverage.schedule(projectId.data);
     } else if (event.type === EventType.CommitRecorded) {
-      const projectId = projects.projectOfWorkstream(event.entityId as WorkstreamId);
+      const workstreamId = WorkstreamId.safeParse(event.entityId);
+      if (!workstreamId.success) return;
+      const projectId = projects.projectOfWorkstream(workstreamId.data);
       if (projectId !== null) coverage.schedule(projectId);
     }
   });

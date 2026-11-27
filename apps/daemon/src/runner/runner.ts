@@ -269,6 +269,7 @@ import { claimedChanges as claimedChangesOf, yieldClaimsWhileWaiting } from './c
 import { anotherWritersRound, readStartDirt, withoutStartDirt } from './start-dirt';
 import {
   answerUnattended,
+  areaMatches,
   judgePreToolUse,
   stringField,
   type GuardVerdict,
@@ -411,6 +412,7 @@ import {
   evalDefinitionSource,
   watchpointHitsAfter,
   watchpointPrinciples,
+  touchedPrincipleWatchpoints,
   watchpointReviewBrief,
   watchpointsForAreas,
   type WatchpointChangeReader,
@@ -3568,10 +3570,26 @@ export function createRunner(opts: RunnerOptions): Runner {
           )
         : null;
     const reading = newestWatchpointRow(listEvidence(db, id));
-    const watchpointReview =
-      (step.role === StepRole.Review || step.role === StepRole.Qa) && reading !== null
-        ? watchpointReviewBrief(reading.detail, agentNotesOf(db, id), principles)
-        : null;
+    const reviewing = step.role === StepRole.Review || step.role === StepRole.Qa;
+    // A watchpoint that only asks a question makes no hit, so what its principles hold a change to is given when the
+    // change touches its paths.
+    const touchedPrinciples =
+      reviewing && principles.size > 0
+        ? touchedPrincipleWatchpoints(
+            watchpoints,
+            principles,
+            await ownChangedFiles(row, checkout),
+            areaMatches,
+          )
+        : [];
+    const watchpointReview = reviewing
+      ? watchpointReviewBrief(
+          reading?.detail ?? null,
+          agentNotesOf(db, id),
+          principles,
+          touchedPrinciples,
+        )
+      : null;
     const prompt = buildSessionPrompt({
       provider,
       linearIssue: linearIssue === null ? null : snapshotSection(linearIssue),
@@ -5046,6 +5064,24 @@ export function createRunner(opts: RunnerOptions): Runner {
    * run's own commits, less what it held uncommitted when the task started. A command that claims no
    * folder reads no git.
    */
+  /** The files the run's own work changed, or none when they can't be read. */
+  async function ownChangedFiles(row: WorkstreamRow, checkout: string): Promise<string[]> {
+    try {
+      const head = await opts.git.head(checkout);
+      const { ranges } = await ownWork(
+        row,
+        checkout,
+        getWorkstreamRow(db, row.id).baseHead ?? head,
+      );
+      const files = await Promise.all(
+        ranges.map((r) => opts.git.filesChangedBetween(checkout, r.base, r.head)),
+      );
+      return [...new Set(files.flat())];
+    } catch {
+      return [];
+    }
+  }
+
   async function coverageOf(
     row: WorkstreamRow,
     checkout: string,

@@ -451,7 +451,9 @@ export function createServices(deps: {
   const coverageIn = (
     project: { id: ProjectId; repoPath: string },
     applying: readonly Watchpoint[],
-  ): Promise<WatchpointCoverageDto> => watchpointCoverage.read(project, coverageSubjects(applying));
+    yours: readonly Watchpoint[],
+  ): Promise<WatchpointCoverageDto> =>
+    watchpointCoverage.read(project, coverageSubjects(applying, yours));
   const restarts = createFailedRestarts(deps);
   const catalogueStatus = (): CatalogueStatusDto => ({
     ...deps.catalogue.status(),
@@ -998,11 +1000,16 @@ export function createServices(deps: {
     },
     watchpointHits: (id) => watchpointHitsOf(db, id),
     watchpointCoverage: (projectId) =>
-      coverageIn(getProject(db, projectId), effectiveWatchpointsOf(projectId).effective),
+      coverageIn(
+        getProject(db, projectId),
+        effectiveWatchpointsOf(projectId).effective,
+        readYourWatchpoints(db),
+      ),
     yourWatchpointCoverage: async () => {
       const yours = readYourWatchpoints(db);
       return sumCoverage(
-        await Promise.all(listActiveProjects(db).map((project) => coverageIn(project, yours))),
+        await Promise.all(listActiveProjects(db).map((project) => coverageIn(project, yours, []))),
+        coverageSubjects(yours),
       );
     },
     watchpointStats: (projectId) => {

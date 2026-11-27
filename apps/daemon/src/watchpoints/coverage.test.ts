@@ -8,31 +8,47 @@ import {
   type PrincipleDto,
   type Watchpoint,
 } from '@10db/contracts';
-import { coverageOf } from './coverage';
+import { coverageOf, coverageSignature } from './coverage';
 import { watchpointPrinciples } from './knowledge';
-import { verdictKey, type LineVerdicts } from './line-verdicts';
+import { verdictKey, type LineVerdict } from './line-verdicts';
 
 const tracked = ['src/a.ts', 'src/b.ts', 'src/c.ts', 'docs/readme.md', '.github/ci.yml'];
 
 describe('coverageOf', () => {
-  it('counts globs alone, and with lines only the files whose whole text matched and was read in full', () => {
-    const globbed = { key: 'ts', globs: ['src/**'], lines: [] };
+  it('counts globs alone, and with lines the files a line matched in, never counting low', () => {
+    const globbed = { globs: ['src/**'], lines: [] };
     expect(coverageOf(globbed, tracked, new Map())).toEqual({
       files: 3,
       examples: ['src/a.ts', 'src/b.ts', 'src/c.ts'],
+      incomplete: false,
     });
     expect(coverageOf({ ...globbed, globs: ['**'] }, tracked, new Map()).files).toBe(5);
 
-    const lined = { key: 'model', globs: ['src/**'], lines: ['claude-'] };
-    const verdicts: LineVerdicts = new Map([
-      [verdictKey('model', 'src/a.ts'), { matched: true, cut: false }],
-      [verdictKey('model', 'src/b.ts'), { matched: false, cut: false }],
-      // A cut line: not read in full.
-      [verdictKey('model', 'src/c.ts'), { matched: true, cut: true }],
+    const lined = { globs: ['src/**'], lines: ['claude-'] };
+    const at = (path: string) => verdictKey(coverageSignature(lined), path);
+    const verdicts = new Map<string, LineVerdict>([
+      [at('src/a.ts'), { matched: true, cut: false }],
+      [at('src/b.ts'), { matched: false, cut: false }],
+      // A matched line proves coverage even when a long line was cut.
+      [at('src/c.ts'), { matched: true, cut: true }],
     ]);
-    expect(coverageOf(lined, tracked, verdicts)).toEqual({ files: 1, examples: ['src/a.ts'] });
-    // No verdict at all: the file was too large or binary to read, so it does not count.
-    expect(coverageOf(lined, tracked, new Map())).toEqual({ files: 0, examples: [] });
+    expect(coverageOf(lined, tracked, verdicts)).toEqual({
+      files: 2,
+      examples: ['src/a.ts', 'src/c.ts'],
+      incomplete: false,
+    });
+    // A cut line with no match might hold one past the cut: the count can't be trusted.
+    verdicts.set(at('src/b.ts'), { matched: false, cut: true });
+    expect(coverageOf(lined, tracked, verdicts).incomplete).toBe(true);
+    // No verdict: too large or binary to read, so it does not count.
+    expect(coverageOf(lined, tracked, new Map())).toEqual({
+      files: 0,
+      examples: [],
+      incomplete: false,
+    });
+    // Another watchpoint with the same lines under the same key never reads this one's verdicts.
+    const edited = { globs: ['src/**'], lines: ['gpt-'] };
+    expect(coverageOf(edited, tracked, verdicts).files).toBe(0);
   });
 });
 

@@ -1,4 +1,9 @@
-import { PrincipleKind, type PrincipleDto, type Watchpoint } from '@10db/contracts';
+import {
+  PrincipleKind,
+  type PrincipleDto,
+  type PrincipleId,
+  type Watchpoint,
+} from '@10db/contracts';
 import { mostSpecific } from '../knowledge';
 
 /** The most principles one watchpoint's guidance takes in. */
@@ -6,7 +11,7 @@ export const MAX_WATCHPOINT_PRINCIPLES = 5;
 
 /** A principle as a brief carries it: its id to cite, and its words. */
 export interface WatchpointPrinciple {
-  readonly id: string;
+  readonly id: PrincipleId;
   readonly statement: string;
 }
 

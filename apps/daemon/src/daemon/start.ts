@@ -2947,6 +2947,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     landed: (projectId) => {
       announceCoverage(state, projectId);
     },
+    logger,
   });
   const unsubscribeCoverage = subscribeWatchpointCoverage(
     bus,

@@ -43,11 +43,21 @@ export function WatchpointsHelp() {
   );
 }
 
-/** What a starter covers, as the menu says it: "Fits · 14 files", or "Counting…". */
+/** What a starter covers, as the menu says it: "Fits · 14 files", "Asks the judge · every file", or "Counting…". */
 function fitLine(coverage: WatchpointCoverage): string {
   if (coverage.state === WatchpointCoverageState.Counting) return 'Counting…';
-  return `Fits · ${String(coverage.files)} file${coverage.files === 1 ? '' : 's'}`;
+  const files =
+    coverage.asks && coverage.files > 0 && coverage.files === coverage.repoFiles
+      ? 'every file'
+      : `${coverage.partial ? 'at least ' : ''}${String(coverage.files)} file${coverage.files === 1 ? '' : 's'}`;
+  return `${coverage.asks ? 'Asks the judge' : 'Fits'} · ${files}`;
 }
+
+/** The menu's group names: for All Projects the counts are taken across the projects, otherwise in one. */
+const GROUPS = {
+  'All Projects': { fits: 'Fits Your Projects', none: 'Nothing in Your Projects Yet' },
+  'This Project': { fits: 'Fits This Project', none: 'Nothing Here Yet' },
+} as const;
 
 /** The menu's heading and what a click does. */
 function StarterHeading({ into }: { readonly into: string }) {
@@ -71,6 +81,7 @@ export function LibraryItems({
   onAdd,
   disabled,
   into,
+  where,
   coverage,
 }: {
   readonly taken: ReadonlySet<string>;
@@ -79,6 +90,8 @@ export function LibraryItems({
   readonly disabled: boolean;
   /** Where a click puts it, in words: "your list" or "this project". */
   readonly into: string;
+  /** Which scope's page the menu is on, so its groups say where the count was taken. */
+  readonly where: keyof typeof GROUPS;
   /** Each starter's count where this menu is; the menu is one flat list until it is read. */
   readonly coverage?: (key: string) => WatchpointCoverage | undefined;
 }) {
@@ -99,7 +112,10 @@ export function LibraryItems({
         {found === undefined ||
         (found.state === WatchpointCoverageState.Counted && found.files === 0) ? null : (
           <Text size="xs" c="dimmed">
-            {found.state === WatchpointCoverageState.Unreadable ? 'Not counted' : fitLine(found)}
+            {found.state === WatchpointCoverageState.Unreadable ||
+            (found.partial && found.files === 0)
+              ? 'Not counted'
+              : fitLine(found)}
           </Text>
         )}
         {found?.examples[0] === undefined ? null : (
@@ -125,26 +141,34 @@ export function LibraryItems({
         {counts.map(({ starter }) => item(starter, undefined))}
       </>
     );
+  const counting = (c: { found: WatchpointCoverage | undefined }) =>
+    c.found?.state === WatchpointCoverageState.Counting;
+  const hasFiles = (c: { found: WatchpointCoverage | undefined }) =>
+    c.found?.state === WatchpointCoverageState.Counted && c.found.files > 0;
+  // Starters that only ask the judge a question are never ranked by count: their paths say what they ask about.
   const fits = counts
-    .filter(
-      (c) =>
-        c.found?.state === WatchpointCoverageState.Counting ||
-        (c.found?.state === WatchpointCoverageState.Counted && c.found.files > 0),
-    )
+    .filter((c) => (counting(c) || hasFiles(c)) && c.found?.asks !== true)
     .toSorted((a, b) => (b.found?.files ?? 0) - (a.found?.files ?? 0));
-  const none = counts.filter((c) => !fits.includes(c));
+  const asks = counts.filter((c) => (counting(c) || hasFiles(c)) && c.found?.asks === true);
+  const none = counts.filter((c) => !fits.includes(c) && !asks.includes(c));
   return (
     <>
       <StarterHeading into={into} />
       {fits.length === 0 ? null : (
         <>
-          <Menu.Label>Fits This Project</Menu.Label>
+          <Menu.Label>{GROUPS[where].fits}</Menu.Label>
           {fits.map(({ starter, found }) => item(starter, found))}
+        </>
+      )}
+      {asks.length === 0 ? null : (
+        <>
+          <Menu.Label>Ask the Judge</Menu.Label>
+          {asks.map(({ starter, found }) => item(starter, found))}
         </>
       )}
       {none.length === 0 ? null : (
         <>
-          <Menu.Label>Nothing Here Yet</Menu.Label>
+          <Menu.Label>{GROUPS[where].none}</Menu.Label>
           {none.map(({ starter, found }) => item(starter, found))}
         </>
       )}
@@ -256,6 +280,7 @@ export function AllWatchpointsSection() {
               disabled={set.isPending}
               coverage={countFor}
               into="your list"
+              where="All Projects"
               onAdd={(starter) => {
                 void save([...list, starter], () => {
                   added.mark(starter);

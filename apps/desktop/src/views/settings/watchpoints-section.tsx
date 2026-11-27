@@ -203,6 +203,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
               disabled={set.isPending}
               coverage={countFor}
               into="this project"
+              where="This Project"
               onAdd={(starter) => {
                 void save(withItem(entries, starter), () => {
                   added.mark(starter);

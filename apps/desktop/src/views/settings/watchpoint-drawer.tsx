@@ -88,6 +88,12 @@ function CoveredFiles({ coverage }: { readonly coverage: WatchpointCoverage }) {
         The files here could not be counted.
       </Text>
     );
+  if (coverage.files === 0 && coverage.partial)
+    return (
+      <Text size="xs" c="dimmed">
+        The files here could not be counted in full.
+      </Text>
+    );
   if (coverage.files === 0)
     return (
       <Text size="xs" c="dimmed">
@@ -98,7 +104,7 @@ function CoveredFiles({ coverage }: { readonly coverage: WatchpointCoverage }) {
   return (
     <Stack gap={4} aria-label="Files this covers">
       <Text size="xs" c="dimmed">
-        {`Covers ${String(coverage.files)} file${coverage.files === 1 ? '' : 's'} here`}
+        {`${coverage.asks ? 'Asks about' : 'Covers'} ${coverage.partial ? 'at least ' : ''}${String(coverage.files)} file${coverage.files === 1 ? '' : 's'} here`}
       </Text>
       <Group gap={6}>
         {coverage.examples.map((path) => (
@@ -288,7 +294,6 @@ export function WatchpointDrawer({
           <TextInput
             label="Question"
             aria-label="Watchpoint question"
-            placeholder="Does this change who can do what: sign-in, sessions, tokens, roles or permission checks?"
             description="Optional. A yes or no 10db's judge asks of the files these paths cover that no line settled. With a question and no lines, the paths alone match nothing. For now the answer is only logged, in Settings › Decisions."
             maxLength={MAX_WATCHPOINT_QUESTION_LENGTH}
             value={draft.question}
@@ -316,8 +321,8 @@ export function WatchpointDrawer({
         <TagsInput
           label="Knowledge"
           aria-label="Watchpoint knowledge topics"
-          placeholder={draft.knowledge.length === 0 ? 'ui, auth' : ''}
-          description="Optional. Topic keys from your Knowledge, such as ui or auth. The current principles under each join What to Check in the agent's and reviewer's briefs."
+          description="Optional. Topic keys from your Knowledge, such as ui or auth. The current principles under each, newest first and at most five, are given with What to Check in the agent's and reviewer's briefs. A watchpoint with a question and no lines gives them as guidance only, with no reasons asked for."
+          maxTags={8}
           value={draft.knowledge}
           onChange={(knowledge) => {
             change({ knowledge });
