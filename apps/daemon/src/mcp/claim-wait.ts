@@ -50,7 +50,15 @@ export const CLAIM_POLL_MS = 2_000;
 export const CLAIM_WAIT_SLICE_MS = 4 * 60_000;
 
 export type ClaimResult =
-  | { readonly granted: true; readonly claim: ClaimRow }
+  | {
+      readonly granted: true;
+      readonly claim: ClaimRow;
+      /**
+       * The edits the task that held the claim before this wait took it left uncommitted in the
+       * checkout they share (`Asking.handOver`); null when no task held it while this wait waited.
+       */
+      readonly handed: { readonly from: WorkstreamId; readonly paths: readonly string[] } | null;
+    }
   | {
       readonly granted: false;
       readonly heldBy: WorkstreamId | null;
@@ -162,6 +170,11 @@ export interface Asking {
   readonly pollMs: number;
   /** A pass lane's shared area: asked about first, then granted with its hold. */
   readonly shared?: SharedGrant;
+  /**
+   * Records, as `from`'s, the uncommitted edits `from` left under the claim in the checkout it shares
+   * with this task, once this wait takes the claim `from` held, and answers their paths.
+   */
+  handOver(from: WorkstreamId): Promise<readonly string[]>;
 }
 
 /** Where a wait in progress stands: who holds the claim now. */
@@ -531,7 +544,7 @@ export function yieldRefusal(
     inboxId: given.inboxId,
     yielded: true,
     parked: false,
-    instruction: `The builder answered a claim deadlock: this task gave up ${list}, which was released so the other task could go on. You no longer hold ${list}: edit nothing there until request_claim grants it to you again. You did not get ${asked.kind} ${asked.name} either. Call request_claim with a new opId for each claim you still need.`,
+    instruction: `The builder answered a claim deadlock: this task gave up ${list}, which was released so the other task could go on. You no longer hold ${list}: edit nothing there until request_claim grants it to you again. Your uncommitted edits there stay as they are and are still your own: the other task does not commit them, and to commit them you ask for ${list} again. You did not get ${asked.kind} ${asked.name} either. Call request_claim with a new opId for each claim you still need.`,
   };
 }
 
@@ -673,7 +686,13 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
       if (outcome === null) return turnEndedRefusal(a, null);
       if (outcome.ok) {
         withdrawDeadlock(a);
-        return grantedFrom(a, outcome.claims);
+        // Recorded inside the wait, so a grant that lands between two calls still records it.
+        const from = heldBy;
+        const handed =
+          from === null
+            ? null
+            : { from, paths: await a.handOver(from).catch(() => [] as readonly string[]) };
+        return grantedFrom(a, outcome.claims, handed);
       }
       const holder = outcome.conflict.heldBy;
       // A page whose sign-off waits for this turn frees nothing until the turn ends: no wait on it.
@@ -717,8 +736,12 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
   }
 }
 
-function grantedFrom(a: Asking, claims: readonly ClaimRow[]): ClaimResult {
+function grantedFrom(
+  a: Asking,
+  claims: readonly ClaimRow[],
+  handed: { readonly from: WorkstreamId; readonly paths: readonly string[] } | null,
+): ClaimResult {
   const claim = claims.find((c) => c.kind === a.kind && c.name === a.name);
   if (!claim) throw new InvalidError('Claim was granted but not found');
-  return { granted: true, claim };
+  return { granted: true, claim, handed };
 }

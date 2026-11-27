@@ -10,7 +10,14 @@ import {
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { mintId, type BatchDto, type BatchId, type WorkstreamDto } from '@10db/contracts';
-import { getBatch, getWorkstreamRow, listWorkstreams, patchWorkstream, schema } from '@10db/db';
+import {
+  getBatch,
+  getWorkstreamRow,
+  insertToolOp,
+  listWorkstreams,
+  patchWorkstream,
+  schema,
+} from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { opened, pathOf } from '../../test/delivery-worlds';
@@ -536,7 +543,17 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     expect((await updates.beforeGate(batch.id, signal)).kind).toBe('merged');
     // Beta starts on that merge, then commits its own file; main moves on again.
     startAt(member(beta.id).id, gitIn(path, 'rev-parse', 'HEAD'));
-    await commitOnBatch(batch, 'src/ui/beta.txt');
+    const betaCommit = await commitOnBatch(batch, 'src/ui/beta.txt');
+    // As the commit tool records it: in a worktree two tasks share, only a task's recorded commits are its own.
+    h.state.write((c) => {
+      insertToolOp(c, {
+        workstreamId: member(beta.id).id,
+        sessionId: mintId('Session'),
+        opId: 'op-beta-commit',
+        tool: 'commit',
+        result: { sha: betaCommit, alreadyCommitted: false },
+      });
+    });
     h.teammatePush('main', 'src/ui/second.txt');
     expect((await updates.beforeGate(batch.id, signal)).kind).toBe('merged');
     const changes = await workstreamChanges({ db: h.store.db, git: h.git }, member(beta.id).id);

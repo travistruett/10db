@@ -101,6 +101,11 @@ export interface PromptInput {
   readonly watchpoints?: string | null;
   /** What a Review or QA step is told, every round, of the watchpoint files the change touched. */
   readonly watchpointReview?: string | null;
+  /**
+   * What a Review or QA step of a run in a shared copy is told, every round, the change is: the run's own
+   * commits, with the rest of the branch out of scope. Null for a run whose branch is its own.
+   */
+  readonly changeUnderReview?: string | null;
   readonly revisedBy: {
     readonly role: StepRole;
     readonly personaName: string;
@@ -968,7 +973,7 @@ function actionSection(input: PromptInput): string {
         : gate;
     }
     case 'uncommitted':
-      return `Your step ended with changes in your claims that are not committed:\n${bullets(input.action.paths)}\nCommit each one through mcp__10db__commit, naming every path, then end your turn. 10db runs the gate once they are committed. A path this task never changed (another writer is editing this checkout) is not yours to commit: name it in mcp__10db__report_deviation's leaveUncommitted, saying whose it looks to be, and end your turn.`;
+      return `Your step ended with changes in your claims that are not committed:\n${bullets(input.action.paths)}\nCommit each one through mcp__10db__commit, naming every path, then end your turn. 10db runs the gate once they are committed. A path this task never changed (the builder, or another task in this copy, edited it) is not yours to commit: name it in mcp__10db__report_deviation's leaveUncommitted, saying whose it looks to be, and end your turn.`;
     case 'merge':
       return mergeSection(input.action.base, input.action.paths);
     case 'verify':
@@ -1100,6 +1105,8 @@ function stepSection(input: PromptInput): string[] {
     lines.push('', `Your previous result${verdict}:`, input.previousResult.summary);
   }
   lines.push(...roundSection(step, input.earlierResults));
+  if ((step.role === StepRole.Review || step.role === StepRole.Qa) && input.changeUnderReview)
+    lines.push('', input.changeUnderReview);
   lines.push(...reviewFactsSection(step.role, input.reviewFacts));
   const firstRound = !input.earlierResults.some((r) => r.verdict === Verdict.Reject);
   if (step.role === StepRole.Review && firstRound && input.testValue)

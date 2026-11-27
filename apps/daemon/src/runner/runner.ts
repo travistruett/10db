@@ -131,6 +131,7 @@ import {
   insertEvidence,
   appendRetryLimitFindings,
   insertRetryLimitFollowUp,
+  retryLimitSourceOf,
   insertPassTurn,
   insertSession,
   insertSource,
@@ -195,6 +196,7 @@ import {
   briefedFromHandoff,
   buildContextPack,
   buildSessionPrompt,
+  changeUnderReviewBrief,
   compactionReinjection,
   contextPackedEvent,
   denialsForLane,
@@ -232,6 +234,7 @@ import {
   checkoutOf,
   diffOfRanges,
   runCommits,
+  sharesBatchWorktree,
   fileFlakyTests,
   flakeNote,
   gateNote,
@@ -425,6 +428,7 @@ import {
   type LaneMessages,
 } from './lane-messages';
 import { PASS_TURN_DETAIL } from './pass-check';
+import { raiseRepeatFindings } from './repeat-findings-card';
 import {
   endTurnSteps,
   finishEndedTurn,
@@ -946,6 +950,15 @@ function laneBrowserSession(
 interface Failure {
   readonly kind: WorkstreamFailure;
   readonly reason: string;
+}
+
+/**
+ * A rejection that used up the review rounds and ships: its findings, and the task this one was filed to
+ * fix at that task's own limit (null when it was filed some other way).
+ */
+interface AtLimit {
+  readonly found: RetryLimitFindings;
+  readonly parent: TaskDto | null;
 }
 
 /** Why a session is asked to hand off: its context filled, or its account neared its usage limit. */
@@ -2042,13 +2055,14 @@ export function createRunner(opts: RunnerOptions): Runner {
   /**
    * The steps once the current one is done and step `to` entered (-1: none). A rejection at the
    * round limit (`atLimit`) files its findings as a follow-up task in the same write and names it on
-   * the step.
+   * the step. A task that is itself a retry-limit follow-up (`atLimit.parent`) files none: its findings
+   * go on one Inbox card, so the follow-ups stop at one level.
    */
   function stepsAdvanced(
     ctx: WriteContext,
     row: WorkstreamRow,
     to: number,
-    atLimit: RetryLimitFindings | null,
+    atLimit: AtLimit | null,
   ): WorkstreamStep[] {
     const steps = advanceSteps(row.steps, row.stepIndex, to, entryFor(ctx, row.id));
     if (!atLimit) return steps;
@@ -2056,10 +2070,19 @@ export function createRunner(opts: RunnerOptions): Runner {
     // QA sent the work back, adds to it while it is unstarted and files no second one.
     const earlier = row.steps[row.stepIndex]?.shippedAtLimit;
     if (earlier !== undefined) {
-      appendRetryLimitFindings(ctx, earlier.followUpTaskId, atLimit);
+      appendRetryLimitFindings(ctx, earlier.followUpTaskId, atLimit.found);
       return steps;
     }
-    const followUp = insertRetryLimitFollowUp(ctx, row.taskId, atLimit);
+    if (atLimit.parent !== null) {
+      raiseRepeatFindings(ctx, {
+        task: getTask(ctx.tx, row.taskId),
+        parent: atLimit.parent,
+        workstreamId: row.id,
+        found: atLimit.found,
+      });
+      return steps;
+    }
+    const followUp = insertRetryLimitFollowUp(ctx, row.taskId, atLimit.found);
     return steps.map((s, i) =>
       i === row.stepIndex
         ? { ...s, shippedAtLimit: { followUpTaskId: followUp.id, followUpTitle: followUp.title } }
@@ -2154,7 +2177,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     step: WorkstreamStep,
     ending: {
       readonly reason: (qaSkipped: boolean) => string;
-      readonly atLimit: RetryLimitFindings | null;
+      readonly atLimit: AtLimit | null;
       readonly skipQa: boolean;
     },
   ): Promise<'next' | 'stop'> {
@@ -2308,17 +2331,23 @@ export function createRunner(opts: RunnerOptions): Runner {
               evidence: listEvidence(db, id),
             })
           ) {
-            const atLimit = {
+            const found = {
               role: step.role === StepRole.Qa ? 'QA' : step.role,
               notes: findingNotes(result.summary),
             };
+            // The step that filed this task names it in the write that filed it, so it reads here.
+            const parent = retryLimitSourceOf(db, row.taskId);
+            const filedAs =
+              parent === null
+                ? 'shipped with its findings filed as a follow-up task'
+                : `shipped; its findings repeat those of "${parent.title}", on one Inbox card`;
             // The move an approval would get: a step that follows (QA after review) still runs. One
             // that rejects there is past the limit too, so it ships the same way with its own follow-up.
             // A change of Markdown files alone skips QA here as it does after an approval.
             return finishApproved(id, ctl, row, step, {
               reason: (qaSkipped) =>
-                `${step.role} rejected the work and the review rounds (${String(rounds)}) are used up; shipped with its findings filed as a follow-up task${qaSkipped ? '; QA skipped: only docs changed' : ''}`,
-              atLimit,
+                `${step.role} rejected the work and the review rounds (${String(rounds)}) are used up; ${filedAs}${qaSkipped ? '; QA skipped: only docs changed' : ''}`,
+              atLimit: { found, parent },
               skipQa: await qaSkippedForDocs(id, ctl, row, step, true),
             });
           }
@@ -3590,6 +3619,22 @@ export function createRunner(opts: RunnerOptions): Runner {
           touchedPrinciples,
         )
       : null;
+    // A Review or QA step in a copy its batch's other runs commit on is shown only this run's commits.
+    let changeUnderReview: string | null = null;
+    if (
+      (step.role === StepRole.Review || step.role === StepRole.Qa) &&
+      sharesBatchWorktree(db, row, checkout)
+    ) {
+      try {
+        changeUnderReview = changeUnderReviewBrief(await ownWork(row, checkout, baseHead));
+      } catch (err) {
+        opts.logger.warn(
+          { workstreamId: id, err },
+          "could not read the run's commits for its review brief",
+        );
+        changeUnderReview = changeUnderReviewBrief(null);
+      }
+    }
     const prompt = buildSessionPrompt({
       provider,
       linearIssue: linearIssue === null ? null : snapshotSection(linearIssue),
@@ -3660,6 +3705,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       acceptance,
       watchpoints: watchpointBuild,
       watchpointReview,
+      changeUnderReview,
       revisedBy: reviser
         ? {
             role: reviser.role,
@@ -5091,22 +5137,26 @@ export function createRunner(opts: RunnerOptions): Runner {
     if (checkCoverage(command, [], checkout) === null) return null;
     try {
       const head = knownHead ?? (await opts.git.head(checkout));
-      let own: string[];
-      if (checkout !== getProject(db, row.projectId).repoPath) {
-        // Read again: the gate's base update moves the task's base.
-        const base = getWorkstreamRow(db, row.id).baseHead ?? head;
-        own = await opts.git.filesChangedBetween(checkout, base, head);
-      } else {
-        const { ranges } = await ownWork(row, checkout, row.baseHead ?? head);
-        const files = await Promise.all(
-          ranges.map((r) => opts.git.filesChangedBetween(checkout, r.base, r.head)),
-        );
-        own = withoutStartDirt(
-          [...new Set(files.flat())],
-          checkout,
-          passOfWorkstream(db, row.id) ? null : getTaskStartDirt(db, row.taskId),
-        );
-      }
+      const inWorktree = checkout !== getProject(db, row.projectId).repoPath;
+      // A worktree's base is read again: the gate's base update moves the task's base.
+      const base = (inWorktree ? getWorkstreamRow(db, row.id).baseHead : row.baseHead) ?? head;
+      const { ranges } = await ownWork(row, checkout, base);
+      const files = [
+        ...new Set(
+          (
+            await Promise.all(
+              ranges.map((r) => opts.git.filesChangedBetween(checkout, r.base, r.head)),
+            )
+          ).flat(),
+        ),
+      ];
+      const own = inWorktree
+        ? files
+        : withoutStartDirt(
+            files,
+            checkout,
+            passOfWorkstream(db, row.id) ? null : getTaskStartDirt(db, row.taskId),
+          );
       return checkCoverage(command, own, checkout);
     } catch {
       return null;

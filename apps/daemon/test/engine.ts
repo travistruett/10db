@@ -128,13 +128,20 @@ import {
   type LiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
+  handOverEdits,
   type Runner,
   type RunnerOptions,
   subscribeLaneTakeOut,
 } from '../src/runner';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { createGateRunner } from '../src/verify';
-import { retryWorkstream, seedTeam, startTaskWithPlan } from '../src/team';
+import {
+  insertPlannedWorkstream,
+  planForStart,
+  retryWorkstream,
+  seedTeam,
+  startTaskWithPlan,
+} from '../src/team';
 import { measureForTests } from './catalogue';
 import { seedProfiles } from './seed-profiles';
 import { createMemoryKeychain, createTempRepo, tempDir } from './fixtures';
@@ -574,6 +581,7 @@ export async function createTestEngine(
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
       awayFor: (id) => live.get(id)?.away,
+      handOverClaim: (handover) => handOverEdits({ state, git }, handover),
       // As the daemon does: a builder message the MCP side writes goes to the page's session.
       deliverMessage: (taskId, messageId) =>
         created.deliverMessage(taskId, messageId, { redo: false }),
@@ -741,7 +749,9 @@ export async function createTestEngine(
         }),
       );
       const workstream = plan
-        ? startTaskWithPlan(state, task.id)
+        ? state.write((ctx) =>
+            insertPlannedWorkstream(ctx, task.id, planForStart(ctx.tx, task.id), batchId ?? null),
+          )
         : state.write((ctx) =>
             insertWorkstream(ctx, task.id, {
               first: { model: 'claude-sonnet-5-5', effort: 'medium' },

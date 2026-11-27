@@ -17,8 +17,12 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   ConflictError,
+  EvidenceKind,
   InboxAnswerRefused,
+  InboxKind,
   LEFT_OUT_NOTICE_KEY,
+  McpToolName,
+  McpToolOutputs,
   mintId,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
   MIGRATIONS_UNCARRIED_NOTICE_KEY,
@@ -27,6 +31,9 @@ import {
   REVERT_COMMIT_LINE,
   ToolAccess,
   TRUST_DEFAULTS,
+  WatchpointChoice,
+  WatchpointFileStatus,
+  WatchpointLoudness,
   YourMcpSource,
   yourMcpServerKey,
   AccountCardChoice,
@@ -65,6 +72,7 @@ import {
   listSessions,
   listSkipsForWorkstream,
   listTaskThread,
+  listToolOpResults,
   listWorkstreams,
   patchAccount,
   replaceAccountModels,
@@ -93,7 +101,9 @@ import {
   RESULT_NUDGE,
 } from '../briefing';
 import { createLauncher } from '../environment';
+import { startTaskWithPlan } from '../team';
 import { setProjectLiveSystems } from '../trust';
+import { announceWatchpointReading } from '../watchpoints';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { DEFAULT_RUNNER_LIMITS } from '../runner';
 import { createGit, type Git } from '../git';
@@ -2419,6 +2429,8 @@ describe('flows', () => {
     expect(ws(workstream.id).state).toBe('DONE');
     expect(ws(workstream.id).steps.map((s) => s.status)).toEqual(['done', 'done']);
     expect(engine.adapter.prompts[1]?.prompt).toContain('Your step: 2 of 2, review, as Reviewer.');
+    // A task whose branch is its own is reviewed on its diff, with no commit list.
+    expect(engine.adapter.prompts[1]?.prompt).not.toContain('other tasks also commit to');
     expect(
       listEvidence(engine.store.db, workstream.id).filter((e) => e.kind === 'gate'),
     ).toHaveLength(1);
@@ -2721,6 +2733,39 @@ describe('flows', () => {
         followUpTaskId: filed?.id,
         followUpTitle: filed?.title,
       });
+    });
+
+    it('files no follow-up of a follow-up that ships at the limit too, and raises one card instead', async () => {
+      const again = (n: number) => [
+        [turn],
+        [
+          reject(`op-flow-06${String(n)}0`, `1. BLOCKING the scope is wrong, round ${String(n)}`),
+          turn,
+        ],
+      ];
+      engine = await createTestEngine({
+        Alpha: [...[1, 2, 3, 4].flatMap(round)],
+        'Resolve the open findings of "Alpha"': [...[1, 2, 3, 4].flatMap(again)],
+      });
+      engine.state.write((ctx) =>
+        setPlaybook(ctx, null, { rows: [{ rigor: 'standard', reviewRounds: 3 }] }),
+      );
+      const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+      const [filed] = filedFor(task.id);
+      if (filed === undefined) throw new Error('no follow-up filed');
+      const followUp = startTaskWithPlan(engine.state, filed.id);
+      await until(followUp.id, (s) => s === 'DONE' || s === 'FAILED', 20);
+      expect(ws(followUp.id)).toMatchObject({ state: 'DONE', failureReason: null });
+      expect(filedFor(task.id).filter((t) => t.id !== filed.id)).toEqual([]);
+      expect(step(followUp.id, 1)?.shippedAtLimit).toBeUndefined();
+      const cards = listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (item) =>
+          item.kind === InboxKind.Flag && item.targets.some((t) => t.workstreamId === followUp.id),
+      );
+      expect(cards).toHaveLength(1);
+      expect(cards[0]?.title).toBe(`Findings repeat: ${filed.title}`);
+      expect(cards[0]?.body).toContain('round 4');
     });
 
     describe('when a QA step follows the review', () => {
@@ -3820,6 +3865,201 @@ describe("a lane's settled read-only line", () => {
     expect(spec.preToolUse(cat)).toHaveProperty('settled');
     expect(spec.preToolUse({ ...cat, cwd: apps })).not.toHaveProperty('settled');
     await engine.runner.cancel(workstream.id);
+  });
+});
+
+describe('a worktree batch two tasks share', () => {
+  let worktrees: TempDir | null = null;
+  afterEach(() => {
+    worktrees?.cleanup();
+    worktrees = null;
+  });
+
+  it("a task's watchpoints read only its own commits, not a sibling's", async () => {
+    const book: FakeScriptBook = {
+      // Beta's first gate fails, so its run starts before Alpha's migration and reads after it.
+      Beta: [[turn], [write('src/ui/beta.txt'), commit('op-wt-own-b1', ['src/ui/beta.txt']), turn]],
+      Alpha: [
+        [
+          write('src/api/migrations/0001_x.sql'),
+          commit('op-wt-own-a1', ['src/api/migrations/0001_x.sql']),
+          turn,
+        ],
+      ],
+    };
+    engine = await createTestEngine(book, {
+      workspaceMode: 'worktree',
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      gateCommand: 'test -f src/ui/beta.txt -o -f src/api/migrations/0001_x.sql',
+    });
+    worktrees = tempDir('runner-shared-worktree');
+    const path = join(worktrees.path, 'wt');
+    execFileSync('git', ['-C', engine.repoPath, 'worktree', 'add', '-q', '-b', 'batch/two', path], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    const batch = engine.state.write((ctx) => {
+      const inserted = insertBatch(ctx, {
+        projectId: engine.project.id,
+        title: 'Two tasks',
+        baseBranch: 'main',
+        worktreePath: realpathSync(path),
+      });
+      return transitionBatch(ctx, inserted.id, {
+        to: 'OPEN',
+        patch: { branch: 'batch/two', baseSha: 'x' },
+      });
+    });
+    const beta = engine.addTask('Beta', ['ui'], [], undefined, batch.id).workstream;
+    engine.launch(beta.id);
+    await engine.runner.idle();
+    expect(ws(beta.id).state).toBe('QUEUED');
+    const alpha = engine.addTask(
+      'Alpha',
+      ['api', 'migrations'],
+      [],
+      undefined,
+      batch.id,
+    ).workstream;
+    engine.launch(alpha.id);
+    await engine.runner.idle();
+    engine.launch(beta.id);
+    await engine.runner.idle();
+    const readings = listEvidence(engine.store.db, beta.id).filter(
+      (e) => e.kind === EvidenceKind.Watchpoint,
+    );
+    // Alpha's own reading still holds its migration.
+    expect(listEvidence(engine.store.db, alpha.id).map((e) => e.summary)).toContain(
+      '1 file under 1 watchpoint.',
+    );
+    expect(readings.map((e) => JSON.stringify(e.detail))).not.toContainEqual(
+      expect.stringContaining('migrations'),
+    );
+    const cards = listInbox(engine.store.db, {}).filter(
+      (item) =>
+        item.kind === InboxKind.Watchpoint && item.targets.some((t) => t.workstreamId === beta.id),
+    );
+    expect(cards).toEqual([]);
+    expect(ws(beta.id).state).toBe('DONE');
+  });
+
+  it("a task's review is shown only its own commits, with a sibling's out of scope", async () => {
+    const complete = { opId: 'op-wt-rev-b2', summary: 'Looks right.', verdict: 'approve' };
+    const book: FakeScriptBook = {
+      // Beta's first gate fails, so its run starts before Alpha's commit and reviews after it.
+      Beta: [
+        [turn],
+        [write('src/ui/beta.txt'), commit('op-wt-rev-b1', ['src/ui/beta.txt']), turn],
+        [{ do: 'mcp', tool: 'complete_step', args: complete }, turn],
+      ],
+      Alpha: [[write('src/api/alpha.txt'), commit('op-wt-rev-a1', ['src/api/alpha.txt']), turn]],
+    };
+    engine = await createTestEngine(book, {
+      workspaceMode: 'worktree',
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      gateCommand: 'test -f src/ui/beta.txt -o -f src/api/alpha.txt',
+    });
+    worktrees = tempDir('runner-shared-review');
+    const path = join(worktrees.path, 'wt');
+    execFileSync('git', ['-C', engine.repoPath, 'worktree', 'add', '-q', '-b', 'batch/two', path], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    const batch = engine.state.write((ctx) => {
+      const inserted = insertBatch(ctx, {
+        projectId: engine.project.id,
+        title: 'Two tasks',
+        baseBranch: 'main',
+        worktreePath: realpathSync(path),
+      });
+      return transitionBatch(ctx, inserted.id, {
+        to: 'OPEN',
+        patch: { branch: 'batch/two', baseSha: 'x' },
+      });
+    });
+    const beta = engine.addTask('Beta', ['ui'], [], { flow: 'standard' }, batch.id).workstream;
+    engine.launch(beta.id);
+    await engine.runner.idle();
+    expect(ws(beta.id).state).toBe('QUEUED');
+    const alpha = engine.addTask('Alpha', ['api'], [], undefined, batch.id).workstream;
+    engine.launch(alpha.id);
+    await engine.runner.idle();
+    for (let i = 0; i < 3 && ws(beta.id).state !== 'DONE'; i += 1) {
+      engine.launch(beta.id);
+      await engine.runner.idle();
+    }
+    expect(ws(beta.id).state).toBe('DONE');
+    const shaOf = (id: WorkstreamId): string => {
+      const [result] = listToolOpResults(engine.store.db, id, McpToolName.Commit);
+      return McpToolOutputs.commit.parse(result).sha;
+    };
+    const own = shaOf(beta.id);
+    const sibling = shaOf(alpha.id);
+    const review = engine.adapter.prompts.find((p) =>
+      p.prompt.includes('Your step: 2 of 2, review'),
+    )?.prompt;
+    expect(review).toContain(own.slice(0, 12));
+    expect(review).toContain('out of scope');
+    expect(review).not.toContain(sibling.slice(0, 12));
+  });
+
+  it('a run is asked once about a watchpoint the builder answered, however many steps read it', async () => {
+    engine = await createTestEngine({});
+    const { workstream } = engine.addTask('Alpha', ['api']);
+    const task = getTask(engine.store.db, workstream.taskId);
+    const hit = (key: string, path: string) => ({
+      watchpoint: {
+        key,
+        label: key,
+        why: 'why',
+        guidance: 'check',
+        loudness: WatchpointLoudness.Ask,
+      },
+      files: [
+        {
+          path,
+          status: WatchpointFileStatus.Added,
+          added: 1,
+          removed: 0,
+          patch: '',
+          clipped: false,
+        },
+      ],
+    });
+    const announce = (hits: ReturnType<typeof hit>[]) => {
+      engine.state.write((ctx) => {
+        announceWatchpointReading(ctx, {
+          workstreamId: workstream.id,
+          projectId: engine.project.id,
+          taskId: task.id,
+          taskTitle: task.title,
+          detail: { hits, head: 'h', skipped: null },
+        });
+      });
+    };
+    const looks = () =>
+      listInbox(engine.store.db, {}).filter(
+        (item) =>
+          item.kind === InboxKind.Watchpoint &&
+          item.targets.some((t) => t.workstreamId === workstream.id),
+      );
+    const migration = hit('migrations', 'src/api/migrations/0001_x.sql');
+    announce([migration]);
+    const [first] = looks();
+    if (first === undefined) throw new Error('no Look card');
+    engine.inbox.answer(first.id, { choice: WatchpointChoice.LooksRight });
+    // The next steps read the same change.
+    announce([migration]);
+    announce([migration]);
+    expect(looks()).toHaveLength(1);
+    // A watchpoint no answered card named is still asked about, alone.
+    announce([migration, hit('contracts', 'src/api/contracts/x.ts')]);
+    const later = looks().filter((item) => item.id !== first.id);
+    expect(later.map((item) => item.detail)).toEqual([
+      { watchpoints: [{ key: 'contracts', label: 'contracts' }] },
+    ]);
   });
 });
 
