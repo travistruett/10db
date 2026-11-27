@@ -256,7 +256,17 @@ export function AccountsSection() {
     return (
       <>
         {header}
-        <PageLoading shape={PageLoadingShape.List} label="Reading the accounts" />
+        <PageLoading
+          shape={PageLoadingShape.Table}
+          label="Reading the accounts"
+          columns={['Account', 'Kind', 'Used By', 'Decisions', 'Status', 'This Month'].map(
+            (title) => ({ title }),
+          )}
+          minWidth={860}
+          rows={2}
+          cellLines={2}
+          verticalSpacing="sm"
+        />
       </>
     );
   // A failed background refetch also sets isError while the last list is still here; that must not

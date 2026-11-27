@@ -46,7 +46,18 @@ export function PlaybookTable({
     );
   const view = playbook.data;
   if (view === undefined)
-    return <PageLoading shape={PageLoadingShape.List} rows={4} label="Reading the playbook" />;
+    return (
+      <PageLoading
+        shape={PageLoadingShape.Table}
+        label="Reading the playbook"
+        columns={[{ title: 'Rigor', width: 230 }, ...ROLES.map(({ label }) => ({ title: label }))]}
+        minWidth={1000}
+        rows={4}
+        cellLines={2}
+        verticalSpacing="xs"
+        horizontalSpacing="md"
+      />
+    );
 
   const columns: DataTableColumn<PlaybookRowDto>[] = [
     {
