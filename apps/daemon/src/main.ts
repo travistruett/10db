@@ -189,6 +189,18 @@ function chooseAdapter(): AgentAdapter | ((logger: Logger) => AgentAdapter) {
     });
 }
 
+// The shell holds our stdin open; EOF means it is gone. While starting nothing is serving, so leave at once rather
+// than hold daemon.lock with no daemon.json for every later daemon. EOF is seen only while start-up waits on I/O (a
+// child process, the backup copy); the migration itself runs synchronously, so it never ends part-way here.
+const shellLeftDuringStart = (): void => {
+  console.error('10db daemon: the shell left during start-up; exiting');
+  process.exit(1);
+};
+if (env.TENDB_PARENT_STDIN === '1') {
+  process.stdin.once('end', shellLeftDuringStart);
+  process.stdin.resume();
+}
+
 try {
   const sqliteBinding = resolveSqliteBinding(env);
   // Only a bundle has build-info.json (scripts/build.ts); a run from source shows no commit.
@@ -243,10 +255,10 @@ try {
   };
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
-  // The shell holds our stdin open; EOF means it is gone, so stop as if told to.
+  // Serving now: EOF stops the daemon as if told to.
   if (env.TENDB_PARENT_STDIN === '1') {
+    process.stdin.off('end', shellLeftDuringStart);
     process.stdin.once('end', shutdown);
-    process.stdin.resume();
   }
 } catch (error) {
   if (error instanceof AlreadyRunningError) {

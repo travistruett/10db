@@ -1,4 +1,4 @@
-import type { DeviationId, SessionId, TaskId } from '@10db/contracts';
+import type { DeviationId, SessionId, TaskId, WorkstreamId } from '@10db/contracts';
 import { eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { StartDirtEntry } from '../schema';
@@ -47,6 +47,33 @@ export function leaveTaskPaths(
     ...kept,
     ...[...named].map((path) => ({ path, fingerprint: null, leftBy: left.by, leftIn: left.in })),
   ];
+  ctx.tx
+    .insert(schema.taskStartDirt)
+    .values({ taskId, entries, createdAt: ctx.now })
+    .onConflictDoUpdate({ target: schema.taskStartDirt.taskId, set: { entries } })
+    .run();
+}
+
+/**
+ * Adds `entries` to the task's record as another task's uncommitted edits, handed over with a claim
+ * this task was granted. A path a session of the task named as someone else's keeps that entry; any
+ * other entry for the path is replaced; a task with no record gets one holding only these.
+ */
+export function handTaskPaths(
+  ctx: WriteContext,
+  taskId: TaskId,
+  handed: readonly {
+    readonly path: string;
+    readonly fingerprint: string | null;
+    readonly handedBy: WorkstreamId;
+  }[],
+): void {
+  if (handed.length === 0) return;
+  const before = getTaskStartDirt(ctx.tx, taskId) ?? [];
+  const left = new Set(before.filter((e) => e.leftBy !== undefined).map((e) => e.path));
+  const added = handed.filter((e) => !left.has(e.path));
+  const replaced = new Set(added.map((e) => e.path));
+  const entries = [...before.filter((e) => !replaced.has(e.path)), ...added];
   ctx.tx
     .insert(schema.taskStartDirt)
     .values({ taskId, entries, createdAt: ctx.now })
