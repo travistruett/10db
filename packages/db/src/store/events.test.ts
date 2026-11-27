@@ -9,6 +9,8 @@ import { createTestStore, seedProject } from './test-support';
 import { insertTask } from './tasks';
 import { insertWorkstream } from './workstreams';
 
+let hashes = 0;
+
 let store: Store;
 let close: () => void;
 beforeEach(() => {
@@ -56,10 +58,10 @@ function seedSession(workstreamId: WorkstreamId, endedAt: string | null, at = OL
       model: 'sonnet',
       effort: 'medium',
       mode: 'managed',
-      mcpTokenHash: `hash-${String(Math.random())}`,
+      mcpTokenHash: `hash-${String((hashes += 1))}`,
     });
     ctx.tx.update(schema.sessions).set({ endedAt }).where(eq(schema.sessions.id, session.id)).run();
-    // The session's own started/ended rows exist already or are added here; only the two types may go.
+    // Each session gets both pruned types and a session.ended row; only the two types may go.
     for (const type of [...PRUNED, EventType.SessionEnded]) addEvent(ctx.tx, type, session.id, at);
     return session.id;
   }).value;
@@ -106,6 +108,8 @@ describe('deleteSessionEventsEndedBefore', () => {
     for (;;) {
       const n = store.write((ctx) => deleteSessionEventsEndedBefore(ctx, CUTOFF, 1)).value;
       if (n === 0) break;
+      // One batch never deletes more than its limit.
+      expect(n).toBe(1);
       total += n;
     }
 

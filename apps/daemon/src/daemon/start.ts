@@ -3766,7 +3766,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       return;
     }
     logger.info(
-      { deleted: total, elapsedMs: Math.round(performance.now() - startedAt) },
+      {
+        deleted: total,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        stopped: sessionEventsPruneAbort.signal.aborted,
+      },
       'pruned old session events',
     );
   };
