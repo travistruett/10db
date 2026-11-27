@@ -23,11 +23,12 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
 - The frame draws one part of the title row itself: `ReconnectingIndicator` (`reconnecting-indicator.tsx`), the
   only sign that the daemon is unreachable, a pill with a yellow dot shown 5 s into an outage (with the minutes from
   two minutes on) and a hover card saying work keeps running. The title host (`.titleHost`) is `display: contents`,
-  so a view's parts are the row's own flex items; the pill takes `order: 1` and `TitleRow`'s actions
-  (`data-title-actions`) `order: 2`, so it lands between the spacer and the actions and nothing else moves when it
+  so a view's parts are the row's own flex items; the pill takes `order: 1`, the sharing icon `order: 2` and
+  `TitleRow`'s actions (`data-title-actions`) `order: 3`, so both land between the spacer and the actions and nothing else moves when it
   shows. There is no reconnect button: the provider already retries every second.
 - `SharingIndicator` (`sharing-indicator.tsx`) is the frame's other part of the title row: a wifi icon (Remote
-  Access's) at the row's end (`order: 3`, after the actions), shown whenever Tailscale is there to read
+  Access's) just before the view's actions (`order: 2`; the actions keep the row's end, where a click leaves the pointer, so
+  the card never opens under a resting pointer over the page), shown whenever Tailscale is there to read
   (`steps.length > 0`): green when shared, orange when paused, grey otherwise, its name the state in words. It stays
   in place in every state, so nothing moves when sharing changes; sharing never draws in the rail. Its hover card
   (opened by a hover, a tap or keyboard focus; kept mounted, so a pending Turn on Tailscale and its error survive the pointer leaving) says the state, copies the address once shared, holds the Share switch

@@ -62,7 +62,7 @@ function shareBlocker(status: SharingStatusDto): string | null {
 }
 
 /**
- * Sharing this Mac on the tailnet, at the bar's right: an icon whenever Tailscale is there to read (green while
+ * Sharing this Mac on the tailnet, at the bar's right just before the view's actions: an icon whenever Tailscale is there to read (green while
  * shared, orange while paused, grey otherwise), in the same place in every state so nothing moves. Its hover card,
  * which a tap or keyboard focus also opens, says the state, copies the address and turns sharing on and off.
  */
@@ -88,8 +88,10 @@ export function SharingIndicator() {
           variant="subtle"
           color="gray"
           aria-label={line}
-          // After the view's actions, at the row's end, whether or not a view drew a title row.
-          style={{ flex: 'none', order: 3, marginLeft: 'auto' }}
+          // Just before the view's actions, which stay at the row's end where a click on them leaves the pointer: a
+          // card opened under a resting pointer would cover the page below. The margin keeps it right where a view
+          // drew no title row.
+          style={{ flex: 'none', order: 2, marginLeft: 'auto' }}
         >
           <IconWifi size={16} stroke={1.8} color={ICON_COLOR[status.state]} />
         </ActionIcon>
