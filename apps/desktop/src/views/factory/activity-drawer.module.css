@@ -1,0 +1,40 @@
+/* Activity's rows take the Inbox list's row box (inbox-row-list.module.css): 12 px side padding, radius md,
+   a hairline inset 12 px that gives way beside a hovered row, whose fill already parts it. */
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  position: relative;
+}
+
+.item::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  left: 12px;
+  height: 1px;
+  background: color-mix(in srgb, var(--mantine-color-default-border) 70%, transparent);
+}
+
+.item:last-child::after,
+.item:hover::after,
+.item:has(+ .item:hover)::after {
+  display: none;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 12px;
+  border-radius: var(--mantine-radius-md);
+}
+
+.row:hover {
+  background: var(--mantine-color-default-hover);
+}

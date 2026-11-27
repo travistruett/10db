@@ -16,6 +16,7 @@ export {
   passReviewPrompt,
   RESULT_NUDGE,
 } from './prompts';
+export { changeUnderReviewBrief } from './change-under-review';
 export { failedSteps } from './failed-steps';
 export { LaneBrief } from './lane-brief';
 export { quoteSlackAnswer } from './quote-answer';

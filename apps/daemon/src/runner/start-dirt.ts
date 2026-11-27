@@ -31,8 +31,9 @@ export async function readStartDirt(
 }
 
 /**
- * `paths` less those still exactly as the task's checkout held them when it first launched, and
- * less those a session of the task named as someone else's.
+ * `paths` less those still exactly as the task's checkout held them when it first launched, or as
+ * another task left them under a claim this task was then granted, and less those a session of the
+ * task named as someone else's.
  */
 export function withoutStartDirt(
   paths: readonly string[],

@@ -36,10 +36,16 @@
   "Assess a project's evals", and says why. `AssessmentNotice` heads the Evals page with the state: assessing, unavailable,
   failed (the reason) or "Not assessed yet" with Assess Now. A project with no eval file and no result is the
   `NoEvals` empty state: New Eval (primary) and Assess Now.
-- A suite row opens `SuiteDrawer` (`suite-drawer.tsx`, `GET /projects/:id/evals/:suiteKey?run=`): the bar; the gates
-  of one run, failing first, with a model switch when the run has several (the failing model first); every run
-  (newest first, eight shown), where a click shows that run whole; flaky cases across the last runs; and what
-  the manifest says it covers, its definition and its free and live commands. The live command is shown, and its Run is the one place 10db runs it (below). A run picked in one suite is dropped when another opens.
+- A suite row opens `SuiteDrawer` (`suite-drawer.tsx`, `GET /projects/:id/evals/:suiteKey?run=`). From the top: the title and
+  meta, the bar, and a verdict in plain words for the shown run (`runVerdict` in `eval-figures.ts`: which models pass
+  every gate and how many each misses, counts instead of names past three models, "Cheapest that passes" when a
+  passing model's cost is known, never $0 for an unknown one); an actions row, the suite's Run
+  (`LiveRunControls`) or a dim line saying 10db doesn't know how to run it yet (a second action, Try Other
+  Models, joins it later); Gates, one run's gates failing first, with a `Select` of models ("name · 7/10 gates",
+  failing first, searchable past six) when the run has several; History (every run, newest first, eight shown,
+  a click shows that run whole); Flaky Cases; and Setup (what it covers, its definition, its free and live
+  commands). Each section has one dim line saying what it is. The live command is shown, and its Run is the one
+  place 10db runs it (below). A run picked in one suite is dropped when another opens.
 - A `project` event refetches every evals query (`INVALIDATIONS`), since recording a manifest is the project's.
 - A model's line says the trials that got no answer apart from its gates ("1 provider error · 2 timeouts",
   `unansweredText`): availability is not quality, though those trials stay in every gate's denominator. When a

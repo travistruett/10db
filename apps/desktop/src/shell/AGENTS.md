@@ -29,14 +29,18 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   so a view's parts are the row's own flex items; the pill takes `order: 1`, the sharing icon `order: 2` and
   `TitleRow`'s actions (`data-title-actions`) `order: 3`, so both land between the spacer and the actions and nothing else moves when it
   shows. There is no reconnect button: the provider already retries every second.
-- `SharingIndicator` (`sharing-indicator.tsx`) is the frame's other part of the title row: a wifi icon (Remote
-  Access's) just before the view's actions (`order: 2`; the actions keep the row's end, where a click leaves the pointer, so
-  the card never opens under a resting pointer over the page), shown whenever Tailscale is there to read
-  (`steps.length > 0`): green when shared, orange when paused, grey otherwise, its name the state in words. It stays
-  in place in every state, so nothing moves when sharing changes; sharing never draws in the rail. Its hover card
-  (opened by a hover, a tap or keyboard focus; kept mounted, so a pending Turn on Tailscale and its error survive the pointer leaving) says the state, copies the address once shared, holds the Share switch
+- `SharingIndicator` (`sharing-indicator.tsx`) is the frame's other part of the title row: a phone icon (what
+  sharing is for today) just before the view's actions (`order: 2`; the actions keep the row's end, where a click leaves
+  the pointer, so the card never opens under a resting pointer over the page), shown whenever Tailscale is there to
+  read (`steps.length > 0`): green when shared, orange when paused, grey otherwise, its name `Remote access: <state>`.
+  It stays in place in every state, so nothing moves when sharing changes; sharing never draws in the rail. Its hover
+  card (a group named Remote access; opened by a hover, a tap or keyboard focus; kept mounted, so a pending Turn on
+  Tailscale and its error survive the pointer leaving; the Pair a Device dialog sits beside the card, not in it,
+  because a closed card hides its portals too) says what sharing gets the builder in
+  each state, lists the paired devices once shared, offers Pair a phone (the Pair a Device dialog), holds the switch
   (`useSetSharing`, disabled with the step it waits on), Turn on Tailscale when the connected step failed
-  (`POST /sharing/connect`, the CLI's words on a refusal) and a link to Remote Access. Where a view draws no
+  (`POST /sharing/connect`, the CLI's words on a refusal) and a Settings link to Remote Access. It shows no address:
+  on a device that isn't paired the address opens only the Not paired page, so the card offers pairing instead. Where a view draws no
   actions the icon is the row's end, right under the × of a Settings drawer (Mantine's `Drawer`, which covers the
   title row). When the drawer leaves, the browser reports the still pointer as entering the icon, so the icon's
   wrapper stops `mouseenter` and `mousemove` at the place of the last pointer event seen outside it

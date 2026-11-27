@@ -44,6 +44,7 @@ import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import type { PicturesOutlook } from '../pictures';
+import { handOverEdits } from '../runner';
 import { createMcpHandler, mintSessionToken } from '../mcp';
 import { FakeAdapter, type FakeScriptBook } from '../sessions';
 import {
@@ -329,6 +330,7 @@ beforeEach(async () => {
       waitObserverFor: () => undefined,
       sessionSignal: () => undefined,
       askedToHandOff: () => undefined,
+      handOverClaim: (handover) => handOverEdits({ state, git: createGit() }, handover),
       // Reads the reporter at call time: a test swaps it for a new one over the same store.
       reporter: {
         reportPost: (id, input) => reporter.reportPost(id, input),

@@ -17,6 +17,10 @@ pub const BACKOFF_BASE: Duration = Duration::from_millis(500);
 pub const BACKOFF_MAX: Duration = Duration::from_secs(30);
 /// A daemon that ran this long before exiting counts as healthy; the backoff starts over.
 pub const HEALTHY_UPTIME: Duration = Duration::from_secs(60);
+/// How long a daemon may take to write a `daemon.json` that names it before it counts as hung.
+pub const START_DEADLINE: Duration = Duration::from_mins(10);
+/// The longest start deadline, however many hung starts came before.
+pub const START_DEADLINE_MAX: Duration = Duration::from_mins(80);
 /// The daemon's exit code when another daemon already holds the data directory.
 pub const EXIT_ALREADY_RUNNING: i32 = 2;
 /// The daemon's exit code when its database's migrations disagree with the ones it ships.
@@ -54,9 +58,9 @@ const HEALTH_PATH: &str = "/health";
 /// What a healthy daemon's /health reply starts with.
 const HEALTH_OK: &[u8; 12] = b"HTTP/1.1 200";
 const LOCK_FILE: &str = "daemon.lock";
-/// Written beside `daemon.lock` just before a frozen daemon is killed, so the next daemon knows the
-/// restart was this shell's kill and not a crash. Its name and shape match `FROZEN_KILL_FILE` in
-/// `apps/daemon/src/daemon/frozen-kill.ts`.
+/// Written beside `daemon.lock` just before a frozen daemon, or one stuck starting, is killed, so the
+/// next daemon knows the restart was this shell's kill and not a crash. Its name and shape match
+/// `FROZEN_KILL_FILE` in `apps/daemon/src/daemon/frozen-kill.ts`.
 const FROZEN_KILL_FILE: &str = "daemon.frozen-kill";
 const LOGS_DIR: &str = "logs";
 const SIDECAR_LOG: &str = "sidecar.log";
@@ -157,6 +161,18 @@ fn write_frozen_marker(data_dir: &Path, pid: u32, frozen_after: Duration) -> io:
     let staged = data_dir.join(format!("{FROZEN_KILL_FILE}.tmp"));
     fs::write(&staged, marker.to_string())?;
     fs::rename(&staged, &path)
+}
+
+/// Leaves the freeze-kill marker for `pid` before this shell kills it, reporting a write that failed.
+fn mark_killed(data_dir: &Path, log_dir: &Path, pid: Option<u32>, after: Duration) {
+    if let Some(pid) = pid
+        && let Err(error) = write_frozen_marker(data_dir, pid, after)
+    {
+        report(
+            log_dir,
+            &format!("could not write the freeze-kill marker: {error}"),
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -347,9 +363,31 @@ impl Supervisor {
     }
 }
 
+/// The start deadline after `hung` consecutive hung starts: doubling from `START_DEADLINE`, capped.
+pub fn start_deadline(hung: u32) -> Duration {
+    let doublings = 1_u32.checked_shl(hung).unwrap_or(u32::MAX);
+    START_DEADLINE
+        .saturating_mul(doublings)
+        .min(START_DEADLINE_MAX)
+}
+
+/// How a supervised daemon ended, as `run_loop` needs it.
+#[derive(Debug, Default, Clone, Copy)]
+struct ChildEnd {
+    code: Option<i32>,
+    /// This shell killed it for staying silent on /health while serving.
+    killed_as_frozen: bool,
+    /// This shell killed it for not finishing its start in time.
+    killed_as_start_hung: bool,
+    /// It wrote a `daemon.json` naming its pid at some point: it finished starting.
+    served: bool,
+}
+
 fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, data_dir: &Path, log_dir: &Path) {
     let mut backoff = Backoff::new(BACKOFF_BASE, BACKOFF_MAX);
     let mut freezes = FreezeKills::new();
+    // Consecutive starts killed for hanging; a start that finished resets it.
+    let mut hung_starts: u32 = 0;
     loop {
         {
             let mut guard = lock(shared);
@@ -361,7 +399,7 @@ fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, data_dir: &Path, log_di
         let started = Instant::now();
         let frozen_after = freezes.frozen_after(started);
         let spawned = spawn_daemon(resource_dir, log_dir);
-        let (code, killed_as_frozen) = {
+        let end = {
             let mut guard = lock(shared);
             guard.spawning = false;
             match spawned {
@@ -370,20 +408,31 @@ fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, data_dir: &Path, log_di
                     guard.stdin = child.stdin.take();
                     guard.child = Some(child);
                     drop(guard);
-                    wait_for_exit(shared, data_dir, log_dir, frozen_after)
+                    wait_for_exit(
+                        shared,
+                        data_dir,
+                        log_dir,
+                        frozen_after,
+                        start_deadline(hung_starts),
+                    )
                 }
                 Err(error) => {
                     drop(guard);
                     report(log_dir, &format!("could not start the daemon: {error}"));
-                    (None, false)
+                    ChildEnd::default()
                 }
             }
         };
-        if killed_as_frozen {
+        if end.killed_as_frozen {
             freezes.record(Instant::now());
         }
+        if end.killed_as_start_hung {
+            hung_starts = hung_starts.saturating_add(1);
+        } else if end.served {
+            hung_starts = 0;
+        }
         let quitting = lock(shared).quitting;
-        match exit_policy(code, quitting) {
+        match exit_policy(end.code, quitting) {
             ExitPolicy::Stop => return,
             ExitPolicy::WaitForHolder => {
                 // The wait is the delay: no backoff on top of it.
@@ -392,7 +441,8 @@ fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, data_dir: &Path, log_di
             }
             ExitPolicy::Restart => {}
         }
-        if started.elapsed() >= HEALTHY_UPTIME {
+        // A start-hang kill ran long but was not healthy.
+        if started.elapsed() >= HEALTHY_UPTIME && !end.killed_as_start_hung {
             backoff.reset();
         }
         thread::sleep(backoff.next_delay());
@@ -408,6 +458,8 @@ enum ChildHealth {
     Gone,
     /// Running, but silent on /health for its `frozen_after`.
     Frozen,
+    /// Running, but no `daemon.json` has named it within its start deadline.
+    StartHung,
 }
 
 /// Probes the child's /health once it serves, so a daemon that froze or is slow to die is replaced.
@@ -419,14 +471,22 @@ struct HealthWatch {
     last_answer: Option<Instant>,
     /// How long the child may stay silent before it counts as frozen.
     frozen_after: Duration,
+    spawned: Instant,
+    /// How long after `spawned` the child may go without a `daemon.json` naming it.
+    start_deadline: Duration,
+    /// A `daemon.json` has named the child: from then on only the freeze watch applies.
+    served: bool,
 }
 
 impl HealthWatch {
-    fn new(frozen_after: Duration) -> Self {
+    fn new(frozen_after: Duration, start_deadline: Duration) -> Self {
         Self {
             last_check: Instant::now(),
             last_answer: None,
             frozen_after,
+            spawned: Instant::now(),
+            start_deadline,
+            served: false,
         }
     }
 
@@ -435,12 +495,14 @@ impl HealthWatch {
             return ChildHealth::Fine;
         }
         self.last_check = Instant::now();
-        let Some((named, port)) = read_runtime_info(data_dir) else {
+        let info = read_runtime_info(data_dir).filter(|&(named, _)| named == pid);
+        let Some((_, port)) = info else {
+            if !self.served && self.spawned.elapsed() >= self.start_deadline && !process_gone(pid) {
+                return ChildHealth::StartHung;
+            }
             return ChildHealth::Fine;
         };
-        if named != pid {
-            return ChildHealth::Fine;
-        }
+        self.served = true;
         if health_answers(port) {
             self.last_answer = Some(Instant::now());
             return ChildHealth::Fine;
@@ -500,14 +562,15 @@ fn release_child(
 
 /// Polls rather than blocking in `wait`, so `stop` can take the lock to signal the child. Between
 /// polls it watches the child's health: the mutex is free while a probe runs. Answers the child's exit
-/// code, and whether this shell killed it as frozen.
+/// code, whether this shell killed it (as frozen or as hung in its start), and whether it served.
 fn wait_for_exit(
     shared: &Mutex<Shared>,
     data_dir: &Path,
     log_dir: &Path,
     frozen_after: Duration,
-) -> (Option<i32>, bool) {
-    let mut watch = HealthWatch::new(frozen_after);
+    start_deadline: Duration,
+) -> ChildEnd {
+    let mut watch = HealthWatch::new(frozen_after, start_deadline);
     loop {
         let pid = {
             let guard = lock(shared);
@@ -530,40 +593,69 @@ fn wait_for_exit(
                         ),
                     );
                     // Before the kill, so the next daemon never starts without it.
-                    if let Some(pid) = pid
-                        && let Err(error) = write_frozen_marker(data_dir, pid, frozen_after)
-                    {
-                        report(
-                            log_dir,
-                            &format!("could not write the freeze-kill marker: {error}"),
-                        );
+                    mark_killed(data_dir, log_dir, pid, frozen_after);
+                    ChildEnd {
+                        code: release_child(shared, log_dir, true, KILL_WAIT),
+                        killed_as_frozen: true,
+                        served: watch.served,
+                        ..ChildEnd::default()
                     }
-                    (release_child(shared, log_dir, true, KILL_WAIT), true)
+                }
+                ChildHealth::StartHung => {
+                    report(
+                        log_dir,
+                        &format!(
+                            "the daemon did not finish starting in {} min; killing it to start another",
+                            start_deadline.as_secs() / 60
+                        ),
+                    );
+                    // The marker too, before the kill: recovery may already have run, and without it every
+                    // hang kill would charge the runs it found, failing them all within a few kills.
+                    mark_killed(data_dir, log_dir, pid, start_deadline);
+                    ChildEnd {
+                        code: release_child(shared, log_dir, true, KILL_WAIT),
+                        killed_as_start_hung: true,
+                        ..ChildEnd::default()
+                    }
                 }
                 ChildHealth::Gone | ChildHealth::Fine => {
                     report(log_dir, "the daemon is gone; starting another");
-                    (release_child(shared, log_dir, false, Duration::ZERO), false)
+                    ChildEnd {
+                        code: release_child(shared, log_dir, false, Duration::ZERO),
+                        served: watch.served,
+                        ..ChildEnd::default()
+                    }
                 }
             };
         }
         {
             let mut guard = lock(shared);
             let Some(child) = guard.child.as_mut() else {
-                return (None, false);
+                return ChildEnd {
+                    served: watch.served,
+                    ..ChildEnd::default()
+                };
             };
             let status = child.try_wait();
             match status {
                 Ok(Some(status)) => {
                     guard.child = None;
                     guard.stdin = None;
-                    return (status.code(), false);
+                    return ChildEnd {
+                        code: status.code(),
+                        served: watch.served,
+                        ..ChildEnd::default()
+                    };
                 }
                 Ok(None) => {}
                 Err(error) => {
                     report(log_dir, &format!("lost track of the daemon: {error}"));
                     guard.child = None;
                     guard.stdin = None;
-                    return (None, false);
+                    return ChildEnd {
+                        served: watch.served,
+                        ..ChildEnd::default()
+                    };
                 }
             }
         }
@@ -635,6 +727,15 @@ mod tests {
                 500, 1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000
             ]
         );
+    }
+
+    #[test]
+    fn the_start_deadline_doubles_per_hung_start_and_caps_at_the_max() {
+        let minutes: Vec<u64> = [0, 1, 2, 3, 4, 1_000, u32::MAX]
+            .iter()
+            .map(|&hung| start_deadline(hung).as_secs() / 60)
+            .collect();
+        assert_eq!(minutes, [10, 20, 40, 80, 80, 80, 80]);
     }
 
     #[test]
