@@ -19,11 +19,14 @@ This spec decides what an ask says, in what order, and when 10db should act inst
   findings of "…""" not shipped: the gate failed (exit 2)`.
 - 10db stops asking where it can act and undo: a gate that fails in the batch's own files starts a fix task by
   itself, a claim deadlock is broken by the later task yielding, a finished worktree whose leftover files exist
-  elsewhere is removed, and a flaky test files its own fix task. You read about each in Activity.
+  elsewhere is removed, and a flaky test files its own fix task. You read about each in the Activity panel (the
+  history icon in the header), never in the Inbox.
 - Review cards for work that already merged (Look, Check These Criteria) fold into one row per project, and leave
   Open unanswered after 7 days as "kept as is".
 - A third round of "fix the findings" is not filed by itself; you get one card asking whether to keep going.
 - Your phone buzzes only for cards where work is stopped until you answer.
+- The Inbox keeps Open, Waiting and Resolved, and nothing else: it holds only what needs you. The Activity panel's
+  rows get the Inbox list's spacing (§6.1).
 
 **What it buys.** Since 2026-11-20 10db raised 419 cards. 214 closed themselves, 145 were answered with a choice
 that changes nothing (Dismiss, Keep, Looks Right, Accept), 29 are open, and **31 (7%) got an answer that made 10db
@@ -32,8 +35,8 @@ understood in seconds.
 
 **What could go wrong, and how we'd know.**
 
-- *10db acts where you'd have chosen otherwise.* Only moves you can undo are automatic, and each posts an Activity
-  line saying what it did and how to undo it. Removing files found nowhere else, cancelling a task and shipping
+- *10db acts where you'd have chosen otherwise.* Only moves you can undo are automatic, and each posts a line in the
+  header's Activity panel saying what it did and how to undo it. Removing files found nowhere else, cancelling a task and shipping
   rejected work stay your call.
 - *A recommendation is wrong and you follow it because it is marked.* Recommendations come from 10db's rules for
   each kind, never from an agent's guess on a 10db card, and each says its reason. Resolved records when you chose
@@ -166,7 +169,7 @@ The grammar follows the published rules this spec draws on (sources in §11):
 
 - **Every card is actionable and needs judgment.** "Every page should be actionable", and "pages with rote,
   algorithmic responses should be a red flag" (Google SRE book). A card whose right answer 10db can compute is a
-  move 10db makes, told in Activity (§3.2).
+  move 10db makes, told in the header's Activity panel (§3.2).
 - **Lead with the symptom.** "What's broken, and why?" (SRE book): Happened is the symptom and Means is why it
   matters.
 - **Offer the next step.** An alert should "indicate the severity of the issue and offer next steps" (PagerDuty), and
@@ -221,7 +224,8 @@ Every card declares one of three fates, extending the signal spec's `closesWhen`
 
 The third is a new `closesWhen` form, `{ by: 'expiry', afterDays, as }`. An hourly sweep resolves an expired card with
 the named answer and `detail.resolution = { by: '10db', reason: 'No answer in 7 days: kept as is' }`. Resolved shows
-it under the "No answer" outcome. An expiring card never has urgency high.
+it under the "No answer" outcome, and the sweep posts one notice per project in the Activity panel ("Kept as is with
+  no answer in 7 days: 3 Look cards"). An expiring card never has urgency high.
 
 ### 2.5 Where it lives
 
@@ -263,7 +267,7 @@ expires, or is replaced by something 10db does itself (§3.2).
 | Judge outage (`judge-outage`)        | 10db's judge can't answer                                                             | Unattended work skips more: OpenRouter has no credits                                | → Use <ready account> for Decisions · Open Decisions                                      | card only for causes that need the builder (401, 402, 403, an expired sign-in); others are a header status line |
 | Standing approval (`precedent`)      | Make 1 kind of command routine in ampsio?                                             | Stop skipping `docker compose` in ampsio? 3 skips in 2 runs                          | Approve · Keep Skipping · → Later when a call of the kind hit a limit in 30 days          | stays; expires in 14 days as Later                                                   |
 | Kept worktree (`worktree-ignored`)   | 10db kept the worktree of "…": it holds git-ignored files                             | A finished worktree holds 1 file found nowhere else: .env · Board-pack findings      | → Save Files and Remove · Keep · Open Folder                                              | 10db removes it when every file has a copy or is rebuilt by a tool                   |
-| Merged hand-made worktrees (`hand-made-merged`) | 3 worktrees in ~/Projects/10db-worktrees.noindex have merged               | none                                                                                 | none                                                                                      | 10db removes clean ones untouched for 24 h; Activity notice                          |
+| Merged hand-made worktrees (`hand-made-merged`) | 3 worktrees in ~/Projects/10db-worktrees.noindex have merged               | none                                                                                 | none                                                                                      | 10db removes clean ones untouched for 24 h; a notice in the Activity panel           |
 | Migrations landed (`copy-migrations`) | The landing of "…" brought migrations into build                                     | Your dev database is 3 migrations behind ampsio's build branch                       | → Apply Migrations (when the project names a migrate command) · I Applied Them            | stays; normal urgency                                                                |
 | Flaky check (`flaky-check`)          | Flaky check: pr-title (1 time)                                                        | none                                                                                 | none                                                                                      | a test check's second flake in 7 days files a fix task (notice); a check that runs no tests is a notice only |
 | Stray write (`stray-write`)          | Write outside every claim                                                             | A lane wrote outside its claim: amps/frontend/src/api/generated/zod.gen.ts           | Trust This Version · → Close (when the path is one a hazard names as generated)           | stays; a generated path becomes a notice                                             |
@@ -283,6 +287,8 @@ expires, or is replaced by something 10db does itself (§3.2).
 
 Each move below is one the builder would almost always make, can be undone or loses nothing, and stays inside
 the hard limits. Each posts a notice on the task or project (`postNotice`) saying what it did and how to undo it.
+Notices are read in the Activity panel the header's history icon opens (`views/factory/activity-drawer.tsx`), and in
+the task's drawer. None of them is an Inbox row, and the Inbox has no Activity tab.
 
 1. **A ship gate that fails in the batch's own files starts a fix task in the batch**, as a task's own gate already
    does for its run. "Its own files" uses the test the shipper already applies (`outsideTheBatch`, `touchedBy`): a
@@ -322,6 +328,7 @@ look over", grouped by `inboxRowKey` as a Workbench pass's pages are today. The 
 - its own Looks Right or Keep As Is, and Send Back.
 
 Mark All Looked At answers every card in the row with its no-change answer. Each card expires 7 days after its merge.
+What happened to the row (looked at, sent back, expired) is posted as one notice in the Activity panel.
 
 When an ask watchpoint passes the noisy mark the watchpoints spec defines (at least 5 cards, at least 80% Looks Right
 with no note), the row offers **Make <watchpoint> a Show watchpoint**. Show keeps its hits in For You and the pull
@@ -440,6 +447,31 @@ codes, and prefers lines containing `FAILED`, `Error` or `error:`.
   work is stopped. The gate card and the claim deadlock are high. The failed run on a test project from 2026-11-21 is
   not.
 
+### 6.1 The Activity panel's rows
+
+The Inbox holds only what needs the builder, so its switch stays Open, Waiting and Resolved. Activity is the panel
+the header's history icon opens, left of the Live and Metrics switch (`ActivityButton` in
+`views/factory/activity-drawer.tsx`). It has a search field, then one row per notice (`ActivityRowItem`).
+
+Today a row reuses the Inbox row's two lines (`Lines` in `views/inbox/inbox-row-item.tsx`) but not the list's row
+box (`inbox-row-list.module.css`). It has no padding, no fixed height, 5 px between its lines, and a full-width rule
+between rows. The rows read as one block of text.
+
+The rows take the Inbox list's box:
+
+- **Height:** each row is at least 64 px, as an Inbox row is, with its two lines centred.
+- **Padding:** 10 px top and bottom, 12 px each side.
+- **Lines:** 6 px between the line and the second line. The title is 13 px at weight 500, and its count and age are
+  11 px dimmed, on the right. The second line is the project chip, then the body's first line, 12 px dimmed.
+- **Rows:** a hairline inset 12 px each side parts the rows. A row's hover is the list's half-step fill, with the
+  md radius, and the hairline beside a filled row is hidden.
+- **Search:** 12 px of space between the search field and the first row.
+- **Days:** rows are grouped under day headings (Today, Yesterday, then the date). A heading is 11 px uppercase
+  dimmed, with 16 px above it and 4 px below.
+
+The simplest build is a shared class beside `inbox-row-list.module.css`'s `.row`, without its absolute
+positioning, which `activity-drawer.tsx`'s list item uses. It needs no new component. This is Small (A6 in §9).
+
 ## 7. Provider parity
 
 - **The grammar is 10db's text,** the same on a Claude plan, Claude through Bedrock or an API key, and a
@@ -473,6 +505,7 @@ Each stage is sized by the code it touches, per the repo's rules. Stages A and B
 | A3    | Small   | Retitle precedent, judge outage, Linear held, base red, flaky check (a check with no tests reads as a title change)                          | related tests                                                                 |
 | A4    | Small   | Claim deadlock: options read A Waits, B Waits, Cancel A, Cancel B, with A and B named in the body                                            | related tests                                                                 |
 | A5    | Small   | Push only for high asks                                                                                                                      | related tests                                                                 |
+| A6    | Small   | The Activity panel's rows take the Inbox list's spacing (§6.1)                                                                               | none (a screenshot)                                                           |
 | B     | Feature | `CardBrief`, `InboxOption.undo` and the expiry fate in contracts; the expiry sweep; the desktop draws the five parts, the Recommended mark and Open's sections; briefs on the six mock-up kinds | extend `apps/desktop/e2e/inbox.spec.ts` with one acceptance and one gate card |
 | C     | Feature | The runner table (§5.2), the summary layout, and Start Fix Task on the gate card                                                             | one unit test per runner (a parser)                                           |
 | D     | Feature | Merged-work rows (§3.3), the 7-day expiry, Make It Show, and acceptance criteria that name the builder raised as questions                   | extend the `loop` e2e                                                         |
@@ -484,7 +517,7 @@ Each stage is sized by the code it touches, per the repo's rules. Stages A and B
 | F5    | Feature | Flaky test fix task on the second flake; a no-test check becomes a notice                                                                    | related tests                                                                 |
 
 Each F stage gets its own Core plan (an index and cards), since each touches git, claims, recovery or data loss.
-Recommended order: A1 to A5 now, then B, then C and D (they remove the most noise), then F1 and F2, then E, F3, F4
+Recommended order: A1 to A6 now, then B, then C and D (they remove the most noise), then F1 and F2, then E, F3, F4
 and F5.
 
 ## 10. How we'd know it worked
