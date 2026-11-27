@@ -1,28 +1,21 @@
-# Task 2: `modelEnv` in the gate sandbox (Track B) — Core: the sandbox
+# Task 2: `modelEnv` in the gate sandbox — Core: the sandbox
 
-**Files:** `apps/daemon/src/sandbox/gate-sandbox.ts`, `apps/daemon/src/verify/gate-runner.ts`,
-`apps/daemon/src/sandbox/AGENTS.md`, `apps/daemon/src/verify/AGENTS.md`, `apps/daemon/test/gate-sandbox.seatbelt.test.ts`.
+**Files:** `apps/daemon/src/sandbox/gate-sandbox.ts`, `apps/daemon/src/sandbox/env-allowlist.ts` (export a
+`looksSecret(name)` over its `SECRET_LOOKING`), `apps/daemon/src/verify/gate-runner.ts`, the `AGENTS.md` of both
+directories, `apps/daemon/test/gate-sandbox.seatbelt.test.ts`, `apps/daemon/src/sandbox/gate-sandbox.test.ts`.
 
-**Implements** on `GateRunInput` and `GateRequest`:
+**Implements:** `modelEnv` on `GateRequest` and `GateRunInput` (index, Interfaces).
 
-```ts
-/** The live run's model env: set after the allowlist; the name is checked again here. */
-readonly modelEnv?: { readonly name: string; readonly value: string };
-```
+- It is added to `commandEnv` last and is **refused when reserved**: `SandboxProfileError('modelEnv', …)` and
+  nothing runs (Design › The manifest's sandbox rule). The value must match `^[A-Za-z0-9._/:@,-]{1,1100}$`, a
+  second check behind task 3's.
+- It goes through `shellAssignments` like every other name. Document that only the live-run path passes it.
 
-- Added to `commandEnv` after `allowlisted(…)`, `TMPDIR`, `prepareCommandEnv` and `PATH`, and only when the name
-  passes `isReservedEnvName` from contracts and is not any key already in `commandEnv`; otherwise
-  `SandboxProfileError('modelEnv', …)`, and nothing runs. The value must match `^[A-Za-z0-9._/:@,-]{1,1100}$`
-  (the second check behind task 3's).
-- Passed through `shellAssignments` like every other name, so it is quoted the same way.
-- Only the live-run path passes it (task 3); document that in both AGENTS.md files.
-- One check that `isReservedEnvName` covers every name the allowlist passes and every name `commandEnv` sets
-  (a pure test over the exported allowlist, since a drift here would let the model env replace one).
+**Tests (core: the sandbox):**
+- `gate-sandbox.test.ts` (FAKE_SRT): requests naming `PATH`, `TMPDIR`, `OPENAI_API_KEY` or an allowlisted name are
+  refused before spawn, and so is a value with a space or `;`.
+- `gate-sandbox.seatbelt.test.ts` (real srt): `printenv MODELS` prints the value.
 
-**Rows:** none directly.
+Prove each red first.
 
-**Tests (core: the sandbox):** extend `gate-sandbox.seatbelt.test.ts` (real srt) with one case: a command
-`printenv MODELS` given `modelEnv: { name: 'MODELS', value: 'google/x,openai/y' }` prints that value; a request
-naming `PATH` or `TMPDIR` is refused before spawn; a value with a space or `;` is refused. Prove red first.
-
-**Index sections:** Global constraints ("The model env is the only addition…").
+**Index sections:** Global constraints; Design › The manifest.
