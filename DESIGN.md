@@ -79,7 +79,9 @@ favors legibility and calm over decoration.
     `<Paper variant="raised">` (`paper.module.css`). A page's table or chart sits in `RaisedPanel`
     (`shell/raised-panel.tsx`), flush with the table drawn transparent (`DataTable`'s
     `backgroundColor="transparent"`, no `withTableBorder`) or `padded` for a chart; a table gets its depth
-    from the panel, never from a global `Table` selector. Factory's project cards are accordion items, not
+    from the panel, never from a global `Table` selector. A chart's own filters sit on its panel's top edge,
+    a select at the left and a mode at the right (Models' Rigor and Every Effort | Best Value Only), apart
+    from the page's toolbar and its section heading. Factory's project cards are accordion items, not
     `Paper`, so their stylesheet reads the same two tokens.
 - **Card state:** the card's border takes the status color (blue running, yellow waiting on you, orange
   paused, red failed, green done); a queued card's border is its own tone, so it shows none. No fill, no left stripe, no pulsing. A

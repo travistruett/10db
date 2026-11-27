@@ -106,9 +106,8 @@ export function SettingRow({
       ) : (
         <Group justify="space-between" wrap="nowrap" gap="xl">
           {text}
-          <Box w={320} style={{ flex: 'none' }}>
-            {children}
-          </Box>
+          {/* Every row in a card has the same width, so a column that gives way in a narrow window still lines up. */}
+          <Box style={{ flex: '0 1 320px', minWidth: 240 }}>{children}</Box>
         </Group>
       )}
       {below === undefined ? null : <Box mt="xs">{below}</Box>}

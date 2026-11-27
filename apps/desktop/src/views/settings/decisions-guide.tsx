@@ -124,7 +124,7 @@ export function DecisionsGuide({ guide }: { readonly guide: PageGuideHandle }) {
       steps={[
         {
           title: 'Each call is a decision',
-          caption: 'Turn it on and pick its model; off, the rules make it.',
+          caption: 'Each has its own switch and model. Off, the rules make it.',
           picture: <DecisionRowPicture />,
         },
         {

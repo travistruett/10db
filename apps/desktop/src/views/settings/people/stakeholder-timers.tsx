@@ -1,5 +1,5 @@
 import type { StakeholderTimersDto } from '@10db/contracts';
-import { Alert, Group, Loader, NumberInput, Stack, Switch, Text } from '@mantine/core';
+import { Alert, Group, NumberInput, Stack, Switch, Text } from '@mantine/core';
 import { useSetStakeholderTimers, useStakeholderTimers } from '../../../daemon/people';
 import { SettingRow, SettingsCard } from '../setting-row';
 import { useDraft } from '../settings-drafts';
@@ -32,7 +32,8 @@ export function StakeholderTimers() {
         {timers.error.message}
       </Alert>
     );
-  if (current === undefined) return <Loader size="sm" />;
+  // The page's placeholder rows stand in while the timers are read.
+  if (current === undefined) return null;
   const remind = current.remindAfterHours ?? DEFAULT_REMIND_HOURS;
   const back = current.returnAfterHours;
   return (

@@ -115,7 +115,7 @@ export function AreasGuide({
           picture: <TaskAreasPicture />,
         },
         {
-          title: 'Different areas, side by side',
+          title: 'Areas run side by side',
           caption: 'Tasks in different areas run at once. The same area takes turns.',
           picture: (
             <LanesPicture
