@@ -48,7 +48,7 @@ const Picks = z.array(z.string());
 
 export interface EvalSweepsDeps {
   readonly state: StateStore;
-  readonly live: Pick<EvalLiveRuns, 'start' | 'stop'>;
+  readonly live: Pick<EvalLiveRuns, 'start' | 'stop' | 'preview'>;
   /** Reads a suite's results, which a step's verdict comes from. */
   readonly evals: Pick<EvalsService, 'candidateBasis'>;
   /** The suite's candidates with their estimates, which a `cheapest` sweep sorts by. */
@@ -136,6 +136,12 @@ const closedSteps = (steps: readonly Step[]): Step[] =>
         ? { ...s, state: EvalSweepStepState.Skipped }
         : s,
   );
+
+/** A text's first line, or null when it has none. */
+const firstLineOf = (text: string): string | null => {
+  const line = text.split('\n')[0]?.trim() ?? '';
+  return line === '' ? null : line;
+};
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -336,6 +342,7 @@ export function createEvalSweeps(deps: EvalSweepsDeps): EvalSweeps {
         if (at?.runId !== null) return;
         steps[step.index] = { ...at, runId: run.id };
         setEvalSweepSteps(ctx, id, JSON.stringify(steps));
+        announce(ctx, row, row.state);
       });
     } catch (error) {
       deps.logger.warn(
@@ -372,12 +379,19 @@ export function createEvalSweeps(deps: EvalSweepsDeps): EvalSweeps {
   }
 
   /** A step's run has ended: read its result, then end the sweep or start the next step. */
-  function afterSettle(id: EvalSweepId, run: EvalLiveRunDto): void {
+  function afterSettle(id: EvalSweepId, run: EvalLiveRunDto | null): void {
     void guarded(id, async () => {
       const row = getEvalSweep(state.db, id);
       if (row?.state !== EvalSweepState.Running) return;
       const step = stepsOf(row).find((s) => s.state === EvalSweepStepState.Running);
       if (step === undefined) return;
+      if (run === null) {
+        // The run's row could not be read back, so its result is unknown: the sweep ends, never stays running.
+        advance(id, {
+          verdict: { state: EvalSweepStepState.Unreadable, costUsd: null, runId: step.runId },
+        });
+        return;
+      }
       if (run.state === EvalLiveRunState.Stopped || run.state === EvalLiveRunState.Interrupted) {
         // Stopped from outside the sweep (the run's own Stop): nothing is read or started.
         endNow(id, {
@@ -387,6 +401,15 @@ export function createEvalSweeps(deps: EvalSweepsDeps): EvalSweeps {
               ? EvalSweepReason.ByYou
               : EvalSweepReason.Interrupted,
           reasonText: null,
+        });
+        return;
+      }
+      if (run.state === EvalLiveRunState.Failed && run.exitCode === null) {
+        // The command never ran (the sandbox refused it, or it could not spawn): there is no result to read.
+        endNow(id, {
+          state: EvalSweepState.Stopped,
+          reason: EvalSweepReason.Refused,
+          reasonText: firstLineOf(run.tail) ?? `The run on ${step.model} could not start.`,
         });
         return;
       }
@@ -437,6 +460,10 @@ export function createEvalSweeps(deps: EvalSweepsDeps): EvalSweeps {
       }));
       if (body.kind === EvalSweepKind.Cheapest)
         steps.sort((a, b) => (a.estimateUsd ?? Infinity) - (b.estimateUsd ?? Infinity));
+
+      // The refusals a plain Run answers (no sandbox, Docker off, a stop command recovering) answer here too.
+      const shown = await deps.live.preview(projectId, suiteKey);
+      if (shown.refusal !== null) refuse(shown.refusal);
 
       // Nothing below awaits before the sweep row is written, so what is checked is what is started.
       if (closed) refuse(EvalLiveRefusal.Busy, '10db is stopping, so it starts no sweep.');

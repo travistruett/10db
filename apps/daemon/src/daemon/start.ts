@@ -3885,6 +3885,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         },
       );
       createdScheduler.stop();
+      // A step that settles during the rest of the stop must not start a new paid run: sweeps end first.
+      await evalSweeps.stopAll();
       stallSweep.stop();
       precedents.stop();
       // A move under way leaves its worktree and its row for the next start to finish.
@@ -3922,9 +3924,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await appStart?.stop();
       // The dev server 10db started ends with it; a builder's own is never 10db's to stop.
       await preview?.stop();
-      // Each live eval run ends `interrupted` and its stop command runs, before the store closes.
-      // A sweep ends first, so none starts a step once its run is interrupted.
-      await evalSweeps.stopAll();
+      // Each live eval run ends `interrupted` and its stop command runs, before the store closes. The
+      // sweeps ended at the top of the stop, so none starts a step once its run is interrupted.
       await evalLiveRuns.stopAll();
       picturePruning.stop();
       await pictureCamera.close();

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { PathPattern } from './entities';
 import { EvalLiveRunId, EvalSweepId, ProjectId } from './ids';
+import { isSandboxManagedEnvName } from './sandbox-env-names';
 
 /** A result file format 10db reads. 10db defines no eval format of its own; each is a project's. */
 export const EvalResultFormat = {
@@ -16,7 +17,9 @@ export const EvalSuiteKey = z
   .string()
   .min(1)
   .max(120)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/, 'a suite key is letters, digits and . _ : / -');
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/, 'a suite key is letters, digits and . _ : / -')
+  // `/evals/sweeps/:sweepId` is a route of its own, so a suite may not take the segment.
+  .refine((key) => key !== 'sweeps', 'sweeps is a route name, not a suite key');
 export type EvalSuiteKey = z.infer<typeof EvalSuiteKey>;
 
 /** A tracked path of the repository, as a manifest names it. */
@@ -317,10 +320,15 @@ const RESERVED_ENV_PREFIXES = [
   'PYTHON',
 ] as const;
 
-/** Whether a variable name is one the shell or a tool reads, so a suite's model env may not use it. */
+/**
+ * Whether a variable name is one the shell, a tool or the sandbox itself sets or reads, so a suite's model env
+ * may not use it.
+ */
 export function isReservedEnvName(name: string): boolean {
   return (
-    RESERVED_ENV_NAMES.has(name) || RESERVED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix))
+    RESERVED_ENV_NAMES.has(name) ||
+    RESERVED_ENV_PREFIXES.some((prefix) => name.startsWith(prefix)) ||
+    isSandboxManagedEnvName(name)
   );
 }
 

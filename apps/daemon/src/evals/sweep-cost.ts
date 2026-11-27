@@ -38,7 +38,8 @@ type Next = { step: number } | { end: EvalSweepState; reason: EvalSweepReason | 
  * The next step to start or the end, once a step has settled. Spent counts known costs only. `cheapest` ends
  * `found` at the first pass, stops when a settled step's cost is unknown (the budget can no longer be kept), and
  * starts the next step only when its estimate is known and fits what the cap has left; `try` runs every step,
- * an unknown estimate included, and stops only before a step whose known estimate does not fit.
+ * an unknown estimate included while the cap has money left, and stops before a step whose known estimate does
+ * not fit.
  */
 export function sweepNext(plan: SweepPlan): Next {
   const settled = plan.steps.filter(
@@ -57,6 +58,6 @@ export function sweepNext(plan: SweepPlan): Next {
   const left =
     micros(plan.capUsd) - micros(plan.steps.reduce((sum, s) => sum + (s.costUsd ?? 0), 0));
   const fits = waiting.estimateUsd !== null && micros(waiting.estimateUsd) <= left;
-  const runs = fits || (!cheapest && waiting.estimateUsd === null);
+  const runs = fits || (!cheapest && waiting.estimateUsd === null && left > 0);
   return runs ? { step: next } : { end: EvalSweepState.Done, reason: EvalSweepReason.Capped };
 }

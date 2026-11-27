@@ -17,7 +17,6 @@ import {
 } from '@10db/contracts';
 import { prepareCommandEnv, withCopyId } from './command-env';
 import { dockerAccess, dockerEnvNames } from './docker-access';
-import { isAllowlistedName, looksSecret } from './env-allowlist';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
 import { isEqualOrUnder, pathsEqual } from './protected-reads';
@@ -206,7 +205,6 @@ function openableDotEnv(checkout: string, file: string): string {
   return real;
 }
 
-/** One gate run under the sandbox: the process to spawn, and its own temp dir. */
 /** A model value is a comma list of model ids: no space, quote, `$`, `;` or backslash. */
 const MODEL_ENV_VALUE = /^[A-Za-z0-9._/:@,-]{1,1100}$/;
 const MODEL_ENV_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
@@ -214,13 +212,7 @@ const MODEL_ENV_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
 /** Refuses a model env that could reach a shell or override a sandbox variable, before anything is made. */
 function checkModelEnvShape(modelEnv: { readonly name: string; readonly value: string }): void {
   const { name, value } = modelEnv;
-  if (
-    !MODEL_ENV_NAME.test(name) ||
-    isReservedEnvName(name) ||
-    isAllowlistedName(name) ||
-    looksSecret(name) ||
-    name.startsWith('TENDB_')
-  )
+  if (!MODEL_ENV_NAME.test(name) || isReservedEnvName(name))
     throw new SandboxProfileError(
       'modelEnv',
       `${name}: a variable the sandbox does not let a model list use`,
@@ -232,6 +224,7 @@ function checkModelEnvShape(modelEnv: { readonly name: string; readonly value: s
     );
 }
 
+/** One gate run under the sandbox: the process to spawn, and its own temp dir. */
 export interface GateRun {
   /** srt's host, which starts the network proxy and runs the command under the profile. */
   readonly file: string;

@@ -120,7 +120,7 @@ export interface EvalLiveRuns {
    * Starts the run the window showed; throws `EvalLiveRefused` and writes no row when it may not. With
    * `models` the run gets the suite's model variable; `sweepId` names the sweep it is a step of (which then
    * must still be running, checked in the write that starts the run), and `onSettled` fires once the row has
-   * ended.
+   * ended, with the run as it stands, or null when it could not be read back.
    */
   start(
     projectId: ProjectId,
@@ -129,7 +129,7 @@ export interface EvalLiveRuns {
     opts?: {
       models?: readonly string[];
       sweepId?: EvalSweepId;
-      onSettled?: (run: EvalLiveRunDto) => void;
+      onSettled?: (run: EvalLiveRunDto | null) => void;
     },
   ): Promise<EvalLiveRunDto>;
   /** Sends the abort and answers; the run settles, and its stop command runs, in the background. Throws NotFoundError for one that is not running. */
@@ -186,15 +186,24 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
   const recoveringIn = (projectId: ProjectId): boolean =>
     [...recovering.values()].some((r) => r.projectId === projectId);
 
-  /** Tells the caller its run has ended, as its row now stands; a throw there never reaches the run. */
+  /** Tells the caller its run has ended, as its row now stands (null when unreadable); a throw there never reaches the run. */
   function settledBy(
     id: EvalLiveRunId,
-    onSettled: ((run: EvalLiveRunDto) => void) | undefined,
+    onSettled: ((run: EvalLiveRunDto | null) => void) | undefined,
   ): void {
     if (onSettled === undefined) return;
     try {
-      const row = getEvalLiveRun(state.db, id);
-      if (row !== null) onSettled(dtoOf(row));
+      let run: EvalLiveRunDto | null = null;
+      try {
+        const row = getEvalLiveRun(state.db, id);
+        run = row === null ? null : dtoOf(row);
+      } catch (error) {
+        deps.logger.error(
+          { runId: id, err: error instanceof Error ? error.message : String(error) },
+          'a live eval run could not be read back to settle it',
+        );
+      }
+      onSettled(run);
     } catch (error) {
       deps.logger.error(
         { runId: id, err: error instanceof Error ? error.message : String(error) },

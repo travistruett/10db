@@ -190,9 +190,8 @@ export function useEvalLivePreview(
       readJson(
         await client.projects[':projectId'].evals[':suiteKey'].live.$get({
           param: { projectId, suiteKey: encodeURIComponent(suiteKey) },
-          // The route reads one comma-separated value, but its validator's output type (a list) is what the typed
-          // client asks for.
-          query: models.length === 0 ? {} : { models: models.join(',') as unknown as string[] },
+          // The route takes the picks as one comma-separated value.
+          query: models.length === 0 ? {} : { models: models.join(',') },
         }),
         EvalLivePreviewDto,
       ),
