@@ -221,6 +221,21 @@ test('a deleted empty branch shows in the Factory Activity drawer, and Open and 
     await expectAccessible(page, `activity, ${mode}`);
   }
 
+  // The abandon notice reports no decision, so Decided For You leaves it out, in the drawer and in the daemon's page.
+  const decided = await request.get(
+    `${daemonUrl}/activity/page?project=${projectId}&decided=true`,
+    { headers: auth, maxRetries: 2 },
+  );
+  expect(
+    Notices.parse(await decided.json()).rows.filter((row) => row.line === NOTICE_LINE),
+  ).toHaveLength(0);
+  await page.goto(`/factory?project=${projectId}`);
+  await page.getByRole('button', { name: 'Activity', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: 'Activity' });
+  await expect(drawer.getByRole('button', { name: new RegExp(NOTICE_LINE) })).toBeVisible();
+  await drawer.getByLabel('Decided For You').check();
+  await expect(drawer.getByRole('button', { name: new RegExp(NOTICE_LINE) })).toHaveCount(0);
+
   expect(await openTotal(request)).toBe(openBefore);
   expect(await openCardIds(request)).toEqual(cardsBefore);
   expect(await badgeText()).toBe(settled);

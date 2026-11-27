@@ -103,6 +103,17 @@
   `flaky-check:<name>`; `resolveNoticeCards` closes an older open card of it), and a judge outage whose cause may clear
   alone, a timeout or a 5xx (`createJudgeOutageCard`, key `judge-outage`). No key, no credits, a 401 or 403 and an
   expired AWS sign-in are `hard` (`JudgeOutage.hard`): one card at once, even after a notice for a transient outage.
+- Every card builder declares who decides it (`what-reaches-the-builder` spec §1, §3, §9; `card-decider.ts` in contracts):
+  `FlagInput.decision` is `decidedByBuilder(BuilderOwns.X)` (one of the seven things the builder owns) or a rule,
+  judge or stakeholder, and `flagCard` stores it as `detail.decider` and `detail.owns`. Open (`openRowsPage`) holds
+  only builder cards, a card with no stored decider is the builder's, and `shouldNotifyOpened` pushes only a builder
+  card; a builder card is never folded away or expired. `tests/repo/src/card-deciders.test.ts` fails when a card
+  builder declares none. A card whose rule has not been built yet stays a builder card: moving a kind off the
+  builder means posting a notice with a `NoticeDecision` instead, so it shows in Activity with who decided and its
+  Undo (`undo: undoable`) or why it is final. `createActivityActions` (`activity-actions.ts`) serves Undo
+  (`POST /activity/:seq/undo`, once per row) and Ask Me Next Time (`PUT` and `DELETE /activity/:seq/ask-next-time`):
+  a project's asking rules sit in `app_settings` (`rules.asking`, read through `isRuleAsking`), and a raiser of a
+  rule-decided notice checks it and raises a card instead when its rule is asking.
 - A failed run's card in a batch carries `resolvesWhen: { event: 'batch_over', batchId }` (`flagFailedRun`, from the
   run's `batchId`), and `resolveOverBatchCards` (`delivery/stale-cards.ts`, at start and on every `batch.updated`)
   closes it once the batch's pull request merged, or the batch is closed or abandoned.

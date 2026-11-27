@@ -145,6 +145,8 @@ test('answering a question with a digit and Enter selects the next row and lower
     .toBe(true);
   expect(before).toBeGreaterThanOrEqual(3);
   await expect(rowsOf(page).first()).toHaveAttribute('aria-selected', 'true');
+  // Open holds the builder's cards, and each says which of the seven things it is.
+  await expect(page.getByTestId('card-owns')).toContainText('Yours: Product and Taste');
   await page.keyboard.press('1');
   await page.keyboard.press('Enter');
   await expect(rowsOf(page)).toHaveCount(2);
