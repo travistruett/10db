@@ -25,8 +25,8 @@
   the project's change event.
 - `live.models` (contracts `EvalLiveModels`) names the env var a suite's live command reads its models from and
   the ids it takes: `'openrouter'` (ids as given, each an `EvalModelId`) or `choices` (the project's names, each with
-  its model). Its env name is refused when reserved (`isReservedEnvName`: the shell's, make's and tools' own
-  variables). The assessor asks for it and records the file that binds a suite's model among its covered paths; an
+  its model). Its env name is refused when reserved (`isReservedEnvName`, in contracts' `sandbox-env-names.ts`: the shell's,
+  make's and tools' own variables, the names the sandbox sets or passes through, `TENDB_*` and secret-looking names). The assessor asks for it and records the file that binds a suite's model among its covered paths; an
   invalid `live.models` is dropped from that suite alone (`assess-answer.ts`), never the whole answer.
 - It imports `catalogue` (`joinOpenRouterId`, for the candidates), `git` (types), `guard`, `events` (types), `log` (types), `clock` (types), `preview` (the process ledger), `verify` (types) and `@10db/db`.
 - Availability is kept apart from quality: a gate report's `outcomes` other than `ok` and `validation_failed`
