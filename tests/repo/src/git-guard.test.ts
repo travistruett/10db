@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1464,6 +1465,33 @@ describe('git guard inside a subagent', TABLE, () => {
         'agent_type without agent_id',
       )
       .toBe('ask');
+  });
+});
+
+// While the builder is away (~/.10db/away touched within a day) the main session gets a subagent's
+// denies: an ask nobody answers would park the session for hours.
+describe('git guard while the builder is away', TABLE, () => {
+  it('denies what it would ask, names a way on, and lapses after a day', () => {
+    const home = mkdtempSync(join(tmpdir(), 'guard-away-'));
+    try {
+      const run = (command: string) => runHook(bash(command, clean), { HOME: home });
+      expect.soft(run('git rebase main').outcome, 'no away file').toBe('ask');
+      mkdirSync(join(home, '.10db'));
+      const away = join(home, '.10db', 'away');
+      writeFileSync(away, '');
+      const { outcome, reason } = run('git rebase main');
+      expect.soft(outcome, 'away').toBe('deny');
+      expect.soft(reason, 'why').toContain('The builder is away');
+      expect.soft(reason, 'the rule').toContain('cannot be undone easily');
+      expect.soft(reason, 'the way on').toContain('git merge origin/main');
+      expect.soft(run("git add a.ts && git commit -m 'x'").outcome, 'an allow stays').toBe('allow');
+      expect.soft(run('git add -A').outcome, 'a deny stays').toBe('deny');
+      const twoDaysAgo = (Date.now() - 2 * 24 * 60 * 60 * 1000) / 1000;
+      utimesSync(away, twoDaysAgo, twoDaysAgo);
+      expect.soft(run('git rebase main').outcome, 'a stale away file').toBe('ask');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 

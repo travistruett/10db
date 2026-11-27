@@ -441,10 +441,20 @@ export const McpToolOutputs = {
     deviationId: DeviationId,
     /** The paths of `leaveUncommitted` 10db now leaves out of the step's uncommitted changes. */
     leftUncommitted: z.array(z.string()).default([]),
+    /** Why none of the named paths was left, when some were named; null otherwise. */
+    instruction: z.string().nullable().default(null),
   }),
   file_follow_up: z.object({ taskId: TaskId, title: z.string() }),
   request_claim: z.discriminatedUnion('granted', [
-    z.object({ granted: z.literal(true), claimId: ClaimId }),
+    z.object({
+      granted: z.literal(true),
+      claimId: ClaimId,
+      /**
+       * The uncommitted edits the task that held the claim before left there, which stay that task's;
+       * null when none were handed over.
+       */
+      instruction: z.string().nullable().default(null),
+    }),
     z.object({
       granted: z.literal(false),
       /** The task holding the claim; null when no task does, as for a migrations hazard held back. */

@@ -19,6 +19,7 @@ import { useNow } from '../../shell/relative';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { ActivityContent } from './activity-content';
 import { activityRowOf, ActivityRowItem } from './activity-row-item';
+import classes from './activity-drawer.module.css';
 
 /** How many notices show at first, and how many more each Show More adds. */
 const FIRST_SHOWN = 20;
@@ -111,7 +112,7 @@ function ActivityList({ project }: { readonly project: ProjectId | null }) {
   const shown = all.slice(0, limit);
   const more = all.length > limit || rows.hasMore;
   return (
-    <Stack gap="xs" ref={root}>
+    <Stack gap="sm" ref={root}>
       <TextInput
         size="xs"
         placeholder="Search"
@@ -136,25 +137,16 @@ function ActivityList({ project }: { readonly project: ProjectId | null }) {
         </Text>
       ) : null}
       {shown.length > 0 ? (
-        <Box
-          component="ul"
-          m={0}
-          p={0}
-          style={{ listStyle: 'none', borderTop: '1px solid var(--mantine-color-default-border)' }}
-        >
+        <Box component="ul" className={classes['list']}>
           {shown.map((row) => (
-            <li
-              key={row.key}
-              style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}
-            >
+            <li key={row.key} className={classes['item']}>
               <UnstyledButton
-                w="100%"
+                className={classes['row']}
                 data-activity-key={row.key}
                 onClick={() => {
                   setBackTo(null);
                   setOpenKey(row.key);
                 }}
-                style={{ borderRadius: 'var(--mantine-radius-md)' }}
               >
                 <ActivityRowItem row={row} now={now} />
               </UnstyledButton>
