@@ -7,7 +7,8 @@
 **Implements:** `SweepPlan`, `estimateRunCost`, `sweepNext`, the candidates route (index, Interfaces). Candidates
 come from the daemon's catalogue (`apps/daemon/src/catalogue/`) and model profiles, as in Design › Candidates.
 
-`sweepNext(plan)`:
+`sweepNext(plan)` owns every end, `found` included:
+- After a settled step that passed in `cheapest`, the end is `found`.
 - `cheapest`: the next waiting step if its estimate is known and fits `cap − spent`. Otherwise the end: `done`·capped
   when a step was left out for the cap, else `done`.
 - `try`: the next waiting step, unless its known estimate doesn't fit (`done`·capped). An unknown estimate runs.

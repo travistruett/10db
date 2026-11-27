@@ -14,7 +14,8 @@ cheapest first, and stops at the first that clears every gate, or before a run t
 Results land as your harness's normal reports, so the table and trend update as today. When a model wins, **Switch
 to <model>** files a task: an agent changes the binding your project's way (ampsio: the slot line in
 `apps/llm/model_slots.py`) and lists every suite on that slot; each suite that covers that file shows
-"<suite> · not run" on the task until you run it. 10db never edits your code and never spends without your click.
+"<suite> · not run" on the task until you run it. A binding file every slot shares (ampsio's `model_slots.py`)
+marks every suite "not run" on a switch task: deliberate and conservative. 10db never edits your code and never spends without your click.
 
 **How a suite takes a model.** The manifest names the env var a suite's command reads for models (ampsio: `MODELS`,
 today). orgtools works once its task `tsk_01a21eb6-a18b-7330-aefe-b488689f3843` lands; any other suite offers **Let

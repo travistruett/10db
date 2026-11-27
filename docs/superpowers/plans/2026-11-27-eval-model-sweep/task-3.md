@@ -26,7 +26,7 @@ Interfaces).
   `live-runs.ts`'s `execute` catch does. Each change announces `eval.sweep_changed` in the same write.
 - `stopAll` runs before `evalLiveRuns.stopAll()` at daemon stop. Archive and remove go through the same path.
   `recoverAtStart` runs after `evalLiveRuns.recoverAtStart()`.
-- Let 10db Pick Models: `POST …/evals/tasks` with `NewEvalOrigin.PickModels`. The draft asks the agent to make the
+- Let 10db Pick Models: `POST …/evals/tasks` with `NewEvalOrigin.PickModels` (its origin line is task 1's). The draft asks the agent to make the
   live command read its models from an env var, names ampsio's `MODELS ?=` as the pattern, and says the agent runs
   free checks only.
 
