@@ -5,6 +5,7 @@ import {
   type InboxItemDto,
 } from '@10db/contracts';
 import { Accordion, List, Stack, Text } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import type { ReactNode } from 'react';
 import { CardActions } from './card-actions';
 import { CardSurface } from './card-surface';
@@ -24,6 +25,9 @@ export interface AcceptanceCardProps {
   readonly onAnsweredElsewhere?: () => void;
   readonly framed?: boolean;
 }
+
+/** From here the evidence starts open: the Mac's pane has the room, a phone keeps it folded under the counts. */
+const WIDE_QUERY = '(min-width: 48em)';
 
 /** The fold's header: how many criteria are unconfirmed and whether an extra behaviour is named. */
 const evidenceHeader = (unmet: number, extra: boolean): string =>
@@ -56,15 +60,21 @@ export function AcceptanceCard({
     : [];
 
   const { unmet, extra } = acceptanceCounts(item);
+  // Read before the first paint, so the fold mounts open or shut and never springs open.
+  const wide = useMediaQuery(WIDE_QUERY, true, { getInitialValueInEffect: false });
 
   return (
     <CardSurface framed={framed}>
       <Stack gap={framed ? 'sm' : 'md'} className={framed ? undefined : classes['content']}>
         {header}
         {open.length === 0 && !extra ? null : (
-          // The evidence stays out of the way: the header says the counts, and the line by the buttons says
-          // what each answer does.
-          <Accordion variant="contained" chevronPosition="left">
+          // The header says the counts and the line by the buttons says what each answer does; a phone folds the
+          // evidence away under them.
+          <Accordion
+            variant="contained"
+            chevronPosition="left"
+            defaultValue={wide ? 'evidence' : null}
+          >
             <Accordion.Item value="evidence">
               <Accordion.Control>{evidenceHeader(unmet, extra)}</Accordion.Control>
               <Accordion.Panel>

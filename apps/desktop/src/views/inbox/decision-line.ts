@@ -1,10 +1,4 @@
-import {
-  AcceptanceDetail,
-  AcceptanceVerdict,
-  InboxKind,
-  WatchpointCardDetail,
-  type InboxItemDto,
-} from '@10db/contracts';
+import { AcceptanceDetail, AcceptanceVerdict, InboxKind, type InboxItemDto } from '@10db/contracts';
 import { isPrincipleCard } from './permission-labels';
 
 /** What the card's own state adds to its line: facts the card's data alone does not hold. */
@@ -28,11 +22,6 @@ export function acceptanceCounts(item: InboxItemDto): { unmet: number; extra: bo
 const plural = (count: number, one: string, many: string): string =>
   `${String(count)} ${count === 1 ? one : many}`;
 
-const listOf = (names: readonly string[]): string =>
-  names.length > 1
-    ? `${names.slice(0, -1).join(', ')} and ${names.at(-1) ?? ''}`
-    : (names[0] ?? '');
-
 function acceptanceLine(item: InboxItemDto): string {
   const { unmet, extra } = acceptanceCounts(item);
   const shipped =
@@ -41,11 +30,9 @@ function acceptanceLine(item: InboxItemDto): string {
   return `${shipped} ${counts} Keep As Is changes nothing; Send Back files a fix task.`;
 }
 
-function watchpointLine(item: InboxItemDto): string {
-  const detail = WatchpointCardDetail.safeParse(item.detail);
-  const areas = detail.success ? listOf(detail.data.watchpoints.map((w) => w.label)) : '';
-  return `Touched ${areas === '' ? 'an area' : areas}, which you asked to see. Nothing is waiting on this.`;
-}
+/** The card's body already names the areas the change touched, so the line says only what the answers do. */
+const WATCHPOINT_LINE =
+  'Nothing is waiting on this. Looks Right closes it; What Needs to Change files a follow-up task.';
 
 function flagLine(item: InboxItemDto, facts: DecisionFacts): string | null {
   const { retry, abandon } = facts.batch ?? { retry: false, abandon: false };
@@ -69,7 +56,7 @@ export function decisionLine(item: InboxItemDto, facts: DecisionFacts = {}): str
     case InboxKind.Acceptance:
       return acceptanceLine(item);
     case InboxKind.Watchpoint:
-      return watchpointLine(item);
+      return WATCHPOINT_LINE;
     case InboxKind.Check:
       return `${facts.commits === undefined || facts.commits === null ? 'The work is ready' : `${plural(facts.commits, 'commit', 'commits')} ready`}. Approve and Finish lands it and finishes the task.`;
     case InboxKind.Plan:

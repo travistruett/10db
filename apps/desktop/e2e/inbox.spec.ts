@@ -154,6 +154,58 @@ test('answering a question with a digit and Enter selects the next row and lower
   await page.unrouteAll({ behavior: 'ignoreErrors' });
 });
 
+test('an acceptance card shows what it could not confirm and what Keep As Is does', async ({
+  page,
+}) => {
+  const title = 'Check these criteria: Greet by name';
+  execFileSync(
+    'pnpm',
+    [
+      'exec',
+      'tsx',
+      'scripts/seed-question-card.ts',
+      resolve(E2E_DATA, '10db.sqlite'),
+      JSON.stringify({
+        projectId,
+        title,
+        body: 'Seeded for the acceptance check.',
+        options: [
+          { label: 'accept', description: 'The work is right as it is' },
+          { label: 'send_back', description: 'Send it back with a note' },
+        ],
+        acceptance: {
+          criteria: [
+            {
+              criterion: 'The greeting names the user',
+              verdict: 'not_met',
+              note: 'read as not met',
+            },
+            { criterion: 'It falls back to "there"', verdict: 'unclear', note: 'read as unclear' },
+            { criterion: 'It is one line', verdict: 'met', note: 'read as met' },
+          ],
+          unasked: 'It also logs the name.',
+          sentBack: false,
+        },
+      }),
+    ],
+    { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
+  );
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(inboxUrl('&kind=acceptance'));
+  await rowsOf(page).filter({ hasText: title }).click();
+  // On the Mac's pane the fold starts open under its counts; the met criterion is not listed.
+  await expect(page.getByRole('button', { name: '2 unconfirmed, 1 extra' })).toBeVisible();
+  await expect(page.getByText('The greeting names the user')).toBeVisible();
+  await expect(page.getByText('It is one line')).toHaveCount(0);
+  await expect(
+    page.getByText(
+      'Already shipped. 2 criteria unconfirmed, 1 extra behaviour. Keep As Is changes nothing; Send Back files a fix task.',
+    ),
+  ).toBeVisible();
+  await page.getByRole('button', { name: /^Keep As Is/ }).click();
+  await expect(rowsOf(page).filter({ hasText: title })).toHaveCount(0);
+});
+
 const Shared = z.looseObject({ state: z.string() });
 
 /** Writes one open question card into the project, as a lane's `ask_human` would. */
