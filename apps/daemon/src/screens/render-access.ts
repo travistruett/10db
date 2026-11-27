@@ -176,6 +176,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/settings/keep-awake': 'No screen draws a setting.',
   '/settings/watchpoints': 'No screen draws a setting.',
   '/projects/:projectId/watchpoints': 'No screen draws a setting.',
+  '/projects/:projectId/eval-suggest': "No screen draws the New Eval wizard's suggestion status.",
   '/projects/:projectId/eval-markers': 'No screen draws a task marker.',
   '/tasks/:taskId/eval-coverage': 'No screen draws a task marker.',
   '/projects/:projectId/watchpoints/stats': 'No screen draws a setting.',
