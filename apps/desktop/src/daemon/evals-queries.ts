@@ -156,6 +156,7 @@ export function useEvalLivePreview(projectId: ProjectId, suiteKey: string, enabl
       readJson(
         await client.projects[':projectId'].evals[':suiteKey'].live.$get({
           param: { projectId, suiteKey: encodeURIComponent(suiteKey) },
+          query: {},
         }),
         EvalLivePreviewDto,
       ),
