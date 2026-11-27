@@ -56,6 +56,16 @@
             "type": "string",
             "maxLength": 2000
           },
+          "knowledge": {
+            "default": [],
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 80,
+              "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+            }
+          },
           "loudness": {
             "type": "string",
             "enum": [

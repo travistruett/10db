@@ -1,5 +1,6 @@
 import {
   PROTOCOL_VERSION,
+  PairingCodeDto,
   SharingState,
   TicketScope,
   mintId,
@@ -46,10 +47,11 @@ const SHORT_HEALTH = { status: 'ok', protocolVersion: PROTOCOL_VERSION };
 let close: () => void;
 let lists: ListenerAllowlists | null;
 let listCalls = 0;
+let nameLookups: string[] = [];
 let devices: DeviceService;
 let tickets: Tickets;
 let sockets: SocketRegistry;
-let pair: () => { deviceId: DeviceId; token: string };
+let pair: () => Promise<{ deviceId: DeviceId; token: string }>;
 let app: ReturnType<typeof createApp>;
 let makeApp: (upgrade: typeof noUpgrade) => ReturnType<typeof createApp>;
 
@@ -58,6 +60,7 @@ const call = (listener: Listener, path: string, init?: RequestInit) =>
 
 beforeEach(() => {
   listCalls = 0;
+  nameLookups = [];
   const clock = new ManualClock();
   const made = createTestStore();
   close = made.close;
@@ -81,15 +84,18 @@ beforeEach(() => {
       portHolder: null,
       steps: [],
     }),
+    tailnetName: (ip) => {
+      nameLookups.push(ip);
+      return Promise.resolve('Travis’s S26');
+    },
   });
   tickets = createTickets({ clock });
   lists = { hosts: [shareHost.Host], origins: [PHONE, 'tauri://localhost'] };
-  pair = () => {
-    const paired = devices.pair({
-      code: codes.open().code,
-      label: 'Pixel',
-      platform: 'android',
-    });
+  pair = async () => {
+    const paired = await devices.pair(
+      { code: codes.open().code, label: 'Pixel', platform: 'android' },
+      null,
+    );
     return { deviceId: paired.deviceId, token: paired.token };
   };
   makeApp = (upgrade) =>
@@ -176,8 +182,10 @@ const rows = (): Row[] => [
   {
     row: '2 main: a device token',
     status: 401,
-    run: () =>
-      call(Listener.Main, '/projects', { headers: { ...mainHost, ...bearer(pair().token) } }),
+    run: async () =>
+      call(Listener.Main, '/projects', {
+        headers: { ...mainHost, ...bearer((await pair()).token) },
+      }),
   },
   {
     row: '3 main: another Host is refused before the credential',
@@ -220,18 +228,18 @@ const rows = (): Row[] => [
   {
     row: '6 share: a device token from the tailnet Host and the phone origin',
     status: 200,
-    run: () =>
+    run: async () =>
       call(Listener.Share, '/projects', {
-        headers: { ...shareHost, ...bearer(pair().token), Origin: PHONE },
+        headers: { ...shareHost, ...bearer((await pair()).token), Origin: PHONE },
       }),
   },
   {
     row: '6 share: a device token may not turn on Tailscale, which runs a command on the Mac',
     status: 403,
-    run: () =>
+    run: async () =>
       call(Listener.Share, '/sharing/connect', {
         method: 'POST',
-        headers: { ...shareHost, ...bearer(pair().token), Origin: PHONE },
+        headers: { ...shareHost, ...bearer((await pair()).token), Origin: PHONE },
       }),
   },
   {
@@ -263,29 +271,29 @@ const rows = (): Row[] => [
   ...['/builder/mcp', '/mcp'].map((path): Row => ({
     row: `11 share: ${path} is not routed`,
     status: 404,
-    run: () =>
+    run: async () =>
       call(Listener.Share, path, {
         method: 'POST',
-        headers: { ...shareHost, ...bearer(pair().token) },
+        headers: { ...shareHost, ...bearer((await pair()).token) },
       }),
   })),
   {
     row: '11 share: /screens/claim is not routed',
     status: 404,
-    run: () =>
+    run: async () =>
       call(Listener.Share, '/screens/claim', {
         method: 'POST',
-        headers: { ...shareHost, ...bearer(pair().token) },
+        headers: { ...shareHost, ...bearer((await pair()).token) },
       }),
   },
   {
     row: "12 share: a Tailscale-User-Login that isn't the host's",
     status: 403,
-    run: () =>
+    run: async () =>
       call(Listener.Share, '/projects', {
         headers: {
           ...shareHost,
-          ...bearer(pair().token),
+          ...bearer((await pair()).token),
           'Tailscale-User-Login': 'other@example.com',
         },
       }),
@@ -293,11 +301,11 @@ const rows = (): Row[] => [
   {
     row: "12 share: the host's own login, in other case, passes",
     status: 200,
-    run: () =>
+    run: async () =>
       call(Listener.Share, '/projects', {
         headers: {
           ...shareHost,
-          ...bearer(pair().token),
+          ...bearer((await pair()).token),
           'Tailscale-User-Login': 'ME@example.com',
         },
       }),
@@ -322,10 +330,10 @@ const rows = (): Row[] => [
   {
     row: '14 share: a live device ticket reaches the socket',
     status: 426,
-    run: () => {
+    run: async () => {
       const { ticket } = tickets.issue({
         scope: TicketScope.Full,
-        deviceId: pair().deviceId,
+        deviceId: (await pair()).deviceId,
         listener: Listener.Share,
       });
       return call(Listener.Share, `/events/stream?ticket=${ticket}`, { headers: shareHost });
@@ -335,10 +343,10 @@ const rows = (): Row[] => [
     row: '19 share: no name yet, everything but /health is 503',
     status: 503,
     body: { error: 'not_shared' },
-    run: () => {
+    run: async () => {
       lists = null;
       return call(Listener.Share, '/projects', {
-        headers: { ...shareHost, ...bearer(pair().token) },
+        headers: { ...shareHost, ...bearer((await pair()).token) },
       });
     },
   },
@@ -360,20 +368,21 @@ const rows = (): Row[] => [
     row: '21 main: a stale bearer on /health answers the short shape',
     status: 200,
     body: SHORT_HEALTH,
-    run: () => call(Listener.Main, '/health', { headers: { ...mainHost, ...bearer('stale') } }),
+    run: async () =>
+      call(Listener.Main, '/health', { headers: { ...mainHost, ...bearer('stale') } }),
   },
   {
     row: '22 main: X-Forwarded-For with a device token',
     status: 401,
-    run: () =>
+    run: async () =>
       call(Listener.Main, '/projects', {
-        headers: { ...mainHost, ...bearer(pair().token), 'X-Forwarded-For': '100.64.0.9' },
+        headers: { ...mainHost, ...bearer((await pair()).token), 'X-Forwarded-For': '100.64.0.9' },
       }),
   },
   {
     row: '22 main: pairing is not routed',
     status: 404,
-    run: () =>
+    run: async () =>
       call(Listener.Main, '/devices/pair', {
         method: 'POST',
         headers: { ...mainHost, 'X-Forwarded-For': '100.64.0.9' },
@@ -383,13 +392,13 @@ const rows = (): Row[] => [
     row: '23 share: a UI token on /health is never compared, so the shape is short',
     status: 200,
     body: SHORT_HEALTH,
-    run: () => call(Listener.Share, '/health', { headers: { ...shareHost, ...bearer(UI) } }),
+    run: async () => call(Listener.Share, '/health', { headers: { ...shareHost, ...bearer(UI) } }),
   },
   {
     row: '24 share: a ticket whose device was revoked after it was issued',
     status: 401,
-    run: () => {
-      const device = pair();
+    run: async () => {
+      const device = await pair();
       const { ticket } = tickets.issue({
         scope: TicketScope.Full,
         deviceId: device.deviceId,
@@ -409,9 +418,9 @@ describe('the request path through both listeners', () => {
   });
 
   it('works out the share allowlists once per request, and again for the next', async () => {
-    const send = () =>
+    const send = async () =>
       call(Listener.Share, '/projects', {
-        headers: { ...shareHost, ...bearer(pair().token), Origin: PHONE },
+        headers: { ...shareHost, ...bearer((await pair()).token), Origin: PHONE },
       });
     expect((await send()).status).toBe(200);
     expect(listCalls).toBe(1);
@@ -420,9 +429,32 @@ describe('the request path through both listeners', () => {
     expect(listCalls).toBe(2);
   });
 
+  it('names a device by its tailnet name from the share listener, and only after the code is accepted', async () => {
+    const opening = await call(Listener.Main, '/devices/pairing-code', {
+      method: 'POST',
+      headers: { ...mainHost, ...bearer(UI) },
+    });
+    const opened = PairingCodeDto.parse(await opening.json());
+    const post = (code: string) =>
+      call(Listener.Share, '/devices/pair', {
+        method: 'POST',
+        headers: {
+          ...shareHost,
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': '100.64.0.9',
+        },
+        body: JSON.stringify({ code, label: 'Android phone', platform: 'android' }),
+      });
+    expect((await post('000000')).status).toBe(401);
+    expect(nameLookups).toEqual([]);
+    expect((await post(opened.code)).status).toBe(200);
+    expect(nameLookups).toEqual(['100.64.0.9']);
+    expect(devices.list().map((d) => d.label)).toEqual(['Travis’s S26']);
+  });
+
   it('answers the same 401 for an unknown device, a revoked one and a wrong secret', async () => {
-    const live = pair();
-    const revoked = pair();
+    const live = await pair();
+    const revoked = await pair();
     devices.revoke(revoked.deviceId);
     const last = live.token.slice(-1);
     const wrongSecret = `${live.token.slice(0, -1)}${last === 'A' ? 'B' : 'A'}`;
@@ -453,7 +485,7 @@ describe('the request path through both listeners', () => {
     try {
       const host = `127.0.0.1:${String(started.listener.port)}`;
       lists = { hosts: [host], origins: [] };
-      const device = pair();
+      const device = await pair();
       const { ticket } = tickets.issue({
         scope: TicketScope.Full,
         deviceId: device.deviceId,

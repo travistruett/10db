@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { NOISY_MIN_RAISED, NOISY_SHARE } from './inbox-card-types';
 import { AreaName, DEFAULT_HAZARDS, DEPS_HAZARD, PathPattern } from './entities';
+import { TopicKey } from './knowledge';
 import { WatchpointLoudness } from './watchpoint-hit';
 
 /** A regex over a changed line, matched case-insensitively; it must compile. */
@@ -20,6 +21,9 @@ export const WatchpointLinePattern = z
     { message: 'is not a valid pattern' },
   );
 export type WatchpointLinePattern = z.infer<typeof WatchpointLinePattern>;
+
+/** The most Knowledge topics one watchpoint links. */
+export const MAX_WATCHPOINT_KNOWLEDGE = 8;
 
 /** The longest question a watchpoint asks. */
 export const MAX_WATCHPOINT_QUESTION_LENGTH = 400;
@@ -41,6 +45,11 @@ export const Watchpoint = z.object({
    */
   question: z.string().trim().min(1).max(MAX_WATCHPOINT_QUESTION_LENGTH).nullable().default(null),
   guidance: z.string().max(2000),
+  /**
+   * Knowledge topic keys. The current principles under each key, or under a key that starts with `key.`, join the
+   * guidance in the build and review briefs. A list stored before this field reads as none.
+   */
+  knowledge: z.array(TopicKey).max(MAX_WATCHPOINT_KNOWLEDGE).default([]),
   loudness: z.enum(WatchpointLoudness),
   /** The library key it came from, so a starter's later revision knows which watchpoints to touch. */
   starter: z.string().nullable().default(null),
@@ -151,6 +160,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     question: null,
     guidance:
       'Check that the migration can run on existing data, that it is safe to apply while the old code still runs, and that nothing depends on a rollback.',
+    knowledge: [],
     loudness: WatchpointLoudness.Ask,
     starter: 'migrations',
   },
@@ -163,6 +173,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     question: null,
     guidance:
       'Check that every change is additive, that nothing is removed or narrowed, and that callers are updated.',
+    knowledge: [],
     loudness: WatchpointLoudness.Ask,
     starter: 'contracts',
   },
@@ -175,6 +186,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     question: null,
     guidance:
       'Check the new wording against what it should make the model do, and look for instructions that now conflict.',
+    knowledge: [],
     loudness: WatchpointLoudness.Show,
     starter: 'prompts',
   },
@@ -186,6 +198,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     lines: [],
     question: null,
     guidance: 'Check that no bar was lowered and no golden changed without a reason.',
+    knowledge: [],
     loudness: WatchpointLoudness.Show,
     starter: 'evals',
   },
@@ -198,6 +211,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     question: null,
     guidance:
       'Check that the rule is true, that it belongs there, and that it does not widen what agents may do.',
+    knowledge: [],
     loudness: WatchpointLoudness.Show,
     starter: 'agent-instructions',
   },
@@ -210,6 +224,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     question: null,
     guidance:
       'Check that each new or changed dependency is needed, pinned, and from a source you trust.',
+    knowledge: [],
     loudness: WatchpointLoudness.Show,
     starter: 'dependencies',
   },
@@ -226,6 +241,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     question: null,
     guidance:
       'Check whether the index locks or rebuilds a big table, and that it can be built while the old code still runs.',
+    knowledge: [],
     loudness: WatchpointLoudness.Show,
     starter: 'indexes',
   },
@@ -245,6 +261,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
     question: null,
     guidance:
       'Check that the model is the one intended, that it works on every provider the feature supports, and what it costs.',
+    knowledge: [],
     loudness: WatchpointLoudness.Show,
     starter: 'model-choice',
   },
@@ -258,6 +275,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
       'Does this change how the interface looks or behaves for the user: layout, wording, colours, controls or flows?',
     guidance:
       'Check the change against how you want the interface to look and behave, and that it matches the screens around it.',
+    knowledge: ['ui'],
     loudness: WatchpointLoudness.Show,
     starter: 'design-principles',
   },
@@ -271,6 +289,7 @@ export const STARTER_WATCHPOINTS: readonly Watchpoint[] = [
       'Does this change who can do what: sign-in, sessions, tokens, roles, or permission checks?',
     guidance:
       'Check who can now do what they could not before, and that every path to the action still checks it.',
+    knowledge: ['auth'],
     loudness: WatchpointLoudness.Show,
     starter: 'auth-and-permissions',
   },
@@ -288,6 +307,9 @@ const INITIAL_KEYS: readonly string[] = [
 export const INITIAL_WATCHPOINTS: readonly Watchpoint[] = STARTER_WATCHPOINTS.filter((w) =>
   INITIAL_KEYS.includes(w.key),
 );
+
+// A starter's `knowledge` is not a revision: a copy the builder already holds keeps the topics it has, the way
+// `STOCK_HAZARD_REVISIONS` leaves an existing project's hazards alone. Only a starter added later carries it.
 
 /**
  * The starters' revision now. A list saved before revisions existed counts as revision 1; every save stamps the
@@ -321,6 +343,7 @@ export const STARTER_WATCHPOINT_REVISIONS: readonly {
       question: null,
       guidance:
         'Check that the migration can run on existing data, that it is safe to apply while the old code still runs, and that nothing depends on a rollback.',
+      knowledge: [],
       loudness: WatchpointLoudness.Show,
       starter: 'migrations',
     },
@@ -336,6 +359,7 @@ export const STARTER_WATCHPOINT_REVISIONS: readonly {
       question: null,
       guidance:
         'Check that every change is additive, that nothing is removed or narrowed, and that callers are updated.',
+      knowledge: [],
       loudness: WatchpointLoudness.Show,
       starter: 'contracts',
     },
@@ -353,7 +377,9 @@ const sameWatchpoint = (a: Watchpoint, b: Watchpoint): boolean =>
   a.globs.every((g, i) => g === b.globs[i]) &&
   a.lines.length === b.lines.length &&
   a.lines.every((l, i) => l === b.lines[i]) &&
-  a.question === b.question;
+  a.question === b.question &&
+  a.knowledge.length === b.knowledge.length &&
+  a.knowledge.every((k, i) => k === b.knowledge[i]);
 
 /**
  * The stored list with each unedited copy of a starter moved to the starter's current loudness, for the revisions

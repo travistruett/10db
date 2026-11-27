@@ -3,11 +3,24 @@ import {
   MAX_WATCHPOINT_QUESTION_LENGTH,
   Watchpoint,
   WatchpointLinePattern,
+  WatchpointCoverageState,
   WatchpointLoudness,
   type JudgeStatusDto,
+  type WatchpointCoverage,
   type Watchpoint as WatchpointValue,
 } from '@10db/contracts';
-import { Alert, Button, Group, Input, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import {
+  Alert,
+  Button,
+  Code,
+  Group,
+  Input,
+  Stack,
+  TagsInput,
+  Text,
+  Textarea,
+  TextInput,
+} from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { useJudgeStatus } from '../../daemon/judge-queries';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
@@ -23,6 +36,7 @@ interface Draft {
   readonly lines: string;
   readonly question: string;
   readonly guidance: string;
+  readonly knowledge: string[];
   readonly loudness: WatchpointLoudness;
 }
 
@@ -33,6 +47,7 @@ const EMPTY: Draft = {
   lines: '',
   question: '',
   guidance: '',
+  knowledge: [],
   loudness: WatchpointLoudness.Show,
 };
 
@@ -54,8 +69,55 @@ function draftOf(watchpoint: WatchpointValue): Draft {
     lines: watchpoint.lines.join('\n'),
     question: watchpoint.question ?? '',
     guidance: watchpoint.guidance,
+    knowledge: watchpoint.knowledge,
     loudness: watchpoint.loudness,
   };
+}
+
+/** What the watchpoint's paths and lines cover in the checkout: the count and up to five of the files. */
+function CoveredFiles({ coverage }: { readonly coverage: WatchpointCoverage }) {
+  if (coverage.state === WatchpointCoverageState.Counting)
+    return (
+      <Text size="xs" c="dimmed">
+        Counting the files…
+      </Text>
+    );
+  if (coverage.state === WatchpointCoverageState.Unreadable)
+    return (
+      <Text size="xs" c="dimmed">
+        The files here could not be counted.
+      </Text>
+    );
+  if (coverage.files === 0 && coverage.partial)
+    return (
+      <Text size="xs" c="dimmed">
+        The files here could not be counted in full.
+      </Text>
+    );
+  if (coverage.files === 0)
+    return (
+      <Text size="xs" c="dimmed">
+        No files here
+      </Text>
+    );
+  const rest = coverage.files - coverage.examples.length;
+  return (
+    <Stack gap={4} aria-label="Files this covers">
+      <Text size="xs" c="dimmed">
+        {`${coverage.asks ? 'Asks about' : 'Covers'} ${coverage.partial ? 'at least ' : ''}${String(coverage.files)} file${coverage.files === 1 ? '' : 's'} here`}
+      </Text>
+      <Group gap={6}>
+        {coverage.examples.map((path) => (
+          <Code key={path}>{path}</Code>
+        ))}
+        {rest > 0 ? (
+          <Text size="xs" c="dimmed">
+            {`+${String(rest)} more`}
+          </Text>
+        ) : null}
+      </Group>
+    </Stack>
+  );
 }
 
 /**
@@ -64,6 +126,7 @@ function draftOf(watchpoint: WatchpointValue): Draft {
  */
 export function WatchpointDrawer({
   watchpoint,
+  coverage,
   takenKeys,
   saving,
   problem,
@@ -74,6 +137,8 @@ export function WatchpointDrawer({
   onDirty,
 }: {
   readonly watchpoint: WatchpointValue | null;
+  /** What it covers in the checkout, as last counted; none for a new watchpoint. */
+  readonly coverage?: WatchpointCoverage | undefined;
   /** Every key in use, which a new watchpoint's key keeps apart from. */
   readonly takenKeys: ReadonlySet<string>;
   readonly saving: boolean;
@@ -120,6 +185,7 @@ export function WatchpointDrawer({
       lines: lines(draft.lines),
       question: draft.question.trim() === '' ? null : draft.question.trim(),
       guidance: draft.guidance.trim(),
+      knowledge: draft.knowledge,
       loudness: draft.loudness,
       starter: watchpoint?.starter ?? null,
     });
@@ -208,6 +274,7 @@ export function WatchpointDrawer({
             }}
           />
           <PathMeanings paths={lines(draft.paths)} />
+          {coverage === undefined ? null : <CoveredFiles coverage={coverage} />}
         </Stack>
         <Textarea
           label="Lines"
@@ -227,7 +294,6 @@ export function WatchpointDrawer({
           <TextInput
             label="Question"
             aria-label="Watchpoint question"
-            placeholder="Does this change who can do what: sign-in, sessions, tokens, roles or permission checks?"
             description="Optional. A yes or no 10db's judge asks of the files these paths cover that no line settled. With a question and no lines, the paths alone match nothing. For now the answer is only logged, in Settings › Decisions."
             maxLength={MAX_WATCHPOINT_QUESTION_LENGTH}
             value={draft.question}
@@ -250,6 +316,16 @@ export function WatchpointDrawer({
           value={draft.guidance}
           onChange={(e) => {
             change({ guidance: e.currentTarget.value });
+          }}
+        />
+        <TagsInput
+          label="Knowledge"
+          aria-label="Watchpoint knowledge topics"
+          description="Optional. Topic keys from your Knowledge, such as ui or auth. The current principles under each, newest first and at most five, are given with What to Check in the agent's and reviewer's briefs. A watchpoint with a question and no lines gives them as guidance only, with no reasons asked for."
+          maxTags={8}
+          value={draft.knowledge}
+          onChange={(knowledge) => {
+            change({ knowledge });
           }}
         />
         <Input.Wrapper

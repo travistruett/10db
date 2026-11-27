@@ -6,3 +6,4 @@ export { coverageLinesOf, suitesOfTasks } from './task-coverage';
 export { createEvalsAssessor, type EvalsAssessor } from './assess';
 export { subscribeEvalAssessment } from './assess-triggers';
 export { createEvalLiveRuns, type EvalLiveRuns } from './live-runs';
+export { createEvalSuggester, type EvalSuggester } from './suggest';

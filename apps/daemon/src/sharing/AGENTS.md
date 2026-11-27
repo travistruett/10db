@@ -70,3 +70,7 @@ mapping of 4399 to a header-recording listener, removed afterwards (`serve statu
   port's `TCP` entry is exactly `{ "HTTPS": true }` (no `TCPForward`, no `TerminateTLS`, no other key), and
   `AllowFunnel` has no `<fqdn>:<port>` set to true.
 - `tailscale serve` and `serve --https=<port> off` each exit 0 within a second here.
+- **`tailscale whois --json <tailnet ip>`** names a peer. `Node.Hostinfo.Hostname` is the device's own name
+  ("Travis's S26" for the Android phone), `Node.ComputedName` is the tailnet machine name (`travis-s26`) and
+  `Node.Name` is `travis-s26.<tailnet>.ts.net.` with a trailing dot. `readTailnetName` reads only those three and
+  runs only for a Tailscale address; `pair` uses it for the device's label, after the code is accepted.

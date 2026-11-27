@@ -1,5 +1,11 @@
 import { WatchpointLoudness } from '@10db/contracts';
-import { SegmentedControl, type MantineSize, type MantineSpacing } from '@mantine/core';
+import {
+  Box,
+  SegmentedControl,
+  Tooltip,
+  type MantineSize,
+  type MantineSpacing,
+} from '@mantine/core';
 import { ProjectChoice } from './watchpoint-lists';
 
 /** The loudness words. Hold is not offered until the app can act on it, but a saved one still reads as Hold. */
@@ -8,6 +14,19 @@ const LOUDNESS_LABEL: Readonly<Record<WatchpointLoudness, string>> = {
   [WatchpointLoudness.Ask]: 'Ask',
   [WatchpointLoudness.Hold]: 'Hold',
 };
+
+/** What Show and Ask do, in the words the pages' info button uses. */
+export const LOUDNESS_WORDS =
+  "Show puts the changes in the task's For You and the pull request; nothing waits on you. Ask also leaves one Inbox card per task, for you to look at.";
+
+/** Says what Show and Ask do when the pointer rests on a When It Matches control. */
+function WithLoudnessWords({ children }: { readonly children: React.ReactNode }) {
+  return (
+    <Tooltip label={LOUDNESS_WORDS} multiline w={280} openDelay={400} withinPortal>
+      <Box display="inline-block">{children}</Box>
+    </Tooltip>
+  );
+}
 
 /** When It Matches for a watchpoint in its own list: Show or Ask. */
 export function LoudnessControl({
@@ -27,20 +46,22 @@ export function LoudnessControl({
   readonly disabled?: boolean;
 }) {
   return (
-    <SegmentedControl
-      size={size}
-      disabled={disabled}
-      {...(mt === undefined ? {} : { mt })}
-      aria-label={ariaLabel}
-      data={[
-        { value: WatchpointLoudness.Show, label: LOUDNESS_LABEL[WatchpointLoudness.Show] },
-        { value: WatchpointLoudness.Ask, label: LOUDNESS_LABEL[WatchpointLoudness.Ask] },
-      ]}
-      value={value}
-      onChange={(next) => {
-        if (next === WatchpointLoudness.Show || next === WatchpointLoudness.Ask) onChange(next);
-      }}
-    />
+    <WithLoudnessWords>
+      <SegmentedControl
+        size={size}
+        disabled={disabled}
+        {...(mt === undefined ? {} : { mt })}
+        aria-label={ariaLabel}
+        data={[
+          { value: WatchpointLoudness.Show, label: LOUDNESS_LABEL[WatchpointLoudness.Show] },
+          { value: WatchpointLoudness.Ask, label: LOUDNESS_LABEL[WatchpointLoudness.Ask] },
+        ]}
+        value={value}
+        onChange={(next) => {
+          if (next === WatchpointLoudness.Show || next === WatchpointLoudness.Ask) onChange(next);
+        }}
+      />
+    </WithLoudnessWords>
   );
 }
 
@@ -66,20 +87,22 @@ export function ProjectChoiceControl({
   readonly disabled?: boolean;
 }) {
   return (
-    <SegmentedControl
-      size="xs"
-      disabled={disabled}
-      aria-label={ariaLabel}
-      data={[
-        { value: ProjectChoice.Default, label: `Default · ${LOUDNESS_LABEL[defaultLoudness]}` },
-        { value: ProjectChoice.Show, label: LOUDNESS_LABEL[WatchpointLoudness.Show] },
-        { value: ProjectChoice.Ask, label: LOUDNESS_LABEL[WatchpointLoudness.Ask] },
-        { value: ProjectChoice.Off, label: 'Off' },
-      ]}
-      value={value}
-      onChange={(next) => {
-        if (isProjectChoice(next)) onChange(next);
-      }}
-    />
+    <WithLoudnessWords>
+      <SegmentedControl
+        size="xs"
+        disabled={disabled}
+        aria-label={ariaLabel}
+        data={[
+          { value: ProjectChoice.Default, label: `Default · ${LOUDNESS_LABEL[defaultLoudness]}` },
+          { value: ProjectChoice.Show, label: LOUDNESS_LABEL[WatchpointLoudness.Show] },
+          { value: ProjectChoice.Ask, label: LOUDNESS_LABEL[WatchpointLoudness.Ask] },
+          { value: ProjectChoice.Off, label: 'Off' },
+        ]}
+        value={value}
+        onChange={(next) => {
+          if (isProjectChoice(next)) onChange(next);
+        }}
+      />
+    </WithLoudnessWords>
   );
 }
