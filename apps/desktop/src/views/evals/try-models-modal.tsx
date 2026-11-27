@@ -12,8 +12,8 @@ import {
   Anchor,
   Button,
   Checkbox,
+  Code,
   Group,
-  Loader,
   Modal,
   NumberInput,
   Stack,
@@ -32,7 +32,8 @@ import {
   useSwitchEvalModel,
 } from '../../daemon/evals-queries';
 import { costText, dayTimeText } from './eval-figures';
-import { changedRefusal, Notes, REFUSAL_WORDS } from './live-run-modal';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
+import { changedRefusal, ConfirmBody } from './live-run-modal';
 
 /** What the drawer's two sweep buttons open, and the window of a sweep already going. */
 export const TryMode = { Try: 'try', Cheapest: 'cheapest', Window: 'window' } as const;
@@ -81,6 +82,22 @@ export function sweepVerdict(sweep: EvalSweepDto): string {
         : `Every picked model ran.${reason}`;
     case EvalSweepState.Stopped:
       return `Stopped.${reason}`;
+  }
+}
+
+/** The row button's words for an ended sweep, from its fields so a model id's dots stay whole. */
+export function lastSweepWords(sweep: EvalSweepDto): string {
+  switch (sweep.state) {
+    case EvalSweepState.Running:
+      return 'Sweep running';
+    case EvalSweepState.Found:
+      return `Last sweep: ${sweep.winner ?? 'a model'} is the cheapest that passes`;
+    case EvalSweepState.Done:
+      return sweep.kind === EvalSweepKind.Cheapest
+        ? 'Last sweep: no cheaper model passed'
+        : 'Last sweep: every picked model ran';
+    case EvalSweepState.Stopped:
+      return 'Last sweep: stopped';
   }
 }
 
@@ -251,7 +268,8 @@ function Picker({
     preselected(candidates, kind, cheapestPassUsd),
   );
   const [search, setSearch] = useState('');
-  const [cap, setCap] = useState<number | null>(null);
+  // Raw while typing: "2." and "" are strings. The default shows only until the first edit.
+  const [cap, setCap] = useState<number | string | undefined>(undefined);
   const needle = search.trim().toLowerCase();
   const matching = candidates.filter(
     (c) =>
@@ -260,7 +278,12 @@ function Picker({
       (c.name ?? '').toLowerCase().includes(needle),
   );
   const shown = matching.slice(0, SHOWN);
-  const capUsd = cap ?? defaultCap(lastRunCostUsd, picked.length, kind);
+  const capUsd =
+    cap === undefined
+      ? defaultCap(lastRunCostUsd, picked.length, kind)
+      : Number.isFinite(Number(cap)) && cap !== ''
+        ? Number(cap)
+        : null;
   const problem =
     picked.length === 0
       ? 'Pick at least one model.'
@@ -362,9 +385,9 @@ function Picker({
           max={500}
           decimalScale={2}
           allowNegative={false}
-          value={capUsd ?? ''}
+          value={cap ?? capUsd ?? ''}
           onChange={(v) => {
-            setCap(typeof v === 'number' ? v : null);
+            setCap(v);
           }}
           w={200}
         />
@@ -403,12 +426,21 @@ interface ConfirmProps {
 function Confirm(props: ConfirmProps) {
   const preview = useEvalLivePreview(props.projectId, props.suiteKey, true, props.models);
   if (preview.data === undefined)
-    return preview.isError ? (
-      <Text size="sm" c="red">
-        {preview.error.message}
-      </Text>
-    ) : (
-      <Loader size="sm" />
+    return (
+      <Stack gap="md">
+        {preview.isError ? (
+          <Text size="sm" c="red">
+            {preview.error.message}
+          </Text>
+        ) : (
+          <PageLoading shape={PageLoadingShape.Lines} rows={4} label="Reading the sweep" />
+        )}
+        <Group>
+          <Button variant="subtle" onClick={props.onBack}>
+            Back
+          </Button>
+        </Group>
+      </Stack>
     );
   return <ConfirmWindow key={props.models.join(',')} {...props} data={preview.data} />;
 }
@@ -428,71 +460,49 @@ function ConfirmWindow({
   // The hash of the preview the builder was shown, held from the first load: Start always sends it, and a
   // refetch that changes the live hash waits for the builder to accept the new window. New picks mount anew.
   const [shownHash, setSeen] = useState(data.previewHash);
-  const changed = data.previewHash !== shownHash;
   const estimates = models.map((m) => candidates.find((c) => c.model === m)?.estimateUsd ?? null);
   const known = estimates.filter((e): e is number => e !== null);
   const unknown = estimates.length - known.length;
   const total = known.reduce((a, b) => a + b, 0);
   return (
-    <Stack gap="md">
-      <Stack gap={2}>
-        {models.map((m) => (
-          <Text key={m} size="sm" style={{ overflowWrap: 'anywhere' }}>
-            {m}
-          </Text>
-        ))}
-      </Stack>
-      <Text size="sm">
-        {`Estimated ${known.length === 0 ? 'unknown' : costText(total)}${unknown > 0 && known.length > 0 ? ` plus ${String(unknown)} with no estimate` : ''}, cap ${costText(capUsd)}; one run can cost more than its estimate.`}
-        {kind === EvalSweepKind.Cheapest ? ' It stops at the first model that passes.' : ''}
-      </Text>
-      {changed ? (
-        <Text size="sm" c="yellow">
-          This window now shows what changed. Check it, then press Start.
-        </Text>
-      ) : null}
-      {data.refusal !== null ? (
-        <Text size="sm" c="red" data-testid="live-refusal">
-          {REFUSAL_WORDS[data.refusal]}
-        </Text>
-      ) : (
-        <>
-          <Notes preview={data} />
-          {start.isError && !changedRefusal(start.error) ? (
-            <Text size="sm" c="red">
-              {start.error.message}
+    <ConfirmBody
+      preview={data}
+      seen={shownHash}
+      onAccept={() => {
+        setSeen(data.previewHash);
+      }}
+      verb="Start"
+      error={start.isError && !changedRefusal(start.error) ? start.error.message : null}
+      pending={start.isPending}
+      onBack={onBack}
+      onGo={() => {
+        start.mutate(
+          { kind, models: [...models], capUsd, previewHash: shownHash },
+          { onSuccess: onStarted },
+        );
+      }}
+      before={
+        <Stack gap="xs">
+          <Stack gap={2}>
+            {models.map((m) => (
+              <Text key={m} size="sm" style={{ overflowWrap: 'anywhere' }}>
+                {m}
+              </Text>
+            ))}
+          </Stack>
+          {data.models === null ? null : (
+            <Text size="sm">
+              {'Models go in '}
+              <Code>{`$${data.models.env}`}</Code>
             </Text>
-          ) : null}
-        </>
-      )}
-      <Group justify="space-between">
-        <Button variant="subtle" onClick={onBack}>
-          Back
-        </Button>
-        {data.refusal !== null ? null : changed ? (
-          <Button
-            variant="default"
-            onClick={() => {
-              setSeen(data.previewHash);
-            }}
-          >
-            Show what runs now
-          </Button>
-        ) : (
-          <Button
-            loading={start.isPending}
-            onClick={() => {
-              start.mutate(
-                { kind, models: [...models], capUsd, previewHash: shownHash },
-                { onSuccess: onStarted },
-              );
-            }}
-          >
-            Start
-          </Button>
-        )}
-      </Group>
-    </Stack>
+          )}
+          <Text size="sm">
+            {`Estimated ${known.length === 0 ? 'unknown' : costText(total)}${unknown > 0 && known.length > 0 ? ` plus ${String(unknown)} with no estimate` : ''}, cap ${costText(capUsd)}; one run can cost more than its estimate.`}
+            {kind === EvalSweepKind.Cheapest ? ' It stops at the first model that passes.' : ''}
+          </Text>
+        </Stack>
+      }
+    />
   );
 }
 
@@ -523,8 +533,12 @@ function Body({
   if (mode === TryMode.Window || started !== null) {
     return sweep ? (
       <SweepWindow projectId={projectId} suiteKey={suiteKey} sweep={sweep} onClose={onClose} />
+    ) : latest.isError ? (
+      <Text size="sm" c="red">
+        {latest.error.message}
+      </Text>
     ) : (
-      <Loader size="sm" />
+      <PageLoading shape={PageLoadingShape.Lines} rows={4} label="Reading the sweep" />
     );
   }
   if (candidates.data === undefined)
@@ -533,7 +547,7 @@ function Body({
         {candidates.error.message}
       </Text>
     ) : (
-      <Loader size="sm" />
+      <PageLoading shape={PageLoadingShape.Lines} rows={5} label="Reading the models" />
     );
   if (picks === null)
     return (

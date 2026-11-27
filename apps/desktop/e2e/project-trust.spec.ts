@@ -250,8 +250,11 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await expect(sweepWindow.getByTestId('candidates')).toContainText('cheap');
   await expect(sweepWindow.getByTestId('candidates')).toContainText('steady');
   await sweepWindow.getByRole('checkbox', { name: 'Pick cheap' }).check();
+  await sweepWindow.getByRole('checkbox', { name: 'Pick steady' }).check();
   await sweepWindow.getByRole('textbox', { name: 'Most to spend' }).fill('5');
   await sweepWindow.getByRole('button', { name: 'Continue' }).click();
+  await expect(sweepWindow).toContainText('echo done');
+  await expect(sweepWindow).toContainText('Models go in $MODELS');
   await expect(sweepWindow).toContainText('one run can cost more than its estimate');
   await expect(sweepWindow.getByTestId('live-refusal')).toContainText('runs no sandbox');
   await expect(sweepWindow.getByRole('button', { name: 'Start' })).toHaveCount(0);

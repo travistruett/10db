@@ -10,11 +10,11 @@ import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useEvalLivePreview, useLatestEvalSweep, useNewEvalTask } from '../../daemon/evals-queries';
 import { costText } from './eval-figures';
-import { sweepVerdict, TryMode, TryModelsModal } from './try-models-modal';
+import { lastSweepWords, TryMode, TryModelsModal } from './try-models-modal';
 
-/** The cheapest model that passes every gate in the suite's shown run, when its cost is known. */
+/** The cheapest model that passes every gate in the suite's latest run, when its cost is known. */
 function cheapestPass(detail: EvalSuiteDetailDto): number | null {
-  const costs = (detail.run?.models ?? []).flatMap((m) =>
+  const costs = (detail.suite.latest?.models ?? []).flatMap((m) =>
     m.passed && m.costUsd !== null ? [m.costUsd] : [],
   );
   return costs.length === 0 ? null : Math.min(...costs);
@@ -147,7 +147,7 @@ export function SweepActions({
         >
           {running
             ? `Sweep running · ${costText(sweep.spentUsd)} of ${costText(sweep.capUsd)}`
-            : `Last sweep: ${sweepVerdict(sweep).split('.')[0] ?? ''}`}
+            : lastSweepWords(sweep)}
         </Button>
       )}
       <TryModelsModal
