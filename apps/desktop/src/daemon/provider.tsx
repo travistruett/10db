@@ -134,6 +134,8 @@ export function DaemonProvider({
     let everConnected = false;
     let downSince: number | null = null;
     let attempts = 0;
+    let ticking = false;
+    let tickAgain = false;
 
     /** Asks where the daemon is (when not connected) and for its health. */
     async function attempt(): Promise<HealthResponse & { readonly active: DaemonValue }> {
@@ -167,6 +169,13 @@ export function DaemonProvider({
     }
 
     async function tick(): Promise<void> {
+      // One attempt at a time: a wake during one runs the next as soon as it ends.
+      if (ticking) {
+        tickAgain = true;
+        return;
+      }
+      ticking = true;
+      clearTimeout(timer);
       try {
         const { active, ...health } = await withDeadline(attempt(), deadlineMs);
         if (stopped) return;
@@ -198,6 +207,12 @@ export function DaemonProvider({
         );
       }
       // Both branches above return when the effect stopped during an await; nothing since can stop it.
+      ticking = false;
+      if (tickAgain) {
+        tickAgain = false;
+        void tick();
+        return;
+      }
       timer = setTimeout(
         () => {
           void tick();
@@ -206,10 +221,25 @@ export function DaemonProvider({
       );
     }
 
+    // A page coming back (a phone's screen on, the app brought forward, the network back) asks at once instead of
+    // waiting on a timer the browser held while it was away, and a status shown as healthy is checked again.
+    const wake = (): void => {
+      if (document.visibilityState !== 'visible') return;
+      void tick();
+    };
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('pageshow', wake);
+    window.addEventListener('online', wake);
+    window.addEventListener('focus', wake);
+
     void tick();
     return () => {
       stopped = true;
       clearTimeout(timer);
+      document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('pageshow', wake);
+      window.removeEventListener('online', wake);
+      window.removeEventListener('focus', wake);
     };
   }, [resolve, healthyMs, disconnectedMs, deadlineMs]);
 

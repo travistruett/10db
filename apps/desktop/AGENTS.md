@@ -8,7 +8,9 @@ tokens; the app still uses the main listener.
   hand-write a fetch to the daemon. Parse every response with its `@10db/contracts` schema via `readJson`.
 - The UI gets its daemon connection from `DaemonProvider` (Tauri `daemon_connection`, or
   `VITE_DAEMON_URL`/`VITE_DAEMON_TOKEN` in the browser); it also polls `/health` and owns the connecting,
-  reconnecting and version-mismatch states. Use `useDaemon()` and the hooks in `src/daemon/queries.ts`.
+  reconnecting and version-mismatch states. A page coming back (`visibilitychange` to visible, `pageshow`, `online`,
+  `focus`) asks at once rather than waiting on a timer the browser held, one attempt at a time. Use `useDaemon()`
+  and the hooks in `src/daemon/queries.ts`.
 - One event stream (`useEventStream`) invalidates queries by entity type (`INVALIDATIONS`). Don't poll lists.
 - `pnpm dev:preview` serves the UI with no token for 10db to run as 10db's own preview command, under the gate's
   sandbox; Open Page hands a tab at the daemon's dev UI origin (`/health`'s `devUiOrigin`) the daemon's address and
