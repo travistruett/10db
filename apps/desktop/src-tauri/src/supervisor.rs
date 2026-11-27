@@ -58,7 +58,7 @@ const HEALTH_PATH: &str = "/health";
 /// What a healthy daemon's /health reply starts with.
 const HEALTH_OK: &[u8; 12] = b"HTTP/1.1 200";
 const LOCK_FILE: &str = "daemon.lock";
-/// Written beside `daemon.lock` just before a frozen daemon is killed, so the next daemon knows the
+/// Written beside `daemon.lock` just before a frozen daemon, or one stuck starting, is killed, so the next daemon knows the
 /// restart was this shell's kill and not a crash. Its name and shape match `FROZEN_KILL_FILE` in
 /// `apps/daemon/src/daemon/frozen-kill.ts`.
 const FROZEN_KILL_FILE: &str = "daemon.frozen-kill";
@@ -161,6 +161,18 @@ fn write_frozen_marker(data_dir: &Path, pid: u32, frozen_after: Duration) -> io:
     let staged = data_dir.join(format!("{FROZEN_KILL_FILE}.tmp"));
     fs::write(&staged, marker.to_string())?;
     fs::rename(&staged, &path)
+}
+
+/// Leaves the freeze-kill marker for `pid` before this shell kills it, reporting a write that failed.
+fn mark_killed(data_dir: &Path, log_dir: &Path, pid: Option<u32>, after: Duration) {
+    if let Some(pid) = pid
+        && let Err(error) = write_frozen_marker(data_dir, pid, after)
+    {
+        report(
+            log_dir,
+            &format!("could not write the freeze-kill marker: {error}"),
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -581,14 +593,7 @@ fn wait_for_exit(
                         ),
                     );
                     // Before the kill, so the next daemon never starts without it.
-                    if let Some(pid) = pid
-                        && let Err(error) = write_frozen_marker(data_dir, pid, frozen_after)
-                    {
-                        report(
-                            log_dir,
-                            &format!("could not write the freeze-kill marker: {error}"),
-                        );
-                    }
+                    mark_killed(data_dir, log_dir, pid, frozen_after);
                     ChildEnd {
                         code: release_child(shared, log_dir, true, KILL_WAIT),
                         killed_as_frozen: true,
@@ -604,7 +609,9 @@ fn wait_for_exit(
                             start_deadline.as_secs() / 60
                         ),
                     );
-                    // No freeze-kill marker: no serving daemon froze.
+                    // The marker too, before the kill: recovery may already have run, and without it every
+                    // hang kill would charge the runs it found, failing them all within a few kills.
+                    mark_killed(data_dir, log_dir, pid, start_deadline);
                     ChildEnd {
                         code: release_child(shared, log_dir, true, KILL_WAIT),
                         killed_as_start_hung: true,

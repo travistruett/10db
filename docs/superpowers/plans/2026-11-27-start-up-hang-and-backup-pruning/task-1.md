@@ -23,8 +23,9 @@ pub fn start_deadline(hung: u32) -> Duration;
   watch applies, never the start deadline.
 - `wait_for_exit` handles `StartHung` like `Frozen`: report to the sidecar log
   (`the daemon did not finish starting in {N} min; killing it to start another`) and
-  `release_child(shared, log_dir, true, KILL_WAIT)`. Write no freeze-kill marker: that marker tells the next
-  daemon a serving daemon froze, which is not what happened.
+  `release_child(shared, log_dir, true, KILL_WAIT)`. Write the freeze-kill marker first, as the freeze kill does: recovery may already have run, and a
+  kill without it counts as a crash that charges every run it found, failing them after a few kills (code review
+  round 1).
 - `wait_for_exit` returns the index's `ChildEnd`. `run_loop` keeps a consecutive-hang count: `killed_as_start_hung`
   adds 1, `served` resets it to 0, anything else leaves it. The next spawn's deadline is `start_deadline(count)`.
 - A start-hang kill must not reset the restart backoff, although the child ran past `HEALTHY_UPTIME`. Today
