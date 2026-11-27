@@ -45,12 +45,17 @@ export function StepLogLink({ item }: { readonly item: InboxItemDto }) {
 export function useBatchActions(
   item: InboxItemDto,
   onDone: () => void,
-): { readonly buttons: readonly BarButton[]; readonly error: string | null } {
+): {
+  readonly buttons: readonly BarButton[];
+  readonly error: string | null;
+  /** Which answers the card offers, for the line that says what each does. */
+  readonly offers: { readonly retry: boolean; readonly abandon: boolean };
+} {
   const ship = useShipBatch();
   const abandon = useAbandonBatch();
   const done = item.detail?.[CARD_CLOSES_ITSELF] === true ? () => undefined : onDone;
   const offer = actionBatch(item);
-  if (offer === null) return { buttons: [], error: null };
+  if (offer === null) return { buttons: [], error: null, offers: { retry: false, abandon: false } };
   const buttons: BarButton[] = [];
   if (offer.retry)
     buttons.push({
@@ -71,5 +76,9 @@ export function useBatchActions(
         abandon.mutate(offer.batchId, { onSuccess: done });
       },
     });
-  return { buttons, error: (ship.error ?? abandon.error)?.message ?? null };
+  return {
+    buttons,
+    error: (ship.error ?? abandon.error)?.message ?? null,
+    offers: { retry: offer.retry, abandon: offer.abandon },
+  };
 }

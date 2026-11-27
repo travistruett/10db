@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { useTasks, useWorkstreamChanges, useWorkstreams } from '../../daemon/queries';
 import { CardActions } from './card-actions';
 import { CardSurface } from './card-surface';
+import { decisionLine } from './decision-line';
 import classes from './inbox-card.module.css';
 import { useCardAnswer } from './use-card-answer';
 import { KEYS_IGNORE_ATTRIBUTE } from './use-inbox-keys';
@@ -186,6 +187,7 @@ export function CheckCard({
         framed={framed}
         start={[viewTask]}
         error={failure}
+        decision={decisionLine(item)}
         sendBack={{
           label: 'What Needs to Change',
           description: 'The agent gets this note with the work.',
@@ -197,7 +199,7 @@ export function CheckCard({
           pending: answer.pending,
         }}
         primary={{
-          label: 'Approve',
+          label: 'Approve and Finish',
           loading: answer.pending,
           disabled: loadingChanges,
           onClick: () => {

@@ -4,10 +4,12 @@ import {
   AcceptanceVerdict,
   type InboxItemDto,
 } from '@10db/contracts';
-import { List, Stack, Text } from '@mantine/core';
+import { Accordion, List, Stack, Text } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import type { ReactNode } from 'react';
 import { CardActions } from './card-actions';
 import { CardSurface } from './card-surface';
+import { acceptanceCounts, decisionLine } from './decision-line';
 import classes from './inbox-card.module.css';
 import { useCardAnswer } from './use-card-answer';
 import { useViewTaskButton } from './view-task';
@@ -23,6 +25,15 @@ export interface AcceptanceCardProps {
   readonly onAnsweredElsewhere?: () => void;
   readonly framed?: boolean;
 }
+
+/** From here the evidence starts open: the Mac's pane has the room, a phone keeps it folded under the counts. */
+const WIDE_QUERY = '(min-width: 48em)';
+
+/** The fold's header: how many criteria are unconfirmed and whether an extra behaviour is named. */
+const evidenceHeader = (unmet: number, extra: boolean): string =>
+  [unmet === 0 ? null : `${String(unmet)} unconfirmed`, extra ? '1 extra' : null]
+    .filter((part) => part !== null)
+    .join(', ');
 
 /**
  * Criteria the acceptance check could not confirm on work that shipped: the builder accepts them as they are or
@@ -48,39 +59,54 @@ export function AcceptanceCard({
     ? detail.data.criteria.filter((c) => c.verdict !== AcceptanceVerdict.Met)
     : [];
 
+  const { unmet, extra } = acceptanceCounts(item);
+  // Read before the first paint, so the fold mounts open or shut and never springs open.
+  const wide = useMediaQuery(WIDE_QUERY, true, { getInitialValueInEffect: false });
+
   return (
     <CardSurface framed={framed}>
       <Stack gap={framed ? 'sm' : 'md'} className={framed ? undefined : classes['content']}>
         {header}
-        <Text size="sm">
-          {item.detail?.['reviewFollows'] === true
-            ? 'The work went on to review'
-            : 'The work shipped'}
-          . 10db could not confirm these acceptance criteria. Accept the work as it is, or send it
-          back and 10db files a task to meet them.
-        </Text>
-        {open.length === 0 ? null : (
-          <List size="sm" spacing={4}>
-            {open.map((c) => (
-              <List.Item key={c.criterion}>
-                {c.criterion}
-                <Text size="xs" c="dimmed">
-                  {c.note}
-                </Text>
-              </List.Item>
-            ))}
-          </List>
+        {open.length === 0 && !extra ? null : (
+          // The header says the counts and the line by the buttons says what each answer does; a phone folds the
+          // evidence away under them.
+          <Accordion
+            variant="contained"
+            chevronPosition="left"
+            defaultValue={wide ? 'evidence' : null}
+          >
+            <Accordion.Item value="evidence">
+              <Accordion.Control>{evidenceHeader(unmet, extra)}</Accordion.Control>
+              <Accordion.Panel>
+                <Stack gap="sm">
+                  {open.length === 0 ? null : (
+                    <List size="sm" spacing={4}>
+                      {open.map((c) => (
+                        <List.Item key={c.criterion}>
+                          {c.criterion}
+                          <Text size="xs" c="dimmed">
+                            {c.note}
+                          </Text>
+                        </List.Item>
+                      ))}
+                    </List>
+                  )}
+                  {detail.success && detail.data.unasked !== null ? (
+                    <Text size="sm">
+                      It may also do something the task didn't ask for: {detail.data.unasked}
+                    </Text>
+                  ) : null}
+                </Stack>
+              </Accordion.Panel>
+            </Accordion.Item>
+          </Accordion>
         )}
-        {detail.success && detail.data.unasked !== null ? (
-          <Text size="sm">
-            It may also do something the task didn't ask for: {detail.data.unasked}
-          </Text>
-        ) : null}
       </Stack>
       <CardActions
         framed={framed}
         start={[viewTask]}
         error={answer.failure}
+        decision={decisionLine(item)}
         sendBack={{
           label: 'What Needs to Change',
           description: 'The follow-up task gets this note.',
@@ -92,7 +118,7 @@ export function AcceptanceCard({
           pending: answer.pending,
         }}
         primary={{
-          label: 'Accept',
+          label: 'Keep As Is',
           loading: answer.pending,
           onClick: () => {
             answer.respond({ choice: AcceptanceChoice.Accept });

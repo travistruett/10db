@@ -545,6 +545,12 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // notes as For You, and Looks Right closes it.
   const lookTitle = page.getByText(`Look at these changes: ${TASK}`);
   await lookTitle.first().click();
+  // The bar says what the answers do; the card's body already names the areas.
+  await expect(
+    page.getByText(
+      'Nothing is waiting on this. Looks Right closes it; Send Back files a follow-up task.',
+    ),
+  ).toBeVisible();
   // View Task, in the card's bar, opens the task's drawer over the Inbox; Back closes it and the card is still there.
   await page.getByRole('button', { name: 'View Task', exact: true }).click();
   await expect(taskDrawer).toBeVisible();

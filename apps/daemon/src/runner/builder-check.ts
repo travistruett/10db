@@ -39,7 +39,7 @@ export function liveCheckCard(db: DbReader, workstreamId: WorkstreamId): InboxIt
 
 function checkBody(check: BuilderCheck): string {
   return [
-    `${commitsReady(check.commits.length)} Approve to finish the task, or send it back with a note.`,
+    `${commitsReady(check.commits.length)} Approve and Finish lands it, or send it back with a note.`,
     ...coverageSection(check.evalLines),
   ].join('\n');
 }

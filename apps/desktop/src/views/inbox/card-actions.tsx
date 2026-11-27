@@ -44,6 +44,8 @@ export interface BarNote {
 export interface BarSendBack {
   /** The composer's field label, such as "What Needs to Change". */
   readonly label: string;
+  /** The button that opens the composer, named by what it does; Send Back by default. */
+  readonly buttonLabel?: string;
   readonly description: string;
   readonly note: string;
   readonly onNote: (note: string) => void;
@@ -98,6 +100,7 @@ export function CardActions({
   secondary = [],
   primary = null,
   error = null,
+  decision = null,
 }: {
   readonly framed: boolean;
   /** The ways out: View Task, Open Session, Open on GitHub, Full Diff. */
@@ -112,6 +115,8 @@ export function CardActions({
   readonly secondary?: readonly BarButton[];
   readonly primary?: BarPrimary | null;
   readonly error?: string | null;
+  /** One short line over the buttons saying what each answer does for this card. */
+  readonly decision?: string | null;
 }) {
   const [composing, setComposing] = useState(sendBack !== null && sendBack.note !== '');
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -187,7 +192,7 @@ export function CardActions({
               setComposing(true);
             }}
           >
-            Send Back
+            {sendBack.buttonLabel ?? 'Send Back'}
           </Button>
         )}
         {secondary.map((button) => (
@@ -263,6 +268,11 @@ export function CardActions({
       {error === null ? null : (
         <Text size="sm" c="red" role="alert">
           {error}
+        </Text>
+      )}
+      {decision === null || composer !== null ? null : (
+        <Text size="sm" c="dimmed">
+          {decision}
         </Text>
       )}
       <Group justify="space-between" align="flex-end" gap="sm">
