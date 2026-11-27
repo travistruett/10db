@@ -11,8 +11,8 @@ import type { Git } from '../git';
 import { readLineVerdicts } from './line-reading';
 import { verdictKey, type LineCheck, type LineVerdicts } from './line-verdicts';
 
-/** The most files whose text is read for line patterns, the most bytes of one, and the files asked of git at once. */
-const MAX_LINE_FILES = 3000;
+/** The most files per watchpoint whose text is read for line patterns, the most bytes of one, and the files asked of git at once. */
+const MAX_LINE_FILES = 10_000;
 const MAX_FILE_BYTES = 256 * 1024;
 const READ_BATCH_FILES = 500;
 const MAX_BATCH_BYTES = 64 * 1024 * 1024;
@@ -131,13 +131,16 @@ export function createWatchpointCoverage(deps: WatchpointCoverageDeps): Watchpoi
     tracked: readonly string[],
     lineWatchpoints: readonly Watchpoint[],
   ): Promise<Map<string, Coverage>> {
+    // Each watchpoint's own first files, so a `**` watchpoint's share never crowds out another's.
     const candidates = [
       ...new Set(
-        tracked.filter((path) =>
-          lineWatchpoints.some((w) => w.globs.some((g) => areaMatches(path, g))),
+        lineWatchpoints.flatMap((w) =>
+          tracked
+            .filter((path) => w.globs.some((g) => areaMatches(path, g)))
+            .slice(0, MAX_LINE_FILES),
         ),
       ),
-    ].slice(0, MAX_LINE_FILES);
+    ];
     const signal = AbortSignal.timeout(READ_DEADLINE_MS);
     const texts = new Map<string, string>();
     let refused = false;
