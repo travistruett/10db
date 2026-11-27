@@ -1,34 +1,51 @@
 import type { EvalModelResultDto, EvalSuiteDetailDto, ProjectId } from '@10db/contracts';
-import { Code, Group, SegmentedControl, Stack, Table, Text, Title } from '@mantine/core';
+import { Code, Group, Select, Stack, Table, Text, Title } from '@mantine/core';
 import { useState, type ReactNode } from 'react';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useEvalSuite } from '../../daemon/evals-queries';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { LiveRunControls } from './live-run-modal';
-import { costText, dayTimeText, gatesPassed, rateText } from './eval-figures';
+import {
+  costText,
+  dayTimeText,
+  gatesPassed,
+  modelDisplayName,
+  rateText,
+  runVerdict,
+} from './eval-figures';
 
 /** How many runs the drawer lists before "n older runs". */
 const RUNS_SHOWN = 8;
 
-function Section({ title, children }: { readonly title: string; readonly children: ReactNode }) {
+function Section({
+  title,
+  help,
+  children,
+}: {
+  readonly title: string;
+  readonly help?: string;
+  readonly children: ReactNode;
+}) {
   return (
     <Stack gap={6}>
-      <Text size="sm" fw={600} c="var(--mantine-color-bright)">
-        {title}
-      </Text>
+      <Stack gap={2}>
+        <Text size="sm" fw={600} c="var(--mantine-color-bright)">
+          {title}
+        </Text>
+        {help === undefined ? null : (
+          <Text size="xs" c="dimmed">
+            {help}
+          </Text>
+        )}
+      </Stack>
       {children}
     </Stack>
   );
 }
 
 /** A model's binding in a run: two slots may name one model. */
-const bindingOf = (m: EvalModelResultDto): string => `${m.slot ?? ''}|${m.model}`;
-
-/** A model's name in the switch: the model, and its slot only when two bindings share the model. */
-function switchName(m: EvalModelResultDto, models: readonly EvalModelResultDto[]): string {
-  const shared = models.filter((other) => other.model === m.model).length > 1;
-  return shared && m.slot !== null ? `${m.model} (${m.slot})` : m.model;
-}
+const bindingOf = (m: EvalModelResultDto, place: number): string =>
+  `${String(place)}|${m.slot ?? ''}|${m.model}`;
 
 /** One model's gates, failing first, each rate against its minimum. */
 function Gates({ model }: { readonly model: EvalModelResultDto }) {
@@ -65,22 +82,37 @@ function Gates({ model }: { readonly model: EvalModelResultDto }) {
   );
 }
 
+/** More models than this and the picker is searchable. */
+const SEARCHABLE_MODELS = 6;
+
 function RunGates({ detail }: { readonly detail: EvalSuiteDetailDto }) {
-  const models = detail.run?.models ?? [];
+  // Failing models first, so the one to look at is on top and is the default.
+  const models = [...(detail.run?.models ?? [])].sort(
+    (a, b) => Number(a.passed) - Number(b.passed),
+  );
   const [chosen, setChosen] = useState<string | null>(null);
-  const shown =
-    models.find((m) => bindingOf(m) === chosen) ?? models.find((m) => !m.passed) ?? models[0];
+  const shownPlace = Math.max(
+    0,
+    models.findIndex((m, place) => bindingOf(m, place) === chosen),
+  );
+  const shown = models[shownPlace];
   if (shown === undefined) return null;
   return (
-    <Section title="Gates">
+    <Section
+      title="Gates"
+      help="Each gate is one check on the answers. Its rate is the share of trials that passed it; a model passes when every gate meets its minimum."
+    >
       {models.length > 1 ? (
-        <SegmentedControl
+        <Select
           size="xs"
-          value={bindingOf(shown)}
+          aria-label="Model"
+          allowDeselect={false}
+          searchable={models.length > SEARCHABLE_MODELS}
+          value={bindingOf(shown, shownPlace)}
           onChange={setChosen}
-          data={models.map((m) => ({
-            value: bindingOf(m),
-            label: `${switchName(m, models)} · ${gatesPassed(m)}`,
+          data={models.map((m, place) => ({
+            value: bindingOf(m, place),
+            label: `${modelDisplayName(m, models)} · ${gatesPassed(m)} gates`,
           }))}
         />
       ) : null}
@@ -107,7 +139,10 @@ function Runs({
   const shownPath = detail.run?.path ?? null;
   const older = detail.runs.length - RUNS_SHOWN;
   return (
-    <Section title="Runs">
+    <Section
+      title="History"
+      help="Every run of this suite, newest first. Click one to see its gates."
+    >
       <Table highlightOnHover verticalSpacing={6} fz="sm">
         <Table.Tbody>
           {detail.runs.slice(0, RUNS_SHOWN).map((run, place) => (
@@ -145,13 +180,7 @@ function Runs({
   );
 }
 
-function Manifest({
-  detail,
-  projectId,
-}: {
-  readonly detail: EvalSuiteDetailDto;
-  readonly projectId: ProjectId;
-}) {
+function Manifest({ detail }: { readonly detail: EvalSuiteDetailDto }) {
   const rows: [string, ReactNode][] = [];
   if (detail.coveredPaths.length > 0)
     rows.push(['Covers', detail.coveredPaths.map((p) => <Code key={p}>{p}</Code>)]);
@@ -159,11 +188,9 @@ function Manifest({
     rows.push(['Definition', detail.suite.definitionPaths.map((p) => <Code key={p}>{p}</Code>)]);
   if (detail.freeCommand !== null) rows.push(['Free Check', <Code>{detail.freeCommand}</Code>]);
   if (detail.liveCommand !== null) rows.push(['Live Run', <Code>{detail.liveCommand}</Code>]);
-  if (detail.liveCommand !== null)
-    rows.push(['', <LiveRunControls projectId={projectId} suiteKey={detail.suite.key} />]);
   if (rows.length === 0) return null;
   return (
-    <Section title="What It Covers">
+    <Section title="Setup">
       <Table withRowBorders={false} verticalSpacing={4} horizontalSpacing={0} fz="sm">
         <Table.Tbody>
           {rows.map(([label, value]) => (
@@ -180,6 +207,23 @@ function Manifest({
       </Table>
     </Section>
   );
+}
+
+/** What the builder can do with this suite: Run when it has a live command, else why not. */
+function Actions({
+  detail,
+  projectId,
+}: {
+  readonly detail: EvalSuiteDetailDto;
+  readonly projectId: ProjectId;
+}) {
+  if (detail.liveCommand === null)
+    return (
+      <Text size="xs" c="dimmed">
+        10db does not know how to run this suite yet.
+      </Text>
+    );
+  return <LiveRunControls projectId={projectId} suiteKey={detail.suite.key} />;
 }
 
 function SuiteBody({
@@ -202,6 +246,7 @@ function SuiteBody({
     suite.definitionChangedAt !== null && run !== null && run.path === suite.latest?.path
       ? `The eval's definition was committed ${dayTimeText(suite.definitionChangedAt)}, after this run, so this result may not measure the eval as it is now.`
       : null;
+  const verdict = run === null ? null : runVerdict(run.models);
   return (
     <Stack gap="lg">
       <Stack gap={4}>
@@ -212,16 +257,32 @@ function SuiteBody({
           {meta.join(' · ')}
         </Text>
         {suite.bar === null ? null : <Text size="sm">{suite.bar}</Text>}
+        {verdict === null ? null : (
+          <Stack gap={2}>
+            <Text size="sm" fw={500}>
+              {verdict.verdict}
+            </Text>
+            {verdict.cheapest === null ? null : (
+              <Text size="sm" c="dimmed">
+                {verdict.cheapest}
+              </Text>
+            )}
+          </Stack>
+        )}
         {changedAfter === null ? null : (
           <Text size="xs" c="dimmed">
             {changedAfter}
           </Text>
         )}
       </Stack>
+      <Actions detail={detail} projectId={projectId} />
       <RunGates key={run?.path ?? ''} detail={detail} />
       {detail.runs.length > 0 ? <Runs detail={detail} onPick={onPick} /> : null}
       {detail.flaky.length > 0 ? (
-        <Section title="Flaky in the Last Runs">
+        <Section
+          title="Flaky Cases"
+          help="Cases that passed in some trials and failed in others, so a single run of them can mislead."
+        >
           {detail.flaky.map((c) => (
             <Text key={c.name} size="sm">
               {c.name}{' '}
@@ -232,7 +293,7 @@ function SuiteBody({
           ))}
         </Section>
       ) : null}
-      <Manifest detail={detail} projectId={projectId} />
+      <Manifest detail={detail} />
     </Stack>
   );
 }

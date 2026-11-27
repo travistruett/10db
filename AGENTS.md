@@ -159,6 +159,12 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   Claude guard is a deny instead. Its reason keeps the rule, names a way that needs no approval
   where there is one, and otherwise says to stop and report the command as blocked; the main
   session still asks. Codex's rules can't tell a subagent apart and keep prompting.
+  While the builder is away the main session gets the same denies: `~/.10db/away` exists and was
+  touched within a day (`touch ~/.10db/away` when the builder says they are going, `rm` it when
+  they are back; it lapses on its own after a day). A deny then says to skip the command, note it
+  for the builder and carry on. The file only turns asks into denies, so an agent may write it.
+  Commands that ask stop an unattended session for hours: run a push as its own command
+  (`cd <worktree> && git push`), never after `;` or a pipe, and leave merged branches undeleted.
 - `.claude/hooks/git-guard.mjs` (Claude Code) and `.codex/rules/default.rules` (Codex) enforce
   these rules. The Claude guard fails open; only `TENDB_GIT_GUARD=off` in the environment
   Claude Code starts with disables it. It also asks before `gh pr merge --admin`, `gh api` writes

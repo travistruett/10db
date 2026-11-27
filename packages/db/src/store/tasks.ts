@@ -47,7 +47,7 @@ import {
   type TaskKind,
   type TaskLanding,
 } from '@10db/contracts';
-import { and, asc, desc, eq, inArray, isNull, max, ne, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, max, ne, or, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn, listBoardColumns } from './board-columns';
 import { checkTaskKinds, listKinds } from './kinds';
@@ -593,6 +593,21 @@ export function insertRetryLimitFollowUp(
     proposalId: null,
     boardColumnId: null,
   });
+}
+
+/**
+ * The task whose run shipped at the retry limit and filed `taskId` as its follow-up, or null when
+ * `taskId` is no retry-limit follow-up. A step names its follow-up in the write that files it.
+ */
+export function retryLimitSourceOf(tx: DbReader, taskId: TaskId): TaskDto | null {
+  const row = tx
+    .select({ taskId: schema.workstreams.taskId })
+    .from(schema.workstreams)
+    .where(
+      sql`EXISTS (SELECT 1 FROM json_each(${schema.workstreams.steps}) WHERE json_extract(value, '$.shippedAtLimit.followUpTaskId') = ${taskId})`,
+    )
+    .get();
+  return row === undefined ? null : getTask(tx, row.taskId);
 }
 
 /**

@@ -1506,24 +1506,38 @@ function insteadOf(verb, rewritesRefs, inOwnWorktree) {
 }
 
 /**
- * The verdict for a subagent, which nobody watches: an ask would wait for hours, so it becomes a
- * deny that keeps the rule's reason and says what to do instead.
+ * The verdict where nobody watches: an ask would wait for hours, so it becomes a deny that keeps the
+ * rule's reason and says what to do instead.
  * @param {Verdict} verdict
+ * @param {string} why
+ * @param {string} then
  * @returns {Verdict}
  */
-function unattended(verdict) {
+function unattended(verdict, why, then) {
   if (verdict.decision !== 'ask') return verdict;
   return {
     decision: 'deny',
-    reason: [
-      'Nobody can approve a prompt inside a subagent, so this is denied instead of asked.',
-      verdict.reason,
-      verdict.instead,
-      'If no other way works, stop and report it as blocked, quoting the command.',
-    ]
-      .filter(Boolean)
-      .join(' '),
+    reason: [why, verdict.reason, verdict.instead, then].filter(Boolean).join(' '),
   };
+}
+
+/** How long the away file holds after it was last touched, so a forgotten one lapses. */
+const AWAY_HOLDS_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether the builder said they are away: `~/.10db/away` exists and was touched within a day. It
+ * only turns asks into denies, never an ask or a deny into an allow, so a file an agent can write is
+ * safe here, unlike a kill switch.
+ * @param {number} now
+ */
+function builderAway(now) {
+  const home = process.env.HOME;
+  if (!home) return false;
+  try {
+    return now - statSync(join(home, '.10db', 'away')).mtimeMs < AWAY_HOLDS_MS;
+  } catch {
+    return false;
+  }
 }
 
 function main() {
@@ -1535,7 +1549,19 @@ function main() {
   if (!judged) return;
   // The hook input carries agent_id only inside a subagent (or an in-process teammate).
   const inSubagent = typeof input.agent_id === 'string' && input.agent_id !== '';
-  const verdict = inSubagent ? unattended(judged) : judged;
+  const verdict = inSubagent
+    ? unattended(
+        judged,
+        'Nobody can approve a prompt inside a subagent, so this is denied instead of asked.',
+        'If no other way works, stop and report it as blocked, quoting the command.',
+      )
+    : builderAway(Date.now())
+      ? unattended(
+          judged,
+          'The builder is away (~/.10db/away), so this is denied instead of asked.',
+          'If no other way works, skip it, note the command for the builder, and carry on with the rest.',
+        )
+      : judged;
   const hookSpecificOutput =
     verdict.decision === 'warn'
       ? { hookEventName: 'PreToolUse', additionalContext: verdict.reason }

@@ -8,6 +8,7 @@ import { CodeHighlightAdapterProvider } from '@mantine/code-highlight';
 import { MantineProvider } from '@mantine/core';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { RouterProvider, type AnyRouter } from '@tanstack/react-router';
+import type { ReactNode } from 'react';
 import { LinkConfirmHost } from './conversation/link-confirm';
 import { shikiAdapter } from './conversation/shiki';
 import type { ConnectionResolver } from './daemon/connection';
@@ -20,9 +21,19 @@ export interface AppProps {
   readonly queryClient: QueryClient;
   readonly resolve: ConnectionResolver;
   readonly intervals?: DaemonIntervals;
+  /** What the connecting screen adds when the first connection keeps failing: the phone's way to fix it. */
+  readonly connectingHelp?: ReactNode;
+  readonly connectingHelpAfterMs?: number;
 }
 
-export function App({ router, queryClient, resolve, intervals }: AppProps) {
+export function App({
+  router,
+  queryClient,
+  resolve,
+  intervals,
+  connectingHelp,
+  connectingHelpAfterMs,
+}: AppProps) {
   return (
     <MantineProvider
       theme={theme}
@@ -31,7 +42,12 @@ export function App({ router, queryClient, resolve, intervals }: AppProps) {
     >
       <CodeHighlightAdapterProvider adapter={shikiAdapter}>
         <QueryClientProvider client={queryClient}>
-          <DaemonProvider resolve={resolve} {...(intervals ? { intervals } : {})}>
+          <DaemonProvider
+            resolve={resolve}
+            {...(intervals ? { intervals } : {})}
+            {...(connectingHelp === undefined ? {} : { connectingHelp })}
+            {...(connectingHelpAfterMs === undefined ? {} : { connectingHelpAfterMs })}
+          >
             <RouterProvider router={router} />
             <LinkConfirmHost />
           </DaemonProvider>

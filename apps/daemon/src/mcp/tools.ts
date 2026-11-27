@@ -27,10 +27,14 @@ import {
   Urgency,
   WorkspaceMode,
   withKindsNamed,
+  type BatchId,
   type McpToolInputs,
+  type ProjectId,
   type SessionId,
   type TaskId,
   type TaskMessageId,
+  type TaskDto,
+  type WorkstreamId,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -59,6 +63,7 @@ import {
   listEvidence,
   listKinds,
   listTaskPageReports,
+  listWorkstreams,
   listToolOps,
   listStepToolOpResults,
   openPassTurn,
@@ -73,6 +78,7 @@ import {
   searchDecisions,
   searchPrinciples,
   type ClaimRow,
+  type DbReader,
   type Json,
 } from '@10db/db';
 import type { z } from 'zod';
@@ -150,6 +156,15 @@ export interface McpDeps {
   showImages?(sessionId: SessionId, images: ToolImages): void;
   /** The lane nobody watches a session runs in, whose questions are answered at once; absent, it asks. */
   awayFor?(sessionId: SessionId): AwayLane | undefined;
+  /**
+   * Records the uncommitted edits `from` left under `claim` in the checkout it shares with `grantee`,
+   * which was just granted it, as `from`'s, and answers their paths (the runner's `handOverEdits`).
+   */
+  handOverClaim(handover: {
+    readonly grantee: WorkstreamId;
+    readonly from: WorkstreamId;
+    readonly claim: { readonly kind: ClaimKind; readonly name: string };
+  }): Promise<readonly string[]>;
   /** Every session's claim waits; the daemon shares them with the scheduler. */
   readonly claimWaits?: ClaimWaits;
   /** How often a task waiting for a claim looks again; tests shorten it. */
@@ -187,6 +202,53 @@ const PLAN_RECORDED =
 
 /** Why a build step that plans first may not commit yet: the plan comes before the code. */
 const PLAN_BEFORE_COMMIT = 'Record your plan with mcp__10db__complete_step first.';
+
+/** How many handed-over paths a grant names before it counts the rest. */
+const HANDED_LISTED = 20;
+
+/**
+ * What a grant tells the agent about the edits the claim's last holder left uncommitted there: they
+ * stay that task's, so the agent leaves them; null when there are none.
+ */
+function handedInstruction(
+  db: DbReader,
+  handed: { readonly from: WorkstreamId; readonly paths: readonly string[] },
+): string | null {
+  if (handed.paths.length === 0) return null;
+  const title = getTask(db, getWorkstream(db, handed.from).taskId).title;
+  const listed = handed.paths.slice(0, HANDED_LISTED).join(', ');
+  const more = handed.paths.length - HANDED_LISTED;
+  const rest = more > 0 ? ` and ${String(more)} more` : '';
+  return `Task "${title}" held this claim before you and left uncommitted edits in it: ${listed}${rest}. They are still that task's: leave them as they are and don't commit them; 10db doesn't count them as your changes. A file among them that is your own, or that your change must edit, is yours to commit.`;
+}
+
+/**
+ * Whether `report_deviation` may leave paths uncommitted for this task, or why not. Only a checkout
+ * another writer shares has edits that are not the task's: the builder's own, or a copy whose batch
+ * holds another task's workstream. A pass charges its page with its pass's own record.
+ */
+function leavesIn(
+  db: DbReader,
+  task: TaskDto,
+  row: { readonly projectId: ProjectId; readonly batchId: BatchId | null },
+  repoPath: string,
+): { readonly leaves: true } | { readonly leaves: false; readonly why: string } {
+  if (passHoldingTask(db, task))
+    return {
+      leaves: false,
+      why: "Nothing was left uncommitted: a Workbench page answers for every change in its pass's areas.",
+    };
+  if (checkoutOf(db, row) === repoPath) return { leaves: true };
+  if (
+    row.batchId !== null &&
+    listWorkstreams(db, { batchId: row.batchId }).some((w) => w.taskId !== task.id)
+  )
+    return { leaves: true };
+  return {
+    leaves: false,
+    why: "Nothing was left uncommitted: this copy is this task's alone, so every change in it is this task's. Commit it, or undo it if it doesn't belong.",
+  };
+}
 
 type In<K extends McpToolName> = z.output<(typeof McpToolInputs)[K]>;
 type Out<K extends McpToolName> = z.output<(typeof McpToolOutputs)[K]>;
@@ -232,7 +294,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   propose:
     'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal whose kinds ask for no card is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set kinds (the keys of what the work touches: security, auth, migration, dependency, schema, infra, ui, docs, or another the builder made) when the work has them, and joinsRunningBatch when it must join a batch that is running; a kind that asks for a card (security, auth, migration and dependency do) or a batch request raises the card. A step can have at most 10 tasks filed without a person, between this and file_follow_up; past that, a proposal raises the card. The followUps of complete_step (review roles) are a separate allowance: they do not count toward the 10 and the 10 does not block them.',
   report_deviation:
-    "Report a departure from the plan or a principle, with your signed reason. When 10db asks you to commit uncommitted paths that are not this task's work (another writer's edits in a shared checkout), name them in leaveUncommitted instead of committing them: 10db leaves them and stops sending your step back for them; it does so only in the builder's own checkout, outside a Workbench pass, and leftUncommitted says which it left.",
+    "Report a departure from the plan or a principle, with your signed reason. When 10db asks you to commit uncommitted paths that are not this task's work (another writer's edits in a shared checkout), name them in leaveUncommitted instead of committing them: 10db leaves them and stops sending your step back for them; it does so only in a checkout another writer shares (the builder's own, or a copy other tasks work in too), outside a Workbench pass. leftUncommitted says which it left, and when it left none of them, instruction says why.",
   file_follow_up:
     'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts. A step can file at most 10 (MAX_FOLLOW_UPS), counting small proposals 10db files by itself; after that the call is refused. The followUps of complete_step are not counted and are not refused by it.',
   request_claim:
@@ -361,7 +423,11 @@ export function createToolHandlers(
         'request_claim',
         opId,
         settled.granted
-          ? { granted: true, claimId: settled.claim.id }
+          ? {
+              granted: true,
+              claimId: settled.claim.id,
+              instruction: settled.handed && handedInstruction(ctx.tx, settled.handed),
+            }
           : {
               granted: false,
               heldBy: settled.heldBy,
@@ -669,12 +735,9 @@ export function createToolHandlers(
       const done = prior(input.opId, McpToolName.ReportDeviation);
       if (done !== undefined) return Promise.resolve(McpToolOutputs.report_deviation.parse(done));
       const { project, task } = context();
-      // Only the builder's own checkout has other writers; a worktree's dirt is 10db's, and a pass
-      // charges its page with its own record.
-      const leaves =
-        checkoutOf(db, getWorkstreamRow(db, workstreamId)) === project.repoPath &&
-        !passHoldingTask(db, task);
-      const leftUncommitted = leaves ? [...new Set(input.leaveUncommitted)].sort() : [];
+      const where = leavesIn(db, task, getWorkstreamRow(db, workstreamId), project.repoPath);
+      const leftUncommitted = where.leaves ? [...new Set(input.leaveUncommitted)].sort() : [];
+      const instruction = !where.leaves && input.leaveUncommitted.length > 0 ? where.why : null;
       return Promise.resolve(
         deps.state.write((ctx) => {
           const sourceId = insertSource(ctx, 'agent', { sessionId, workstreamId });
@@ -690,7 +753,12 @@ export function createToolHandlers(
             sourceId,
           });
           leaveTaskPaths(ctx, task.id, leftUncommitted, { by: deviationId, in: sessionId });
-          return record('report_deviation', input.opId, { deviationId, leftUncommitted }, ctx);
+          return record(
+            'report_deviation',
+            input.opId,
+            { deviationId, leftUncommitted, instruction },
+            ctx,
+          );
         }),
       );
     },
@@ -755,6 +823,8 @@ export function createToolHandlers(
         signal,
         pollMs: deps.claimPollMs ?? CLAIM_POLL_MS,
         ...(shared ? { shared } : {}),
+        handOver: (from) =>
+          deps.handOverClaim({ grantee: workstreamId, from, claim: { kind, name: input.name } }),
       });
       let timer: NodeJS.Timeout | undefined;
       // The slice listens to no signal: a session that stops ends the wait itself, with its error. It
