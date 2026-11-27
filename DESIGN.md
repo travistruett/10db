@@ -65,7 +65,8 @@ favors legibility and calm over decoration.
     its Needs you panel and its project cards, and every page-level table or chart (Knowledge's lists, the
     Plan record's tables, each Settings table, Factory's Metrics tables). It takes the card tone
     (`--tendb-color-card`: `bg_1` in dark, `bg_0` in light) and the `xs` shadow (`--tendb-elevation-raised`),
-    and no border besides; a Board card's border is its state color.
+    and no border besides; a Board card's border is its state color, and a filter tile (Evals' four counts) that is
+    selected takes a border in its own color.
   - **2, overlay:** what floats above the page. Menus, popovers, hover cards and select lists take the `md`
     shadow (`Popover`'s default in `theme.ts`, which they all render through); a drawer and the sidebar sheet
     cast the sheet's own shadow (see Surfaces), and a modal Mantine's.
@@ -280,8 +281,8 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   Esc inside it or its ×.
 - **Loading:** a page draws its header first, since the title and byline are known before the data. After 300 ms
   of waiting, quiet placeholder rows in the shape of what is coming take the content's place
-  (`PageLoading`, `apps/desktop/src/shell/page-loading.tsx`: a list, cards or transcript lines), always static,
-  with no shimmer, and no wider than 720 px. A page never shows a lone spinner as its whole content; a spinner
+  (`PageLoading`, `apps/desktop/src/shell/page-loading.tsx`: a list, cards or transcript lines), static and
+  quiet, with no shimmer, and no wider than 720 px; placeholders shaped like a whole page (a table, tiles) pulse gently. A page never shows a lone spinner as its whole content; a spinner
   stays inside a button or a row. A page that is not rows draws its own shape after the same delay
   (`useLoadingDelayElapsed`): the Board draws its row of column outlines (`BoardSkeleton`,
   `apps/desktop/src/views/board/board-skeleton.tsx`) at the loaded columns' widths, narrow rails and open columns

@@ -22,8 +22,10 @@
     whether it was `assessed` or `found at HEAD`, and New Eval (prefills the behavior, the gap's reason as evidence
     and its `where` path). With the No Eval filter on, a line above the table says how many sites each call
     pattern found, so a pattern that is too broad shows.
-  - An unlinked file row (found by file name, no suite uses it): the path and the trailing Assess Now, since
-    assessing links it.
+  - An unlinked file row (found by file name, no suite uses it): the path and a dim line; no button of its own,
+    since the notice above the table carries Assess Now and assessing links it. Before an assessment the No Eval
+    tile counts files alone, says "not assessed" (a dash when there are none), and its filter opens with a line
+    saying so; an assessed project with nothing there reads "Every LLM task has an eval."
 - The byline under the title is only when the evals were last assessed ("Assessed 2 hours ago", the exact time and
   commit in a tooltip; "Assessing…"; "Not assessed yet"). It never names a commit or says no model ran. The
   first read shows `EvalsSkeleton` (`evals-skeleton.tsx`): tile placeholders over the table's real headings and five

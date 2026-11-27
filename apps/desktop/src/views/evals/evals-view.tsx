@@ -27,6 +27,7 @@ import { ContentWidth } from '../../shell/content-width';
 import { EmptyState } from '../../shell/empty-state';
 import { absoluteTime, fromNow, useNow } from '../../shell/relative';
 import { PageIntro } from '../../shell/page-intro';
+import { useLoadingDelayElapsed } from '../../shell/page-loading';
 import { StatTile } from '../../shell/stat-tile';
 import { TitleRow } from '../../shell/title-row';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -68,7 +69,7 @@ function Byline({ evals }: { readonly evals: EvalsDto }) {
   );
 }
 
-/** One bordered line on the Suites tab: a sentence and what to do about it. */
+/** One bordered line on the Evals page: a sentence and what to do about it. */
 function Notice({
   lead,
   children,
@@ -245,6 +246,14 @@ function NoEvals({
   );
 }
 
+/** Holds the byline's line while the first read loads, drawn after the page's loading delay like the rest. */
+function BylineSkeleton() {
+  const late = useLoadingDelayElapsed();
+  return (
+    <Skeleton height={10} width={120} my={5} style={late ? undefined : { visibility: 'hidden' }} />
+  );
+}
+
 /** A small filled dot in a tile's color; decorative, the label beside it carries the meaning. */
 function TileDot({ color }: { readonly color: string }) {
   return (
@@ -264,19 +273,22 @@ function TileDot({ color }: { readonly color: string }) {
 }
 
 const TILES = [
-  { filter: EvalFilter.Passing, color: 'green', label: 'Passing' },
-  { filter: EvalFilter.Failing, color: 'red', label: 'Failing' },
-  { filter: EvalFilter.NotRun, color: 'gray', label: 'Not Run Yet' },
-  { filter: EvalFilter.NoEval, color: 'yellow', label: 'No Eval' },
+  { filter: EvalFilter.Passing, color: 'green', label: 'passing' },
+  { filter: EvalFilter.Failing, color: 'red', label: 'failing' },
+  { filter: EvalFilter.NotRun, color: 'gray', label: 'not run yet' },
+  { filter: EvalFilter.NoEval, color: 'yellow', label: 'no eval' },
 ] as const;
 
 /** The four counts, each a toggle that narrows the table to what it counts; the active one clears itself. */
 function EvalTiles({
   counts,
+  notAssessed,
   filter,
   onFilter,
 }: {
-  readonly counts: Readonly<Record<EvalFilter, number>>;
+  readonly counts: Readonly<Record<EvalFilter, number | null>>;
+  /** The No Eval count is files alone until an assessment finds the LLM work with no eval. */
+  readonly notAssessed: boolean;
   readonly filter: EvalFilter | null;
   readonly onFilter: (filter: EvalFilter | null) => void;
 }) {
@@ -287,6 +299,7 @@ function EvalTiles({
           key={tile.filter}
           n={counts[tile.filter]}
           mark={<TileDot color={tile.color} />}
+          {...(notAssessed && tile.filter === EvalFilter.NoEval ? { of: 'not assessed' } : {})}
           label={tile.label}
           color={tile.color}
           selected={filter === tile.filter}
@@ -355,7 +368,7 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
   if (evals.data === undefined)
     return (
       <>
-        {header(<Skeleton height={10} width={120} my={5} />)}
+        {header(evals.isError ? undefined : <BylineSkeleton />)}
         {evals.isError ? (
           <Text size="sm" c="red">
             {evals.error.message}
@@ -369,13 +382,18 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
   const data = evals.data;
   const gaps = data.gaps ?? [];
   const rows = evalRows(data.suites, data.gaps, data.unlinked);
-  const counts: Record<EvalFilter, number> = {
+  const notAssessed = data.gaps === null;
+  const counts: Record<EvalFilter, number | null> = {
     [EvalFilter.Passing]: 0,
     [EvalFilter.Failing]: 0,
     [EvalFilter.NotRun]: 0,
-    [EvalFilter.NoEval]: gaps.length + data.unlinked.length,
+    [EvalFilter.NoEval]:
+      notAssessed && data.unlinked.length === 0 ? null : gaps.length + data.unlinked.length,
   };
-  for (const suite of data.suites) counts[suiteFilter(suite)] += 1;
+  for (const suite of data.suites) {
+    const group = suiteFilter(suite);
+    counts[group] = (counts[group] ?? 0) + 1;
+  }
   const nothing = rows.length === 0;
   return (
     <>
@@ -386,7 +404,12 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
         <Stack gap="md">
           {nothing ? null : (
             <>
-              <EvalTiles counts={counts} filter={filter} onFilter={setFilter} />
+              <EvalTiles
+                counts={counts}
+                notAssessed={notAssessed}
+                filter={filter}
+                onFilter={setFilter}
+              />
               <AssessmentNotice evals={data} assessment={assessment} project={project} />
             </>
           )}
@@ -404,6 +427,11 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
             />
           ) : (
             <Stack gap={6}>
+              {filter === EvalFilter.NoEval && notAssessed ? (
+                <Text size="xs" c="dimmed">
+                  Not assessed yet. Assess Now finds the LLM work with no eval.
+                </Text>
+              ) : null}
               {filter === EvalFilter.NoEval && data.callSites.length > 0 ? (
                 <Text size="xs" c="dimmed">
                   {`Sites found at HEAD by call pattern: ${callSitesText(data.callSites)}`}
@@ -413,8 +441,7 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
                 rows={rows.filter((row) => rowMatches(row, filter))}
                 filter={filter}
                 openKey={open}
-                project={project}
-                assessment={assessment}
+                notAssessed={notAssessed}
                 onOpen={(suite) => {
                   setOpen(suite.key);
                 }}

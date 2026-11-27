@@ -15,7 +15,8 @@ export function StatTile({
   selected,
   onToggle,
 }: {
-  readonly n: number;
+  /** The count; null reads as a dash when there is nothing to count yet. */
+  readonly n: number | null;
   readonly of?: string | undefined;
   readonly mark: ReactNode;
   readonly label: string;
@@ -31,10 +32,10 @@ export function StatTile({
           fz={24}
           fw={600}
           lh={1}
-          c={n === 0 ? 'dimmed' : 'bright'}
+          c={n === null || n === 0 ? 'dimmed' : 'bright'}
           style={{ fontVariantNumeric: 'tabular-nums' }}
         >
-          {n}
+          {n ?? '—'}
         </Text>
         {of === undefined ? null : (
           <Text size="xs" c="dimmed">

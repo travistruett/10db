@@ -3,8 +3,7 @@ import { Button, Code, Group, Stack, Text } from '@mantine/core';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { pagerProps, TABLE_PAGE_SIZES, usePaging } from '../../shell/table-pager';
 import { RaisedPanel } from '../../shell/raised-panel';
-import type { ProjectViewDto } from '@10db/contracts';
-import { AssessAction, type EvalAssessment } from './assess-action';
+import classes from './evals-table.module.css';
 import { dayText, latencyText, modelCostsText } from './eval-figures';
 import { asBehavior, type NewEvalPrefill } from './new-eval-modal';
 import { ModelLine, Trend } from './result-marks';
@@ -67,14 +66,10 @@ function Dim({ children }: { readonly children: string }) {
   );
 }
 
-/** The column headings, shared with the loading skeleton so the two line up. */
+/** The fixed column widths, shared with the loading skeleton so the two line up. */
 export const EVAL_COLUMN_WIDTHS = { trend: 110, cost: 120, p50: 70, at: 150 } as const;
 
-function columns(
-  project: ProjectViewDto,
-  assessment: EvalAssessment,
-  onNewEval: (prefill: NewEvalPrefill) => void,
-): DataTableColumn<EvalRow>[] {
+function columns(onNewEval: (prefill: NewEvalPrefill) => void): DataTableColumn<EvalRow>[] {
   return [
     {
       accessor: 'name',
@@ -229,11 +224,7 @@ function columns(
               </Group>
             );
           case 'file':
-            return (
-              <Group justify="flex-end">
-                <AssessAction assessment={assessment} project={project} />
-              </Group>
-            );
+            return null;
         }
       },
     },
@@ -248,8 +239,7 @@ export function EvalsTable({
   rows,
   filter,
   openKey,
-  project,
-  assessment,
+  notAssessed,
   onOpen,
   onNewEval,
 }: {
@@ -257,41 +247,46 @@ export function EvalsTable({
   readonly rows: readonly EvalRow[];
   readonly filter: EvalFilter | null;
   readonly openKey: string | null;
-  readonly project: ProjectViewDto;
-  readonly assessment: EvalAssessment;
+  /** No assessment has said what has no eval, so an empty No Eval is not an answer. */
+  readonly notAssessed: boolean;
   readonly onOpen: (suite: EvalSuiteDto) => void;
   readonly onNewEval: (prefill: NewEvalPrefill) => void;
 }) {
   const paging = usePaging(filter ?? 'all', TABLE_PAGE_SIZES[0]);
-  const from = (paging.page - 1) * paging.pageSize;
+  // A list that shrank under the reader never leaves them on a page past its end.
+  const page = Math.min(paging.page, Math.max(1, Math.ceil(rows.length / paging.pageSize)));
+  const from = (page - 1) * paging.pageSize;
   return (
     <RaisedPanel>
       <DataTable<EvalRow>
         aria-label="Evals"
         records={rows.slice(from, from + paging.pageSize)}
-        columns={columns(project, assessment, onNewEval)}
+        columns={columns(onNewEval)}
         idAccessor="id"
         backgroundColor="transparent"
         verticalSpacing="sm"
         horizontalSpacing="md"
-        highlightOnHover
-        {...pagerProps({ ...paging, total: rows.length }, TABLE_PAGE_SIZES)}
+        {...(rows.length > TABLE_PAGE_SIZES[0]
+          ? pagerProps({ ...paging, page, total: rows.length }, TABLE_PAGE_SIZES)
+          : {})}
         {...(rows.length === 0 ? { minHeight: 120 } : {})}
         emptyState={
           <Text c="dimmed" size="sm" ta="center">
-            Nothing matches this filter.
+            {filter === EvalFilter.NoEval && !notAssessed
+              ? 'Every LLM task has an eval.'
+              : 'Nothing matches this filter.'}
           </Text>
         }
         onRowClick={({ record }) => {
           if (record.kind === 'suite') onOpen(record.suite);
         }}
         customRowAttributes={(row) => (row.kind === 'suite' ? { 'data-keeps-drawer': '' } : {})}
-        rowStyle={(row) => ({
-          ...(row.kind === 'suite' ? {} : { cursor: 'default' }),
-          ...(row.kind === 'suite' && row.suite.key === openKey
+        rowClassName={(row) => (row.kind === 'suite' ? classes['suite'] : undefined)}
+        rowStyle={(row) =>
+          row.kind === 'suite' && row.suite.key === openKey
             ? { background: 'var(--mantine-color-default-hover)' }
-            : {}),
-        })}
+            : { cursor: row.kind === 'suite' ? 'pointer' : 'default' }
+        }
       />
     </RaisedPanel>
   );
