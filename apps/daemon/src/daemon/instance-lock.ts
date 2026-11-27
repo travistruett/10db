@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
@@ -20,6 +20,12 @@ const KILL_WAIT_MS = 5_000;
 const KILL_POLL_MS = 100;
 /** One for the lock as found, one after a dead holder's lock is removed. */
 const ATTEMPTS = 2;
+/**
+ * How much later than the lock was written its holder must have started to count as a stranger. ps
+ * reports whole seconds, and a clock stepped back between a daemon's start and its write of the lock
+ * would make the daemon look younger than its own lock.
+ */
+const STRANGER_MARGIN_MS = 60_000;
 const LOCK_FILE = 'daemon.lock';
 const HEALTH_PATH = '/health';
 
@@ -100,6 +106,22 @@ function runtimeInfo(dataDir: string): ReturnType<typeof readRuntimeInfo> | null
   }
 }
 
+/**
+ * True only on proof that the holder started after the lock was written, so it is not the daemon that
+ * wrote it but a process that got its pid later. An unreadable start time or lock proves nothing.
+ */
+async function startedAfterLock(holder: number, lockPath: string): Promise<boolean> {
+  const state = await holderState(holder);
+  if (state === null) return false;
+  const startedMs = new Date(state.lstart).getTime();
+  if (Number.isNaN(startedMs)) return false;
+  try {
+    return startedMs > statSync(lockPath).mtimeMs + STRANGER_MARGIN_MS;
+  } catch {
+    return false;
+  }
+}
+
 async function healthAnswers(port: number): Promise<boolean> {
   try {
     const response = await outboundFetch(`http://127.0.0.1:${String(port)}${HEALTH_PATH}`, {
@@ -124,9 +146,13 @@ function sleep(clock: Clock, ms: number): Promise<void> {
  * A holder is killed only when all of this holds: `daemon.json` names its pid, its /health stayed
  * silent for `silenceMs`, and ps shows it started no later than `daemon.json` says the daemon did,
  * so it is that daemon and not a stranger that reused the pid. Anything unreadable leaves it alone.
+ *
+ * A holder `daemon.json` does not name keeps the lock, unless ps shows it started after the lock was
+ * written: then it is a stranger, and the lock is taken over without signalling it.
  */
 async function settleHolder(
   dataDir: string,
+  lockPath: string,
   holder: number,
   silenceMs: number,
   clock: Clock,
@@ -136,7 +162,12 @@ async function settleHolder(
   // daemon.json is written once the holder's server listens and removed on a clean shutdown, so a
   // crash leaves it behind. Without one naming the holder there is no port to probe.
   const info = runtimeInfo(dataDir);
-  if (info?.pid !== holder) throw new AlreadyRunningError(holder);
+  if (info?.pid !== holder) {
+    // A daemon that died before it listened left only its lock. Once its pid is another process's,
+    // which a restart of the Mac makes likely, that process would keep the lock for as long as it runs.
+    if (await startedAfterLock(holder, lockPath)) return;
+    throw new AlreadyRunningError(holder);
+  }
 
   const deadline = clock.now().getTime() + silenceMs;
   for (;;) {
@@ -196,7 +227,7 @@ export async function acquireInstanceLock(
       if (!hasCode(error, 'EEXIST')) throw error;
       const holder = Number(readFileSync(path, 'utf8'));
       if (Number.isInteger(holder) && holder > 0)
-        await settleHolder(dataDir, holder, silenceMs, clock);
+        await settleHolder(dataDir, path, holder, silenceMs, clock);
       rmSync(path, { force: true });
     }
   }
