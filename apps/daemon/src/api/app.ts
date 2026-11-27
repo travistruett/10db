@@ -1754,6 +1754,14 @@ export function createApp(deps: ApiDeps) {
       );
       return c.body(null, 204);
     })
+    .get('/projects/:projectId/evals/:suiteKey/candidates', async (c) =>
+      c.json(
+        await deps.services.evalCandidates(
+          ProjectId.parse(c.req.param('projectId')),
+          EvalSuiteKey.parse(c.req.param('suiteKey')),
+        ),
+      ),
+    )
     .get('/projects/:projectId/evals/:suiteKey/live', async (c) =>
       c.json(
         await deps.services.evalLivePreview(

@@ -179,7 +179,13 @@ import { dropPendingPageLabels } from './page-label-guess';
 import { adoptGoal } from '../goals';
 import { classifyPath } from '../guard';
 import { taskSession } from '../chat';
-import { suitesOfTasks, type EvalLiveRuns, type EvalsAssessor, type EvalsService } from '../evals';
+import {
+  buildCandidates,
+  suitesOfTasks,
+  type EvalLiveRuns,
+  type EvalsAssessor,
+  type EvalsService,
+} from '../evals';
 import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import {
@@ -1062,6 +1068,28 @@ export function createServices(deps: {
     },
     evalSuite(projectId, key, run) {
       return deps.evals.suite(projectId, getProject(db, projectId).repoPath, key, run);
+    },
+    async evalCandidates(projectId, suiteKey) {
+      const basis = await deps.evals.candidateBasis(
+        projectId,
+        getProject(db, projectId).repoPath,
+        suiteKey,
+      );
+      if (basis.models === null) return [];
+      const catalogue = deps.catalogue.catalogue();
+      const rows = buildModelRows({
+        profiles: listModelProfiles(db),
+        offers: listAccountModels(db),
+        accounts: listAccounts(db),
+        catalogue,
+        now: deps.clock.now(),
+      });
+      return buildCandidates({
+        models: basis.models,
+        catalogue,
+        intelligence: new Map(rows.map((r) => [r.model, r.intelligence])),
+        runs: basis.runs,
+      });
     },
     evalLivePreview(projectId, suiteKey) {
       return deps.evalLive.preview(projectId, suiteKey);

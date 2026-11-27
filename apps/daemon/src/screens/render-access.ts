@@ -52,6 +52,9 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/projects/:projectId/eval-models' },
   // Evals draws a suite's Run window and its recent live runs: a database read and the manifest's own fields.
   { route: '/projects/:projectId/evals/:suiteKey/live' },
+  // Evals draws a suite's models to try: the catalogue's OpenRouter entries and the suite's own results.
+  // Nothing is written or run.
+  { route: '/projects/:projectId/evals/:suiteKey/candidates' },
   { route: '/projects/:projectId/evals/live/runs' },
 ];
 

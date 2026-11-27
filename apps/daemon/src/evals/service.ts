@@ -7,6 +7,7 @@ import {
   type EvalCoverageSideDto,
   type EvalCoverageState,
   type EvalManifestResult,
+  type EvalLiveModels,
   type EvalModelsDto,
   type EvalsDto,
   type NewEvalBody,
@@ -33,6 +34,7 @@ import { evalTaskDraft, findEvalSkills, type EvalTaskDraft } from './new-eval-ta
 import { readEvalManifest, writeEvalManifest } from './manifest-store';
 import { buildModels } from './models';
 import { createEvalsCache, readEvals, type FoundEvals } from './read-results';
+import type { ParsedRun } from './run-summary';
 
 /** A suite and the times a task's branch point and last commit were committed. */
 export interface CoverageQuery {
@@ -58,6 +60,12 @@ export interface EvalsService {
   ): Promise<EvalSuiteDetailDto>;
   /** Every model the project's results graded, with its newest result per suite. */
   models(projectId: ProjectId, repoPath: string): Promise<EvalModelsDto>;
+  /** What a suite's candidates are built from: where it takes its models from and its runs, oldest first. */
+  candidateBasis(
+    projectId: ProjectId,
+    repoPath: string,
+    key: string,
+  ): Promise<{ models: EvalLiveModels | null; runs: readonly ParsedRun[] }>;
   record(
     projectId: ProjectId,
     repoPath: string,
@@ -268,6 +276,17 @@ export function createEvalsService(deps: EvalsDeps): EvalsService {
     },
     async models(projectId, repoPath) {
       return buildModels(await found(repoPath), readEvalManifest(deps.state.db, projectId));
+    },
+    async candidateBasis(projectId, repoPath, key) {
+      const suite = readEvalManifest(deps.state.db, projectId)?.manifest.suites.find(
+        (s) => s.key === key,
+      );
+      if (suite === undefined) throw new NotFoundError('Eval suite', key);
+      const read = await found(repoPath);
+      return {
+        models: suite.live?.models ?? null,
+        runs: read?.suites.find((s) => s.key === key)?.runs ?? [],
+      };
     },
     async suite(projectId, repoPath, key, run) {
       const read = await found(repoPath);

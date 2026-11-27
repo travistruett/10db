@@ -28,7 +28,7 @@
   its model). Its env name is refused when reserved (`isReservedEnvName`: the shell's, make's and tools' own
   variables). The assessor asks for it and records the file that binds a suite's model among its covered paths; an
   invalid `live.models` is dropped from that suite alone (`assess-answer.ts`), never the whole answer.
-- It imports `git` (types), `guard`, `events` (types), `log` (types), `clock` (types), `preview` (the process ledger), `verify` (types) and `@10db/db`.
+- It imports `catalogue` (`joinOpenRouterId`, for the candidates), `git` (types), `guard`, `events` (types), `log` (types), `clock` (types), `preview` (the process ledger), `verify` (types) and `@10db/db`.
 - Availability is kept apart from quality: a gate report's `outcomes` other than `ok` and `validation_failed`
   (the model answered, malformed) are a model's `unanswered` trials. A trend point is `evalChanged` when its
   fingerprint differs from the run before it. `definitionChangedAt` is the last commit of a suite's definition
@@ -46,6 +46,20 @@
   eval files the assessed commit didn't track, uncovered sites it didn't have (by label, path and line text, so a
   line that only moved isn't new), and manifest paths HEAD no longer tracks. It raises no Inbox item. A commit that
   can't be read any more counts no site as new.
+- Sweeps' money rules (`sweep-cost.ts`, pure): `estimateRunCost` scales the reference run's cost by output price
+  (unknown when either price or the reference is, or the reference is free) and `sweepNext` owns every end of a
+  sweep, `found` included: `cheapest` ends `found` at the first pass, `stopped`·cost_unknown at a settled step
+  whose cost is unknown, and starts the next waiting step only when its estimate is known and fits `cap - spent`,
+  else `done`·capped (`done` when nothing waits); `try` runs every step, an unknown estimate included, and ends
+  `done`·capped only before a step whose known estimate does not fit. Spent counts known costs; amounts compare
+  in whole micro-dollars so an exact fit fits. The caller sorts a `cheapest` sweep's steps by estimate
+  (cheapest first) before the first call and calls only once no step is running.
+- Candidates (`candidates.ts`, `GET /projects/:id/evals/:suite/candidates`): for an `openrouter` suite every
+  non-deprecated OpenRouter entry of the catalogue (an enabled profile reaches OpenRouter through the same entry);
+  for a `choices` suite its choices, named by the choice. Each carries the entry's output price, the joined model's
+  Intelligence, the estimate and its newest result in the suite; the list is cheapest first, unpriced last. The
+  reference for estimates is the newest run's cheapest passing model that has a cost, else its first with a cost.
+  A suite with no `live.models` has none.
 - By Model (`models.ts`, `GET /projects/:id/eval-models`, not under `/evals/` where `models` would be a suite key):
   each model's newest result per suite, its cost for one run of each (unknown if any is) and the median of its p50s.
   A result from a run whose fingerprint differs from the suite's newest run is `olderEval`. Compare is the UI's join.

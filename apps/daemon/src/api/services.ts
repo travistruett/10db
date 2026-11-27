@@ -89,6 +89,7 @@ import type {
   EvalLiveRunId,
   EvalLivePreviewDto,
   EvalLiveRunDto,
+  EvalCandidateDto,
   EvalSuiteKey,
   NewEvalBody,
   EvalManifestResult,
@@ -968,6 +969,8 @@ export interface ApiServices extends PlanRecordServices {
   assessEvals(projectId: ProjectId): Promise<EvalsDto>;
   /** Every model the project's results graded, with its newest result per suite; nothing is run. */
   evalModels(projectId: ProjectId): Promise<EvalModelsDto>;
+  /** The models a suite may try, with prices, estimates and last results; none for a suite with no `live.models`. */
+  evalCandidates(projectId: ProjectId, suiteKey: EvalSuiteKey): Promise<EvalCandidateDto[]>;
   /** The suites each of the project's tasks touched, with their state against the checkout's results; nothing is run. */
   evalMarkers(projectId: ProjectId): Promise<EvalMarkersDto>;
   /** The suites a task's change touched, with their results before and after it. */
