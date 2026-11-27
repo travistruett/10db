@@ -25,6 +25,7 @@ import {
   type ShapeId,
   type WorkstreamId,
   DEPS_HAZARD,
+  INBOX_OPTION_LABEL_MAX,
   commandParagraph,
   visibleLine,
 } from '@10db/contracts';
@@ -224,7 +225,13 @@ const AskUserQuestionInput = z.looseObject({
         question: z.string().min(1),
         header: z.string().default(''),
         options: z
-          .array(z.looseObject({ label: z.string().min(1), description: z.string().default('') }))
+          .array(
+            z.looseObject({
+              // A card's label is its button; one past the bound fails the desktop's parse of the list.
+              label: z.string().min(1).max(INBOX_OPTION_LABEL_MAX),
+              description: z.string().default(''),
+            }),
+          )
           .min(2)
           .max(4),
       }),
@@ -528,7 +535,7 @@ export function createPermissionBroker(
     if (!parsed.success) {
       return {
         behavior: 'deny',
-        message: 'AskUserQuestion input was not understood; use ask_human instead.',
+        message: `AskUserQuestion input was not understood (2-4 options a question, each label at most ${String(INBOX_OPTION_LABEL_MAX)} characters); ask again with shorter labels, or use ask_human instead.`,
         by: DeniedBy.TenDb,
       };
     }

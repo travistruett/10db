@@ -1,5 +1,7 @@
 import {
   ClaimKind,
+  clipText,
+  INBOX_OPTION_LABEL_MAX,
   InboxAnswerRefused,
   InboxKind,
   isTerminal,
@@ -37,43 +39,60 @@ export interface DeadlockTask {
   readonly yields: readonly { readonly kind: ClaimKind; readonly name: string }[];
 }
 
+/** The start of a title a label always keeps; tasks whose titles share it are told apart by number. */
+const TITLE_KEPT = 32;
+/** The longest number tag a label gives a task, ` (task 99)`. */
+const TAG_ROOM = 10;
+const YIELDS = ' yields ';
+const CANCEL = 'Cancel ';
+
 /**
  * The answers a claim deadlock card offers, and what the daemon does for each: every task in the
  * deadlock can yield its claim (so the other gets it) or be cancelled (which frees all it holds).
- * Tasks of the same title are told apart by their workstream.
+ * A label fits on the card's button, so a long title is cut; the description names the whole title.
+ * Tasks whose titles start alike are told apart by number, and their descriptions name the workstream.
  */
 export function deadlockAnswers(tasks: readonly DeadlockTask[]): {
   readonly options: InboxOption[];
   readonly detail: Record<string, Json>;
 } {
-  const sameTitle = (t: DeadlockTask): boolean =>
-    tasks.filter((o) => o.title === t.title).length > 1;
-  const named = (t: DeadlockTask): string =>
-    sameTitle(t) ? `${t.title} (${t.workstreamId})` : t.title;
+  const lookAlike = (t: DeadlockTask): boolean =>
+    tasks.some((o) => o !== t && o.title.slice(0, TITLE_KEPT) === t.title.slice(0, TITLE_KEPT));
+  const named = (t: DeadlockTask, room: number): string => {
+    const tag = lookAlike(t) ? ` (task ${String(tasks.indexOf(t) + 1)})` : '';
+    return `${clipText(t.title, room - tag.length)}${tag}`;
+  };
+  const whole = (t: DeadlockTask): string =>
+    lookAlike(t) ? `"${t.title}" (${t.workstreamId})` : `"${t.title}"`;
   const claimsOf = (t: DeadlockTask): string =>
     t.yields.map((c) => `${c.kind} ${c.name}`).join(', ');
   const choices: { choice: DeadlockChoice; description: string }[] = [];
   // A task with nothing to give up (the waits changed since the deadlock was found) gets no yield:
   // choosing it would release nothing.
-  for (const t of tasks.filter((o) => o.yields.length > 0))
+  for (const t of tasks.filter((o) => o.yields.length > 0)) {
+    const claims = clipText(
+      claimsOf(t),
+      INBOX_OPTION_LABEL_MAX - YIELDS.length - TITLE_KEPT - TAG_ROOM,
+    );
     choices.push({
       choice: {
-        label: `${named(t)} yields ${claimsOf(t)}`,
+        label: `${named(t, INBOX_OPTION_LABEL_MAX - YIELDS.length - claims.length)}${YIELDS}${claims}`,
         action: 'yield',
         workstreamId: t.workstreamId,
         claims: [...t.yields],
       },
-      description: `Task "${t.title}" gives up ${claimsOf(t)} so the other task gets it. It asks for it again before editing there.`,
+      description: `Task ${whole(t)} gives up ${claimsOf(t)} so the other task gets it. It asks for it again before editing there.`,
     });
+  }
   for (const t of tasks)
     choices.push({
       choice: {
-        label: `Cancel ${named(t)}`,
+        label: `${CANCEL}${named(t, INBOX_OPTION_LABEL_MAX - CANCEL.length)}`,
         action: 'cancel',
         workstreamId: t.workstreamId,
         claims: [],
       },
-      description: `Ends task "${t.title}" and frees every claim it holds, so the other task goes on.`,
+      description: `Ends task ${whole(t)} and frees every claim it holds, so the other task goes on.`,
     });
   return {
     options: choices.map(({ choice, description }) => ({ label: choice.label, description })),

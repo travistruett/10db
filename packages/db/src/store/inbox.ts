@@ -1,5 +1,7 @@
 import {
+  clipText,
   EventType,
+  INBOX_OPTION_LABEL_MAX,
   InboxState,
   mintId,
   NotFoundError,
@@ -61,6 +63,15 @@ export const ASKED_TOPIC_KEY = 'askedTopic';
 
 const LIVE_STATES: InboxState[] = [InboxState.Open, InboxState.Answered, InboxState.Delivering];
 
+/**
+ * A closed card's options with each label cut to the longest the contract allows. A card stored before its
+ * labels were bounded still reads; an open card keeps its labels whole, since an answer names one exactly.
+ */
+function shownOptions(row: typeof schema.inboxItems.$inferSelect): InboxOption[] {
+  if (row.state === InboxState.Open) return row.options;
+  return row.options.map((o) => ({ ...o, label: clipText(o.label, INBOX_OPTION_LABEL_MAX) }));
+}
+
 function copyForOf(row: typeof schema.inboxItems.$inferSelect): string[] {
   const named = row.detail?.[COPY_FOR_KEY];
   if (row.state !== InboxState.Open || !Array.isArray(named)) return [];
@@ -79,7 +90,7 @@ export function toInboxItemDto(
     state: row.state,
     title: row.title,
     body: row.body,
-    options: row.options,
+    options: shownOptions(row),
     recommendation: row.recommendation,
     category: row.category,
     urgency: row.urgency,
