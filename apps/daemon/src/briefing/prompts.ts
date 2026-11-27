@@ -101,6 +101,11 @@ export interface PromptInput {
   readonly watchpoints?: string | null;
   /** What a Review or QA step is told, every round, of the watchpoint files the change touched. */
   readonly watchpointReview?: string | null;
+  /**
+   * What a Review or QA step of a run in a shared copy is told, every round, the change is: the run's own
+   * commits, with the rest of the branch out of scope. Null for a run whose branch is its own.
+   */
+  readonly changeUnderReview?: string | null;
   readonly revisedBy: {
     readonly role: StepRole;
     readonly personaName: string;
@@ -1100,6 +1105,8 @@ function stepSection(input: PromptInput): string[] {
     lines.push('', `Your previous result${verdict}:`, input.previousResult.summary);
   }
   lines.push(...roundSection(step, input.earlierResults));
+  if ((step.role === StepRole.Review || step.role === StepRole.Qa) && input.changeUnderReview)
+    lines.push('', input.changeUnderReview);
   lines.push(...reviewFactsSection(step.role, input.reviewFacts));
   const firstRound = !input.earlierResults.some((r) => r.verdict === Verdict.Reject);
   if (step.role === StepRole.Review && firstRound && input.testValue)
