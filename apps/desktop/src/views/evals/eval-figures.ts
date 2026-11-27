@@ -72,3 +72,66 @@ export function unansweredText(unanswered: Readonly<Record<string, number>>): st
 export function rateText(rate: number): string {
   return String(Math.round(rate * 1000) / 1000);
 }
+
+/** A model's name in a run: the model, and its slot only when two bindings share the model. */
+export function modelDisplayName(
+  m: EvalModelResultDto,
+  models: readonly EvalModelResultDto[],
+): string {
+  const shared = models.filter((other) => other.model === m.model).length > 1;
+  return shared && m.slot !== null ? `${m.model} (${m.slot})` : m.model;
+}
+
+const gatesMissed = (m: EvalModelResultDto): number => m.gates.filter((g) => !g.passed).length;
+
+/** Past this many models the verdict counts them instead of naming each. */
+const VERDICT_NAMES_MAX = 3;
+
+/** One run's outcome in plain words, from its models; the cheapest model that passes when costs are known. */
+export function runVerdict(models: readonly EvalModelResultDto[]): {
+  readonly verdict: string;
+  readonly cheapest: string | null;
+} {
+  const [only] = models;
+  if (only === undefined) return { verdict: 'No model results in this run.', cheapest: null };
+  if (models.length === 1) {
+    const worst = worstGate(only);
+    const missed = gatesMissed(only);
+    if (missed === 0) return { verdict: 'Passes every gate.', cheapest: null };
+    const under =
+      worst === null
+        ? ''
+        : worst.minimum === null
+          ? `; furthest under: ${worst.name} failed`
+          : `; furthest under: ${worst.name} ${rateText(worst.rate)} < ${rateText(worst.minimum)}`;
+    return {
+      verdict: `Misses ${String(missed)} of ${String(only.gates.length)} gates${under}`,
+      cheapest: null,
+    };
+  }
+  const passing = models.filter((m) => m.passed);
+  const failing = models.filter((m) => !m.passed);
+  const sentences: string[] = [];
+  if (models.length > VERDICT_NAMES_MAX) {
+    sentences.push(`${String(passing.length)} of ${String(models.length)} models pass every gate.`);
+  } else {
+    if (passing.length > 0) {
+      const names = passing.map((m) => modelDisplayName(m, models)).join(' and ');
+      sentences.push(`${names} ${passing.length === 1 ? 'passes' : 'pass'} every gate.`);
+    }
+    for (const m of failing) {
+      sentences.push(
+        `${modelDisplayName(m, models)} misses ${String(gatesMissed(m))} of ${String(m.gates.length)}.`,
+      );
+    }
+  }
+  let cheapest: string | null = null;
+  const priced = passing.filter((m) => m.costUsd !== null);
+  const best = priced.reduce<EvalModelResultDto | null>(
+    (low, m) => (low === null || (m.costUsd ?? 0) < (low.costUsd ?? 0) ? m : low),
+    null,
+  );
+  if (best !== null)
+    cheapest = `Cheapest that passes: ${modelDisplayName(best, models)} at ${costText(best.costUsd)} a run.`;
+  return { verdict: sentences.join(' '), cheapest };
+}
