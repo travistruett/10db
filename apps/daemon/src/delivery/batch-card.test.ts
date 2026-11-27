@@ -386,7 +386,11 @@ describe('the failed workstream card', () => {
         'Ship without it',
         'Later',
       ]);
-      expect(card.detail).toEqual({ batchCard: { batchId, workstreamId: failed } });
+      expect(card.detail).toEqual({
+        batchCard: { batchId, workstreamId: failed },
+        decider: 'builder',
+        owns: 'out_of_moves',
+      });
       expect(batchCardFields({ id: failed, batchId: null })).toBeNull();
 
       expect(inbox.answer(card.id, { choice: 'Ship without it' }).state).toBe('RESOLVED');
@@ -1255,7 +1259,10 @@ describe('the failed workstream card', () => {
               .soft(stopped.body, `${name}: body`)
               .not.toMatch(/answer Ship without it|Ship anyway/);
             expect.soft(stopped.options, `${name}: options`).toEqual([]);
-            expect.soft(stopped.detail, `${name}: detail`).toBeNull();
+            // No answer-offering fields: only the decider declaration every builder card carries.
+            expect
+              .soft(stopped.detail, `${name}: detail`)
+              .toEqual({ decider: 'builder', owns: 'out_of_moves' });
           }
         });
         it('keeps one ship-failure card when the failure repeats, and closes it when the batch is abandoned', async () => {

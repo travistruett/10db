@@ -99,7 +99,7 @@ describe('a judge outage', () => {
     status = 402;
     for (let i = 0; i < 6; i += 1) await judge.choose(request);
     expect(cards()).toMatchObject([{ state: InboxState.Open }]);
-    expect(cards()[0]?.body).toContain('says the account has no credits');
+    expect(cards()[0]?.body).toContain('OpenRouter has no credits.');
     expect(notices()).toHaveLength(1);
 
     status = 200;
