@@ -101,7 +101,7 @@ test('a fence highlights under a script policy with no eval or WebAssembly, and 
         await route.fallback();
         return;
       }
-      const response = await route.fetch();
+      const response = await route.fetch({ maxRetries: 2 });
       await route.fulfill({
         response,
         headers: {

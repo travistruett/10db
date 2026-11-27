@@ -70,7 +70,7 @@ const SystemAnswer = z.looseObject({
  */
 async function toolsAreInstalled(page: Page): Promise<void> {
   await page.route(`${daemonUrl}/system*`, async (route) => {
-    const response = await route.fetch();
+    const response = await route.fetch({ maxRetries: 2 });
     const body = SystemAnswer.parse(await response.json());
     for (const tool of body.tools) {
       tool.path ??= `/usr/local/bin/${tool.name}`;
