@@ -20,4 +20,4 @@ export {
   backgroundSubjects,
   subscribeWatchpointCoverage,
 } from './coverage-triggers';
-export { watchpointPrinciples, type WatchpointPrinciples } from './knowledge';
+export { watchpointPrinciples } from './knowledge';
