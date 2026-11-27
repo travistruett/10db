@@ -83,8 +83,10 @@ const StatusContext = createContext<DaemonStatus>({ kind: 'connecting', lastErro
 export interface DaemonProviderProps {
   readonly resolve: ConnectionResolver;
   readonly intervals?: DaemonIntervals;
-  /** What the connecting screen adds once the first connection has failed for `CONNECTING_HELP_AFTER_MS`. */
+  /** What the connecting screen adds once the first connection has failed and `connectingHelpAfterMs` has passed. */
   readonly connectingHelp?: ReactNode;
+  /** Counted from when the connecting screen shows; `CONNECTING_HELP_AFTER_MS` by default. */
+  readonly connectingHelpAfterMs?: number;
   readonly children: ReactNode;
 }
 
@@ -92,26 +94,28 @@ function sameConnection(a: DaemonConnection, b: DaemonConnection): boolean {
   return a.url === b.url && a.token === b.token;
 }
 
-/** How long the first connection may fail before the connecting screen shows its help. */
+/** How long the connecting screen waits, from when it shows, before it adds its help to a failed connection. */
 const CONNECTING_HELP_AFTER_MS = 10_000;
 
 function ConnectingScreen({
   lastError,
   help,
+  helpAfterMs,
 }: {
   readonly lastError: string | null;
   readonly help: ReactNode;
+  readonly helpAfterMs: number;
 }) {
   const [helpDue, setHelpDue] = useState(false);
   useEffect(() => {
     if (help === undefined || help === null) return undefined;
     const timer = setTimeout(() => {
       setHelpDue(true);
-    }, CONNECTING_HELP_AFTER_MS);
+    }, helpAfterMs);
     return () => {
       clearTimeout(timer);
     };
-  }, [help]);
+  }, [help, helpAfterMs]);
   return (
     <Center h="100vh">
       <Stack align="center" gap="xs">
@@ -146,6 +150,7 @@ export function DaemonProvider({
   resolve,
   intervals = DEFAULT_INTERVALS,
   connectingHelp,
+  connectingHelpAfterMs = CONNECTING_HELP_AFTER_MS,
   children,
 }: DaemonProviderProps) {
   const [value, setValue] = useState<DaemonValue | null>(null);
@@ -282,6 +287,7 @@ export function DaemonProvider({
       <ConnectingScreen
         lastError={status.kind === 'connecting' ? status.lastError : null}
         help={connectingHelp}
+        helpAfterMs={connectingHelpAfterMs}
       />
     );
   return (

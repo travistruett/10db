@@ -23,9 +23,17 @@ export interface AppProps {
   readonly intervals?: DaemonIntervals;
   /** What the connecting screen adds when the first connection keeps failing: the phone's way to fix it. */
   readonly connectingHelp?: ReactNode;
+  readonly connectingHelpAfterMs?: number;
 }
 
-export function App({ router, queryClient, resolve, intervals, connectingHelp }: AppProps) {
+export function App({
+  router,
+  queryClient,
+  resolve,
+  intervals,
+  connectingHelp,
+  connectingHelpAfterMs,
+}: AppProps) {
   return (
     <MantineProvider
       theme={theme}
@@ -38,6 +46,7 @@ export function App({ router, queryClient, resolve, intervals, connectingHelp }:
             resolve={resolve}
             {...(intervals ? { intervals } : {})}
             {...(connectingHelp === undefined ? {} : { connectingHelp })}
+            {...(connectingHelpAfterMs === undefined ? {} : { connectingHelpAfterMs })}
           >
             <RouterProvider router={router} />
             <LinkConfirmHost />

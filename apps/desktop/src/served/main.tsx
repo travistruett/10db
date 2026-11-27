@@ -4,7 +4,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@mantine/core/styles.css';
 import { App } from '../app';
-import { CantReachMacHelp } from './cant-reach-mac';
+import { CantReachMacHelp, RELOADED_STUCK_KEY } from './cant-reach-mac';
 import { cssVariablesResolver, theme } from '../theme';
 import { readDevice } from './device-session';
 import { PairPage } from './pair-page';
@@ -48,9 +48,23 @@ function Served() {
       queryClient={new QueryClient()}
       resolve={resolveServedConnection}
       connectingHelp={<CantReachMacHelp />}
+      {...(afterStuckReload ? { connectingHelpAfterMs: 0 } : {})}
     />
   );
 }
+
+/** Whether this page is the phone's own reload while stuck, read once and cleared. */
+function reloadedStuck(): boolean {
+  try {
+    const set = sessionStorage.getItem(RELOADED_STUCK_KEY) === '1';
+    sessionStorage.removeItem(RELOADED_STUCK_KEY);
+    return set;
+  } catch {
+    return false;
+  }
+}
+// Read once, before the first render: StrictMode renders twice, and the second would find it cleared.
+const afterStuckReload = reloadedStuck();
 
 createRoot(root).render(
   <StrictMode>
