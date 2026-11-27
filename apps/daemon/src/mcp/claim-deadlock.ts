@@ -71,7 +71,7 @@ export function deadlockAnswers(tasks: readonly DeadlockTask[]): {
         workstreamId: t.workstreamId,
         claims: [...t.yields],
       },
-      description: `Task ${whole(t)} gives up ${claimsOf(t)} so ${others} get${tasks.length > 2 ? '' : 's'} it, and waits. It asks for it again before editing there.`,
+      description: `Task ${whole(t)} gives up ${claimsOf(t)} so ${others} get${tasks.length > 2 ? '' : 's'} it, and waits. It asks for it again before editing there. Edits it has not committed there stay as they are and remain its own: the other task is not asked to commit them, and this task commits them after it gets ${claimsOf(t)} back.`,
     });
   }
   for (const t of tasks)
@@ -82,7 +82,7 @@ export function deadlockAnswers(tasks: readonly DeadlockTask[]): {
         workstreamId: t.workstreamId,
         claims: [],
       },
-      description: `Ends task ${whole(t)} and frees every claim it holds, so ${others} go${tasks.length > 2 ? '' : 'es'} on.`,
+      description: `Ends task ${whole(t)} and frees every claim it holds, so ${others} go${tasks.length > 2 ? '' : 'es'} on. Its uncommitted edits stay in its folder as they are; the other task is not asked to commit them.`,
     });
   return {
     options: choices.map(({ choice, description }) => ({ label: choice.label, description })),
