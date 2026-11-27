@@ -89,6 +89,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
     folderKeys.all,
     chatWorkKeys.all,
   ],
+  // A watchpoint count that was being made landed, so the counts that showed `counting` are asked again.
+  watchpoint_coverage: [watchpointKeys.allCoverage],
   // A run's skip is recorded under its task's event; a task becoming done, or changing rigor, moves the rigor
   // figures.
   // Accept and Start's counts follow lanes freeing up.

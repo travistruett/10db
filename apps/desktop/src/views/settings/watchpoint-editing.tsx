@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { Text } from '@mantine/core';
+import { useEffect, useState } from 'react';
 import { ConfirmModal } from '../../shell/confirm-modal';
 
 /**
@@ -52,4 +53,39 @@ export function useWatchpointEditing<T extends { readonly key: string }>(name: (
 /** The daemon's refusal as words for the page. */
 export function refusal(error: unknown): string {
   return error instanceof Error ? error.message : 'The daemon refused the change.';
+}
+
+/** How long a starter just added stays marked in its list. */
+const ADDED_MARK_MS = 4000;
+
+/**
+ * The starter just added to a list: its row is highlighted and scrolled into view, and a line names it, for a
+ * moment. The page marks it once the save has landed, so the row exists.
+ */
+export function useJustAdded() {
+  const [added, setAdded] = useState<{ readonly key: string; readonly label: string } | null>(null);
+  useEffect(() => {
+    if (added === null) return undefined;
+    document
+      .querySelector(`[data-watchpoint-key="${added.key}"]`)
+      ?.scrollIntoView({ block: 'center' });
+    const timer = setTimeout(() => {
+      setAdded(null);
+    }, ADDED_MARK_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [added]);
+  return {
+    key: added?.key ?? null,
+    mark: (starter: { readonly key: string; readonly label: string }) => {
+      setAdded(starter);
+    },
+    note:
+      added === null ? null : (
+        <Text size="sm" role="status">
+          {`Added ${added.label}.`}
+        </Text>
+      ),
+  };
 }

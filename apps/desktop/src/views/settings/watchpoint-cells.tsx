@@ -1,5 +1,5 @@
-import type { Watchpoint } from '@10db/contracts';
-import { Group, Stack, Text } from '@mantine/core';
+import { WatchpointCoverageState, type Watchpoint, type WatchpointCoverage } from '@10db/contracts';
+import { Group, Skeleton, Stack, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { PathSummary } from './table-cells';
 
@@ -32,12 +32,34 @@ export function WatchpointName({
   );
 }
 
-/** The paths a watchpoint covers in brief, then how many line patterns narrow them. */
+/** How many files a count covers: a skeleton while it is read, and "No files here", dimmed, when it is none. */
+export function CoverageCount({ coverage }: { readonly coverage: WatchpointCoverage | undefined }) {
+  if (coverage === undefined || coverage.state === WatchpointCoverageState.Counting)
+    return <Skeleton h={12} w={64} aria-label="Counting the files" />;
+  if (coverage.state === WatchpointCoverageState.Unreadable)
+    return (
+      <Text size="xs" c="dimmed">
+        Not counted
+      </Text>
+    );
+  return coverage.files === 0 ? (
+    <Text size="xs" c="dimmed">
+      No files here
+    </Text>
+  ) : (
+    <Text size="xs">{`${String(coverage.files)} file${coverage.files === 1 ? '' : 's'}`}</Text>
+  );
+}
+
+/** The paths a watchpoint covers in brief, how many line patterns narrow them, and how many files that covers. */
 export function WatchpointMatches({
   watchpoint,
+  coverage,
   shown,
 }: {
   readonly watchpoint: Watchpoint;
+  /** The count read from the checkout; a skeleton shows until it is given. */
+  readonly coverage?: WatchpointCoverage | undefined;
   /** How many paths show before "+N more"; PathSummary's own count when not given. */
   readonly shown?: number;
 }) {
@@ -50,6 +72,7 @@ export function WatchpointMatches({
           {`+ ${String(patterns)} line pattern${patterns === 1 ? '' : 's'}`}
         </Text>
       ) : null}
+      <CoverageCount coverage={coverage} />
     </Stack>
   );
 }

@@ -1,8 +1,10 @@
 import {
   isWatchpointOff,
   WatchpointLoudness,
+  WatchpointCoverageState,
   type ProjectWatchpointEntry,
   type Watchpoint,
+  type WatchpointCoverage,
 } from '@10db/contracts';
 
 /** A list with `item` in place of the one with its key, or added at the end. */
@@ -115,4 +117,18 @@ export function withChoice(
   if (choice === ProjectChoice.Default) return withoutKey(entries, row.key);
   if (choice === ProjectChoice.Off) return withItem(entries, { key: row.key, off: true as const });
   return withItem(entries, { ...row.shown, loudness: choice });
+}
+
+/**
+ * Finds a watchpoint's count in a coverage query. While the query is on its way there is none (the count shows a
+ * skeleton); a query that failed answers every key as not counted, so no skeleton waits forever.
+ */
+export function coverageLookup(query: {
+  readonly data: readonly WatchpointCoverage[] | undefined;
+  readonly isError: boolean;
+}): (key: string) => WatchpointCoverage | undefined {
+  return (key) =>
+    query.isError
+      ? { key, files: 0, examples: [], state: WatchpointCoverageState.Unreadable }
+      : query.data?.find((c) => c.key === key);
 }

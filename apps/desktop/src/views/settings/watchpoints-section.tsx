@@ -5,6 +5,7 @@ import { useState } from 'react';
 import {
   useProjectWatchpoints,
   useSetProjectWatchpoints,
+  useWatchpointCoverage,
   useWatchpointStats,
   useYourWatchpoints,
 } from '../../daemon/watchpoint-queries';
@@ -16,9 +17,10 @@ import { SplitButton } from './split-button';
 import { Pill, RowActions } from './table-cells';
 import { WatchpointMatches, WatchpointName } from './watchpoint-cells';
 import { WatchpointDrawer } from './watchpoint-drawer';
-import { refusal, useWatchpointEditing } from './watchpoint-editing';
+import { refusal, useJustAdded, useWatchpointEditing } from './watchpoint-editing';
 import {
   choiceOf,
+  coverageLookup,
   isOffHere,
   isOverride,
   keysInUse,
@@ -44,6 +46,8 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
   const yours = useYourWatchpoints();
   const here = useProjectWatchpoints(project.id);
   const stats = useWatchpointStats(project.id).data;
+  const countFor = coverageLookup(useWatchpointCoverage(project.id));
+  const added = useJustAdded();
   const set = useSetProjectWatchpoints(project.id);
   const edit = useWatchpointEditing<ProjectRow>((row) => row.shown.label);
   const [removing, setRemoving] = useState<ProjectRow | null>(null);
@@ -92,7 +96,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
               ) : null
             }
           />
-          <WatchpointMatches watchpoint={row.shown} shown={2} />
+          <WatchpointMatches watchpoint={row.shown} coverage={countFor(row.key)} shown={2} />
         </Stack>
       ),
     },
@@ -197,13 +201,18 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
             <LibraryItems
               taken={taken}
               disabled={set.isPending}
+              coverage={countFor}
+              into="this project"
               onAdd={(starter) => {
-                void save(withItem(entries, starter), () => undefined);
+                void save(withItem(entries, starter), () => {
+                  added.mark(starter);
+                });
               }}
             />
           </SplitButton>
         }
       />
+      {added.note}
       <RaisedPanel>
         <DataTable<ProjectRow>
           aria-label="Watchpoints"
@@ -215,8 +224,19 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
           horizontalSpacing="xs"
           highlightOnHover
           noRecordsText="No watchpoints apply here"
-          rowStyle={() => ({ cursor: 'pointer' })}
-          customRowAttributes={() => ({ 'data-keeps-drawer': '' })}
+          rowStyle={(row) => ({
+            cursor: 'pointer',
+            ...(row.key === added.key
+              ? {
+                  background: 'var(--mantine-primary-color-light-hover)',
+                  boxShadow: 'inset 3px 0 0 var(--mantine-primary-color-filled)',
+                }
+              : {}),
+          })}
+          customRowAttributes={(row) => ({
+            'data-keeps-drawer': '',
+            'data-watchpoint-key': row.key,
+          })}
           onRowClick={({ record }) => {
             edit.request(record);
           }}
@@ -231,6 +251,7 @@ export function WatchpointsSection({ project }: { readonly project: ProjectDto }
         <WatchpointDrawer
           key={opened?.key ?? 'new'}
           watchpoint={opened?.shown ?? null}
+          coverage={opened === null ? undefined : countFor(opened.key)}
           takenKeys={taken}
           saving={set.isPending}
           problem={edit.problem}
