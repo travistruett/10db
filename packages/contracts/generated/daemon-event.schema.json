@@ -36,6 +36,7 @@
         "workstream.changed",
         "eval.definition_changed",
         "eval.live_run_changed",
+        "eval.sweep_changed",
         "workstream.wait_changed",
         "session.started",
         "session.activity",

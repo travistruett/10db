@@ -31,6 +31,8 @@ const REFUSAL_WORDS: Readonly<Record<EvalLiveRefusal, string>> = {
   [EvalLiveRefusal.DockerOff]: "This runs in Docker and the project's Docker switch is off.",
   [EvalLiveRefusal.ManifestChanged]: 'What the suite runs changed since this window opened.',
   [EvalLiveRefusal.Busy]: 'A live eval is already running in this project.',
+  [EvalLiveRefusal.NoModels]: 'This suite takes no model from 10db.',
+  [EvalLiveRefusal.BadModel]: 'A picked model is not one this suite accepts.',
 };
 
 const STATE_WORDS: Readonly<Record<EvalLiveRunState, string>> = {

@@ -43,6 +43,8 @@ const REFUSAL_TEXT: Readonly<Record<EvalLiveRefusal | 'shuttingDown' | 'archived
   [EvalLiveRefusal.ManifestChanged]:
     'The suite changed since the window showed it. Open Run again to see what it will do now.',
   [EvalLiveRefusal.Busy]: 'A live eval is already running in this project.',
+  [EvalLiveRefusal.NoModels]: 'This suite takes no model from 10db, so it has no models to try.',
+  [EvalLiveRefusal.BadModel]: 'A picked model is not one this suite accepts.',
 };
 
 /** A stop command ends the work inside the container; it gets this long. */
@@ -406,6 +408,7 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
         loopback: (live?.loopback ?? false) && project.sandboxLoopback,
         loopbackAsked: live?.loopback ?? false,
         timeoutMinutes: live?.timeoutMinutes ?? 0,
+        models: live?.models ?? null,
         lastRunCostUsd: await lastCostUsd(project, suiteKey),
         previewHash: previewHash(suite, project),
         refusal: refused?.refusal ?? null,

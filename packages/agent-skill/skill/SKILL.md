@@ -258,6 +258,12 @@ freeCommand?, liveCommand?, live? }], "gaps": [{ label, where, why }], "callPatt
      that signals the `manage.py run_eval` process), because stopping 10db's side leaves it running.
    - `hosts` (domains, `*.example.com` at most; never a bare `*.com`) only for a suite that is not Docker and
      calls a provider from the Mac. `loopback: true` only for a command that calls a local server.
+   - `models` (inside `live`) names the env var the live command reads its models from, so Try Other Models can
+     offer them: ampsio `{ "env": "MODELS", "ids": "openrouter" }` (any provider id as given); orgtools
+     `{ "env": "MODELS", "ids": { "choices": [{ "name": "gemini_3_7_flash", "model": "google/gemini-3.7-flash" }] } }`
+     (only the project's own names, each with the model it is). Leave it out when the command reads no such var.
+     Record the file that binds a suite's model (ampsio's `apps/llm/model_slots.py`) among its `coveredPaths`, so a
+     model switch marks the suite not run, also when the project is assessed through Codex.
    - When unsure, leave `live` out: a suite without it has no Run.
 
 5. **Apply** with `evals <projectId> <file>`. It refuses, and keeps nothing, when a `definitionPaths` entry is not a

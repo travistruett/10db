@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "model": {
+      "type": "string"
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "intelligence": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "outputPrice": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "estimateUsd": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "last": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "passed": {
+              "type": "boolean"
+            },
+            "costUsd": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "at": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "passed",
+            "costUsd",
+            "at"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "model",
+    "name",
+    "intelligence",
+    "outputPrice",
+    "estimateUsd",
+    "last"
+  ]
+}

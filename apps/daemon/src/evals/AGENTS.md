@@ -23,6 +23,11 @@
   when every `definitionPaths` entry is tracked at HEAD and every `coveredPaths` glob holds a tracked file (matched as
   a hazard's glob, `guard`'s `classifyPath`); else it answers the untracked names and keeps nothing. A suite's `live.envFiles` entry (untracked by nature: it holds secrets) must be a regular file in the working tree (`lstat`, so no link), else it is refused the same way. `live` (contracts `EvalLiveRun`) is what a suite's Run needs from the gate sandbox (Docker, env files readable never writable, hosts, loopback, a stop command, a time limit); a manifest refuses `live` without `liveCommand`. A recording emits
   the project's change event.
+- `live.models` (contracts `EvalLiveModels`) names the env var a suite's live command reads its models from and
+  the ids it takes: `'openrouter'` (ids as given, each an `EvalModelId`) or `choices` (the project's names, each with
+  its model). Its env name is refused when reserved (`isReservedEnvName`: the shell's, make's and tools' own
+  variables). The assessor asks for it and records the file that binds a suite's model among its covered paths; an
+  invalid `live.models` is dropped from that suite alone (`assess-answer.ts`), never the whole answer.
 - It imports `git` (types), `guard`, `events` (types), `log` (types), `clock` (types), `preview` (the process ledger), `verify` (types) and `@10db/db`.
 - Availability is kept apart from quality: a gate report's `outcomes` other than `ok` and `validation_failed`
   (the model answered, malformed) are a model's `unanswered` trials. A trend point is `evalChanged` when its
