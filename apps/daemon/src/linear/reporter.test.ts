@@ -828,6 +828,8 @@ describe('the Linear reporter', () => {
     // 10db names one file at a time: the next only once the last was sent.
     expect(String(answers[0]?.detail['text'])).toContain('1-home-before.png');
     expect(String(answers[0]?.detail['text'])).not.toContain('1-home-after.png');
+    // The agent has no file: it is told 10db sends the bytes, or it gives up on the upload.
+    expect(String(answers[0]?.detail['text'])).toContain('You have no file to provide');
     return String(answers.at(-1)?.detail['text']);
   };
 
