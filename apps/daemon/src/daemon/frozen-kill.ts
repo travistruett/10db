@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 /**
  * The marker the app's shell writes beside `daemon.lock` just before it kills a daemon that stopped
- * answering /health. The name and shape match `FROZEN_KILL_FILE` in
+ * answering /health, or that never finished starting. The name and shape match `FROZEN_KILL_FILE` in
  * `apps/desktop/src-tauri/src/supervisor.rs`.
  */
 export const FROZEN_KILL_FILE = 'daemon.frozen-kill';
@@ -14,7 +14,7 @@ const FrozenKill = z.object({
   pid: z.number().int().positive(),
   /** When, in Unix milliseconds. */
   at: z.number().int(),
-  /** How long it had been silent on /health when it was killed. */
+  /** How long it had been silent on /health, or starting, when it was killed. */
   frozenAfterMs: z.number().int().positive(),
 });
 export type FrozenKill = z.infer<typeof FrozenKill>;

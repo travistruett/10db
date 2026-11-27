@@ -2526,7 +2526,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   if (frozenKill !== null) {
     logger.warn(
       { killedPid: frozenKill.pid, at: frozenKill.at, frozenAfterMs: frozenKill.frozenAfterMs },
-      'the app killed the previous daemon as frozen; runs are not charged for the restart',
+      'the app killed the previous daemon as frozen or stuck starting; runs are not charged for the restart',
     );
   }
   await recoverOnStartup({
