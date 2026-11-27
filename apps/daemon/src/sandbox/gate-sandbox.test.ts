@@ -617,6 +617,8 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       { name: 'LANG', value: 'a/b' },
       { name: 'TENDB_COPY_ID', value: 'a/b' },
       { name: 'BASH_ENV', value: 'a/b' },
+      { name: 'HTTPS_PROXY', value: 'a/b' },
+      { name: 'SSL_CERT_FILE', value: 'a/b' },
       { name: 'MODELS', value: 'a b' },
       { name: 'MODELS', value: 'a;b' },
     ];
