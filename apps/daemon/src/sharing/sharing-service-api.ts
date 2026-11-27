@@ -8,6 +8,8 @@ export interface SharingService {
   set(body: PutSharingBody): Promise<SharingStatusDto>;
   /** The builder's Get Certificate: runs the first probe for a name with no certificate. */
   requestCertificate(): Promise<SharingStatusDto>;
+  /** Turn on Tailscale: runs `tailscale up`, then reads the status again. Throws `SharingRefusedError` with the CLI's words. */
+  connect(): Promise<SharingStatusDto>;
   /** For the share listener; null until sharing is Ready with a known name. */
   allowlists(): ListenerAllowlists | null;
   hostLogin(): string | null;

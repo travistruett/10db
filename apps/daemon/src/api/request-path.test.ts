@@ -225,6 +225,24 @@ const rows = (): Row[] => [
         headers: { ...shareHost, ...bearer(pair().token), Origin: PHONE },
       }),
   },
+  {
+    row: '6 share: a device token may not turn on Tailscale, which runs a command on the Mac',
+    status: 403,
+    run: () =>
+      call(Listener.Share, '/sharing/connect', {
+        method: 'POST',
+        headers: { ...shareHost, ...bearer(pair().token), Origin: PHONE },
+      }),
+  },
+  {
+    row: '1 main: the UI token reaches Turn on Tailscale (no CLI here, so the service refuses)',
+    status: 409,
+    run: () =>
+      call(Listener.Main, '/sharing/connect', {
+        method: 'POST',
+        headers: { ...mainHost, ...bearer(UI), Origin: 'http://localhost:1420' },
+      }),
+  },
   ...[
     ['the UI token', UI],
     ['the dev-UI token', DEV_UI],

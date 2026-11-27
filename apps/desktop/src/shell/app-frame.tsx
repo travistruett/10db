@@ -15,6 +15,7 @@ import { px, usePanelWidth } from './panel-width';
 import { Rail } from './rail';
 import { railSectionForPath, type RailSection } from './rail-items';
 import { ReconnectingIndicator } from './reconnecting-indicator';
+import { SharingIndicator } from './sharing-indicator';
 import { useSidebarLabels } from './sidebar-labels';
 import {
   PANEL_MAX_WIDTH,
@@ -342,6 +343,7 @@ export function AppFrame({ children }: { readonly children: ReactNode }) {
                 {/* The view's parts are the row's own flex items; the frame's status sits before its actions. */}
                 <div ref={setTitleHost} className={classes['titleHost']} />
                 <ReconnectingIndicator />
+                <SharingIndicator />
               </div>
               <div className={classes['content']} inert={sheetOpen}>
                 <main className={classes['main']}>{children}</main>

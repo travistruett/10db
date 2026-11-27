@@ -23,6 +23,8 @@ export { SharingRefusedError, type SharingService };
 
 const MONITOR_MS = 60_000;
 const STALE_MS = 10_000;
+/** `tailscale up` returns at once when it is signed in; one that waits on a sign-in is cut off here. */
+const UP_TIMEOUT_MS = 10_000;
 const TAURI_ORIGINS = ['tauri://localhost', 'http://tauri.localhost'] as const;
 
 /** Why the listener is down: `retry` may clear on its own, `blocked` needs the builder. */
@@ -442,6 +444,35 @@ export function createSharingService(deps: {
           await current.tick(fqdn);
         }
         publish();
+        return compute();
+      });
+    },
+    connect() {
+      return enqueue(async () => {
+        const cli = deps.cli();
+        if (cli === null) throw new SharingRefusedError('Tailscale is not installed');
+        const result = await deps.run(cli)(['up'], UP_TIMEOUT_MS);
+        const said = `${result.stderr}\n${result.stdout}`.trim();
+        if (result.timedOut) {
+          throw new SharingRefusedError(
+            said === ''
+              ? 'Tailscale is waiting for a sign-in: open the Tailscale app'
+              : `Tailscale is waiting for a sign-in: ${said}`,
+          );
+        }
+        if (result.code !== 0) {
+          throw new SharingRefusedError(
+            said === '' ? `tailscale up exited with ${String(result.code)}` : said,
+          );
+        }
+        await refresh();
+        // A share that paused while Tailscale was down comes back now rather than on the monitor's next tick.
+        if (settings.enabled() && !closed) {
+          if (listener !== null) await monitorTick();
+          else await startSharing();
+          scheduleMonitor();
+        }
+        publish(true);
         return compute();
       });
     },

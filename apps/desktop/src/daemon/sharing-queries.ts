@@ -51,3 +51,14 @@ export function useRequestCertificate() {
     onSuccess: (status) => queryClient.setQueryData(sharingKeys.all, status),
   });
 }
+
+/** Turn on Tailscale: the daemon runs `tailscale up`; a sign-in it waits on arrives as the error, in the CLI's words. */
+export function useConnectTailscale() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    meta: { quiet: true },
+    mutationFn: async () => readJson(await client.sharing.connect.$post(), SharingStatusDto),
+    onSuccess: (status) => queryClient.setQueryData(sharingKeys.all, status),
+  });
+}

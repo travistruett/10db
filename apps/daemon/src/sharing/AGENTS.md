@@ -31,9 +31,14 @@ Shares this Mac's daemon on the builder's tailnet through `tailscale serve`.
   port is not, and the monitor only removes 10db's mapping while the listener is down. `set` refuses with
   `SharingRefusedError`, whose message is shown to the builder (task 10 maps it to 409).
 - While sharing is on, the 60 s monitor publishes `sharing.changed` whenever the status it reads changes (its state
-  or its steps), so a tick that finds the CLI gone publishes even when the state label stays `paused`. The rail
-  refetches only on that event, or on Remote Access's 10 s poll, which fills the same query; a removed CLI clears
-  the rail's line within a minute.
+  or its steps), so a tick that finds the CLI gone publishes even when the state label stays `paused`. The bar's
+  sharing icon refetches only on that event, or on Remote Access's 10 s poll, which fills the same query; a removed
+  CLI clears the icon within a minute.
+- `connect` (`POST /sharing/connect`, the icon's Turn on Tailscale) runs `tailscale up` on the same queue, cut off at
+  10 s, then refreshes and, while sharing is enabled, brings the share back at once rather than on the monitor's
+  next tick. A timeout means Tailscale waits on a sign-in; it and a non-zero exit refuse with the CLI's own words
+  (`SharingRefusedError`, 409). The route runs a command on the Mac, so it takes only the window's UI token: a paired
+  device passes the share listener's API row in the auth matrix and is refused in the route (403).
 - A daemon that is not sharing (no listener, not enabled) neither unserves its port on Stop or shutdown nor records an owed
   unserve: the port's mapping may be another daemon's (`notSharing` in `sharing-service.ts`). An unserve an earlier Stop
   owed is still retried by the monitor and at start.

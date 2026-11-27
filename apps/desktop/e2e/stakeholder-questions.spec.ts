@@ -114,6 +114,14 @@ test('routes a question to someone outside Slack from its card, and the table sh
   // with nothing paired, says so and offers pairing.
   await page.goto('/settings/remote-access');
   await expect(page.getByText('Share on your tailnet')).toBeVisible();
+  // The bar's sharing icon shows once Tailscale is there to read; its card's switch waits on the certificate.
+  const sharingIcon = page.getByRole('button', { name: "Sharing isn't set up" });
+  await sharingIcon.click();
+  const shareSwitch = page.getByRole('switch', { name: 'Share on your tailnet' });
+  await expect(shareSwitch).toBeDisabled();
+  await expect(page.getByText('Waits for the certificate step.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Remote Access settings' })).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.goto('/settings/devices');
   await expect(page.getByText('No devices paired')).toBeVisible();
   await expect(
