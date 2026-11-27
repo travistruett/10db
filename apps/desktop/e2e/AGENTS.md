@@ -50,7 +50,7 @@ highlights code) and `see-screen.spec.ts` (the screen a session draws is a real 
   order with one worker. A flow that adds minutes folds into one that exists.
 - **A spec that routes a request imports `test` from `./routed-test`**, whose page drops its routes when the
   test ends; the app polls `/system`, and a route callback still running then fails the test or the next one.
-- **A read retries, a write never does.** Each `request.get` passes `maxRetries: 2`: a request can reuse a keep-alive socket the daemon closed after its 5 s timeout, and Playwright retries only ECONNRESET. No `request.post` passes `maxRetries`, since a POST the daemon already applied would run twice. `request-retries.test.ts` checks both.
+- **A read retries, a write never does.** Each `request.get` and `route.fetch` passes `maxRetries: 2`: a request can reuse a keep-alive socket the daemon closed after its 5 s timeout, and Playwright retries only ECONNRESET. No `request.post` passes `maxRetries`, since a POST the daemon already applied would run twice. `request-retries.test.ts` checks both.
 - **Specs share one daemon per shard.** `first-run.spec.ts` runs first in shard 1 because the first run shows only
   while the daemon has no project. The Board shows the first project by name, so the project it makes,
   `e2e-first-run`, sorts after `e2e`, which `loop.spec.ts` and the specs after it open. Every spec adds its own
