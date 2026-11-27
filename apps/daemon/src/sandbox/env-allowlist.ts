@@ -12,11 +12,6 @@ export function looksSecret(name: string): boolean {
   return SECRET_LOOKING_ENV_NAME.test(name);
 }
 
-/** Whether a name is one a sandboxed command inherits from the daemon's env. */
-export function isAllowlistedName(name: string): boolean {
-  return ALLOWED_NAMES.has(name) || ALLOWED_PREFIXES.some((prefix) => name.startsWith(prefix));
-}
-
 /**
  * Names in `env` that a sandboxed command must not inherit: everything off the allowlist. `also`
  * names more that the caller allows for this command (a project with Docker on adds `DOCKER_HOST`);
