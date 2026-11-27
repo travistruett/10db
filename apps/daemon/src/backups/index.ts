@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TendbDatabase } from '@10db/db';
 import { z } from 'zod';
@@ -35,17 +35,55 @@ export async function backupDatabase(
 ): Promise<string> {
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `10db-${label}-${stamp(now)}.sqlite`);
-  await db.$client.backup(file);
+  // One fixed name per label: the instance lock makes the daemon its only writer. SQLite's backup opens an
+  // existing destination as a database, so a half-written leftover from a killed copy is removed first.
+  const partial = join(dir, `10db-${label}.partial`);
+  for (const leftover of [partial, `${partial}-journal`, `${partial}-wal`]) {
+    rmSync(leftover, { force: true });
+  }
+  await db.$client.backup(partial);
+  renameSync(partial, file);
   return file;
 }
 
-/** Deletes all but the newest `keep` backups of a label; returns the deleted paths, oldest first. */
-export function pruneBackups(dir: string, label: string, keep: number): string[] {
+const PRE_MIGRATE = 'pre-migrate';
+
+/**
+ * The copy taken before migrations: prunes the label to `keep` (so a full disk can clear), copies, then prunes
+ * to `keep` again, never deleting the copy just made. Returns the copy and the paths removed.
+ */
+export async function backupBeforeMigrating(
+  db: TendbDatabase,
+  dir: string,
+  now: Date,
+  keep: number,
+): Promise<{ readonly file: string; readonly removed: readonly string[] }> {
+  mkdirSync(dir, { recursive: true });
+  const removed: string[] = [];
+  // A copy that can't be deleted is no reason to stay down: the start goes on, the copy still throws if it fails.
+  const prune = (spare?: string): void => {
+    try {
+      removed.push(...pruneBackups(dir, PRE_MIGRATE, keep, spare));
+    } catch {
+      // Left for the next start's prune.
+    }
+  };
+  prune();
+  const file = await backupDatabase(db, dir, PRE_MIGRATE, now);
+  prune(file);
+  return { file, removed };
+}
+
+/** Deletes all but the newest `keep` backups of a label, never `spare`; returns the deleted paths, oldest first. */
+export function pruneBackups(dir: string, label: string, keep: number, spare?: string): string[] {
   const files = readdirSync(dir)
     .filter((f) => f.startsWith(`10db-${label}-`) && f.endsWith('.sqlite'))
     .sort()
     .reverse();
-  const doomed = files.slice(keep).map((f) => join(dir, f));
+  const doomed = files
+    .slice(keep)
+    .map((f) => join(dir, f))
+    .filter((path) => path !== spare);
   for (const file of doomed) rmSync(file, { force: true });
   return doomed.reverse();
 }

@@ -119,6 +119,7 @@ write a module's notes there, not here. This file keeps what crosses modules.
 
 - `accounts/`: account pauses, the monthly cap, readiness and staggered starts (`src/accounts/AGENTS.md`)
 - `agent-skill/`: installs the shipped 10db-task skill and links it for Claude Code and Codex (`src/agent-skill/AGENTS.md`)
+- `backups/`: the copies taken before migrations and nightly, and how many are kept (`src/backups/AGENTS.md`)
 - `benchmarks/`: Artificial Analysis's model list and OpenRouter's scores and speeds, each synced with the builder's own key (`src/benchmarks/AGENTS.md`)
 - `catalogue/`: the model catalogue from models.dev and its four rungs (`src/catalogue/AGENTS.md`)
 - `chat/`: Sessions' chats: their attended sessions, their builder tools and `@` files (`src/chat/AGENTS.md`)
