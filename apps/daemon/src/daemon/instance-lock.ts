@@ -57,6 +57,9 @@ function alive(pid: number): boolean {
   }
 }
 
+/** How long one read of the holder's state may take. */
+const PS_TIMEOUT_MS = 5_000;
+
 const HolderState = z.object({ stat: z.string().min(1), lstart: z.string().min(1) });
 type HolderState = z.infer<typeof HolderState>;
 
@@ -72,6 +75,9 @@ async function holderState(pid: number): Promise<HolderState | null> {
     const zone = process.env['TZ'];
     const { stdout } = await run('/bin/ps', ['-o', 'stat=', '-o', 'lstart=', '-p', String(pid)], {
       env: zone === undefined ? { LC_ALL: 'C' } : { LC_ALL: 'C', TZ: zone },
+      // A ps that stalls would hang the start before the daemon listens, where nothing watches it; a killed one
+      // reads as unknown.
+      timeout: PS_TIMEOUT_MS,
     });
     const row = stdout.trim();
     const split = row.search(/\s/);
