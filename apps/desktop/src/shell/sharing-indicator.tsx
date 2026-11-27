@@ -115,11 +115,9 @@ function SharingCard({
         <Switch
           aria-label="Share on your tailnet"
           // The card's tone is the off track's own: off, the track takes the border's tone so its shape shows.
-          styles={
-            shared
-              ? undefined
-              : { track: { backgroundColor: 'var(--mantine-color-default-border)' } }
-          }
+          styles={{
+            track: shared ? {} : { backgroundColor: 'var(--mantine-color-default-border)' },
+          }}
           checked={shared}
           disabled={switchBlocked || set.isPending}
           onChange={(event) => {
