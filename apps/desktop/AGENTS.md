@@ -68,7 +68,7 @@ tokens; the app still uses the main listener.
   the last doubles that threshold (up to 8 minutes), and before each kill it writes `daemon.frozen-kill` beside
   `daemon.lock`, so the next daemon charges no run for the restart
   (`decisions/2026-11-26-a-freeze-kill-is-not-a-crash-of-every-run.md`). `ps` that can't run counts as "not gone".
-  A daemon no `daemon.json` has named within 10 minutes of its spawn is killed as hung (no freeze marker, no backoff
+  A daemon no `daemon.json` has named within 10 minutes of its spawn is killed as hung (the freeze-kill marker is written first, so its runs are not charged; no backoff
   reset); each consecutive hung start doubles that deadline up to 80 minutes, and a start that serves resets it.
   The loops have no scripted coverage. The check by hand (`kill -9`, then `kill -STOP`, the daemon of the built or
   installed app, which runs its own sidecar) is the builder's or the coordinator's to run: an agent signals only a

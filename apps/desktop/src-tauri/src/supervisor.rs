@@ -58,9 +58,9 @@ const HEALTH_PATH: &str = "/health";
 /// What a healthy daemon's /health reply starts with.
 const HEALTH_OK: &[u8; 12] = b"HTTP/1.1 200";
 const LOCK_FILE: &str = "daemon.lock";
-/// Written beside `daemon.lock` just before a frozen daemon, or one stuck starting, is killed, so the next daemon knows the
-/// restart was this shell's kill and not a crash. Its name and shape match `FROZEN_KILL_FILE` in
-/// `apps/daemon/src/daemon/frozen-kill.ts`.
+/// Written beside `daemon.lock` just before a frozen daemon, or one stuck starting, is killed, so the
+/// next daemon knows the restart was this shell's kill and not a crash. Its name and shape match
+/// `FROZEN_KILL_FILE` in `apps/daemon/src/daemon/frozen-kill.ts`.
 const FROZEN_KILL_FILE: &str = "daemon.frozen-kill";
 const LOGS_DIR: &str = "logs";
 const SIDECAR_LOG: &str = "sidecar.log";
