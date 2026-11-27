@@ -4,7 +4,6 @@ import {
   ActionIcon,
   Button,
   Group,
-  Loader,
   Stack,
   Table,
   Text,
@@ -14,6 +13,7 @@ import {
 import { IconPencil, IconRoute, IconTrash, IconUsers } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { EmptyState } from '../../shell/empty-state';
 import { useGoals } from '../../daemon/goal-queries';
 import { useJudgeStatus } from '../../daemon/judge-queries';
@@ -25,6 +25,18 @@ import { HelpHint } from './help-hint';
 import { RouteScope, routeRows, ruleInputs, type RouteRow } from './route-rows';
 import { SettingsSectionKey } from './sections';
 import { RaisedPanel } from '../../shell/raised-panel';
+
+/** The table's column titles and widths, which its placeholder draws too while the routes load. */
+const ROUTE_COLUMNS = {
+  scope: { title: 'Scope', width: 100 },
+  subject: { title: 'For' },
+  questions: { title: 'Questions' },
+  goesTo: { title: 'Goes To' },
+  actions: { title: '', width: 80 },
+} as const;
+
+/** The table's scroll width, kept by its placeholder. */
+const ROUTES_MIN_WIDTH = 560;
 
 /** Settings › Question Routing: who a question goes to, by scope, most specific first. */
 export function WhoAnswersSection({ project }: { readonly project: ProjectDto }) {
@@ -96,7 +108,16 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
           </Button>
         </Group>
       </Group>
-      {rules.isPending ? <Loader size="sm" /> : null}
+      {rules.isPending ? (
+        <PageLoading
+          shape={PageLoadingShape.Table}
+          label="Loading the routes"
+          columns={Object.values(ROUTE_COLUMNS)}
+          minWidth={ROUTES_MIN_WIDTH}
+          rows={3}
+          verticalSpacing="xs"
+        />
+      ) : null}
       {rules.isError ? (
         <Alert color="red" title="Couldn't load the routes">
           {rules.error.message}
@@ -118,15 +139,15 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
       ) : null}
       {rules.isSuccess && rows.length > 0 ? (
         <RaisedPanel>
-          <Table.ScrollContainer minWidth={560}>
+          <Table.ScrollContainer minWidth={ROUTES_MIN_WIDTH}>
             <Table verticalSpacing="xs">
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th w={100}>Scope</Table.Th>
-                  <Table.Th>For</Table.Th>
-                  <Table.Th>Questions</Table.Th>
-                  <Table.Th>Goes To</Table.Th>
-                  <Table.Th w={80} />
+                  <Table.Th w={ROUTE_COLUMNS.scope.width}>{ROUTE_COLUMNS.scope.title}</Table.Th>
+                  <Table.Th>{ROUTE_COLUMNS.subject.title}</Table.Th>
+                  <Table.Th>{ROUTE_COLUMNS.questions.title}</Table.Th>
+                  <Table.Th>{ROUTE_COLUMNS.goesTo.title}</Table.Th>
+                  <Table.Th w={ROUTE_COLUMNS.actions.width} />
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>

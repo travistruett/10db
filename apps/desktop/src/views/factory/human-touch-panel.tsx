@@ -1,6 +1,7 @@
 import type { HumanTouchDayDto, ProjectId } from '@10db/contracts';
-import { Alert, Loader, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Stack, Table, Text, Title } from '@mantine/core';
 import { useHumanTouch } from '../../daemon/human-touch-queries';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
 
 /** "Nov 3" for a `YYYY-MM-DD` UTC day, the way the daemon cut it. */
@@ -16,6 +17,9 @@ function dayLabel(day: string): string {
 function perTask(value: number | null): string {
   return value === null ? '–' : String(Number(value.toFixed(1)));
 }
+
+/** The table's scroll width, kept by its placeholder. */
+const TABLE_MIN_WIDTH = 720;
 
 const COLUMNS = [
   'Day',
@@ -78,10 +82,18 @@ export function HumanTouchPanel({ projectId }: { readonly projectId: ProjectId |
           {touch.error.message}
         </Alert>
       ) : null}
-      {touch.isLoading ? <Loader size="sm" aria-label="Loading human touch" /> : null}
+      {touch.isLoading ? (
+        <PageLoading
+          shape={PageLoadingShape.Table}
+          label="Loading human touch"
+          columns={COLUMNS.map((title) => ({ title }))}
+          rows={7}
+          minWidth={TABLE_MIN_WIDTH}
+        />
+      ) : null}
       {touch.isSuccess ? (
         <RaisedPanel>
-          <Table.ScrollContainer minWidth={720}>
+          <Table.ScrollContainer minWidth={TABLE_MIN_WIDTH}>
             <Table aria-label="How often a person was needed">
               <Table.Thead>
                 <Table.Tr>

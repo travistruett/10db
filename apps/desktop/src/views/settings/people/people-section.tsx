@@ -6,7 +6,6 @@ import {
   Badge,
   Button,
   Group,
-  Loader,
   Modal,
   Stack,
   Table,
@@ -21,6 +20,7 @@ import {
   IconUsers,
 } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
+import { PageLoading, PageLoadingShape } from '../../../shell/page-loading';
 import { EmptyState } from '../../../shell/empty-state';
 import { useState } from 'react';
 import { usePeople, useRemovePerson, useSlackMember, useSlackStatus } from '../../../daemon/people';
@@ -29,6 +29,17 @@ import { PersonAnswers } from './person-answers';
 import { PersonModal } from './person-modal';
 import { StakeholderTimers } from './stakeholder-timers';
 import { RaisedPanel } from '../../../shell/raised-panel';
+
+/** The table's column titles, which its placeholder draws too while the people load. */
+const PEOPLE_COLUMNS = {
+  name: { title: 'Name' },
+  howSent: { title: "How It's Sent" },
+  answers: { title: 'Answers' },
+  actions: { title: '' },
+} as const;
+
+/** The table's scroll width, kept by its placeholder. */
+const PEOPLE_MIN_WIDTH = 640;
 
 /** The builder's person is named "You" until they pick their Slack member. */
 function rowName(person: PersonDto): string {
@@ -178,7 +189,18 @@ export function PeopleSection() {
           )}
         </Group>
         <ConnectSlack />
-        {people.isPending ? <Loader size="sm" /> : null}
+        {people.isPending ? (
+          <PageLoading
+            shape={PageLoadingShape.Table}
+            label="Loading people"
+            columns={Object.values(PEOPLE_COLUMNS)}
+            minWidth={PEOPLE_MIN_WIDTH}
+            rows={3}
+            cellLines={2}
+            verticalSpacing="sm"
+            horizontalSpacing="md"
+          />
+        ) : null}
         {people.isError ? (
           <Alert color="red" title="Couldn't load people">
             {people.error.message}
@@ -186,13 +208,13 @@ export function PeopleSection() {
         ) : null}
         {people.isSuccess ? (
           <RaisedPanel>
-            <Table.ScrollContainer minWidth={640}>
+            <Table.ScrollContainer minWidth={PEOPLE_MIN_WIDTH}>
               <Table verticalSpacing="sm" horizontalSpacing="md">
                 <Table.Thead>
                   <Table.Tr>
-                    <Table.Th>Name</Table.Th>
-                    <Table.Th>How It's Sent</Table.Th>
-                    <Table.Th>Answers</Table.Th>
+                    <Table.Th>{PEOPLE_COLUMNS.name.title}</Table.Th>
+                    <Table.Th>{PEOPLE_COLUMNS.howSent.title}</Table.Th>
+                    <Table.Th>{PEOPLE_COLUMNS.answers.title}</Table.Th>
                     <Table.Th aria-label="Actions" />
                   </Table.Tr>
                 </Table.Thead>

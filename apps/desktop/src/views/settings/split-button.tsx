@@ -1,7 +1,8 @@
-import { Button, Group, Menu } from '@mantine/core';
+import { Button, Group, Menu, Skeleton } from '@mantine/core';
 import { IconChevronDown } from '@tabler/icons-react';
 import type { ReactNode, Ref } from 'react';
 import { CountBadge } from '../../shell/count-badge';
+import { useLoadingDelayElapsed } from '../../shell/page-loading';
 
 /**
  * A section's primary action with a caret beside it that opens the section's other actions. The caret
@@ -56,5 +57,29 @@ export function SplitButton({
         <Menu.Dropdown>{children}</Menu.Dropdown>
       </Menu>
     </Group>
+  );
+}
+
+/**
+ * The split button's place while its section loads: the real button, hidden under a placeholder, so the
+ * placeholder is exactly its size.
+ */
+export function SplitButtonLoading({
+  label,
+  menuLabel,
+}: {
+  readonly label: string;
+  readonly menuLabel: string;
+}) {
+  const late = useLoadingDelayElapsed();
+  if (!late) return null;
+  return (
+    <Skeleton visible width="fit-content" radius="sm" role="status" aria-label={`Loading ${label}`}>
+      <div inert>
+        <SplitButton label={label} menuLabel={menuLabel} onClick={() => undefined}>
+          {null}
+        </SplitButton>
+      </div>
+    </Skeleton>
   );
 }

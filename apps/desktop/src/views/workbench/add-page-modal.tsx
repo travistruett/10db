@@ -5,9 +5,10 @@ import type {
   ProjectViewDto,
   TaskDto,
 } from '@10db/contracts';
-import { Button, Loader, Stack, Textarea } from '@mantine/core';
+import { Button, Stack, Textarea } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { FormModal } from '../../shell/form-modal';
 import { PagePicker } from './page-picker';
 import { StartLines } from './start-lines';
@@ -77,7 +78,7 @@ export function AddPageModal({
       }
     >
       {start === undefined ? (
-        <Loader size="sm" role="status" aria-label="Loading the pages" />
+        <PageLoading shape={PageLoadingShape.Fields} rows={2} label="Loading the pages" />
       ) : (
         <Stack gap="md">
           <PagePicker

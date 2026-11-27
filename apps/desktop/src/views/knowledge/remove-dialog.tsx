@@ -18,6 +18,7 @@ import {
 } from '../../daemon/knowledge-queries';
 import { DaemonRequestError } from '../../daemon/client';
 import { FormModal } from '../../shell/form-modal';
+import { LoadingTextLine, useLoadingDelayElapsed } from '../../shell/page-loading';
 import { ReasonDialog } from './reason-dialog';
 import { STATE_LABELS } from './knowledge-labels';
 
@@ -79,7 +80,7 @@ function NewerVersion({
     >
       <Stack gap="sm">
         <Text size="sm">{`“${record.label}” has a newer version, so it can’t be removed.`}</Text>
-        {newest.isPending ? <Loader size="sm" aria-label="Finding the newest version" /> : null}
+        {newest.isPending ? <NewestLoading /> : null}
         {found ? (
           <>
             <Text size="sm">
@@ -94,6 +95,18 @@ function NewerVersion({
         ) : null}
       </Stack>
     </FormModal>
+  );
+}
+
+/** The newest version's place while it is found: the sentence that introduces it, then its name. */
+function NewestLoading() {
+  const late = useLoadingDelayElapsed();
+  if (!late) return null;
+  return (
+    <Stack gap="sm" role="status" aria-label="Finding the newest version">
+      <LoadingTextLine size="sm" bar={12} width="55%" />
+      <LoadingTextLine size="sm" bar={12} width="75%" />
+    </Stack>
   );
 }
 

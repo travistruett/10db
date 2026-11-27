@@ -1,6 +1,7 @@
 import type { PassTurnId } from '@10db/contracts';
-import { Alert, Drawer, Group, Loader, Stack, Text } from '@mantine/core';
+import { Alert, Drawer, Group, Stack, Text } from '@mantine/core';
 import { useTurnActivity } from '../../daemon/pass-queries';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { clockTime } from './page-status';
 
 export interface TurnLogDrawerProps {
@@ -16,7 +17,9 @@ export function TurnLogDrawer({ turnId, title, opened, onClose }: TurnLogDrawerP
   const activity = useTurnActivity(turnId, opened);
   return (
     <Drawer opened={opened} onClose={onClose} position="right" title={title}>
-      {activity.isPending ? <Loader size="sm" aria-label="Loading the log" /> : null}
+      {activity.isPending ? (
+        <PageLoading shape={PageLoadingShape.Log} rows={8} label="Loading the log" />
+      ) : null}
       {activity.isError ? (
         <Alert color="red" title="Couldn't load the log">
           {activity.error.message}

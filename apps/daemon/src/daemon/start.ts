@@ -55,6 +55,7 @@ import {
   deleteAppSetting,
   getWorkstreamRow,
   deleteJudgeCallsBefore,
+  deleteSessionEventsEndedBefore,
   findAccountRow,
   lanesByAccount,
   getAccountRow,
@@ -546,6 +547,10 @@ import { assertWorktreeRootAllowed, DEFAULT_WORKTREE_BASE, worktreeRootFor } fro
 const SLACK_TIMEOUT_MS = 15_000;
 /** How often a post Slack refused is tried again while its Inbox item is open. */
 const SLACK_PICTURE_RETRY_MS = 15 * 60_000;
+/** How long a finished task's session.context and session.activity rows are kept. */
+const SESSION_EVENTS_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+/** Rows deleted per write, so the writer lock is held briefly and other work runs between batches. */
+const SESSION_EVENTS_PRUNE_BATCH = 2_000;
 
 export interface DaemonOptions {
   readonly dataDir: string;
@@ -3786,11 +3791,42 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger.warn({ err: error }, "could not sweep 10db's temp dirs from the system temp dirs");
   });
 
+  // Aborted first in `shutdown()`, so no batch starts once a stop has begun; the next night resumes.
+  const sessionEventsPruneAbort = new AbortController();
+  const pruneSessionEvents = async (): Promise<void> => {
+    const cutoff = new Date(clock.now().getTime() - SESSION_EVENTS_RETENTION_MS).toISOString();
+    const startedAt = performance.now();
+    let total = 0;
+    try {
+      for (;;) {
+        if (sessionEventsPruneAbort.signal.aborted) break;
+        const deleted = state.write((ctx) =>
+          deleteSessionEventsEndedBefore(ctx, cutoff, SESSION_EVENTS_PRUNE_BATCH),
+        );
+        total += deleted;
+        if (deleted < SESSION_EVENTS_PRUNE_BATCH) break;
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    } catch (error: unknown) {
+      logger.warn({ err: error, deleted: total }, 'could not prune old session events');
+      return;
+    }
+    logger.info(
+      {
+        deleted: total,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        stopped: sessionEventsPruneAbort.signal.aborted,
+      },
+      'pruned old session events',
+    );
+  };
+
   const nightly = scheduleNightlyBackup(
     clock,
     async () => {
       await backupDatabase(db, backupsDir, 'nightly', clock.now());
       pruneBackups(backupsDir, 'nightly', DEFAULTS.nightlyBackupsKept);
+      await pruneSessionEvents();
     },
     DEFAULTS.nightlyBackupHour,
     (error) => {
@@ -3823,6 +3859,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   logger.info({ port, dataDir: opts.dataDir }, 'daemon started');
 
   async function shutdown(): Promise<void> {
+    sessionEventsPruneAbort.abort();
     try {
       // First, so a shutdown killed part-way has already unshared.
       await sharing.stop();

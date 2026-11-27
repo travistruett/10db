@@ -5,11 +5,35 @@ import {
   type ProjectId,
   type RigorFiguresPeriod,
 } from '@10db/contracts';
-import { Alert, Anchor, Loader, SegmentedControl, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Anchor, SegmentedControl, Stack, Table, Text, Title } from '@mantine/core';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useAcceptanceFigures } from '../../daemon/acceptance-queries';
+import { LoadingTable, useLoadingDelayElapsed } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
+
+const ACCEPTANCE_LISTS = ['Completed', 'Sent back', 'Sent to you'] as const;
+
+/** The three run lists while they load: each list's own title over a few rows of its three columns. */
+function AcceptanceLoading() {
+  const late = useLoadingDelayElapsed();
+  return (
+    <Stack gap="xs" role="status" aria-label="Loading acceptance counts">
+      {ACCEPTANCE_LISTS.map((label) => (
+        <Stack key={label} gap={4}>
+          <Title order={4}>{label}</Title>
+          {late ? (
+            <LoadingTable
+              columns={[{ title: '' }, { title: '' }, { title: '' }]}
+              headingRow={false}
+              rows={2}
+            />
+          ) : null}
+        </Stack>
+      ))}
+    </Stack>
+  );
+}
 
 /** Why acceptance isn't checking, shown under the counts. */
 function notCheckingLine(checking: AcceptanceChecking): string | null {
@@ -103,7 +127,7 @@ export function AcceptancePanel({ projectId }: { readonly projectId: ProjectId |
           {figures.error.message}
         </Alert>
       ) : null}
-      {figures.isLoading ? <Loader size="sm" aria-label="Loading acceptance counts" /> : null}
+      {figures.isLoading ? <AcceptanceLoading /> : null}
       {figures.isSuccess ? (
         <>
           <RunList
