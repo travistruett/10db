@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { BlockList, isIP } from 'node:net';
+import { DEVICE_LABEL_MAX } from '@10db/contracts';
 import { z } from 'zod';
 
 export interface CliResult {
@@ -128,4 +130,75 @@ export async function readTailscaleSelf(run: TailscaleRun): Promise<TailscaleSel
     certDomains: status.CertDomains ?? [],
     version: status.Version ?? '',
   };
+}
+
+/** How long a pairing waits for the CLI to name the device. */
+export const TAILNET_NAME_TIMEOUT_MS = 3_000;
+
+const tailscaleAddresses = new BlockList();
+tailscaleAddresses.addSubnet('100.64.0.0', 10, 'ipv4');
+tailscaleAddresses.addSubnet('fd7a:115c:a1e0::', 48, 'ipv6');
+
+/**
+ * Only a bare Tailscale address, so a host name, a port, a zone id, an IPv4-mapped form or a value starting with `-`
+ * never reaches the CLI. `isIP` and the block list accept the last three, so they are refused first.
+ */
+function isTailscaleAddress(value: string): boolean {
+  if (value.includes('%') || value.toLowerCase().startsWith('::ffff:')) return false;
+  const family = isIP(value);
+  if (family === 0) return false;
+  return tailscaleAddresses.check(value, family === 4 ? 'ipv4' : 'ipv6');
+}
+
+const WhoisJson = z.object({
+  Node: z
+    .object({
+      Name: z.string().optional(),
+      ComputedName: z.string().optional(),
+      Hostinfo: z.object({ Hostname: z.string().optional() }).nullish(),
+    })
+    .nullish(),
+});
+
+/** Cut to `DEVICE_LABEL_MAX` UTF-16 units without leaving half a surrogate pair at the end; null when empty. */
+function cutLabel(name: string): string | null {
+  let cut = name.slice(0, DEVICE_LABEL_MAX);
+  const last = cut.charCodeAt(cut.length - 1);
+  if (cut.length < name.length && last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
+  return cut.trim() || null;
+}
+
+function usableName(value: string | undefined): string | null {
+  const name = value?.trim() ?? '';
+  return name === '' || name.toLowerCase() === 'localhost' ? null : name;
+}
+
+/**
+ * The name Tailscale has for the machine at `ip`: `Node.Hostinfo.Hostname` unless empty or `localhost`, else
+ * `Node.ComputedName`, else the first label of `Node.Name`; trimmed, cut to `DEVICE_LABEL_MAX`, and null when
+ * empty. Null too when `ip` isn't a Tailscale address (100.64.0.0/10 or fd7a:115c:a1e0::/48, checked with
+ * `node:net`'s `isIP` and a `BlockList`, so nothing else, nor a value starting with `-`, reaches the CLI), or the CLI
+ * fails, times out or answers something that doesn't parse. It never rejects.
+ */
+export async function readTailnetName(
+  run: TailscaleRun,
+  ip: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  if (!isTailscaleAddress(ip)) return null;
+  try {
+    const result = await run(['whois', '--json', ip], timeoutMs);
+    if (result.timedOut || result.code !== 0) return null;
+    // The CLI's own output, so it is parsed here and never trusted as typed.
+    const parsed = WhoisJson.safeParse(JSON.parse(result.stdout));
+    if (!parsed.success) return null;
+    const node = parsed.data.Node;
+    const name =
+      usableName(node?.Hostinfo?.Hostname) ??
+      usableName(node?.ComputedName) ??
+      usableName(node?.Name?.split('.')[0]);
+    return name === null ? null : cutLabel(name);
+  } catch {
+    return null;
+  }
 }
