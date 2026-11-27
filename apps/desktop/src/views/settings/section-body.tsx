@@ -120,12 +120,7 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.AllWatchpoints:
-      return (
-        <>
-          {heading}
-          <AllWatchpointsSection />
-        </>
-      );
+      return <AllWatchpointsSection />;
     case SettingsSectionKey.NetworkHosts:
       return (
         <>
