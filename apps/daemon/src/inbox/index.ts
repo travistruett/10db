@@ -5,7 +5,7 @@ export {
   raiseDockerOnNote,
 } from './docker-card';
 export { createJudgeOutageCard } from './judge-outage-card';
-export { createActivityActions, type ActivityActions, type UndoMoves } from './activity-actions';
+export { createActivityActions } from './activity-actions';
 export { leftWithBuilder } from './builder-card';
 export { clearAppStartCard, raiseAppStartCard } from './app-start-card';
 export { clearGateHoldCard, raiseGateHoldCard } from './gate-hold-card';
@@ -63,9 +63,6 @@ export { raiseStartHoldCard, withdrawStartHoldCard } from './start-hold-card';
 export {
   BY_ANSWER,
   CardTier,
-  DECIDED_BY_JUDGE,
-  DECIDED_BY_RULE,
-  DECIDED_BY_STAKEHOLDER,
   decidedByBuilder,
   type CardClosesWhen,
   type StoredTier,

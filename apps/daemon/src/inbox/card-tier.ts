@@ -25,12 +25,3 @@ export const BY_ANSWER: CardClosesWhen = { by: 'answer' };
 export function decidedByBuilder(owns: BuilderOwns): CardDecision {
   return { decider: CardDecider.Builder, owns };
 }
-
-/** A rule settles this card's question; the card is not in Open. */
-export const DECIDED_BY_RULE: CardDecision = { decider: CardDecider.Rule };
-
-/** 10db's judge settles this card's question; the card is not in Open. */
-export const DECIDED_BY_JUDGE: CardDecision = { decider: CardDecider.Judge };
-
-/** The project's stakeholder settles this card's question; the card is not in Open. */
-export const DECIDED_BY_STAKEHOLDER: CardDecision = { decider: CardDecider.Stakeholder };
