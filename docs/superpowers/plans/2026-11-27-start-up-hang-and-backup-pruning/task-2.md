@@ -18,8 +18,8 @@ nearest `AGENTS.md` with one line on what is kept.
   it is not zero. The nightly path keeps calling `backupDatabase` and `pruneBackups` as today.
 - A failed prune (an `rmSync` error) inside `backupBeforeMigrating` is caught there and doesn't stop the copy or the
   start: a copy that couldn't be deleted is no reason to stay down. A failed copy still throws, as today.
-- `spare` is compared by full path; the spared file doesn't count toward `keep`, so 5 others may remain beside it in
-  the clock-stepped-back case. That is fine.
+- `spare` is compared by full path. The rule is "keep the newest `keep`, and `spare` too wherever it sorts": in the
+  usual case the new copy is the newest, so 5 remain in all; only when the clock stepped back do 6 remain.
 - A rename within one directory is atomic on APFS.
 
 **Tests:** extend `backups.test.ts` on its rung (a temp directory, a real SQLite file). One test of
