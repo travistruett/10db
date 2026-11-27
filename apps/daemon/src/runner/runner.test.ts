@@ -17,7 +17,9 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   ConflictError,
+  EvidenceKind,
   InboxAnswerRefused,
+  InboxKind,
   LEFT_OUT_NOTICE_KEY,
   mintId,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
@@ -27,6 +29,9 @@ import {
   REVERT_COMMIT_LINE,
   ToolAccess,
   TRUST_DEFAULTS,
+  WatchpointChoice,
+  WatchpointFileStatus,
+  WatchpointLoudness,
   YourMcpSource,
   yourMcpServerKey,
   AccountCardChoice,
@@ -94,6 +99,7 @@ import {
 } from '../briefing';
 import { createLauncher } from '../environment';
 import { setProjectLiveSystems } from '../trust';
+import { announceWatchpointReading } from '../watchpoints';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { DEFAULT_RUNNER_LIMITS } from '../runner';
 import { createGit, type Git } from '../git';
@@ -3820,6 +3826,140 @@ describe("a lane's settled read-only line", () => {
     expect(spec.preToolUse(cat)).toHaveProperty('settled');
     expect(spec.preToolUse({ ...cat, cwd: apps })).not.toHaveProperty('settled');
     await engine.runner.cancel(workstream.id);
+  });
+});
+
+describe('a worktree batch two tasks share', () => {
+  let worktrees: TempDir | null = null;
+  afterEach(() => {
+    worktrees?.cleanup();
+    worktrees = null;
+  });
+
+  it("a task's watchpoints read only its own commits, not a sibling's", async () => {
+    const book: FakeScriptBook = {
+      // Beta's first gate fails, so its run starts before Alpha's migration and reads after it.
+      Beta: [[turn], [write('src/ui/beta.txt'), commit('op-wt-own-b1', ['src/ui/beta.txt']), turn]],
+      Alpha: [
+        [
+          write('src/api/migrations/0001_x.sql'),
+          commit('op-wt-own-a1', ['src/api/migrations/0001_x.sql']),
+          turn,
+        ],
+      ],
+    };
+    engine = await createTestEngine(book, {
+      workspaceMode: 'worktree',
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      gateCommand: 'test -f src/ui/beta.txt -o -f src/api/migrations/0001_x.sql',
+    });
+    worktrees = tempDir('runner-shared-worktree');
+    const path = join(worktrees.path, 'wt');
+    execFileSync('git', ['-C', engine.repoPath, 'worktree', 'add', '-q', '-b', 'batch/two', path], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    const batch = engine.state.write((ctx) => {
+      const inserted = insertBatch(ctx, {
+        projectId: engine.project.id,
+        title: 'Two tasks',
+        baseBranch: 'main',
+        worktreePath: realpathSync(path),
+      });
+      return transitionBatch(ctx, inserted.id, {
+        to: 'OPEN',
+        patch: { branch: 'batch/two', baseSha: 'x' },
+      });
+    });
+    const beta = engine.addTask('Beta', ['ui'], [], undefined, batch.id).workstream;
+    engine.launch(beta.id);
+    await engine.runner.idle();
+    expect(ws(beta.id).state).toBe('QUEUED');
+    const alpha = engine.addTask(
+      'Alpha',
+      ['api', 'migrations'],
+      [],
+      undefined,
+      batch.id,
+    ).workstream;
+    engine.launch(alpha.id);
+    await engine.runner.idle();
+    engine.launch(beta.id);
+    await engine.runner.idle();
+    const readings = listEvidence(engine.store.db, beta.id).filter(
+      (e) => e.kind === EvidenceKind.Watchpoint,
+    );
+    // Alpha's own reading still holds its migration.
+    expect(listEvidence(engine.store.db, alpha.id).map((e) => e.summary)).toContain(
+      '1 file under 1 watchpoint.',
+    );
+    expect(readings.map((e) => JSON.stringify(e.detail))).not.toContainEqual(
+      expect.stringContaining('migrations'),
+    );
+    const cards = listInbox(engine.store.db, {}).filter(
+      (item) =>
+        item.kind === InboxKind.Watchpoint && item.targets.some((t) => t.workstreamId === beta.id),
+    );
+    expect(cards).toEqual([]);
+    expect(ws(beta.id).state).toBe('DONE');
+  });
+
+  it('a run is asked once about a watchpoint the builder answered, however many steps read it', async () => {
+    engine = await createTestEngine({});
+    const { workstream } = engine.addTask('Alpha', ['api']);
+    const task = getTask(engine.store.db, workstream.taskId);
+    const hit = (key: string, path: string) => ({
+      watchpoint: {
+        key,
+        label: key,
+        why: 'why',
+        guidance: 'check',
+        loudness: WatchpointLoudness.Ask,
+      },
+      files: [
+        {
+          path,
+          status: WatchpointFileStatus.Added,
+          added: 1,
+          removed: 0,
+          patch: '',
+          clipped: false,
+        },
+      ],
+    });
+    const announce = (hits: ReturnType<typeof hit>[]) => {
+      engine.state.write((ctx) => {
+        announceWatchpointReading(ctx, {
+          workstreamId: workstream.id,
+          projectId: engine.project.id,
+          taskId: task.id,
+          taskTitle: task.title,
+          detail: { hits, head: 'h', skipped: null },
+        });
+      });
+    };
+    const looks = () =>
+      listInbox(engine.store.db, {}).filter(
+        (item) =>
+          item.kind === InboxKind.Watchpoint &&
+          item.targets.some((t) => t.workstreamId === workstream.id),
+      );
+    const migration = hit('migrations', 'src/api/migrations/0001_x.sql');
+    announce([migration]);
+    const [first] = looks();
+    if (first === undefined) throw new Error('no Look card');
+    engine.inbox.answer(first.id, { choice: WatchpointChoice.LooksRight });
+    // The next steps read the same change.
+    announce([migration]);
+    announce([migration]);
+    expect(looks()).toHaveLength(1);
+    // A watchpoint no answered card named is still asked about, alone.
+    announce([migration, hit('contracts', 'src/api/contracts/x.ts')]);
+    const later = looks().filter((item) => item.id !== first.id);
+    expect(later.map((item) => item.detail)).toEqual([
+      { watchpoints: [{ key: 'contracts', label: 'contracts' }] },
+    ]);
   });
 });
 

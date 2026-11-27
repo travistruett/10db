@@ -15,6 +15,7 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  answeredItemsForWorkstream,
   getWorkstreamRow,
   insertInboxItem,
   insertWatchpointFollowUp,
@@ -50,7 +51,10 @@ export function announceWatchpointReading(
     detail: WatchpointDetail | null;
   },
 ): void {
-  const asks = hitsAt(input.detail, WatchpointLoudness.Ask);
+  const looked = lookedAt(ctx, input.workstreamId);
+  const asks = hitsAt(input.detail, WatchpointLoudness.Ask).filter(
+    (h) => !looked.has(h.watchpoint.key),
+  );
   if (asks.length > 0) raiseWatchpointCard(ctx, { ...input, asks });
   else if (input.detail?.skipped === null) withdrawLiveCard(ctx, input.workstreamId);
   const shows = hitsAt(input.detail, WatchpointLoudness.Show);
@@ -66,6 +70,20 @@ export function announceWatchpointReading(
         .map((h) => `${h.watchpoint.label}: ${h.files.map((f) => f.path).join(', ')}`)
         .join('\n'),
     });
+}
+
+/**
+ * The watchpoints the builder already answered a Look card of the workstream about: a later reading of the same
+ * run doesn't ask again. A card 10db withdrew has no answer, so a change that comes back is asked about again.
+ */
+function lookedAt(ctx: WriteContext, workstreamId: WorkstreamId): Set<string> {
+  const keys = new Set<string>();
+  for (const card of answeredItemsForWorkstream(ctx.tx, workstreamId, InboxKind.Watchpoint)) {
+    if (!card.answer) continue;
+    const detail = WatchpointCardDetail.safeParse(card.detail);
+    if (detail.success) for (const w of detail.data.watchpoints) keys.add(w.key);
+  }
+  return keys;
 }
 
 /** A later reading with nothing to ask about closes the card the earlier one left, as 10db's own withdrawal. */

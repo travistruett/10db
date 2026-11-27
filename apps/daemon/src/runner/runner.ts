@@ -5042,22 +5042,26 @@ export function createRunner(opts: RunnerOptions): Runner {
     if (checkCoverage(command, [], checkout) === null) return null;
     try {
       const head = knownHead ?? (await opts.git.head(checkout));
-      let own: string[];
-      if (checkout !== getProject(db, row.projectId).repoPath) {
-        // Read again: the gate's base update moves the task's base.
-        const base = getWorkstreamRow(db, row.id).baseHead ?? head;
-        own = await opts.git.filesChangedBetween(checkout, base, head);
-      } else {
-        const { ranges } = await ownWork(row, checkout, row.baseHead ?? head);
-        const files = await Promise.all(
-          ranges.map((r) => opts.git.filesChangedBetween(checkout, r.base, r.head)),
-        );
-        own = withoutStartDirt(
-          [...new Set(files.flat())],
-          checkout,
-          passOfWorkstream(db, row.id) ? null : getTaskStartDirt(db, row.taskId),
-        );
-      }
+      const inWorktree = checkout !== getProject(db, row.projectId).repoPath;
+      // A worktree's base is read again: the gate's base update moves the task's base.
+      const base = (inWorktree ? getWorkstreamRow(db, row.id).baseHead : row.baseHead) ?? head;
+      const { ranges } = await ownWork(row, checkout, base);
+      const files = [
+        ...new Set(
+          (
+            await Promise.all(
+              ranges.map((r) => opts.git.filesChangedBetween(checkout, r.base, r.head)),
+            )
+          ).flat(),
+        ),
+      ];
+      const own = inWorktree
+        ? files
+        : withoutStartDirt(
+            files,
+            checkout,
+            passOfWorkstream(db, row.id) ? null : getTaskStartDirt(db, row.taskId),
+          );
       return checkCoverage(command, own, checkout);
     } catch {
       return null;
