@@ -43,7 +43,8 @@ function Section({
 }
 
 /** A model's binding in a run: two slots may name one model. */
-const bindingOf = (m: EvalModelResultDto): string => `${m.slot ?? ''}|${m.model}`;
+const bindingOf = (m: EvalModelResultDto, place: number): string =>
+  `${String(place)}|${m.slot ?? ''}|${m.model}`;
 
 /** One model's gates, failing first, each rate against its minimum. */
 function Gates({ model }: { readonly model: EvalModelResultDto }) {
@@ -89,7 +90,11 @@ function RunGates({ detail }: { readonly detail: EvalSuiteDetailDto }) {
     (a, b) => Number(a.passed) - Number(b.passed),
   );
   const [chosen, setChosen] = useState<string | null>(null);
-  const shown = models.find((m) => bindingOf(m) === chosen) ?? models[0];
+  const shownPlace = Math.max(
+    0,
+    models.findIndex((m, place) => bindingOf(m, place) === chosen),
+  );
+  const shown = models[shownPlace];
   if (shown === undefined) return null;
   return (
     <Section
@@ -102,10 +107,10 @@ function RunGates({ detail }: { readonly detail: EvalSuiteDetailDto }) {
           aria-label="Model"
           allowDeselect={false}
           searchable={models.length > SEARCHABLE_MODELS}
-          value={bindingOf(shown)}
+          value={bindingOf(shown, shownPlace)}
           onChange={setChosen}
-          data={models.map((m) => ({
-            value: bindingOf(m),
+          data={models.map((m, place) => ({
+            value: bindingOf(m, place),
             label: `${modelDisplayName(m, models)} · ${gatesPassed(m)} gates`,
           }))}
         />
