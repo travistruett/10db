@@ -1,6 +1,6 @@
 # Inbox cards that mean something
 
-**Status:** designed on 2026-11-27, not built.
+**Status:** designed on 2026-11-27 and ruled on by the builder the same day; not built.
 
 **Builds on:** `docs/superpowers/specs/2026-11-17-10db-inbox-signal-design.md` (which cards exist: ask, notice or
 status) and pull request #944 (a dim line in the bar saying what each answer does, and buttons named by effect).
@@ -56,8 +56,11 @@ understood in seconds.
    code would fail the same way.
 5. Phone pushes only for high-urgency asks.
 
-**Needed from you:** a reply on this brief and on the mock-ups linked from the pull request. Then cut the stages in
-§9. Nothing else.
+**Ruled by the builder on 2026-11-27:** the card grammar, the titles and the mock-ups stand (more feedback on
+the mock-ups may follow). Calls 2 to 4 are accepted, with the refinements in
+`2026-11-27-what-reaches-the-builder-design.md`, which decides who answers each card and is now the roadmap.
+Calls 1 and 5 are overruled: nothing that is the builder's expires or folds, and every builder card is pushed.
+So stage A5 and stage D are cut, and stage B carries no expiry fate or sweep.
 
 ---
 
@@ -504,11 +507,11 @@ Each stage is sized by the code it touches, per the repo's rules. Stages A and B
 | A2    | Small   | Acceptance: drop the scores from the body and notes, and drop the `unasked` line when it carries no description (a bug)                      | related tests                                                                 |
 | A3    | Small   | Retitle precedent, judge outage, Linear held, base red, flaky check (a check with no tests reads as a title change)                          | related tests                                                                 |
 | A4    | Small   | Claim deadlock: options read A Waits, B Waits, Cancel A, Cancel B, with A and B named in the body                                            | related tests                                                                 |
-| A5    | Small   | Push only for high asks                                                                                                                      | related tests                                                                 |
+| A5    | Cut     | ~~Push only for high asks~~ (every builder card is pushed)                                                                                                                      | related tests                                                                 |
 | A6    | Small   | The Activity panel's rows take the Inbox list's spacing (§6.1)                                                                               | none (a screenshot)                                                           |
 | B     | Feature | `CardBrief`, `InboxOption.undo` and the expiry fate in contracts; the expiry sweep; the desktop draws the five parts, the Recommended mark and Open's sections; briefs on the six mock-up kinds | extend `apps/desktop/e2e/inbox.spec.ts` with one acceptance and one gate card |
 | C     | Feature | The runner table (§5.2), the summary layout, and Start Fix Task on the gate card                                                             | one unit test per runner (a parser)                                           |
-| D     | Feature | Merged-work rows (§3.3), the 7-day expiry, Make It Show, and acceptance criteria that name the builder raised as questions                   | extend the `loop` e2e                                                         |
+| D     | Cut     | Merged-work rows (§3.3), the 7-day expiry, Make It Show, and acceptance criteria that name the builder raised as questions                   | extend the `loop` e2e                                                         |
 | E     | Feature | Short names (`shortTitle`, its migration last), follow-up titles by root and round, the round-3 card                                         | one test on the real SQLite for the root walk                                 |
 | F1    | Core    | Automatic fix task for an in-batch ship gate failure                                                                                         | per its plan's cards                                                          |
 | F2    | Core    | Claim deadlock: automatic yield of the later asker                                                                                           | per its plan's cards                                                          |
