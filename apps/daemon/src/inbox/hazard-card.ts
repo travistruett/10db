@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   HazardRemoval,
   InboxKind,
   type HazardEntryKind,
@@ -17,7 +18,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { z } from 'zod';
-import { CardTier } from './card-tier';
+import { CardTier, decidedByBuilder } from './card-tier';
 import type { FlagInput } from './service';
 
 const HAZARD_DETAIL = 'hazardRemovals';
@@ -70,6 +71,7 @@ export function hazardRemovalCard(
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: { by: 'withdrawn', when: 'no hazard removal is pending (removal-card)' },
+    decision: decidedByBuilder(BuilderOwns.Guardrails),
     title: `Loosen ${removals.length === 1 ? 'a hazard' : `${String(removals.length)} hazards`} in ${project.name}?`,
     body: [
       '10db read the repository again and found hazard entries it no longer sees a reason for. A hazard makes tasks take turns, so taking one out is only done with your yes.',

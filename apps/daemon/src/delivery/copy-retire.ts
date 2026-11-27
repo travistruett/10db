@@ -1,5 +1,6 @@
 import {
   BatchState,
+  BuilderOwns,
   CopyStep,
   type BatchId,
   Urgency,
@@ -7,7 +8,7 @@ import {
   type LocalCopyDto,
 } from '@10db/contracts';
 import { getBatch, getLocalCopy, getProject, patchLocalCopy } from '@10db/db';
-import { BY_ANSWER, CardTier } from '../inbox';
+import { BY_ANSWER, CardTier, decidedByBuilder } from '../inbox';
 import { worktreeOffer, type Card } from './cards';
 import { projectAtCheckout } from './checkout';
 import { withdraw, raise, type DeliveryContext } from './context';
@@ -31,6 +32,7 @@ function teardownFailed(batch: BatchDto, what: string): Card {
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     title: `The copy of "${batch.title}" was not cleaned up: its teardown did not finish`,
     body: `10db kept the copy's worktree until the command that drops the copy's databases succeeds. The command must be safe to run again.\n\n${what}`,
     foldKey: teardownFoldKey(batch.id),

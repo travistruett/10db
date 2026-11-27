@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import {
+  BuilderOwns,
   CARD_OPENS,
   CARD_RESOLVES_WHEN,
   Urgency,
@@ -22,7 +23,7 @@ import {
 } from '../sessions';
 import { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
 import type { InboxService } from './service';
-import { BY_ANSWER, CardTier } from './card-tier';
+import { BY_ANSWER, CardTier, decidedByBuilder } from './card-tier';
 import { resolveStaleCards } from './resolve-cards';
 
 /**
@@ -83,6 +84,7 @@ export function flagMcpFailure(
     workstreamId,
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
+    decision: decidedByBuilder(BuilderOwns.Guardrails),
     ...configCard(projectId, repoPath),
     title: `The repo's MCP server "${failure.name}" can't run as written`,
     body: failure.message,
@@ -133,6 +135,7 @@ export function createProjectMcpReader(deps: ProjectMcpReaderDeps): ProjectMcpRe
             workstreamId,
             tier: CardTier.Ask,
             urgency: Urgency.High,
+            decision: decidedByBuilder(BuilderOwns.Guardrails),
             ...configCard(project.id, project.repoPath),
             title: "The repo's MCP config stops sessions from starting",
             body: error.message,
@@ -159,6 +162,7 @@ export function createProjectMcpReader(deps: ProjectMcpReaderDeps): ProjectMcpRe
           workstreamId,
           tier: CardTier.Ask,
           urgency: Urgency.Normal,
+          decision: decidedByBuilder(BuilderOwns.Guardrails),
           ...configCard(project.id, project.repoPath),
           title: "Check the repo's MCP config",
           body: warning,

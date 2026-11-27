@@ -55,6 +55,7 @@ const NOTICE_TYPES = [
   },
   { name: 'hand-made-removed', matches: startsWith('hand-made-removed:') },
   { name: 'hand-made-spotlight-done', matches: startsWith('hand-made-spotlight-done:') },
+  { name: 'flaky-check', matches: startsWith('flaky-check:') },
 ] as const;
 
 /** The notice type an open card is a leftover of, or null when it is an ask or a status. */

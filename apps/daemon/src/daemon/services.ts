@@ -195,6 +195,7 @@ import type { Git } from '../git';
 import { coverageSubjects, sumCoverage, type WatchpointCoverageReader } from '../watchpoints';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import {
+  createActivityActions,
   earlierMcpApproval,
   requestMcpApproval,
   withdrawStartHoldCard,
@@ -559,6 +560,15 @@ export function createServices(deps: {
       'new tasks',
     );
   }
+  const activityActions = createActivityActions({
+    state: deps.state,
+    // Undo puts a project back on the account 10db moved it from, as the builder's own move does.
+    moves: {
+      moveProject: (projectId, accountId) => {
+        deps.moves.move(projectId, accountId, { cause: MoveCause.Builder });
+      },
+    },
+  });
   /** What was found of a project's evals, with where 10db's own assessment of them stands. */
   async function readEvalsPage(projectId: ProjectId): Promise<EvalsDto> {
     const read = await deps.evals.read(projectId, getProject(db, projectId).repoPath);
@@ -994,9 +1004,15 @@ export function createServices(deps: {
         connectedTeams: deps.slackConnections.connectedTeams(),
       }),
     pageActivity: (query) => pageActivity(db, query),
+    undoActivity: (seq) => {
+      activityActions.undo(seq);
+    },
+    askNextTime: (seq, asking) => {
+      activityActions.askNextTime(seq, asking);
+    },
     inboxCardContext: (id) => inboxCardContext(db, id, CARD_CONTEXT_MESSAGES),
-    answerInbox(id, answer) {
-      const item = deps.inbox.answer(id, answer);
+    answerInbox(id, answer, answerer) {
+      const item = deps.inbox.answer(id, answer, answerer);
       deps.scheduler.requestTick();
       return item;
     },

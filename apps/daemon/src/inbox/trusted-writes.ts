@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  BuilderOwns,
   InboxKind,
   type InboxAnswer,
   type InboxItemDto,
@@ -17,7 +18,7 @@ import {
 } from '@10db/db';
 import { z } from 'zod';
 import { existsAsEntry } from '../git';
-import { BY_ANSWER, CardTier } from './card-tier';
+import { BY_ANSWER, CardTier, decidedByBuilder } from './card-tier';
 import type { FlagInput } from './service';
 
 /** The answers a single stray-write card offers, shown as written. Dismiss closes only that card. */
@@ -180,6 +181,7 @@ export function applyTrustChoice(
       tier: CardTier.Ask,
       urgency: item.urgency,
       closesWhen: BY_ANSWER,
+      decision: decidedByBuilder(BuilderOwns.Guardrails),
       workstreamId: item.targets[0]?.workstreamId ?? null,
       title: item.title,
       body: now === null ? body : `${body}\nVersion ${shortSha(now)}`,

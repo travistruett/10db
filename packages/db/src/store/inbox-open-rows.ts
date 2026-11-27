@@ -4,6 +4,7 @@ import {
   inboxRowKey,
   inboxRowSort,
   InboxState,
+  isBuilderCard,
   readyPassOf,
   RoutedBy,
   type InboxPageDto,
@@ -92,6 +93,8 @@ export function openRowsPage(
   const rows: OpenRow[] = [];
   const byKey = new Map<string, OpenRow>();
   for (const card of cards) {
+    // Open holds the builder's decisions only: a card another decider settles is never a row here.
+    if (!isBuilderCard(card)) continue;
     const key = inboxRowKey(card);
     const counted = card.routedBy !== RoutedBy.TriagePending;
     const matched = card.hit === 1;

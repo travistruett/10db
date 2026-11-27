@@ -1,6 +1,7 @@
 import {
   AbandonStep,
   BatchState,
+  BuilderOwns,
   pageLabel,
   PassState,
   TakeOutStep,
@@ -35,7 +36,7 @@ import {
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
 import { shellWord } from '../git';
-import { CardTier, flagCard, postNotice, withdrawCard } from '../inbox';
+import { CardTier, decidedByBuilder, flagCard, postNotice, withdrawCard } from '../inbox';
 import { PASS_CARD_DETAIL, PASS_CARD_KIND, PassCardKind, withdrawFolderCard } from './folder';
 import { passBranch, readKeptRef, type PassWorkDeps } from './kept-work';
 import { keepOrLetGo } from './shared-chain';
@@ -216,6 +217,7 @@ export function raiseAbandonCard(
       tier: CardTier.Ask,
       urgency: Urgency.Normal,
       closesWhen: { by: 'withdrawn', when: 'the folder moves to the return branch (abandon)' },
+      decision: decidedByBuilder(BuilderOwns.YourHands),
       title,
       body,
       foldKey: passAbandonCardKey(pass.id),

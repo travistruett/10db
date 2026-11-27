@@ -62,6 +62,7 @@ export function createAccountLimits(opts: {
       tier: card.tier,
       urgency: card.urgency,
       closesWhen: card.closesWhen,
+      decision: card.decision,
       title: card.title,
       body: card.body,
       detail: card.detail,

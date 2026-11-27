@@ -8,10 +8,11 @@ import {
   setBatchNotice,
   transitionBatch,
 } from '@10db/db';
-import type { BatchId, ProjectId } from '@10db/contracts';
+import { BuilderOwns, type BatchId, type ProjectId } from '@10db/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { waitFor } from '../../test/fixtures';
+import { decidedByBuilder } from '../inbox';
 import { ManualClock } from '../clock';
 import { GhError, PrState, type CheckRollupItem, type Gh } from '../github';
 import { prCardKey } from './cards';
@@ -167,7 +168,13 @@ describe('the pull request watch', () => {
     expect(checksCard.body.startsWith(lintUrl)).toBe(true);
     expect(checksCard.body).toContain('https://github.com/acme/widgets/actions/runs/test');
     expect(checksCard.body).toContain(prUrl);
-    expect(checksCard.detail).toEqual({ batchId: id, prUrl, link: lintUrl });
+    expect(checksCard.detail).toEqual({
+      batchId: id,
+      prUrl,
+      link: lintUrl,
+      decider: 'builder',
+      owns: 'out_of_moves',
+    });
     expect(pr(id)).toMatchObject({ checks: 'failing' });
 
     await round(w);
@@ -199,7 +206,14 @@ describe('the pull request watch', () => {
     expect(card.body).toContain('keeps the local branch 10db/Alpha until you answer');
     expect(card.body).not.toContain('new batch');
     expect(card.options.map((o) => o.label)).toEqual(['Delete Branch', 'Keep']);
-    expect(card.detail).toEqual({ batchId: id, prUrl, link: prUrl, branchCard: { batchId: id } });
+    expect(card.detail).toEqual({
+      batchId: id,
+      prUrl,
+      link: prUrl,
+      branchCard: { batchId: id },
+      decider: 'builder',
+      owns: 'one_way_door',
+    });
     expect(pr(id)).toMatchObject({ state: 'closed' });
     expect(findOpenByFoldKey(h.store.db, h.project.id, `pr-closed:${id}`)).toBeDefined();
     expect(findOpenByFoldKey(h.store.db, h.project.id, `pr-checks:${id}`)).toBeUndefined();
@@ -303,6 +317,7 @@ describe('the pull request watch', () => {
           tier: 'ask',
           urgency: 'high',
           closesWhen: { by: 'answer' },
+          decision: decidedByBuilder(BuilderOwns.OutOfMoves),
           title: 'Pull request conflicts',
           body: 'x',
           foldKey: prCardKey.catchUp(id),
@@ -566,6 +581,8 @@ describe('gh unavailable', () => {
       prUrl: a.prUrl,
       ghCheck: true,
       openIntegrations: 'github',
+      decider: 'builder',
+      owns: 'your_hands',
     });
 
     await round(w);

@@ -1,5 +1,6 @@
 import {
   Approval,
+  BuilderOwns,
   ConflictError,
   InboxKind,
   InboxState,
@@ -46,7 +47,14 @@ import { z } from 'zod';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { coverageLinesOf, coverageSection } from '../evals';
-import { flagCard, rewordCard, BY_ANSWER, CardTier, type InboxService } from '../inbox';
+import {
+  flagCard,
+  rewordCard,
+  BY_ANSWER,
+  CardTier,
+  decidedByBuilder,
+  type InboxService,
+} from '../inbox';
 import type { Logger } from '../log';
 import { defaultPrecedentKind, isStorableProgramKey, LIMITS, writtenConfig } from '../trust';
 import { checkoutOf } from './checkout';
@@ -318,6 +326,7 @@ export async function raiseSkippedCard(
       tier: CardTier.Ask,
       urgency: Urgency.Normal,
       closesWhen: BY_ANSWER,
+      decision: decidedByBuilder(BuilderOwns.Guardrails),
       title: `Skipped while you were away: ${task.title}`,
       body: withEvals(ctx.tx, workstreamId, bodyOf(skips, written)),
       options:

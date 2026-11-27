@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   CARD_RESOLUTION,
   ConflictError,
   InboxState,
@@ -30,7 +31,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { LIMITS } from '../trust';
-import { BY_ANSWER, CardTier } from './card-tier';
+import { BY_ANSWER, CardTier, decidedByBuilder } from './card-tier';
 import { postNotice } from './notice';
 import { flagCard } from './service';
 
@@ -136,6 +137,7 @@ export function refreshPrecedentCard(
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.Guardrails),
     title,
     body,
     options: [],
@@ -239,6 +241,7 @@ export function raisePrecedentConflict(
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.Guardrails),
     title: `The standing approval for \`${key}\` matched ${String(row.conflicts)} calls 10db stopped${limits.length === 0 ? '' : ` at ${limits.join(', ')}`}`,
     body: [
       `The standing approval for ${quoted(row.kind)} is paused: calls of this kind go back to being judged without it.`,

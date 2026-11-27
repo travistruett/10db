@@ -1,8 +1,11 @@
 import {
+  BuilderOwns,
   CARD_RELEASED_WORKSTREAMS,
+  CARD_RESOLVES_WHEN,
   ReleasedWorkstreams,
   Urgency,
   WORKSTREAM_FAILED_TITLE_PREFIX,
+  type BatchId,
   type InboxOption,
   type ProjectId,
   type TaskId,
@@ -16,7 +19,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { z } from 'zod';
-import { CardTier } from './card-tier';
+import { CardTier, decidedByBuilder } from './card-tier';
 import { flagCard, withdrawCard } from './service';
 
 /** A task has one failed card: a later run's failure folds into it. */
@@ -31,6 +34,8 @@ export interface FailedRun {
   readonly id: WorkstreamId;
   readonly taskId: TaskId;
   readonly projectId: ProjectId;
+  /** The batch the run was in: the card closes itself once it is over (`batch_over`). */
+  readonly batchId?: BatchId | null;
 }
 
 /** What the card says of the run that failed last, and what its answers act on. */
@@ -62,6 +67,9 @@ export function flagFailedRun(ctx: WriteContext, run: FailedRun, content: Failed
     ...content.detail,
     ...(runs > 1 ? { [FAILED_RUNS]: runs } : {}),
     ...(released.length > 0 ? { [CARD_RELEASED_WORKSTREAMS]: released } : {}),
+    ...(run.batchId === undefined || run.batchId === null
+      ? {}
+      : { [CARD_RESOLVES_WHEN]: { event: 'batch_over', batchId: run.batchId } }),
   };
   const task = getTask(ctx.tx, run.taskId);
   const card = flagCard(ctx, {
@@ -73,6 +81,7 @@ export function flagFailedRun(ctx: WriteContext, run: FailedRun, content: Failed
       by: 'withdrawn',
       when: 'the run is retried, cancelled or shipped (cancelForWorkstream), or a later run of the task finishes',
     },
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     title: `${WORKSTREAM_FAILED_TITLE_PREFIX}${task.title}${runs > 1 ? ` (${String(runs)} runs)` : ''}`,
     body: content.body,
     ...(content.options === undefined ? {} : { options: content.options }),

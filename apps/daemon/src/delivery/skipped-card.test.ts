@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   InboxState,
   SkipKind,
   SkipSource,
@@ -10,7 +11,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore } from '../events';
-import { BY_ANSWER, CardTier, createInboxService } from '../inbox';
+import { BY_ANSWER, CardTier, createInboxService, decidedByBuilder } from '../inbox';
 import { silentLogger } from '../log';
 import { closeFinishedSkippedCards, raiseSkippedCard, SkippedChoice } from './skipped-card';
 
@@ -51,6 +52,7 @@ describe('the skipped-calls item of a run', () => {
       tier: CardTier.Ask,
       urgency: 'high',
       closesWhen: BY_ANSWER,
+      decision: decidedByBuilder(BuilderOwns.OutOfMoves),
       title: `${WORKSTREAM_FAILED_TITLE_PREFIX}${task.title}`,
       body: 'The gate failed 4 times',
     });

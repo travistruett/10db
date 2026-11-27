@@ -1,4 +1,10 @@
-import { SKILL_VERSION_HEADER, DevUiConnectionDto, mintId } from '@10db/contracts';
+import {
+  ANSWERER_HEADER,
+  Answerer,
+  SKILL_VERSION_HEADER,
+  DevUiConnectionDto,
+  mintId,
+} from '@10db/contracts';
 import { defineWebSocketHelper } from 'hono/ws';
 import { describe, expect, it } from 'vitest';
 import { devUiMayRead } from '../screens';
@@ -42,6 +48,31 @@ describe('the skill version check', () => {
       headers: { [SKILL_VERSION_HEADER]: 'bbbbbbbbbbbb' },
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe('who answered a card', () => {
+  const cardId = mintId('InboxItem');
+  async function answeredAs(headers: Record<string, string>): Promise<Answerer | null> {
+    let recorded: Answerer | null = null;
+    const services = stubServices({
+      answerInbox: (_id, _answer, answerer) => {
+        recorded = answerer;
+        throw new Error('stop after recording');
+      },
+    });
+    await app(services).request(`/inbox/${cardId}/answer`, {
+      method: 'POST',
+      headers: { ...auth.headers, ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ choice: 'Yes' }),
+    });
+    return recorded;
+  }
+
+  it('records a caller that does not say it is the builder as an agent', async () => {
+    expect(await answeredAs({})).toBe(Answerer.Agent);
+    expect(await answeredAs({ [ANSWERER_HEADER]: Answerer.Rule })).toBe(Answerer.Agent);
+    expect(await answeredAs({ [ANSWERER_HEADER]: Answerer.Builder })).toBe(Answerer.Builder);
   });
 });
 

@@ -1,4 +1,11 @@
-import { InboxKind, InboxState, ProjectId, QuestionCategory, Urgency } from '@10db/contracts';
+import {
+  Answerer,
+  InboxKind,
+  InboxState,
+  ProjectId,
+  QuestionCategory,
+  Urgency,
+} from '@10db/contracts';
 import { createStore, insertInboxItem, openDatabase, updateInboxItem } from '@10db/db';
 import { z } from 'zod';
 
@@ -62,7 +69,7 @@ if (seed.state === 'resolved') {
     store.write((ctx) =>
       updateInboxItem(ctx, card.id, {
         state: InboxState.Resolved,
-        answer: { choice: card.options[0]?.label ?? 'dismissed' },
+        answer: { choice: card.options[0]?.label ?? 'dismissed', answerer: Answerer.Builder },
       }),
     );
   });

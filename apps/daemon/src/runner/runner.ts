@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   TrustSurface,
+  BuilderOwns,
   ClaimKind,
   JudgeDecision,
   JudgeOutcome,
@@ -280,6 +281,7 @@ import {
 } from '../guard';
 import {
   CardTier,
+  decidedByBuilder,
   createHookJudge,
   createLimitNotes,
   createPermissionBroker,
@@ -2887,6 +2889,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         urgency: Urgency.High,
         // The account's models are in Settings; answering the card closes it.
         closesWhen: BY_ANSWER,
+        decision: decidedByBuilder(BuilderOwns.OutOfMoves),
         detail: {
           [CARD_OPENS]: { to: 'settings', section: 'accounts', label: 'Choose Another Model' },
         },

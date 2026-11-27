@@ -6,8 +6,8 @@ import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { diskCard, DISK_FOLD_KEY } from './card';
 import { projectForMachineCard } from './card-project';
-import { CARD_OPENS, Urgency } from '@10db/contracts';
-import { CardTier } from '../inbox';
+import { BuilderOwns, CARD_OPENS, Urgency } from '@10db/contracts';
+import { CardTier, decidedByBuilder } from '../inbox';
 
 /**
  * Where the free-disk floor is set. Settings has no Capacity section yet, so the link opens Settings
@@ -99,6 +99,7 @@ export function createDiskHold(opts: DiskHoldOptions): DiskHold {
         urgency: Urgency.High,
         detail: { [CARD_OPENS]: CAPACITY_SETTINGS },
         closesWhen: { by: 'withdrawn', when: 'free disk is above the floor again (disk)' },
+        decision: decidedByBuilder(BuilderOwns.YourHands),
         title: content.title,
         body: content.body,
         foldKey: content.foldKey,

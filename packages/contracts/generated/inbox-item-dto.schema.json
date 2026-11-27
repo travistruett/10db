@@ -598,6 +598,15 @@
                 }
               ]
             },
+            "answerer": {
+              "type": "string",
+              "enum": [
+                "builder",
+                "stakeholder",
+                "agent",
+                "rule"
+              ]
+            },
             "answeredBy": {
               "type": "string"
             },

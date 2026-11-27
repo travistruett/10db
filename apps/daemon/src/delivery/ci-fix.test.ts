@@ -127,10 +127,12 @@ describe('a required check that fails once on a head', () => {
     await round(first);
     expect(fixBatches(root)).toEqual([]);
     expect(checksCards()).toEqual([]);
-    const flaky = h.only(h.cards());
-    expect(flaky.title).toBe('build passed only on a rerun: a test is flaky (1 time)');
+    // A flake asks nothing of the builder: it is a notice in Activity, never a card.
+    expect(h.cards()).toEqual([]);
+    const flaky = h.only(h.notices().filter((n) => n.key === 'flaky-check:build'));
+    expect(flaky.line).toBe('Flaky check: build failed, then passed on a rerun');
     expect(flaky.body).toContain(head);
-    expect(flaky.detail).toMatchObject({ head, prUrl });
+    expect(flaky.projectId).toBe(h.project.id);
     expect(getBatch(h.store.db, root.id).notices.map((n) => n.key)).toContain(
       `checks-failed-rerun:${head}`,
     );

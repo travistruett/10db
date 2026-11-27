@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   clipText,
   Urgency,
   type InboxAnswer,
@@ -18,7 +19,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { BY_ANSWER, CardTier, type InboxService } from '../inbox';
+import { BY_ANSWER, CardTier, decidedByBuilder, type InboxService } from '../inbox';
 import { linearLinkOf } from './task-link';
 
 // The project's one Inbox card for Linear updates that need the builder:
@@ -87,6 +88,7 @@ export function refreshReporterCard(
     tier: CardTier.Status,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.Promise),
     workstreamId: null,
     title: `Linear updates for ${getProject(deps.state.db, projectId).name} ${held > 0 ? 'are held' : 'are not going through'}: ${titleReason}`,
     body: [

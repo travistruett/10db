@@ -5,7 +5,14 @@ import {
   type Notice,
   type TaskId,
 } from '@10db/contracts';
-import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
+import { z } from 'zod';
 import { readJson, type DaemonClient } from './client';
 import { useDaemon } from './provider';
 
@@ -33,6 +40,7 @@ async function fetchActivity(
         ...(list.project === undefined ? {} : { project: list.project }),
         ...(list.task === undefined ? {} : { task: list.task }),
         ...(list.q === undefined ? {} : { q: list.q }),
+        ...(list.decided === undefined ? {} : { decided: list.decided }),
         ...(paging.after == null ? {} : { after: paging.after }),
       },
     }),
@@ -69,6 +77,45 @@ export function useActivityRows(list: ActivityList) {
     error: query.isFetchNextPageError ? null : query.error,
     moreError: query.isFetchNextPageError ? query.error : null,
   };
+}
+
+/**
+ * Undo takes back the decision a row reports; the daemon refuses (409) one that can't be undone or already was,
+ * and the refusal's words show on the row.
+ */
+export function useUndoActivity() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    meta: { quiet: true },
+    mutationFn: async (seq: number) => {
+      await readJson(
+        await client.activity[':seq'].undo.$post({ param: { seq: String(seq) } }),
+        z.null(),
+      );
+    },
+    // The row now says undone, and the move's own notice joins the list.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: activityKeys.all }),
+  });
+}
+
+/** Ask Me Next Time sets a row's rule to ask in its project, or, with `asking` false, back to deciding. */
+export function useAskNextTime() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    meta: { quiet: true },
+    mutationFn: async (input: { readonly seq: number; readonly asking: boolean }) => {
+      const param = { seq: String(input.seq) };
+      await readJson(
+        input.asking
+          ? await client.activity[':seq']['ask-next-time'].$put({ param })
+          : await client.activity[':seq']['ask-next-time'].$delete({ param }),
+        z.null(),
+      );
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: activityKeys.all }),
+  });
 }
 
 /** A task's latest notices as the drawer draws them; none, and no request, without a task. */

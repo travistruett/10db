@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
-import type { BatchDto, WorkstreamDto } from '@10db/contracts';
+import { BuilderOwns, type BatchDto, type WorkstreamDto } from '@10db/contracts';
 import {
   getAppSetting,
   getBatch,
@@ -20,7 +20,7 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { commitIn, onOrigin, opened, pathOf } from '../../test/delivery-worlds';
 import { isolatedGitEnv } from '../../test/fixtures';
 import { createGit, parseWorktreeList, type GitTrustError } from '../git';
-import { createInboxService } from '../inbox';
+import { createInboxService, decidedByBuilder } from '../inbox';
 import { retryWorkstream } from '../team';
 import {
   batchCardFields,
@@ -280,6 +280,7 @@ describe("the base, brought into a worktree batch's branch before the shipping g
       tier: 'ask',
       urgency: 'high',
       closesWhen: { by: 'answer' },
+      decision: decidedByBuilder(BuilderOwns.OutOfMoves),
       title: 'Batch conflicts with main',
       body: 'x',
       foldKey: baseConflictKey(batch.id),
@@ -685,6 +686,7 @@ describe('Retry of a FAILED worktree batch', () => {
         tier: 'ask',
         urgency: 'high',
         closesWhen: { by: 'answer' },
+        decision: decidedByBuilder(BuilderOwns.OutOfMoves),
         projectId: h.project.id,
         workstreamId: ws.id,
         title: 'Workstream failed: Alpha',

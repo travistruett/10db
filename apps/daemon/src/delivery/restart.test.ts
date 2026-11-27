@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   ConflictError,
   mintId,
   WorkspaceMode,
@@ -22,6 +23,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { decidedByBuilder } from '../inbox';
 import { createFailedRestarts, type FailedRestarts } from './restart';
 
 let h: DeliveryHarness;
@@ -73,6 +75,7 @@ function failedCard(ws: { id: WorkstreamId }) {
     tier: 'ask',
     urgency: 'high',
     closesWhen: { by: 'answer' },
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     projectId: h.project.id,
     workstreamId: ws.id,
     title: 'Workstream failed: Alpha',

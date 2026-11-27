@@ -3,13 +3,15 @@ import { Anchor, Stack, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { ProjectLabel } from '../../shell/project-label';
 import { useSelectedProject } from '../../shell/selected-project';
+import { ActivityDecision } from './activity-decision';
 
 const WHEN = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const when = (iso: string): string => WHEN.format(new Date(iso));
 
 /**
- * The content for an Activity row: the notice's line and body, how often and when when it was grouped, its
- * project and a link to its task. A notice asks nothing, so there is no answer and no Dismiss.
+ * The content for an Activity row: the notice's line and body, how often and when when it was grouped, who
+ * decided it (with Undo and Ask Me Next Time) when 10db decided something for the builder, its project and a
+ * link to its task. A notice asks nothing, so there is no answer and no Dismiss.
  */
 export function ActivityContent({ row }: { readonly row: ActivityRow }) {
   const { select } = useSelectedProject();
@@ -28,6 +30,9 @@ export function ActivityContent({ row }: { readonly row: ActivityRow }) {
         <Text size="xs" c="dimmed">
           {when(row.at)}
         </Text>
+      )}
+      {row.decision === undefined ? null : (
+        <ActivityDecision row={{ ...row, decision: row.decision }} />
       )}
       {projectId === null ? null : <ProjectLabel projectId={projectId} />}
       {taskId === null ? null : (

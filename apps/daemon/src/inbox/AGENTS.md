@@ -98,6 +98,25 @@
   by `applyPrecedentConflictAnswer` in `onFlagAnswerInWrite`). A shown precedent whose runs changed since it was
   approved (`changedSince`) posts one notice per id and hash per session. The counts never fail the call. The shown
   precedent is in the verdict key, so approving, pausing or editing one judges its calls again.
+- A card that asks nothing of the builder is a notice (`what-reaches-the-builder` spec §3): a write outside every
+  claim to a path that is no guardrail (`watcher/AGENTS.md`), a flaky check (`prCards.flakyCheck`, key
+  `flaky-check:<name>`; `resolveNoticeCards` closes an older open card of it), and a judge outage whose cause may clear
+  alone, a timeout or a 5xx (`createJudgeOutageCard`, key `judge-outage`). No key, no credits, a 401 or 403 and an
+  expired AWS sign-in are `hard` (`JudgeOutage.hard`): one card at once, even after a notice for a transient outage.
+- Every card builder declares who decides it (`what-reaches-the-builder` spec §1, §3, §9; `card-decider.ts` in contracts):
+  `FlagInput.decision` is `decidedByBuilder(BuilderOwns.X)` (one of the seven things the builder owns) or a rule,
+  judge or stakeholder, and `flagCard` stores it as `detail.decider` and `detail.owns`. Open (`openRowsPage`) holds
+  only builder cards, a card with no stored decider is the builder's, and `shouldNotifyOpened` pushes only a builder
+  card; a builder card is never folded away or expired. `tests/repo/src/card-deciders.test.ts` fails when a card
+  builder declares none. A card whose rule has not been built yet stays a builder card: moving a kind off the
+  builder means posting a notice with a `NoticeDecision` instead, so it shows in Activity with who decided and its
+  Undo (`undo: undoable`) or why it is final. `createActivityActions` (`activity-actions.ts`) serves Undo
+  (`POST /activity/:seq/undo`, once per row) and Ask Me Next Time (`PUT` and `DELETE /activity/:seq/ask-next-time`):
+  a project's asking rules sit in `app_settings` (`rules.asking`, read through `isRuleAsking`), and a raiser of a
+  rule-decided notice checks it and raises a card instead when its rule is asking.
+- A failed run's card in a batch carries `resolvesWhen: { event: 'batch_over', batchId }` (`flagFailedRun`, from the
+  run's `batchId`), and `resolveOverBatchCards` (`delivery/stale-cards.ts`, at start and on every `batch.updated`)
+  closes it once the batch's pull request merged, or the batch is closed or abandoned.
 - A stray-write card could still be owned by a Failed run whose task is open (Retry), so it stays until the task finishes or is abandoned.
 - A chat's command outside the sandbox (`judgeBash` with `sandbox.unsandboxed`) is a `chatOnce` ask: no stored rule, carried allowance or project grant answers it, and the card offers Allow once, `allow_chat` and Deny. Its body is only what the agent says, on one quoted line through `visibleLine`, and the warning; the command is `detail.summary`, and `UNSANDBOXED_DETAIL` marks the card, so the desktop shows the command in a block of its own and nothing in it can pass for 10db's text. The loop and pnpm cards, which show only their body in the Inbox, end with `commandParagraph(command)`: the command labelled, on one line with every hidden character shown, after 10db's text. `summary` and the `allow_chat` key stay the raw command. `allow_chat` remembers the exact tool and command in the broker's closure, so it ends with the session and is never a rule or a decision. Every yes calls `mayRun` again; a refusal denies. A conversation's denial text (`chatDenialMessage`) invites another way instead of saying not to retry. `withdrawStaleConversationCards` withdraws every open conversation permission and question card at start, before any session starts, since the call that raised each ended with the daemon.
 - A remembered `allow_chat` call lasts for the turn, and only until the chat changes something or the checkout moves (decision `decisions/2026-11-26-a-chats-remembered-yes-outside-the-sandbox-lasts-for-the-turn.md`): the broker stores the session's change count (`sandbox.unsandboxed.changes(toolUseId)`, from `chat/hooks.ts`, which leaves out a Codex escalation's own sandboxed attempt and also moves at the turn's end and when another chat joins) and the checkout's state (`checkoutState`: HEAD and the changed and untracked files) under the key of the call and its cwd. A changed count or state asks again, and so does a state that can't be read; a yes given while the state can't be read is not remembered. `remembers` is false while something that can write the checkout shares it; a waiting chat and a closed pass waiting for its merge don't count.

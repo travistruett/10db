@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   InboxKind,
   type InboxAnswer,
   type InboxItemDto,
@@ -21,7 +22,7 @@ import {
 } from '../permissions';
 import { BlockedRun } from '../verify';
 import type { InboxService } from './service';
-import { BY_ANSWER, CardTier } from './card-tier';
+import { BY_ANSWER, CardTier, decidedByBuilder } from './card-tier';
 
 const NETWORK_TOOL = 'SandboxNetworkAccess';
 const GATE_HOST_DETAIL = 'gateHost';
@@ -127,6 +128,7 @@ export function raiseGateHostCards(
         tier: CardTier.Ask,
         urgency: Urgency.Normal,
         closesWhen: BY_ANSWER,
+        decision: decidedByBuilder(BuilderOwns.Guardrails),
         title: `Allow network access to ${host}?`,
         body: cardBody(input.run, host, input.command, file),
         options: [

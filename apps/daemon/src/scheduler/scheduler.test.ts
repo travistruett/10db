@@ -265,6 +265,7 @@ function pause(project: ReturnType<typeof seedProject>): void {
         tier: 'ask',
         urgency: 'high',
         closesWhen: { by: 'answer' },
+        decision: { decider: 'builder', owns: 'money' },
         title: 't',
         body: 'b',
         foldKey: 'k',

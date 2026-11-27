@@ -4,6 +4,7 @@ import { IconAlertTriangle } from '@tabler/icons-react';
 import { ProjectLabel } from '../../shell/project-label';
 import { shortAgo } from './short-ago';
 import { Lines } from '../inbox/inbox-row-item';
+import { decidedByText, undoText } from './activity-decision';
 
 /** A row of Activity; `key` names its group, so the open notice stays the same group as repeats join it. */
 export interface ActivityListRow {
@@ -62,7 +63,9 @@ export function ActivityRowItem({
             <ProjectLabel projectId={notice.projectId} />
           )}
           <Text fz={12} c="dimmed" truncate style={{ minWidth: 0 }}>
-            {firstLine(notice.body)}
+            {notice.decision === undefined
+              ? firstLine(notice.body)
+              : `${decidedByText(notice.decision)} · ${undoText({ ...notice, decision: notice.decision }) ?? 'Can be undone'}`}
           </Text>
         </>
       }

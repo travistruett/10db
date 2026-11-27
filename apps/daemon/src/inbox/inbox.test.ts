@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  Answerer,
   DEFAULT_HAZARDS,
   type HazardDef,
   InvalidError,
@@ -149,12 +150,13 @@ describe('permission broker', () => {
     );
     const card = onlyOpenCard();
     expect(card.kind).toBe('question');
-    inbox.answer(card.id, { choice: 'Yes' });
+    inbox.answer(card.id, { choice: 'Yes' }, Answerer.Agent);
     const decision = await pending;
     expect(decision.behavior === 'allow' && decision.updatedInput?.['answers']).toEqual({
       'Ship it?': 'Yes',
     });
     expect(events).toEqual(['start', 'end']);
+    expect(getInboxItem(state.db, card.id).answer?.answerer).toBe(Answerer.Agent);
   });
 
   it('writes a project rule for "always for this project" and skips the card next time', async () => {
@@ -165,6 +167,8 @@ describe('permission broker', () => {
     expect(card.kind).toBe('permission');
     inbox.answer(card.id, { choice: 'allow_project' });
     expect(await pending).toEqual({ behavior: 'allow' });
+    // The in-process caller is the builder's own page, so that is who is recorded.
+    expect(getInboxItem(state.db, card.id).answer?.answerer).toBe(Answerer.Builder);
     expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([
       expect.objectContaining({ toolName: 'Bash', pattern: 'docker compose', workstreamId: null }),
     ]);

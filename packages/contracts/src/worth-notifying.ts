@@ -1,13 +1,15 @@
 import { z } from 'zod';
+import { isBuilderCard } from './card-decider';
 import type { InboxItemDto } from './entities';
 import { RoutedBy, SendState } from './states';
 
 /**
- * Whether a card that just opened is worth a notification: not one triage is still placing, and not one
- * that went straight out to someone, since neither needs the builder. The desktop's notification and the
- * phone's push both read this, so the two cannot disagree.
+ * Whether a card that just opened is worth a notification: a builder card (every one is, whatever its urgency
+ * says), not one triage is still placing, and not one that went straight out to someone, since neither needs
+ * the builder. The desktop's notification and the phone's push both read this, so the two cannot disagree.
  */
 export function shouldNotifyOpened(item: InboxItemDto): boolean {
+  if (!isBuilderCard(item)) return false;
   if (item.routedBy === RoutedBy.TriagePending) return false;
   const send = item.send;
   if (send?.state === SendState.Sent || send?.state === SendState.Sending) return false;

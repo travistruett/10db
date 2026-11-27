@@ -19,6 +19,11 @@ export const CardResolvesWhen = z.discriminatedUnion('event', [
    * install was for, so a start can compare it with the commit it runs.
    */
   z.object({ event: z.literal('update_installed'), commit: z.string().min(1) }),
+  /**
+   * A failed run's card: stale once its batch is over (its pull request merged, or the batch was closed
+   * or abandoned), since nothing the card offers can still change the outcome.
+   */
+  z.object({ event: z.literal('batch_over'), batchId: BatchId }),
   /** A batch that waits on, or failed over, the wrong checkout branch: stale once the checkout is on the batch's branch. */
   z.object({ event: z.literal('branch_ready'), batchId: BatchId }),
   /** A Stuck card: stale once the stall sweep no longer finds the stall `key` names. */

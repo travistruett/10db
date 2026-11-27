@@ -2,6 +2,7 @@ import {
   AbandonStep,
   ConflictError,
   InboxState,
+  Answerer,
   PASS_SIGN_OFF_CHOICE,
   WorkstreamState as S,
   type TaskDto,
@@ -587,7 +588,7 @@ describe('a Sign Off from the Ready card that does not land', () => {
     w.h.state.write((ctx) =>
       updateInboxItem(ctx, id, {
         state: InboxState.Resolved,
-        answer: { choice: PASS_SIGN_OFF_CHOICE },
+        answer: { choice: PASS_SIGN_OFF_CHOICE, answerer: Answerer.Builder },
       }),
     );
     return id;

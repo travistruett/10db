@@ -11,6 +11,7 @@ import {
   QuestionCategory,
   topicKeyFrom,
   Urgency,
+  Answerer,
   type InboxAnswer,
   type InboxItemDto,
   type InboxOption,
@@ -271,7 +272,10 @@ export function closeProposalCard(ctx: WriteContext, proposal: ProposalDto, note
       : PrincipleVerdict.Reject;
   updateInboxItem(ctx, card.id, {
     state: InboxState.Resolved,
-    answer: note === undefined || note === '' ? { choice } : { choice, note },
+    answer:
+      note === undefined || note === ''
+        ? { choice, answerer: Answerer.Builder }
+        : { choice, note, answerer: Answerer.Builder },
   });
 }
 

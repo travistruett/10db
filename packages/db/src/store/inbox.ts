@@ -1,4 +1,5 @@
 import {
+  type Answerer,
   clipText,
   EventType,
   INBOX_OPTION_LABEL_MAX,
@@ -368,8 +369,11 @@ export function updateInboxItem(
     readonly state?: InboxState;
     readonly title?: string;
     readonly body?: string;
-    /** Null clears the answer, as an item opened again has none. */
-    readonly answer?: RecordedAnswer | null;
+    /**
+     * Null clears the answer, as an item opened again has none. An answer written now names who gave
+     * it; only one stored before that was recorded lacks the key.
+     */
+    readonly answer?: (RecordedAnswer & { readonly answerer: Answerer }) | null;
     readonly targets?: readonly InboxTarget[];
     readonly options?: readonly InboxOption[];
     /** Null clears the detail. */

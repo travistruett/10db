@@ -1,9 +1,9 @@
-import { CARD_OPENS, type ProjectId, Urgency } from '@10db/contracts';
+import { BuilderOwns, CARD_OPENS, type ProjectId, Urgency } from '@10db/contracts';
 import { findOpenByFoldKey, getTask, getWorkstream, listProjects } from '@10db/db';
 import type { StateStore } from '../events';
 import type { JudgeOutage, JudgeOutageSink } from '../judge';
 import type { InboxService } from './service';
-import { CardTier } from './card-tier';
+import { CardTier, decidedByBuilder } from './card-tier';
 
 const FOLD_KEY = 'judge-outage';
 const RESOLVED = "10db's judge answers again, or is off";
@@ -26,9 +26,11 @@ function projectOf(state: StateStore, outage: JudgeOutage): ProjectId | undefine
 }
 
 /**
- * The one card that says 10db's judge can't answer: what failed, what happens meanwhile and what clears it.
- * It is a status card that closes itself when the judge answers again; a restart during the outage finds
- * and keeps the same card instead of raising a second one.
+ * Tells the builder 10db's judge can't answer: what failed, what happens meanwhile and what clears it.
+ * A cause only the builder can fix (no credits, a refused key, an expired sign-in) is one card, raised at
+ * once, that closes itself when the judge answers again; a restart during the outage finds and keeps the
+ * same card instead of raising a second one. A timeout or a 5xx may clear alone, so it is a notice in
+ * Activity and nothing is asked.
  */
 export function createJudgeOutageCard(deps: {
   readonly state: StateStore;
@@ -44,12 +46,29 @@ export function createJudgeOutageCard(deps: {
       if (openCards().length > 0) return;
       const projectId = projectOf(deps.state, outage);
       if (projectId === undefined) return;
+      if (!outage.hard) {
+        deps.inbox.notice({
+          tier: CardTier.Notice,
+          projectId,
+          taskId: null,
+          key: FOLD_KEY,
+          tone: 'warning',
+          line: "10db's judge can't answer for now",
+          body: [
+            `Decisions run on ${outage.provider === 'the provider' ? '' : `${outage.provider}, `}${outage.model}.`,
+            `${outage.provider === 'the provider' ? 'The provider' : outage.provider} ${outage.cause}.`,
+            'Until it answers again, the rules decide each case, so more actions are skipped than usually would be. A timeout or a server error like this usually clears by itself; a missing key, no credits or a refused sign-in raises a card at once.',
+          ].join('\n'),
+        });
+        return;
+      }
       deps.inbox.flag({
         projectId,
         workstreamId: null,
         tier: CardTier.Status,
         urgency: Urgency.Normal,
         closesWhen: { by: 'withdrawn', when: 'the judge answers again (judge/outage)' },
+        decision: decidedByBuilder(BuilderOwns.YourHands),
         title: `Unattended work skips more: ${outageCause(outage)}`,
         body: [
           `Decisions run on ${outage.provider === 'the provider' ? '' : `${outage.provider}, `}${outage.model}.`,

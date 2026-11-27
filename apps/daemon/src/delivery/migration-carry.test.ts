@@ -9,13 +9,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { BatchDto } from '@10db/contracts';
+import { BuilderOwns, type BatchDto } from '@10db/contracts';
 import { getBatch, listWorkstreams, patchProject, patchWorkstream, setBatchNotice } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { pathOf } from '../../test/delivery-worlds';
 import { isolatedGitEnv } from '../../test/fixtures';
-import { createInboxService } from '../inbox';
+import { createInboxService, decidedByBuilder } from '../inbox';
 import { LOST_MIGRATIONS_DETAIL, LostChoice } from './cards';
 import type { DeliveryContext } from './context';
 import { createBaseUpdates, createLostMigrationsAnswers } from './index';
@@ -320,6 +320,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
       tier: 'ask',
       urgency: 'high',
       closesWhen: { by: 'answer' },
+      decision: decidedByBuilder(BuilderOwns.OneWayDoor),
       projectId: h.project.id,
       workstreamId: null,
       title: 'Clear',

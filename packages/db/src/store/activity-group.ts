@@ -37,7 +37,15 @@ export function groupNotices(
     } else {
       if (open.length === pageSize) return { rows: open.map((o) => o.row), consumed, full: true };
       open.push({
-        row: { ...notice.data, seq: notice.seq, at: notice.at, firstAt: notice.at, count: 1 },
+        row: {
+          ...notice.data,
+          seq: notice.seq,
+          at: notice.at,
+          firstAt: notice.at,
+          count: 1,
+          asking: false,
+          undone: false,
+        },
         newestMs: ms,
       });
     }

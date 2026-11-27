@@ -912,7 +912,7 @@ export const failedRerunNotices = {
     const tail = {
       [FailedRerunOutcome.Rerun]: `10db ran ${it} again once before starting a CI fix or asking you: a check that passes on the rerun was flaky, and one that fails again is the change's.`,
       [FailedRerunOutcome.Failed]: `${one ? 'It' : 'They'} failed again, so the failure is the change's, and 10db fixes it as it would any failing check.`,
-      [FailedRerunOutcome.Flaked]: `${one ? 'It' : 'They'} passed when 10db ran ${it} again, so the pull request went on to merge. A "Flaky check" card names ${it}.`,
+      [FailedRerunOutcome.Flaked]: `${one ? 'It' : 'They'} passed when 10db ran ${it} again, so the pull request went on to merge. A "Flaky check" notice in Activity names ${it}.`,
       [FailedRerunOutcome.Refused]: `GitHub refused the rerun, so 10db treats the failure as the change's.`,
     }[record.outcome];
     return {

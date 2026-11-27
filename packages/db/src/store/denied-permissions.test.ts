@@ -1,4 +1,4 @@
-import { mintId, type WorkstreamId } from '@10db/contracts';
+import { Answerer, mintId, type WorkstreamId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { deniedPermissionsForWorkstream, insertInboxItem, updateInboxItem } from './inbox';
 import type { Store } from './store';
@@ -38,7 +38,10 @@ function answer(id: ReturnType<typeof permissionCard>['id'], choice: string, not
   store.write((ctx) =>
     updateInboxItem(ctx, id, {
       state: 'RESOLVED',
-      answer: note === undefined ? { choice } : { choice, note },
+      answer:
+        note === undefined
+          ? { choice, answerer: Answerer.Builder }
+          : { choice, note, answerer: Answerer.Builder },
     }),
   );
 }

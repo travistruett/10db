@@ -1,4 +1,5 @@
 import {
+  BuilderOwns,
   InboxKind,
   PASS_RETRY_TURN_CHOICE,
   PASS_SIGN_OFF_CHOICE,
@@ -13,7 +14,7 @@ import {
 } from '@10db/contracts';
 import { insertInboxItem, type WriteContext } from '@10db/db';
 import { coverageLinesOf, coverageSection } from '../evals';
-import { flagCard, CardTier } from '../inbox';
+import { flagCard, CardTier, decidedByBuilder } from '../inbox';
 
 // Workbench spec §6.1, §6.2: a Ready page is a new `check` item each time, answered only by Sign Off;
 // a turn that cannot go on is a flag answered by Retry Turn.
@@ -94,6 +95,7 @@ export function raiseTurnFailed(
     tier: CardTier.Ask,
     urgency: Urgency.High,
     closesWhen: { by: 'withdrawn', when: "the page's next turn starts (withdrawPageItems)" },
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     title: `Turn failed: ${input.task.title}`,
     body: input.reason,
     detail: { passId: input.pass.id, [PASS_TURN_DETAIL]: input.turnId },

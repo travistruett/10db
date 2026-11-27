@@ -2,7 +2,6 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AbandonStep,
-  InboxState,
   isTerminal,
   mintId,
   TakeOutStep,
@@ -21,7 +20,6 @@ import {
   insertTask,
   insertWorkstream,
   lastTakeOut,
-  listInbox,
   listTaskThreadRows,
   seedProject,
   setAbandonStep,
@@ -30,6 +28,7 @@ import {
   type Store,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
+import { noticesPosted } from '../../test/notices-posted';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import type { Git } from '../git';
 import { silentLogger } from '../log';
@@ -223,10 +222,8 @@ describe('takeOut', () => {
       // A stray cards at its first batch, so a write after the put-back shows at once.
       strayWaitMs: 0,
     });
-    const strays = () =>
-      listInbox(db, { states: [InboxState.Open] }).filter((i) =>
-        i.title.includes('outside every claim'),
-      );
+    // A write outside every claim to an ordinary path is a notice in Activity, not a card.
+    const strays = () => noticesPosted(db).filter((n) => n.key.startsWith('stray-write:'));
     const change = async (rel: string) => {
       for (const onChange of heard.values()) onChange(rel);
       await watcher.flush();

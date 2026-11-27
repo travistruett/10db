@@ -1,5 +1,6 @@
 import {
   BatchId,
+  BuilderOwns,
   InboxKind,
   isTerminal,
   Urgency,
@@ -11,7 +12,7 @@ import {
 import { getWorkstreamRow } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
-import { CardTier, type FlagInput } from '../inbox';
+import { CardTier, decidedByBuilder, type FlagInput } from '../inbox';
 import type { Logger } from '../log';
 import { StallAction, type Stall } from './rules';
 
@@ -65,6 +66,7 @@ export function stallCard(stall: Stall): FlagInput {
     tier: CardTier.Ask,
     urgency: Urgency.High,
     closesWhen: { by: 'event', when: { event: 'stall_cleared', key: stall.key } },
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
     workstreamId: stall.workstreamId,
     title: `Stuck: ${stall.title}`,
     body: [

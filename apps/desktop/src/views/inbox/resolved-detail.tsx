@@ -1,4 +1,5 @@
 import {
+  Answerer,
   CARD_PROPOSED_PRINCIPLES,
   CARD_RESOLUTION,
   CardResolution,
@@ -55,12 +56,29 @@ function slackAnswer(item: InboxItemDto, people: readonly PersonDto[]): string[]
   return lines;
 }
 
-/** How the card was closed, in words: 10db's reason, the builder's answer, or just that it is done. */
+/** Who gave an answer, in words; an answer stored before this was recorded says so. */
+function answererWords(answerer: Answerer | undefined): string {
+  switch (answerer) {
+    case Answerer.Builder:
+      return 'by you';
+    case Answerer.Stakeholder:
+      return 'by a stakeholder';
+    case Answerer.Agent:
+      return 'by an agent';
+    case Answerer.Rule:
+      return 'by a rule';
+    case undefined:
+      return '(answerer not recorded)';
+  }
+}
+
+/** How the card was closed, in words: 10db's reason, who answered and what, or just that it is done. */
 function resolvedHow(item: InboxItemDto): string {
   // The detail is JSON read back from the daemon: a boundary, so parse it.
   const resolution = CardResolution.safeParse(item.detail?.[CARD_RESOLUTION]);
   if (resolution.success) return `Resolved by 10db: ${resolution.data.reason}`;
-  if (item.answer) return `Answered: ${answerWords(item, item.answer.choice)}`;
+  if (item.answer)
+    return `Answered ${answererWords(item.answer.answerer)}: ${answerWords(item, item.answer.choice)}`;
   return 'Resolved';
 }
 
