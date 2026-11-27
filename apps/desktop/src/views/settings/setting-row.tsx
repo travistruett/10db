@@ -3,6 +3,28 @@ import { Children, Fragment, useEffect, useId, useRef, type ReactNode } from 're
 import { HelpHint } from './help-hint';
 import { SectionHeading } from './section-heading';
 
+/** A settings card's heading: its title, an optional info button and one dimmed line, and the card's action. */
+export function SettingsCardHeading({
+  title,
+  description,
+  help,
+  action,
+}: {
+  readonly title: string;
+  readonly description?: string;
+  readonly help?: ReactNode;
+  readonly action?: ReactNode;
+}) {
+  return (
+    <SectionHeading
+      title={title}
+      {...(description === undefined || description === '' ? {} : { line: description })}
+      {...(help ? { help } : {})}
+      {...(action === undefined ? {} : { action })}
+    />
+  );
+}
+
 /** A titled card of settings rows, with a hairline between rows. */
 export function SettingsCard({
   title,
@@ -25,11 +47,11 @@ export function SettingsCard({
   return (
     <Stack gap="xs">
       {title ? (
-        <SectionHeading
+        <SettingsCardHeading
           title={title}
-          {...(description === undefined || description === '' ? {} : { line: description })}
-          {...(help ? { help } : {})}
-          {...(action === undefined ? {} : { action })}
+          {...(description === undefined ? {} : { description })}
+          help={help}
+          action={action}
         />
       ) : null}
       <Paper withBorder radius="md">
@@ -61,6 +83,15 @@ export interface SettingRowProps {
 /** The control a row's description belongs to: its input, or the group of radios. */
 const CONTROL = 'textarea, input:not([type="hidden"]), [role="radiogroup"]';
 
+/** The least width of a row's text column. */
+export const SETTING_TEXT_MIN_WIDTH = 240;
+
+/** The width of a row's control column. */
+export const SETTING_CONTROL_WIDTH = 320;
+
+/** How far a row's control column gives way in a narrow window. */
+export const SETTING_CONTROL_MIN_WIDTH = 240;
+
 /** One setting: its name and one line on the left, its control on the right. */
 export function SettingRow({
   label,
@@ -82,7 +113,7 @@ export function SettingRow({
       control.setAttribute('aria-describedby', [...ids, descriptionId].join(' '));
   });
   const text = (
-    <Box flex={1} miw={240}>
+    <Box flex={1} miw={SETTING_TEXT_MIN_WIDTH}>
       <Group gap={4} wrap="nowrap">
         <Text size="sm" fw={500}>
           {label}
@@ -107,7 +138,14 @@ export function SettingRow({
         <Group justify="space-between" wrap="nowrap" gap="xl">
           {text}
           {/* Every row in a card has the same width, so a column that gives way in a narrow window still lines up. */}
-          <Box style={{ flex: '0 1 320px', minWidth: 240 }}>{children}</Box>
+          <Box
+            style={{
+              flex: `0 1 ${String(SETTING_CONTROL_WIDTH)}px`,
+              minWidth: SETTING_CONTROL_MIN_WIDTH,
+            }}
+          >
+            {children}
+          </Box>
         </Group>
       )}
       {below === undefined ? null : <Box mt="xs">{below}</Box>}

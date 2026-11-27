@@ -1,0 +1,18 @@
+/*
+ * Mantine's placeholder pulses between 40% and 100% of its tone, and at its dimmest on a raised panel it is
+ * the panel's own colour. Inside a panel it pulses between 75% and 100%, so the shapes stay in view.
+ */
+@keyframes pulseOnPanel {
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+.onPanel [data-animate]::after {
+  animation-name: pulseOnPanel;
+}

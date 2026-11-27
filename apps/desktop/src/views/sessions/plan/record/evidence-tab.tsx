@@ -97,6 +97,16 @@ function Anchors({ entry }: { readonly entry: PlanEvidenceRow }) {
   );
 }
 
+/** Evidence list's column titles and widths, which its placeholder draws too. */
+export const EVIDENCE_COLUMNS = {
+  kind: { title: 'Kind', width: 130 },
+  title: { title: 'Title' },
+  anchors: { title: 'Anchors' },
+  state: { title: 'State', width: 130 },
+  verified: { title: 'Verified', width: 100 },
+  checkedAt: { title: 'Checked', width: 120 },
+} as const;
+
 export function EvidenceTab({ shapeId }: { readonly shapeId: ShapeId }) {
   const [narrowing, setNarrowing] = useState(NOT_NARROWED);
   const { query, page, paging } = useRecordPage(shapeId, 'evidence', narrowing);
@@ -104,8 +114,7 @@ export function EvidenceTab({ shapeId }: { readonly shapeId: ShapeId }) {
   const columns: DataTableColumn<PlanEvidenceRow>[] = [
     {
       accessor: 'kind',
-      title: 'Kind',
-      width: 130,
+      ...EVIDENCE_COLUMNS.kind,
       filtering: narrowing.kind !== ANY,
       filter: (
         <ChoiceFilter
@@ -121,7 +130,7 @@ export function EvidenceTab({ shapeId }: { readonly shapeId: ShapeId }) {
     },
     {
       accessor: 'title',
-      title: 'Title',
+      ...EVIDENCE_COLUMNS.title,
       resizable: true,
       filtering: narrowing.q.trim() !== '',
       filter: (
@@ -157,15 +166,14 @@ export function EvidenceTab({ shapeId }: { readonly shapeId: ShapeId }) {
     },
     {
       accessor: 'anchors',
-      title: 'Anchors',
+      ...EVIDENCE_COLUMNS.anchors,
       resizable: true,
       toggleable: true,
       render: (e) => <Anchors entry={e} />,
     },
     {
       accessor: 'state',
-      title: 'State',
-      width: 130,
+      ...EVIDENCE_COLUMNS.state,
       toggleable: true,
       filtering: narrowing.state !== ANY,
       filter: (
@@ -186,15 +194,13 @@ export function EvidenceTab({ shapeId }: { readonly shapeId: ShapeId }) {
     },
     {
       accessor: 'verified',
-      title: 'Verified',
-      width: 100,
+      ...EVIDENCE_COLUMNS.verified,
       toggleable: true,
       render: (e) => (e.verified ? 'Yes' : 'No'),
     },
     {
       accessor: 'checkedAt',
-      title: 'Checked',
-      width: 120,
+      ...EVIDENCE_COLUMNS.checkedAt,
       noWrap: true,
       toggleable: true,
       render: (e) => e.checkedAt ?? '—',
@@ -202,6 +208,7 @@ export function EvidenceTab({ shapeId }: { readonly shapeId: ShapeId }) {
   ];
   return (
     <RecordListStates
+      columns={Object.values(EVIDENCE_COLUMNS)}
       query={query}
       what="evidence"
       none={{

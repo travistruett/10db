@@ -2,9 +2,13 @@ import type { StakeholderTimersDto } from '@10db/contracts';
 import { Alert, Group, NumberInput, Stack, Switch, Text } from '@mantine/core';
 import { useSetStakeholderTimers, useStakeholderTimers } from '../../../daemon/people';
 import { SettingRow, SettingsCard } from '../setting-row';
+import { SettingRowsLoading } from '../setting-rows-loading';
 import { useDraft } from '../settings-drafts';
 
 const DEFAULT_REMIND_HOURS = 4;
+
+const CARD_TITLE = "When Someone Hasn't Answered";
+const CARD_DESCRIPTION = 'Hours are real time: a timer due while the Mac sleeps fires on wake.';
 
 function Hours() {
   return (
@@ -32,16 +36,20 @@ export function StakeholderTimers() {
         {timers.error.message}
       </Alert>
     );
-  // The page's placeholder rows stand in while the timers are read.
-  if (current === undefined) return null;
+  if (current === undefined)
+    return (
+      <SettingRowsLoading
+        title={CARD_TITLE}
+        description={CARD_DESCRIPTION}
+        rows={2}
+        label="Loading the timers"
+      />
+    );
   const remind = current.remindAfterHours ?? DEFAULT_REMIND_HOURS;
   const back = current.returnAfterHours;
   return (
     <Stack gap="xs">
-      <SettingsCard
-        title="When Someone Hasn't Answered"
-        description="Hours are real time: a timer due while the Mac sleeps fires on wake."
-      >
+      <SettingsCard title={CARD_TITLE} description={CARD_DESCRIPTION}>
         <SettingRow
           label="Remind Them After"
           description="One reminder in their thread; off never nudges."

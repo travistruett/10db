@@ -1,7 +1,11 @@
 import { CARD_TYPE_DAYS, type CardTypeDto, type ProjectId } from '@10db/contracts';
-import { Alert, Badge, Loader, Stack, Table, Text, Title } from '@mantine/core';
+import { Alert, Badge, Stack, Table, Text, Title } from '@mantine/core';
 import { useCardTypes } from '../../daemon/card-types-queries';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
+
+/** The table's scroll width, kept by its placeholder. */
+const TABLE_MIN_WIDTH = 720;
 
 const COLUMNS = [
   'Card type',
@@ -54,7 +58,15 @@ export function CardTypesPanel({ projectId }: { readonly projectId: ProjectId | 
           {types.error.message}
         </Alert>
       ) : null}
-      {types.isLoading ? <Loader size="sm" aria-label="Loading Inbox card types" /> : null}
+      {types.isLoading ? (
+        <PageLoading
+          shape={PageLoadingShape.Table}
+          label="Loading Inbox card types"
+          columns={COLUMNS.map((title) => ({ title }))}
+          rows={4}
+          minWidth={TABLE_MIN_WIDTH}
+        />
+      ) : null}
       {types.isSuccess ? (
         types.data.types.length === 0 ? (
           <Text size="sm" c="dimmed">
@@ -62,7 +74,7 @@ export function CardTypesPanel({ projectId }: { readonly projectId: ProjectId | 
           </Text>
         ) : (
           <RaisedPanel>
-            <Table.ScrollContainer minWidth={720}>
+            <Table.ScrollContainer minWidth={TABLE_MIN_WIDTH}>
               <Table aria-label="Inbox Card Types">
                 <Table.Thead>
                   <Table.Tr>
