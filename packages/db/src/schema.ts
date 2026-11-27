@@ -31,6 +31,10 @@ import type {
   EvalLiveRunId,
   EvalLiveRunState,
   EvalSuiteKey,
+  EvalSweepId,
+  EvalSweepKind,
+  EvalSweepReason,
+  EvalSweepState,
   DevicePlatform,
   PushSubscriptionId,
   DesignCheckId,
@@ -2961,6 +2965,10 @@ export const evalLiveRuns = sqliteTable(
     costShownUsd: real('cost_shown_usd'),
     stopRan: integer('stop_ran', { mode: 'boolean' }).notNull().default(false),
     logPath: text('log_path').notNull(),
+    /** The models a sweep step picked (a JSON array of strings); null for a plain Run. */
+    modelsJson: text('models_json'),
+    /** The sweep this run is a step of; no foreign key, so a sweep's row never blocks a run's. */
+    sweepId: text('sweep_id').$type<EvalSweepId>(),
   },
   (t) => [
     index('eval_live_runs_project_idx').on(t.projectId, t.suiteKey, t.startedAt),
@@ -2968,5 +2976,37 @@ export const evalLiveRuns = sqliteTable(
       'eval_live_runs_state',
       sql`${t.state} IN ('running', 'passed', 'failed', 'stopped', 'timed_out', 'interrupted')`,
     ),
+  ],
+);
+
+/**
+ * A model sweep of one eval suite: the models it tries in step order (`steps_json`, each step's state, estimate,
+ * cost and live run), the spend cap, and how it ended. At most one is `running` per project.
+ */
+export const evalSweeps = sqliteTable(
+  'eval_sweeps',
+  {
+    id: text('id').$type<EvalSweepId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    suiteKey: text('suite_key').$type<EvalSuiteKey>().notNull(),
+    kind: text('kind').$type<EvalSweepKind>().notNull(),
+    state: text('state').$type<EvalSweepState>().notNull(),
+    reason: text('reason').$type<EvalSweepReason>(),
+    reasonText: text('reason_text'),
+    capUsd: real('cap_usd').notNull(),
+    /** The models as the builder picked them, which `preview_hash` covers. */
+    modelsJson: text('models_json').notNull(),
+    previewHash: text('preview_hash').notNull(),
+    stepsJson: text('steps_json').notNull(),
+    winner: text('winner'),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+  },
+  (t) => [
+    index('eval_sweeps_project_idx').on(t.projectId, t.suiteKey, t.startedAt),
+    check('eval_sweeps_state', sql`${t.state} IN ('running', 'found', 'done', 'stopped')`),
   ],
 );

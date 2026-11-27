@@ -56,6 +56,9 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   // Nothing is written or run.
   { route: '/projects/:projectId/evals/:suiteKey/candidates' },
   { route: '/projects/:projectId/evals/live/runs' },
+  // Evals draws a sweep's window: a database read of its row.
+  { route: '/projects/:projectId/evals/:suiteKey/sweeps/latest' },
+  { route: '/projects/:projectId/evals/sweeps/:sweepId' },
 ];
 
 /** A GET a screen may not read, with why. A route nothing draws is refused as well: less to reach. */

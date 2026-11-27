@@ -4,6 +4,7 @@ import {
   EvalLiveRefusal,
   EvalLiveRefused,
   EvalLiveRunState,
+  EvalSweepState,
   EventType,
   mintId,
   NotFoundError,
@@ -11,6 +12,7 @@ import {
   type EvalLiveRunDto,
   type EvalLiveRunId,
   type EvalManifestSuite,
+  type EvalSweepId,
   type EvalSuiteKey,
   type ProjectDto,
   type ProjectId,
@@ -18,19 +20,23 @@ import {
 import {
   finishEvalLiveRun,
   getEvalLiveRun,
+  getEvalSweep,
   getProject,
   insertEvalLiveRun,
   interruptRunningEvalLiveRuns,
   listEvalLiveRuns,
   markEvalLiveRunStopRan,
   runningEvalLiveRun,
+  runningEvalSweep,
   type EvalLiveRunRow,
 } from '@10db/db';
+import { z } from 'zod';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
 import { openPreviewLedger, type PreviewLedger, type PreviewLedgers } from '../preview';
 import type { GateRequest, GateResult, GateRunner } from '../verify';
 import { readEvalManifest } from './manifest-store';
+import { modelEnvValue } from './model-env';
 import type { EvalsService } from './service';
 
 const REFUSAL_TEXT: Readonly<Record<EvalLiveRefusal | 'shuttingDown' | 'archived', string>> = {
@@ -46,15 +52,23 @@ const REFUSAL_TEXT: Readonly<Record<EvalLiveRefusal | 'shuttingDown' | 'archived
   [EvalLiveRefusal.NoModels]: 'This suite takes no model from 10db, so it has no models to try.',
   [EvalLiveRefusal.BadModel]: 'A picked model is not one this suite accepts.',
 };
+const SWEEP_ENDED_TEXT = 'The sweep this run belongs to has ended, so the run does not start.';
+
+/** What a refusal tells the builder; the sweep service speaks with the same words. */
+export const refusalText = (refusal: EvalLiveRefusal): string => REFUSAL_TEXT[refusal];
 
 /** A stop command ends the work inside the container; it gets this long. */
 const STOP_COMMAND_MS = 2 * 60 * 1000;
 const RECENT_RUNS = 5;
 
-/** Hashes everything the confirm window shows, and the project switches the run depends on. */
+/**
+ * Hashes everything the confirm window shows, and the project switches the run depends on: the suite's model
+ * settings and the models this run picks.
+ */
 export function previewHash(
   suite: EvalManifestSuite,
   project: Pick<ProjectDto, 'sandboxDocker' | 'sandboxLoopback'>,
+  models: readonly string[],
 ): string {
   const live = suite.live;
   return createHash('sha256')
@@ -71,6 +85,7 @@ export function previewHash(
         project.sandboxLoopback,
         // Appended only when present, so a suite with no model env hashes as it did before.
         ...(live?.models === undefined ? [] : [live.models]),
+        ...(models.length === 0 ? [] : [models]),
       ]),
     )
     .digest('hex');
@@ -95,9 +110,28 @@ export interface EvalLiveRunsDeps {
 }
 
 export interface EvalLiveRuns {
-  preview(projectId: ProjectId, suiteKey: EvalSuiteKey): Promise<EvalLivePreviewDto>;
-  /** Starts the run the window showed; throws `EvalLiveRefused` and writes no row when it may not. */
-  start(projectId: ProjectId, suiteKey: EvalSuiteKey, previewHash: string): Promise<EvalLiveRunDto>;
+  /** What a Run would do, for `models` when a sweep step or the model picker asks (none: a plain Run). */
+  preview(
+    projectId: ProjectId,
+    suiteKey: EvalSuiteKey,
+    models?: readonly string[],
+  ): Promise<EvalLivePreviewDto>;
+  /**
+   * Starts the run the window showed; throws `EvalLiveRefused` and writes no row when it may not. With
+   * `models` the run gets the suite's model variable; `sweepId` names the sweep it is a step of (which then
+   * must still be running, checked in the write that starts the run), and `onSettled` fires once the row has
+   * ended.
+   */
+  start(
+    projectId: ProjectId,
+    suiteKey: EvalSuiteKey,
+    previewHash: string,
+    opts?: {
+      models?: readonly string[];
+      sweepId?: EvalSweepId;
+      onSettled?: (run: EvalLiveRunDto) => void;
+    },
+  ): Promise<EvalLiveRunDto>;
   /** Sends the abort and answers; the run settles, and its stop command runs, in the background. Throws NotFoundError for one that is not running. */
   stop(projectId: ProjectId, runId: EvalLiveRunId): Promise<void>;
   list(projectId: ProjectId, suiteKey: EvalSuiteKey | null): EvalLiveRunDto[];
@@ -123,6 +157,11 @@ interface ActiveRun {
   readonly settled: Promise<void>;
 }
 
+const PickedModels = z.array(z.string());
+/** The models a run picked, as its row stored them; none for a plain Run. */
+const modelsOf = (row: Pick<EvalLiveRunRow, 'modelsJson'>): string[] =>
+  row.modelsJson === null ? [] : PickedModels.parse(JSON.parse(row.modelsJson));
+
 const dtoOf = (row: EvalLiveRunRow, stopping = false): EvalLiveRunDto => ({
   id: row.id,
   projectId: row.projectId,
@@ -147,6 +186,23 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
   const recoveringIn = (projectId: ProjectId): boolean =>
     [...recovering.values()].some((r) => r.projectId === projectId);
 
+  /** Tells the caller its run has ended, as its row now stands; a throw there never reaches the run. */
+  function settledBy(
+    id: EvalLiveRunId,
+    onSettled: ((run: EvalLiveRunDto) => void) | undefined,
+  ): void {
+    if (onSettled === undefined) return;
+    try {
+      const row = getEvalLiveRun(state.db, id);
+      if (row !== null) onSettled(dtoOf(row));
+    } catch (error) {
+      deps.logger.error(
+        { runId: id, err: error instanceof Error ? error.message : String(error) },
+        'a live eval run’s settle callback failed',
+      );
+    }
+  }
+
   /** The run as the window shows it: `stopping` while a Stop or a daemon stop is settling it. */
   const viewOf = (row: EvalLiveRunRow): EvalLiveRunDto => {
     const run = active.get(row.id);
@@ -167,6 +223,7 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
   function refusalOf(
     suite: EvalManifestSuite,
     project: ProjectDto,
+    sweepId: EvalSweepId | null,
   ): { refusal: EvalLiveRefusal; running: EvalLiveRunRow | null } | null {
     if (suite.live === undefined || suite.liveCommand === undefined)
       return { refusal: EvalLiveRefusal.NoLive, running: null };
@@ -176,7 +233,27 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
       return { refusal: EvalLiveRefusal.DockerOff, running: null };
     const running = runningEvalLiveRun(state.db, project.id);
     if (running !== null) return { refusal: EvalLiveRefusal.Busy, running };
+    // A sweep holds the project between its steps; only its own steps may start.
+    const sweep = runningEvalSweep(state.db, project.id);
+    if (sweep !== null && sweep.id !== sweepId)
+      return { refusal: EvalLiveRefusal.Busy, running: null };
     return recoveringIn(project.id) ? { refusal: EvalLiveRefusal.Busy, running: null } : null;
+  }
+
+  /** Why the picks are not a run this suite takes, or null: none to take, or one it does not accept. */
+  function pickRefusal(
+    suite: EvalManifestSuite,
+    picked: readonly string[],
+  ): { refusal: EvalLiveRefusal; running: null } | null {
+    if (suite.live?.models === undefined)
+      return { refusal: EvalLiveRefusal.NoModels, running: null };
+    try {
+      modelEnvValue(suite.live.models, picked);
+      return null;
+    } catch (error) {
+      if (error instanceof EvalLiveRefused) return { refusal: error.refusal, running: null };
+      throw error;
+    }
   }
 
   async function lastCostUsd(project: ProjectDto, suiteKey: EvalSuiteKey): Promise<number | null> {
@@ -199,7 +276,7 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
     command: string,
     logPath: string,
     timeoutMs: number,
-    extra: Pick<GateRequest, 'signal' | 'onSpawn'>,
+    extra: Pick<GateRequest, 'signal' | 'onSpawn' | 'modelEnv'>,
   ): GateRequest {
     const live = suite.live;
     const docker = (live?.docker ?? false) && project.sandboxDocker;
@@ -318,6 +395,7 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
     suite: EvalManifestSuite,
     ledger: PreviewLedger,
     run: ActiveRun,
+    modelEnv: GateRequest['modelEnv'],
   ): Promise<void> {
     let result: GateResult | null = null;
     let crashed: string | null = null;
@@ -331,6 +409,7 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
           (suite.live?.timeoutMinutes ?? 60) * 60_000,
           {
             signal: run.abort.signal,
+            ...(modelEnv === undefined ? {} : { modelEnv }),
             onSpawn: tracking(ledger, (message) => {
               // A paid run no ledger holds would outlive the daemon: end it.
               run.failure ??= `The run's processes could not be tracked, so it was ended: ${message}`;
@@ -370,7 +449,8 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
       (s) => s.key === row.suiteKey,
     );
     // A suite that changed since the run began may stop something else: its stop command stays unrun.
-    if (suite === undefined || previewHash(suite, project) !== row.previewHash) return;
+    if (suite === undefined || previewHash(suite, project, modelsOf(row)) !== row.previewHash)
+      return;
     if (!deps.sandboxed) return;
     const ledger = openLedger();
     if (ledger === null) return;
@@ -395,10 +475,11 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
   }
 
   return {
-    async preview(projectId, suiteKey) {
+    async preview(projectId, suiteKey, picked = []) {
       const project = getProject(state.db, projectId);
       const suite = suiteOf(projectId, suiteKey);
-      const refused = refusalOf(suite, project);
+      const refused =
+        refusalOf(suite, project, null) ?? (picked.length > 0 ? pickRefusal(suite, picked) : null);
       const live = suite.live;
       return {
         suiteKey,
@@ -412,13 +493,15 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
         timeoutMinutes: live?.timeoutMinutes ?? 0,
         models: live?.models ?? null,
         lastRunCostUsd: await lastCostUsd(project, suiteKey),
-        previewHash: previewHash(suite, project),
+        previewHash: previewHash(suite, project, picked),
         refusal: refused?.refusal ?? null,
         running: refused?.running ? viewOf(refused.running) : null,
       };
     },
 
-    async start(projectId, suiteKey, shown) {
+    async start(projectId, suiteKey, shown, opts = {}) {
+      const picked = opts.models ?? [];
+      const sweepId = opts.sweepId ?? null;
       const cost = await lastCostUsd(getProject(state.db, projectId), suiteKey);
       // Nothing below awaits before the run is registered, so a stop that comes during the cost read, or
       // after, finds the run or refuses it: nothing starts once the daemon or the project is stopping.
@@ -427,10 +510,19 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
       if (project.archivedAt !== null)
         throw new EvalLiveRefused(EvalLiveRefusal.Busy, REFUSAL_TEXT.archived);
       const suite = suiteOf(projectId, suiteKey);
-      const refused = refusalOf(suite, project);
+      const refused = refusalOf(suite, project, sweepId);
       if (refused !== null)
         throw new EvalLiveRefused(refused.refusal, REFUSAL_TEXT[refused.refusal]);
-      if (previewHash(suite, project) !== shown) {
+      // The env value comes from the picks alone, checked against what the suite accepts, before a row exists.
+      const modelEnv =
+        picked.length === 0
+          ? undefined
+          : suite.live?.models === undefined
+            ? undefined
+            : { name: suite.live.models.env, value: modelEnvValue(suite.live.models, picked) };
+      if (picked.length > 0 && modelEnv === undefined)
+        throw new EvalLiveRefused(EvalLiveRefusal.NoModels, REFUSAL_TEXT[EvalLiveRefusal.NoModels]);
+      if (previewHash(suite, project, picked) !== shown) {
         throw new EvalLiveRefused(
           EvalLiveRefusal.ManifestChanged,
           REFUSAL_TEXT[EvalLiveRefusal.ManifestChanged],
@@ -449,8 +541,15 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
         );
       const id = mintId('EvalLiveRun');
       let row: EvalLiveRunRow | null;
+      const sweep = { ended: false };
       try {
         row = state.write((ctx) => {
+          // A step starts only while its sweep still runs, in the write that inserts it: a Stop or a daemon
+          // stop that ended the sweep first leaves no paid run behind.
+          if (sweepId !== null && getEvalSweep(ctx.tx, sweepId)?.state !== EvalSweepState.Running) {
+            sweep.ended = true;
+            return null;
+          }
           const inserted = insertEvalLiveRun(ctx, {
             id,
             projectId,
@@ -463,6 +562,8 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
             envFilesJson: JSON.stringify(live.envFiles),
             costShownUsd: cost,
             logPath: join(deps.dataDir, 'logs', 'evals', `${id}.log`),
+            modelsJson: picked.length === 0 ? null : JSON.stringify(picked),
+            sweepId,
           });
           if (inserted !== null) announce(ctx, inserted, EvalLiveRunState.Running);
           return inserted;
@@ -473,6 +574,7 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
       }
       if (row === null) {
         await ledger.end();
+        if (sweep.ended) throw new EvalLiveRefused(EvalLiveRefusal.Busy, SWEEP_ENDED_TEXT);
         throw new EvalLiveRefused(EvalLiveRefusal.Busy, REFUSAL_TEXT[EvalLiveRefusal.Busy]);
       }
       const started = row;
@@ -489,7 +591,7 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
         }),
       };
       active.set(id, run);
-      void execute(started, project, suite, ledger, run)
+      void execute(started, project, suite, ledger, run, modelEnv)
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
           deps.logger.error({ runId: id, err: message }, 'a live eval run could not be settled');
@@ -506,6 +608,7 @@ export function createEvalLiveRuns(deps: EvalLiveRunsDeps): EvalLiveRuns {
         .finally(() => {
           active.delete(id);
           settle();
+          settledBy(id, opts.onSettled);
         });
       return dtoOf(started);
     },

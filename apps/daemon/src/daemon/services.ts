@@ -57,6 +57,8 @@ import {
   type ProjectWatchpointsDto,
   type ProjectId,
   type TaskInput,
+  type EvalCandidateDto,
+  type EvalSuiteKey,
 } from '@10db/contracts';
 import {
   closeTask,
@@ -180,9 +182,9 @@ import { adoptGoal } from '../goals';
 import { classifyPath } from '../guard';
 import { taskSession } from '../chat';
 import {
-  buildCandidates,
   suitesOfTasks,
   type EvalLiveRuns,
+  type EvalSweeps,
   type EvalsAssessor,
   type EvalsService,
 } from '../evals';
@@ -430,6 +432,12 @@ export function createServices(deps: {
   readonly evalsAssessor: Pick<EvalsAssessor, 'assess' | 'status'>;
   /** Runs a suite's live arm when the builder presses Run. */
   readonly evalLive: EvalLiveRuns;
+  readonly evalSweeps: EvalSweeps;
+  /** What a suite may try, as the candidates route and a sweep's ordering read it. */
+  readonly evalCandidates: (
+    projectId: ProjectId,
+    suiteKey: EvalSuiteKey,
+  ) => Promise<EvalCandidateDto[]>;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
   /** Settings › Trust: the switches, the builder's plugins and each project's preview. */
@@ -552,8 +560,9 @@ export function createServices(deps: {
       deps.state.write((ctx) => {
         archiveProject(ctx, projectId);
       });
-      // A live eval is the builder's spend in this checkout: it ends with the project's work, its stop command run in the background.
-      void deps.evalLive.stopProject(projectId);
+      // A live eval is the builder's spend in this checkout: it ends with the project's work, its stop command run
+      // in the background. A sweep ends first, so no step starts after its run is gone.
+      void deps.evalSweeps.stopProject(projectId).then(() => deps.evalLive.stopProject(projectId));
     },
     restoreProject(projectId) {
       deps.state.write((ctx) => {
@@ -1069,30 +1078,22 @@ export function createServices(deps: {
     evalSuite(projectId, key, run) {
       return deps.evals.suite(projectId, getProject(db, projectId).repoPath, key, run);
     },
-    async evalCandidates(projectId, suiteKey) {
-      const basis = await deps.evals.candidateBasis(
-        projectId,
-        getProject(db, projectId).repoPath,
-        suiteKey,
-      );
-      if (basis.models === null) return [];
-      const catalogue = deps.catalogue.catalogue();
-      const rows = buildModelRows({
-        profiles: listModelProfiles(db),
-        offers: listAccountModels(db),
-        accounts: listAccounts(db),
-        catalogue,
-        now: deps.clock.now(),
-      });
-      return buildCandidates({
-        models: basis.models,
-        catalogue,
-        intelligence: new Map(rows.map((r) => [r.model, r.intelligence])),
-        runs: basis.runs,
-      });
+    evalCandidates: (projectId, suiteKey) => deps.evalCandidates(projectId, suiteKey),
+    evalLivePreview(projectId, suiteKey, models) {
+      return deps.evalLive.preview(projectId, suiteKey, models);
     },
-    evalLivePreview(projectId, suiteKey) {
-      return deps.evalLive.preview(projectId, suiteKey);
+    startEvalSweep(projectId, suiteKey, body) {
+      return deps.evalSweeps.start(projectId, suiteKey, body);
+    },
+    latestEvalSweep(projectId, suiteKey) {
+      getProject(db, projectId);
+      return deps.evalSweeps.latest(projectId, suiteKey);
+    },
+    getEvalSweep(projectId, sweepId) {
+      return deps.evalSweeps.get(projectId, sweepId);
+    },
+    stopEvalSweep(projectId, sweepId) {
+      return deps.evalSweeps.stop(projectId, sweepId);
     },
     startEvalLive(projectId, suiteKey, previewHash) {
       return deps.evalLive.start(projectId, suiteKey, previewHash);

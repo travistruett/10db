@@ -60,6 +60,20 @@
   Intelligence, the estimate and its newest result in the suite; the list is cheapest first, unpriced last. The
   reference for estimates is the newest run's cheapest passing model that has a cost, else its first with a cost.
   A suite with no `live.models` has none.
+- Live runs take models and sweeps run them (`model-env.ts`, `live-runs.ts`, `sweeps.ts`, `eval_sweeps`): a run
+  started with picks sets the suite's `live.models.env` to `modelEnvValue(models, picks)` (each pick an `EvalModelId`
+  or a choice's name, joined by commas, at most ten; the one place a pick becomes a value; `BadModel` otherwise) as
+  the gate request's `modelEnv`, never on the stop command, and stores `models_json` and `sweep_id`. `previewHash`
+  covers the picks, and `stopLeftBy` hashes with the row's. While a sweep is `running` the project is `busy` for a
+  Run and for another sweep, whichever step is between runs; a step starts only while its sweep is `running`,
+  checked in the write that inserts its run. A sweep (`start`) checks the hash over its picks, sorts a `cheapest`
+  sweep's steps by estimates it computes itself, then runs one step at a time: when a step's run settles (`onSettled`,
+  after the row ended) it re-reads the sweep in one write, reads the suite's newest result since the step began that
+  names the step's model, and `sweepNext` ends the sweep or marks the next step. Before each step the suite is
+  checked against the sweep's hash. Any throw ends the sweep `stopped`·refused with its text; a Stop, an archive and
+  a daemon stop end it before its run is aborted (`stopped`·by_you or ·interrupted), so no paid run starts after
+  them; a start after a crash ends a `running` sweep `stopped`·interrupted and resumes nothing. An ended sweep never
+  changes again.
 - By Model (`models.ts`, `GET /projects/:id/eval-models`, not under `/evals/` where `models` would be a suite key):
   each model's newest result per suite, its cost for one run of each (unknown if any is) and the median of its p50s.
   A result from a run whose fingerprint differs from the suite's newest run is `olderEval`. Compare is the UI's join.

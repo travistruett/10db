@@ -75,6 +75,8 @@ const ORIGIN_LINES = {
   page: 'Asked for from the Evals page.',
   gap: 'Asked for from a row of the No Eval tab: LLM work no suite covers.',
   plan_eval: "Asked for from a goal's proposed eval in a Shape plan.",
+  pick_models:
+    "Asked for from the suite's drawer, Let 10db Pick Models: change the suite's live command so it reads the models to run from an environment variable, which 10db sets to a comma-separated list of model ids to try other models and compare cost. Follow the pattern of ampsio's `MODELS ?=` make variable (a default the command keeps when the variable is unset), then record the variable's name in the suite's manifest `live.models` (`env`, and `ids`: `openrouter` or the project's own `choices`). Run free checks only: never run the live command or any paid model call.",
 } as const satisfies Record<NewEvalBody['origin'], string>;
 
 /** The task that has a lane draft one eval: its rationale as the brief, and never the paid run. */

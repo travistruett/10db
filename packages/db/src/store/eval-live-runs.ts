@@ -24,6 +24,8 @@ export type EvalLiveRunInput = Pick<
   | 'envFilesJson'
   | 'costShownUsd'
   | 'logPath'
+  | 'modelsJson'
+  | 'sweepId'
 >;
 
 /** What ends a run. */

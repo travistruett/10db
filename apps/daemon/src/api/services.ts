@@ -87,6 +87,9 @@ import type {
   FoundHostDto,
   EvalManifest,
   EvalLiveRunId,
+  EvalSweepDto,
+  EvalSweepId,
+  StartEvalSweepBody,
   EvalLivePreviewDto,
   EvalLiveRunDto,
   EvalCandidateDto,
@@ -982,13 +985,28 @@ export interface ApiServices extends PlanRecordServices {
     run: string | undefined,
   ): Promise<EvalSuiteDetailDto>;
   /** What a suite's Run would do, and whether it may; nothing is started. */
-  evalLivePreview(projectId: ProjectId, suiteKey: EvalSuiteKey): Promise<EvalLivePreviewDto>;
+  evalLivePreview(
+    projectId: ProjectId,
+    suiteKey: EvalSuiteKey,
+    models: readonly string[],
+  ): Promise<EvalLivePreviewDto>;
   /** The click: starts the run the window showed; throws `EvalLiveRefused` (409) when it may not. */
   startEvalLive(
     projectId: ProjectId,
     suiteKey: EvalSuiteKey,
     previewHash: string,
   ): Promise<EvalLiveRunDto>;
+  /** Starts a model sweep of the suite; throws `EvalLiveRefused` (409) when it may not. */
+  startEvalSweep(
+    projectId: ProjectId,
+    suiteKey: EvalSuiteKey,
+    body: StartEvalSweepBody,
+  ): Promise<EvalSweepDto>;
+  /** The suite's newest sweep, or null. */
+  latestEvalSweep(projectId: ProjectId, suiteKey: EvalSuiteKey): EvalSweepDto | null;
+  getEvalSweep(projectId: ProjectId, sweepId: EvalSweepId): EvalSweepDto;
+  /** Ends a running sweep and aborts its running step; throws NotFoundError when it is not running. */
+  stopEvalSweep(projectId: ProjectId, sweepId: EvalSweepId): Promise<void>;
   /** Stops a running live run and settles it; throws NotFoundError when it is not running. */
   stopEvalLive(projectId: ProjectId, runId: EvalLiveRunId): Promise<void>;
   /** The project's newest live runs, of one suite or all. */

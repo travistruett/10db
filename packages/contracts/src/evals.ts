@@ -511,6 +511,8 @@ export const NewEvalOrigin = {
   Gap: 'gap',
   /** A goal's proposed eval in a Shape plan. */
   PlanEval: 'plan_eval',
+  /** A suite's drawer: Let 10db Pick Models, which has its live command read its models from an env var. */
+  PickModels: 'pick_models',
 } as const;
 export type NewEvalOrigin = (typeof NewEvalOrigin)[keyof typeof NewEvalOrigin];
 
@@ -554,7 +556,9 @@ export const NewEvalRequest = z.strictObject({
   execution: RationaleText.default(''),
   /** Tracked paths the behavior lives in; the lane reads them, and they pick the task's areas. */
   where: z.array(BriefPath).max(20).default([]),
-  origin: z.enum([NewEvalOrigin.Page, NewEvalOrigin.Gap, NewEvalOrigin.PlanEval]).default('page'),
+  origin: z
+    .enum([NewEvalOrigin.Page, NewEvalOrigin.Gap, NewEvalOrigin.PlanEval, NewEvalOrigin.PickModels])
+    .default('page'),
 });
 export type NewEvalBody = z.output<typeof NewEvalRequest>;
 
