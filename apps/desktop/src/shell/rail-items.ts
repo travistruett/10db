@@ -45,9 +45,7 @@ export type RailEntry =
   | { readonly kind: 'project-tile' }
   | { readonly kind: 'spacer' }
   /** The agent download's status at the rail's foot, shown only while it downloads. */
-  | { readonly kind: 'download-status' }
-  /** Whether this Mac is shared on the tailnet, shown only while it is or has paused. */
-  | { readonly kind: 'sharing-status' };
+  | { readonly kind: 'download-status' };
 
 const item = (section: RailSection): RailEntry => ({ kind: 'item', section });
 
@@ -63,7 +61,6 @@ export const RAIL_ORDER: readonly RailEntry[] = [
   item(RailSection.Evals),
   { kind: 'spacer' },
   { kind: 'download-status' },
-  { kind: 'sharing-status' },
   item(RailSection.Settings),
 ];
 

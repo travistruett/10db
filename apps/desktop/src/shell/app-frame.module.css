@@ -169,7 +169,7 @@
 }
 
 .titleRow [data-title-actions] {
-  order: 2;
+  order: 3;
 }
 
 .titleRow :global(.mantine-Button-root),

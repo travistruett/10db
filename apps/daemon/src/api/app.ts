@@ -239,6 +239,7 @@ export interface SharingRoutes {
   status(): SharingStatusDto;
   set(body: PutSharingBody): Promise<SharingStatusDto>;
   requestCertificate(): Promise<SharingStatusDto>;
+  connect(): Promise<SharingStatusDto>;
 }
 
 export interface ApiDeps {
@@ -304,6 +305,11 @@ const STATUS = { not_found: 404, conflict: 409, invalid: 400, upstream: 502 } as
 const deviceOnly = {
   error: 'conflict',
   message: 'This is for a paired device: the 10db window has none',
+} as const;
+/** What a route that acts on the Mac itself says to any token but the 10db window's. */
+const macOnly = {
+  error: 'forbidden',
+  message: 'Only the 10db app on this Mac can do this',
 } as const;
 const OPEN_PATHS = new Set(['/health', '/mcp']);
 /** A page of a conversation's items starts after this `seq`. */
@@ -1316,6 +1322,14 @@ export function createApp(deps: ApiDeps) {
         ? c.json(await deps.remote.sharing.requestCertificate())
         : c.json({ error: 'not_implemented' }, 501),
     )
+    // Runs a command on the Mac, so only the 10db window may: a paired device's token passes the share listener's
+    // API row, and is refused here.
+    .post('/sharing/connect', async (c) => {
+      if (c.var.principal.kind !== 'this_mac') return c.json(macOnly, 403);
+      return deps.remote
+        ? c.json(await deps.remote.sharing.connect())
+        : c.json({ error: 'not_implemented' }, 501);
+    })
     .get('/devices', (c) =>
       deps.remote ? c.json(deps.remote.devices.list()) : c.json({ error: 'not_implemented' }, 501),
     )

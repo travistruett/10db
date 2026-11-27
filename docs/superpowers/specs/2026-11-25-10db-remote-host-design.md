@@ -134,11 +134,12 @@ state: **Off**, **Setting up**, **Ready** or **Paused**.
 - **The name is public.** The HTTPS and Certificate steps show the Mac's tailnet name and say: "Each certificate
   writes this name to public certificate logs. Rename this Mac first if the name says who you are." When a
   certificate already exists, the line says so instead.
-- **Ready** once every step through Shared passes. The section's nav row and the sidebar footer then read "Shared
-  on your tailnet".
+- **Ready** once every step through Shared passes. The section's nav row and the title row's sharing icon (green)
+  then read "Shared on your tailnet"; the icon's hover card holds the address, the Share switch and, when Tailscale
+  is disconnected, Turn on Tailscale.
 - **Paused** when a step that passed fails later (Tailscale disconnected, the certificate expired, the mapping gone).
-  The daemon re-reads Tailscale every 60 s while sharing is on, so it sees the break with the page shut. The footer
-  reads "Sharing paused: <step>".
+  The daemon re-reads Tailscale every 60 s while sharing is on, so it sees the break with the page shut. The icon
+  turns orange and reads "Sharing paused: <step>".
 - **Stay reachable, Open at login and a Ready card** wait for slice 4; the laptop is home and is open.
 
 ### 3.2 Share and Stop

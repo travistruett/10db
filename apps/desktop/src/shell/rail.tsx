@@ -14,7 +14,6 @@ import { Link, useRouterState } from '@tanstack/react-router';
 import type { KeyboardEvent, ReactElement, ReactNode } from 'react';
 import { firstAppSection } from '../views/settings/sections';
 import { AgentDownloadStatus } from './agent-download-status';
-import { SharingStatus } from './sharing-status';
 import { FactoryStatusDot } from './factory-status';
 import { ProjectSwitcher } from './project-switcher';
 import { RailModeContext, useRailMode } from './rail-mode';
@@ -158,8 +157,6 @@ function RailEntryView({
       return <ProjectSwitcher />;
     case 'download-status':
       return <AgentDownloadStatus />;
-    case 'sharing-status':
-      return <SharingStatus />;
     case 'item': {
       const active = entry.section === current;
       if (entry.section === RailSection.Settings) return <SettingsLink active={active} />;
@@ -193,9 +190,7 @@ export function Rail({ labels }: { readonly labels: boolean }) {
   const body = RAIL_ORDER.slice(0, foot);
   const rest = RAIL_ORDER.slice(foot);
   const settings = rest.filter((entry) => entry.kind === 'item');
-  const controls = rest.filter(
-    (entry) => entry.kind === 'download-status' || entry.kind === 'sharing-status',
-  );
+  const controls = rest.filter((entry) => entry.kind === 'download-status');
   const footEntries = labels ? [...settings, ...controls] : [...controls, ...settings];
   return (
     <RailModeContext value={{ labels }}>
