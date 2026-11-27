@@ -1,6 +1,6 @@
+import { TolerantInboxPage } from './tolerant-inbox-page';
 import {
   InboxCardContextDto,
-  InboxPageDto,
   InboxKind,
   type InboxItemDto,
   type InboxItemId,
@@ -80,7 +80,7 @@ async function fetchRows(
         ...(paging.card === undefined ? {} : { card: paging.card }),
       },
     }),
-    InboxPageDto,
+    TolerantInboxPage,
   );
   return joinRows(page);
 }

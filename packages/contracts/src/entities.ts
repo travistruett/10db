@@ -1180,8 +1180,20 @@ export const WorkstreamDto = z.object({
 });
 export type WorkstreamDto = z.infer<typeof WorkstreamDto>;
 
-export const InboxOption = z.object({ label: z.string().min(1).max(80), description: z.string() });
+/** The longest answer label a card shows; the label is its button, and the description says the rest. */
+export const INBOX_OPTION_LABEL_MAX = 80;
+
+export const InboxOption = z.object({
+  label: z.string().min(1).max(INBOX_OPTION_LABEL_MAX),
+  description: z.string(),
+});
 export type InboxOption = z.infer<typeof InboxOption>;
+
+/** `text` cut to at most `room` characters, ending in an ellipsis when it was cut. */
+export function clipText(text: string, room: number): string {
+  if (text.length <= room) return text;
+  return `${text.slice(0, Math.max(0, room - 1)).trimEnd()}…`;
+}
 
 /** Recording an answer as a decision at a target; an area scope names its area, any other scope none. */
 export const DecisionRecording = z
