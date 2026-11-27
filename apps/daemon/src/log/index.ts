@@ -45,4 +45,4 @@ export function createLogger(options: {
     options.destination,
   );
 }
-export { openLogFile, rotateLogFile, type LogFile } from './rotate';
+export { openLogFile, rotateLogFile } from './rotate';

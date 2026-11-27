@@ -35,7 +35,7 @@ export function openLogFile(path: string): LogFile {
   const sonic = pino.destination({ dest: path, mkdir: true, sync: false });
   let usable = true;
   // Set by the first error. A stream whose open failed never emits `close` or `ready`, so `end()` would wait for
-  // good; close resolves at once instead.
+  // good; close resolves at once for it instead.
   let failed = false;
   let opened = false;
   sonic.once('ready', () => {
@@ -85,7 +85,8 @@ export function openLogFile(path: string): LogFile {
       timer?.cancel();
       usable = false;
       closing ??= new Promise<void>((resolve) => {
-        if (failed) {
+        // Only a stream that never opened has no descriptor to close; one that failed later still ends.
+        if (failed && !opened) {
           resolve();
           return;
         }
