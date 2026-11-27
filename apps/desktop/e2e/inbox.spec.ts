@@ -245,7 +245,7 @@ async function stopSharing(request: APIRequestContext): Promise<void> {
   await request.put(`${daemonUrl}/sharing`, { headers: auth, data: { enabled: false } });
 }
 
-test('a card is answered from a phone paired with a code made in Devices', async ({
+test("a card is answered from a phone paired from the bar's Remote access card", async ({
   page,
   request,
 }) => {
@@ -284,9 +284,16 @@ test('a card is answered from a phone paired with a code made in Devices', async
 
     await page.setViewportSize({ width: 1280, height: 900 });
     await toolsAreInstalled(page);
-    await page.goto('/settings/devices');
-    await page.getByRole('button', { name: 'Pair a Device' }).click();
+    // Pairing starts from the bar's Remote access card, which says what a paired phone can do.
+    await page.goto(inboxUrl(''));
+    await page.getByRole('button', { name: 'Remote access: on' }).click();
+    const remoteCard = page.getByRole('group', { name: 'Remote access' });
+    await expect(remoteCard.getByText(/answer the Inbox/)).toBeVisible();
+    await remoteCard.getByRole('button', { name: /^Pair (a|another) phone$/ }).click();
     const dialog = page.getByRole('dialog', { name: 'Pair a Device' });
+    // The pointer moves onto the dialog, as a person's does to read the code: the card closes, the dialog stays.
+    await dialog.hover();
+    await expect(remoteCard).toBeHidden();
     const label = await dialog.getByLabel(/^Pairing code /).getAttribute('aria-label');
     const code = (label ?? '').replace(/^Pairing code /, '').replace(' ', '');
     expect(code).toMatch(/^[0-9A-Z]{8}$/);
@@ -308,8 +315,11 @@ test('a card is answered from a phone paired with a code made in Devices', async
     await expect(mobile.getByRole('heading', { name: /^Paired with/ })).toBeVisible();
     // Notifications come first once paired; with the worker blocked here, the page says why it can't offer them.
     await expect(mobile.getByText(/This browser can’t show notifications here/)).toBeVisible();
-    // The dialog on the Mac says who paired, then closes.
+    // The dialog on the Mac says who paired, then closes, and the card lists the phone.
     await expect(dialog).toBeHidden();
+    await page.getByRole('button', { name: 'Remote access: on' }).click();
+    await expect(remoteCard.getByLabel('Paired devices')).toBeVisible();
+    await page.keyboard.press('Escape');
     await mobile.getByRole('link', { name: 'Open Inbox' }).click();
     // The row in the list sheet, not the card's own title, which may already be drawn under the sheet.
     await mobile.getByRole('listbox', { name: 'Inbox' }).getByText(title).click();
