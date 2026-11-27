@@ -309,7 +309,7 @@ import {
   systemFreeBytes,
   type LoadMonitorOptions,
 } from '../load';
-import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
+import { createLogger, openLogFile, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
 import { createBuilderMcpHandler, createBuilderTools } from '../builder';
 import type { LaneBrief } from '../briefing';
@@ -788,24 +788,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const lock = await acquireInstanceLock(opts.dataDir);
   const logPath = join(opts.dataDir, 'logs', 'daemon.log');
   rotateLogFile(logPath);
-  const logFile = fileDestination(logPath);
-  const logger = createLogger({ level: opts.logLevel, destination: logFile });
+  const logFile = openLogFile(logPath);
+  logFile.keepRotated(clock);
+  const logger = createLogger({ level: opts.logLevel, destination: logFile.destination });
   /**
    * Ends the log file and waits for its descriptor to close. A stop right after start would otherwise
    * leak the descriptor, and the stream's late open fails once a test has removed the data directory.
    */
-  function closeLog(): Promise<void> {
-    return new Promise((resolve) => {
-      logFile.once('close', () => {
-        resolve();
-      });
-      // SonicBoom emits 'error', not 'close', when its open or close fails, and an unlistened 'error' throws.
-      logFile.once('error', () => {
-        resolve();
-      });
-      logFile.end();
-    });
-  }
+  const closeLog = (): Promise<void> => logFile.close();
   const adapter = typeof opts.adapter === 'function' ? opts.adapter(logger) : opts.adapter;
   // A probe that a crash cut off leaves its scratch folders; none is ever reused.
   await sweepConnectorProbeRoot(connectorProbeRoot(opts.dataDir)).catch((error: unknown) => {
