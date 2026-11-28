@@ -25,7 +25,8 @@ tasks stop passing one claim back and forth (seen three times in one run).
   contested claims, and its queue wait counts toward the Stuck card like any other; a `Turn` wait older than the
   other task's run is the bug.
 - A claim taken from a task that is working in it. A claim is released only from a task that is told through its
-  wait, or taken from one that is Queued with no lease, in the same write that checks both.
+  wait, or taken from one that is Queued with no lease, in the same write that checks both. That write records
+  the take, and the queued task's next brief names it.
 - A yield that frees nothing (the waits changed in the 2 minutes). Then nothing is released and the wait goes on.
 
 **Calls the builder might disagree with.**
@@ -37,7 +38,7 @@ tasks stop passing one claim back and forth (seen three times in one run).
    waits.
 4. The defect task, in 10db's own project, quotes the other project's two task titles and claim names. Both live
    in the builder's local database only.
-5. The pair's state lives in one `app_settings` key, with no migration.
+5. The pair's state lives in one `app_settings` key and the taken claims in another, with no migration.
 
 **Needed from the builder:** nothing.
 
@@ -46,11 +47,13 @@ tasks stop passing one claim back and forth (seen three times in one run).
 - `.claude/rules/code-style.md` and `.claude/rules/testing.md`. No migration. Contract changes are additive: one
   `DecisionRule`, one `UndoAction` kind, one `QueueWaitKind`.
 - A claim leaves a task in two ways only: released from a task that is told through its live wait
-  (`ClaimWaits.yielded`), or taken from a task that is `Queued` with no lease (task 3). Never otherwise.
+  (`ClaimWaits.yielded`), or taken from a task that is `Queued` with no lease, which is told by its next brief
+  from a record the take writes (`recordTaken`, task 3). Never otherwise.
 - One write per move: the release, the pair's record and the notice commit together.
 - No Inbox card on this path while the rule is not set to ask. With `isRuleAsking(db, projectId,
   DecisionRule.ClaimDeadlock)` true, today's card is raised, unchanged.
-- The pair's state is read through zod from `CLAIM_DEADLOCKS_KEY` and written only by the functions below.
+- The pair's state is read through zod from `CLAIM_DEADLOCKS_KEY`, and the taken claims from `CLAIMS_TAKEN_KEY`;
+  both are written only by the functions below.
 - Notice lines and bodies are sentence case and name both tasks by title.
 - The decision is `docs/architecture/decisions/2026-11-27-a-claim-deadlock-is-broken-by-the-later-asker-yielding.md`.
 
@@ -113,6 +116,12 @@ export function turnOver(db: DbReader, pair: DeadlockPair): boolean; // other te
 export function endTurn(w: WriteContext, pair: DeadlockPair): void;
 /** Drops the records of pairs with a terminal task; called where `forgetEndedYields` listens. */
 export function forgetEndedPairs(w: WriteContext): void;
+// Claims taken from a queued task, kept apart from the pair so Undo and the other task ending leave them.
+export const CLAIMS_TAKEN_KEY = 'claims_taken_while_queued';
+export const TakenClaims = z.object({ from: WorkstreamId, to: WorkstreamId, claims: z.array(ClaimRef) });
+export function recordTaken(w: WriteContext, input: { from: WorkstreamId; to: WorkstreamId; claim: ClaimRef }): void;
+/** What was taken from `id` that it does not hold again, for its next brief. Reads only. */
+export function takenFrom(db: DbReader, id: WorkstreamId): readonly TakenClaims[];
 
 // apps/daemon/src/mcp/claim-wait.ts
 export interface Yielded {
@@ -152,7 +161,7 @@ export function fileDefect(
 | A queued task calls `request_claim`                      | Answered at once with the queued refusal.                                                                                                                   |
 | A queued task's session ends by handoff                  | `QUEUED`, lease cleared, `continue_from_handoff` kept, the claims it still holds kept.                                                                      |
 | A queued task ends its step instead                      | Its gate runs as usual; its next session start is passed over with `Turn`.                                                                                  |
-| The other task asks for a claim the queued task holds    | Taken in one write if the record says queued, the holder is `Queued` and has no lease; else a plain wait.                                                   |
+| The other task asks for a claim the queued task holds    | Taken in one write if the record says queued, the holder is `Queued` and has no lease, and `recordTaken`; else a plain wait. The holder's next brief says so. |
 | The other is terminal, or holds none of `contested`      | `endTurn`: `queued` nulled, `breaks` kept. The yielder launches from its handoff.                                                                           |
 | `yield_queue_and_report`                                 | As `yield_and_queue`, and `fileDefect` once per pair; no 10db project: the report is in the notice body.                                                    |
 | Undo on a row                                            | `dropPair`. `ConflictError` when the record is gone. No claim moves.                                                                                        |

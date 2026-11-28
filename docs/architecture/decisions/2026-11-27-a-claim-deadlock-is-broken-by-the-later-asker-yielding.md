@@ -16,8 +16,10 @@ Designed, not built; the plan is `docs/superpowers/plans/2026-11-27-claim-deadlo
   yields and queues.
 - A claim leaves a task in two ways only: released from a task that is told through its live wait, or taken from
   a task that is queued behind the asker, in state Queued, with no lease, all checked in the write that takes it.
+  That write records the take in its own `app_settings` key, and the queued task's next brief names the claim
+  until the task holds it again: it has no session to tell, and a wait's memory would not survive a restart.
 - The pair's count, queue and contested claims live in one `app_settings` key and are dropped when either task
-  ends.
+  ends. The record of a taken claim is dropped only when the task it was taken from ends.
 - Each yield and queueing is an Activity row under the rule `claim-deadlock`. Undo drops the pair's record; it
   never moves a claim. Ask Me Next Time brings back the card.
 

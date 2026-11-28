@@ -22,7 +22,7 @@ claim). Nothing calls this code until task 2, so behavior does not change.
 
 **Implements**, exactly (index, Interfaces): `deadlockMove`, `DeadlockMove`, `DEADLOCK_YIELD_AFTER_MS`,
 `CLAIM_DEADLOCKS_KEY`, `DeadlockPair`, `readPair`, `recordBreak`, `markReported`, `dropPair`, `queuedBehind`,
-`turnOver`, `endTurn`, `forgetEndedPairs`.
+`turnOver`, `endTurn`, `forgetEndedPairs`, `CLAIMS_TAKEN_KEY`, `TakenClaims`, `recordTaken`, `takenFrom`.
 
 **The setting.**
 
@@ -35,6 +35,11 @@ claim). Nothing calls this code until task 2, so behavior does not change.
 - `turnOver`: the other task's row is terminal (`isTerminal`), or `activeClaims(db, other)` holds none of
   `contested`. A task parked on a person lets its claims go, so it does not hold the yielder.
 - `dropPair` and `forgetEndedPairs` rewrite the array without the pair; an empty array deletes the key.
+- A second key, `CLAIMS_TAKEN_KEY`, holds `z.array(TakenClaims)`, read and written the same way. `recordTaken`
+  adds the claim to the record for (`from`, `to`), each claim once. `takenFrom(db, id)` answers the records whose
+  `from` is `id`, without the claims `activeClaims(db, id)` holds again and without records left empty; it reads
+  only. `forgetEndedPairs` also drops the records whose `from` is terminal. `dropPair` leaves them: an Undo must
+  not hide a taken claim from the task that lost it.
 
 **State-table rows:** the five rows of the order table; "Undo on a row" (the record's part); "Either task of a
 pair reaches a terminal state" (the function; task 2 subscribes it).

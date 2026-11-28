@@ -26,7 +26,8 @@ the later asker: the other task was already waiting when this one asked.
   cycle is first found, cleared when it is gone).
 - `card`: today's code path, unchanged.
 - `wait`: no card; the wait's notice reads "Waits for <claim>; task "<title>" waits for a claim this one holds".
-  The poll looks again.
+  The poll looks again: today the cycle is checked only when the holder changed or a card is up, so that
+  condition gains "or `deadlockSince` is set", or the wait would never reach 2 minutes.
 - `yield` (and, until task 3, the two queue moves): one `state.write` releases from me each active claim in
   `claimsAwaitedFrom(me, holder)`, calls `recordBreak` with `contested` = those claims plus the claim I asked for,
   and posts the notice. Then `waits.yielded(me, { claims, inboxId: null, to: holder, queued: false })`, and the

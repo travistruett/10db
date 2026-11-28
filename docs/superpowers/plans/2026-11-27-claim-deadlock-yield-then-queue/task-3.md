@@ -12,12 +12,13 @@ Read the index's Brief and Global Constraints first. Size: Core (claims, the lan
   `Turn` wait.
 - `apps/daemon/src/stalls/thresholds.ts`: `Turn` is not in `UNCOUNTED_WAITS`, so a turn that never ends reaches
   the Stuck card by time. Say so in the comment there.
+- `apps/daemon/src/briefing/prompts.ts` and its caller: the line for a claim taken while the task was queued.
 - `apps/daemon/src/daemon/start.ts`: wiring only, if any is needed.
 - `apps/daemon/src/mcp/AGENTS.md`, `apps/daemon/src/runner/AGENTS.md`.
 - Tests: the runner's engine test file and `apps/daemon/src/mcp/mcp.test.ts`.
 
-**Calls**, exactly: `recordBreak(…, queue: true)`, `readPair`, `queuedBehind`, `turnOver`, `endTurn`, `dropPair`
-(task 1); `requeue(id, ctl, pausedFor, queuedFor)` and `deps.askedToHandOff(sessionId)` (existing).
+**Calls**, exactly: `recordBreak(…, queue: true)`, `readPair`, `queuedBehind`, `turnOver`, `endTurn`, `dropPair`,
+`recordTaken`, `takenFrom` (task 1); `requeue(id, ctl, pausedFor, queuedFor)` and `deps.askedToHandOff(sessionId)` (existing).
 
 **The queue moves.** `yield_and_queue` and `yield_queue_and_report` do task 2's write with `queue: true` and
 `waits.yielded(…, queued: true)`. The notice body ends "Undo ends the queue: "<yielder>" may start and ask again
@@ -66,8 +67,21 @@ conflict path, in ONE `state.write`, take it only if all three hold:
 3. its `leaseOwner` is null.
 
 Then release the holder's claim, acquire it for me, add it to `contested`, and `handOver(holder)` after the write
-records the holder's uncommitted edits as its own. Any one false: a plain wait. Record `waits.yielded(holder, …)`
-so the holder's next `request_claim` is told; its next brief lists its claims from the database.
+records the holder's uncommitted edits as its own. Any one false: a plain wait.
+
+**Telling the queued task.** It has no session and no live wait, so `ClaimWaits.yielded` would answer false and
+keep nothing; do not call it here. Its next brief tells it instead, from the database, so a daemon restart loses
+nothing:
+
+- The take's write also calls `recordTaken(w, { from: holder, to: me, claim })`.
+- `briefing/prompts.ts`: in both places `Your claims:` is written, each record of `takenFrom(db, id)` adds a line
+  after it: `While you were queued, task "<title>" took <claims>. You no longer hold them, whatever your handoff
+says. Your uncommitted edits there stay in your folder and stay yours; do not commit them or edit there. Ask
+with request_claim if you still need them.` The records are passed in as the claims are.
+- `takenFrom` leaves out a claim the task holds again, so the line stops once it has asked and been granted, and
+  repeats in every brief until then. `forgetEndedPairs` drops the records when the task ends.
+- The record is not part of the pair's record: Undo and the other task ending drop that, and the queued task must
+  still be told.
 
 Why one write closes the race: the `Turn` gate, the loop-top requeue and Undo's `dropPair` read or write the same
 record and row in one SQLite database with serial writes, and a launch takes the lease in its own write. Either
@@ -86,10 +100,12 @@ other is terminal, or holds none of `contested`", "Undo on a row" (the queue's p
   the yielder launches with `continue_from_handoff`. No row is inserted as `QUEUED`. Red first without the
   loop-top check.
 - In task 2's `mcp.test.ts` test: the other task's ask for a claim the yielder holds waits while the yielder's row
-  has a lease and takes it once the row is `Queued` with none; Undo drops the queue.
+  has a lease and takes it once the row is `Queued` with none; `takenFrom` then names the claim for the yielder,
+  and its brief, built by the real prompt builder, carries the "took" line until it is granted the claim again;
+  Undo drops the queue and not that record. Red first with `recordTaken` left out.
 
 `Value: protects=a twice-deadlocked task staying queued until the other is done, and its claims being taken only
-while it cannot run; fails_when=the yielder starts a new session and deadlocks again, never starts again, or loses
-a claim while it holds a lease; why_new=claims; no_claim=the defect task, or a cycle of three`.
+while it cannot run and named in its next brief; fails_when=the yielder starts a new session and deadlocks again,
+never starts again, loses a claim while it holds a lease, or is not told of a claim taken; why_new=claims; no_claim=the defect task, or a cycle of three`.
 
 **Spec:** the same sections as task 2.
