@@ -359,6 +359,7 @@ export async function recoverBatches(deps: {
         inbox: deps.inbox,
         root: deps.worktrees.root,
         logger: deps.logger,
+        keptRoot: deps.worktrees.ctx.keptRoot,
         merged: chatBranchMerged(deps.worktrees.ctx, new AbortController().signal),
       })),
     );

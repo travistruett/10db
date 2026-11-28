@@ -85,6 +85,8 @@ describe('a batch whose worktree is missing', () => {
 describe('a worktree 10db kept', () => {
   beforeEach(() => {
     build('worktree');
+    // These cases are about the card a kept worktree raises; saving its files is worktree-ship.test.ts's.
+    h.askBeforeSaving();
   });
 
   /** Abandons a batch whose worktree holds an uncommitted file, so 10db keeps the worktree. */

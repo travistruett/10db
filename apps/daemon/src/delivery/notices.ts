@@ -1,4 +1,6 @@
 import {
+  CardDecider,
+  DecisionRule,
   INSTALL_REPAIRED_NOTICE_KEY,
   LEFT_OUT_NOTICE_KEY,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
@@ -8,8 +10,9 @@ import {
 } from '@10db/contracts';
 import { z } from 'zod';
 import { worktreeMergeCommand, worktreeRestoreCommand } from '../git';
+import { CardTier } from '../inbox';
 import { revertCommitLine } from '../team';
-import { detailOf, inSteps, listPaths, RERAN, testLines } from './cards';
+import { detailOf, inSteps, listPaths, RERAN, testLines, type DeliveryNotice } from './cards';
 import { flakeNote, type FlakyTest } from './flaky-tests';
 import type { GateStepFailure } from './gate-failures';
 import type { TakenNumber } from './migration-numbers';
@@ -498,6 +501,28 @@ export const baseNotices = {
     tone: 'warning',
     line: `Can't take ${batch.baseBranch}: files git doesn't track are in the way (${shortPaths(paths)})`,
     body: `${batch.baseBranch} on origin adds files where the batch's worktree ${worktree} holds files git doesn't track, most likely ignored ones such as a hand-made .env or a build directory:\n${listPaths(paths)}${migrationsHeld(batch, context, 'they are out of the way')}\n\n10db never overwrites or deletes them, so it didn't merge ${batch.baseBranch}, and the gates test the branch without its newer commits. A fix session is told to leave them. If you don't need them, move or delete them; otherwise leave the merge to the pull request. The next gate tries again, and this notice goes once the branch holds ${batch.baseBranch}.`,
+  }),
+};
+
+/** What delivery posts, as an event, about a finished worktree's files: nothing is asked of the builder. */
+export const worktreeNotices = {
+  /** `saved` are the worktree's files now under `dir`; the worktree is removed. */
+  savedAndRemoved: (path: string, dir: string, saved: readonly string[]): DeliveryNotice => ({
+    tier: CardTier.Notice,
+    taskId: null,
+    key: `worktree-saved:${path}`,
+    tone: 'info',
+    line: `Saved ${String(saved.length)} ${saved.length === 1 ? 'file' : 'files'} from a finished worktree and removed it`,
+    body: `The worktree ${path} held files found nowhere else, so 10db copied them to ${dir}, checked each copy by size and hash, and then removed the worktree:\n${listPaths(saved)}\n\nFiles with an identical copy in the project's checkout, and files a tool writes again, were not saved.`,
+    decision: {
+      by: CardDecider.Rule,
+      rule: DecisionRule.WorktreeLeftovers,
+      confidence: null,
+      undo: {
+        state: 'final',
+        reason: 'The files are in the kept folder; the worktree is not made again.',
+      },
+    },
   }),
 };
 

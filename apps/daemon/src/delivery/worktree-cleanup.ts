@@ -21,6 +21,7 @@ import { baseNotices, NOTICE_KEY } from './notices';
 import { installedLockfileKey } from './installed-lockfile';
 import { mergeRef, startRef } from './start-refs';
 import { removeIfEmptyDirectory } from './worktree-leftover';
+import { announceSaved, saveLeftovers, type Leftovers } from './worktree-save';
 import { withWorktreeLock } from './worktree-lock';
 
 /**
@@ -58,8 +59,10 @@ export type Retirement =
  * clear `worktree_path` in one transaction. An ABANDONED batch's worktree is removed only when it
  * is clean, and any finished one only when it holds no git-ignored file outside the seeded
  * directories other than build output, such as a hand-made `.env`; both are checked here so no
- * caller can remove them, and a kept worktree raises a card naming what it holds. Removal
- * withdraws those cards. The clear is last, so recovery re-runs every earlier step after a crash.
+ * caller can remove them, and a kept worktree raises a card naming what it holds. Unless the
+ * worktree-leftovers rule asks, what such a worktree holds that is found nowhere else is first
+ * saved under the kept folder and verified (`saveLeftovers`), and then it is removed with no card;
+ * a failed copy keeps it and its card. Removal withdraws those cards. The clear is last, so recovery re-runs every earlier step after a crash.
  * Safe to repeat; a no-op once cleared. Holds the batch's worktree lock. `discard` is the builder's
  * Remove worktree answer on a kept worktree's card: it skips those two checks and removes what they
  * kept, uncommitted changes and git-ignored files included.
@@ -83,23 +86,37 @@ async function retire(
   const project = getProject(ctx.state.db, batch.projectId);
   const main = project.repoPath;
   if (discard) return removeWorktreeAndSettle(ctx, batch, project, path);
+  const save = (changed: readonly string[], ignored: readonly string[]): Promise<Leftovers> =>
+    saveLeftovers(ctx, project, {
+      name: batchId,
+      path,
+      changed,
+      ignored,
+      at: ctx.clock.now(),
+    });
   if (batch.state === BatchState.Abandoned && existsAsEntry(path)) {
+    let saved: Extract<Leftovers, { kind: 'saved' }> | null = null;
     try {
       const changed = await ctx.git.changedPaths(path);
       if (changed.length > 0) {
         const ignored = await unseededIgnoredFiles(ctx.git, main, path, project.worktreeSeed);
-        raise(
-          ctx.inbox,
-          project.id,
-          worktreeCards.keptDirty(batch, main, path, changed, ignored ?? []),
-        );
-        return { kind: 'kept', reason: 'changes', paths: changed };
+        const outcome = ignored === null ? null : await save(changed, ignored);
+        if (outcome?.kind !== 'saved') {
+          raise(
+            ctx.inbox,
+            project.id,
+            worktreeCards.keptDirty(batch, main, path, changed, ignored ?? []),
+          );
+          return { kind: 'kept', reason: 'changes', paths: changed };
+        }
+        saved = outcome;
       }
     } catch (error) {
       if (!(error instanceof GitTrustError)) throw error;
       ctx.logger.warn({ batchId, path, err: error.message }, 'abandoned worktree kept');
       return { kind: 'untrusted' };
     }
+    if (saved !== null) return removeSaved(ctx, batch, project, path, saved);
   }
   const ignored = await unseededIgnoredFiles(ctx.git, main, path, project.worktreeSeed);
   if (ignored === null) {
@@ -108,10 +125,25 @@ async function retire(
   }
   const loose = looseWork(ignored);
   if (loose.length > 0) {
+    const outcome = await save([], ignored);
+    if (outcome.kind === 'saved') return removeSaved(ctx, batch, project, path, outcome);
     raise(ctx.inbox, project.id, worktreeCards.keptIgnored(batch, main, path, loose));
     return { kind: 'kept', reason: 'ignored', paths: loose };
   }
   return removeWorktreeAndSettle(ctx, batch, project, path);
+}
+
+/** Removes a worktree whose only-here files are saved, and tells the builder where they went. */
+async function removeSaved(
+  ctx: DeliveryContext,
+  batch: BatchDto,
+  project: ProjectDto,
+  path: string,
+  saved: Extract<Leftovers, { kind: 'saved' }>,
+): Promise<Retirement> {
+  const outcome = await removeWorktreeAndSettle(ctx, batch, project, path);
+  announceSaved(ctx, project, path, saved);
+  return outcome;
 }
 
 /** Removes the batch's worktree at `path` and settles what hung on it (the rest of `retireWorktree`). */
