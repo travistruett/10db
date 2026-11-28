@@ -615,6 +615,37 @@
                         "note"
                       ]
                     }
+                  },
+                  "builderCalls": {
+                    "maxItems": 7,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "owns": {
+                          "type": "string",
+                          "enum": [
+                            "money",
+                            "one_way_door",
+                            "guardrails",
+                            "product_and_taste",
+                            "promise",
+                            "your_hands",
+                            "out_of_moves"
+                          ]
+                        },
+                        "call": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 300
+                        }
+                      },
+                      "required": [
+                        "owns",
+                        "call"
+                      ],
+                      "additionalProperties": false
+                    }
                   }
                 },
                 "required": [
@@ -716,6 +747,37 @@
                       "note"
                     ]
                   }
+                },
+                "builderCalls": {
+                  "maxItems": 7,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "owns": {
+                        "type": "string",
+                        "enum": [
+                          "money",
+                          "one_way_door",
+                          "guardrails",
+                          "product_and_taste",
+                          "promise",
+                          "your_hands",
+                          "out_of_moves"
+                        ]
+                      },
+                      "call": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 300
+                      }
+                    },
+                    "required": [
+                      "owns",
+                      "call"
+                    ],
+                    "additionalProperties": false
+                  }
                 }
               },
               "required": [
@@ -777,6 +839,10 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "planReviewAsked": {
+            "type": "boolean",
+            "const": true
           }
         },
         "required": [

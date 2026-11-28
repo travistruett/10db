@@ -13,7 +13,8 @@
         "new_task",
         "change_task",
         "principle",
-        "note"
+        "note",
+        "plan_review"
       ]
     },
     "title": {
@@ -45,6 +46,16 @@
     },
     "joinsRunningBatch": {
       "type": "boolean"
+    },
+    "prerequisite": {
+      "description": "For a new task: true when your task can't meet its acceptance criteria without this work and it adds nothing your task's goal didn't ask for. 10db files it once, whatever its size, unless a kind or risk needs a card.",
+      "type": "boolean"
+    },
+    "costs": {
+      "description": "What the work costs: its size, the time it adds and any risk. The builder reads it when the proposal reaches them.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
     },
     "principle": {
       "description": "For kind \"principle\": the rule itself. Without it, the body is used as the statement.",
