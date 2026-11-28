@@ -134,7 +134,6 @@
   close raises the out-of-moves card again beside a card saying why.
 - A flag answer whose own move closes the card (a retry cancels its run's cards, an abandon its batch's) is still
   recorded on it: `InboxService.answer` writes the answer to a flag `onFlagAnswer` closed instead of refusing it.
-<<<<<<< 03676f2146d5289fcda6f0f5c6d3786e72cd89ad
 - A lane's stray write onto a guardrail path is a flag card with `detail.guardrailDiff` and the options Keep and Revert
   (`guardrail-card.ts`: the title, `GuardrailStrayChoice`, the options; `guardrail-diff.ts`: the capped diff).
   `applyTrustChoice` takes Keep as it takes Keep It. Revert is `createGuardrailAnswers(...).onAnswer`, called from
@@ -142,12 +141,6 @@
   transaction, and records what it did in the answered card's note (`updateInboxItem`) or raises the card again
   (`changedSinceCard`, `trusted-writes.ts`) when the file changed or could not be put back. `home` is injected, the
   builder's home by default.
-- The CI cap card replaces "Pull request checks failed": `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's
-  `prCardKey.checks` card in the stop card's write, and `pr-watch` raises none while `ciStopped` is set.
-||||||| bd472f06d
-- The CI cap card replaces "Pull request checks failed": `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's
-  `prCardKey.checks` card in the stop card's write, and `pr-watch` raises none while `ciStopped` is set.
-=======
 - A CI stop has its card or its pending notice, never neither, and replaces "Pull request checks failed":
   `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's `prCardKey.checks` card in the stop's write, and
   `pr-watch` raises none while `ciStopped` is set. A stop at the limit or on an unchanged head shows the
@@ -156,7 +149,6 @@
   `ci_out_of_moves.<root id>` setting holds the stop time, More's `ignoreFixesBefore`, Change's note (the next fix
   task opens with it) and Drop's `dropped`, which keeps the close's "pull request closed" card away; the write that
   records the merge or close deletes it, last. (Kept here: `delivery/AGENTS.md` is at its word budget.)
->>>>>>> b79431763cbb28f5e05d36963b600256f5d5def7
 - A lane's proposal is routed in `proposal-task.ts` (`decisions/2026-11-27-a-lanes-proposal-is-routed-by-rule.md`):
   `planReviewRoute` turns `plan_review` on Core work into a step, `proposalFiling` lets a `prerequisite` past the size
   rule only, and `fileProposalByItself` files a prerequisite once, matched by its first description line. Each move
