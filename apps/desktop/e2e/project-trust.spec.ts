@@ -176,10 +176,13 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
   await expect(suites).toContainText('complete 0.5 < 1');
   // A trial with no answer is availability, said apart from the gates.
   await expect(suites).toContainText('1 provider error');
-  // Until the evals are assessed the notice says so. The fake adapter has no model, so Assess ends in a
-  // reason and can be pressed again; the project's own scheduled run may have failed the same way first.
-  await expect(page.getByText(/Not assessed yet/u).first()).toBeVisible();
-  await page.getByRole('button', { name: 'Assess', exact: true }).click();
+  // The fake adapter has no model, so Assess ends in a reason and can be pressed again. The project's own
+  // scheduled run may already be assessing, or have failed the same way first, so the notice above the table
+  // reads "Not assessed yet", "Assessing" or "The last assessment failed" by when the page loads: the button
+  // enabled is the state they share.
+  const assess = page.getByRole('button', { name: 'Assess', exact: true });
+  await expect(assess).toBeEnabled();
+  await assess.click();
   await expect(page.getByText('The last assessment failed.')).toBeVisible();
   await expect(page.getByText('The fake adapter has no model to ask.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Assess', exact: true })).toBeEnabled();

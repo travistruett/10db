@@ -12,8 +12,15 @@ import {
 import { getWorkstreamRow } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
-import { CardTier, decidedByBuilder, type FlagInput } from '../inbox';
+import {
+  CardTier,
+  decidedByBuilder,
+  OutOfMovesKind,
+  outOfMovesFields,
+  type FlagInput,
+} from '../inbox';
 import type { Logger } from '../log';
+import type { StallFault } from './restart-rule';
 import { StallAction, type Stall } from './rules';
 
 /** The `detail` key of a Stuck card: what it was raised for, which its answers act on. */
@@ -79,6 +86,100 @@ export function stallCard(stall: Stall): FlagInput {
     foldKey: stall.key,
     refresh: true,
     options,
+  };
+}
+
+/** Why a stalled run is out of moves: the three cases `stallMove`'s last row covers. */
+export const StallOutOfMovesReason = {
+  StopHung: 'stop_hung',
+  Again: 'again',
+  NoAttempts: 'no_attempts',
+} as const;
+export type StallOutOfMovesReason =
+  (typeof StallOutOfMovesReason)[keyof typeof StallOutOfMovesReason];
+
+const OUT_OF_MOVES_WORDS: Readonly<
+  Record<StallOutOfMovesReason, { readonly ending: string; readonly sentence: string }>
+> = {
+  [StallOutOfMovesReason.StopHung]: {
+    ending: 'would not stop',
+    sentence: '10db tried to stop it to restart it, and the stop did not finish in 2 minutes.',
+  },
+  [StallOutOfMovesReason.Again]: {
+    ending: 'stalled again',
+    sentence: '10db restarted it once from its handoff, and it stalled again.',
+  },
+  [StallOutOfMovesReason.NoAttempts]: {
+    ending: 'stalled with no attempts left',
+    sentence: 'It has used all its recovery attempts, so 10db did not restart it.',
+  },
+};
+
+/** What the card says apart from the stall's own words. */
+export interface StallOutOfMovesParts {
+  readonly reason: StallOutOfMovesReason;
+  /** Set when 10db's own part stalled: the card then says whether the defect was filed. */
+  readonly fault: StallFault | null;
+  /** The title of the defect task filed for `fault`, or null when none was. */
+  readonly defect: string | null;
+  /** What the run holds, as fixed text. */
+  readonly holds: string;
+}
+
+function defectLine(parts: StallOutOfMovesParts): string | null {
+  if (parts.fault === null) return null;
+  return parts.defect === null
+    ? 'This looks like a 10db defect; the report could not be filed here.'
+    : `10db filed this as its own defect: ${parts.defect}.`;
+}
+
+/** The card's fingerprint: the sweep rewrites the card only when it changes. */
+export function stallOutOfMovesFingerprint(stall: Stall, parts: StallOutOfMovesParts): string {
+  return [stall.fingerprint, parts.reason, defectLine(parts) ?? '', parts.holds].join('\n');
+}
+
+/**
+ * The Out of Moves card of a stalled run that will not be restarted again: the Stuck card's detail and
+ * closing, with the Out of Moves answers. It closes by `stall_cleared` when the run moves.
+ */
+export function stallOutOfMovesCard(stall: Stall, parts: StallOutOfMovesParts): FlagInput {
+  const detail: StallCardDetail = {
+    key: stall.key,
+    fingerprint: stallOutOfMovesFingerprint(stall, parts),
+    since: stall.since,
+    workstreamId: stall.workstreamId,
+    batchId: stall.batchId,
+    dependencyRunId: stall.dependencyRunId,
+    waitingRunIds: [...stall.waitingRunIds],
+  };
+  const words = OUT_OF_MOVES_WORDS[parts.reason];
+  const fields = outOfMovesFields({
+    kind: OutOfMovesKind.Stall,
+    more: 1,
+    batchId: null,
+    workstreamId: stall.workstreamId,
+  });
+  return {
+    projectId: stall.projectId,
+    tier: CardTier.Ask,
+    urgency: Urgency.High,
+    closesWhen: { by: 'event', when: { event: 'stall_cleared', key: stall.key } },
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
+    workstreamId: stall.workstreamId,
+    title: `Out of moves: ${stall.title} ${words.ending}`,
+    body: [
+      stall.reason,
+      `It has not moved since ${SINCE.format(new Date(stall.since))}.`,
+      words.sentence,
+      defectLine(parts),
+      parts.holds,
+    ]
+      .filter((part): part is string => part !== null)
+      .join('\n\n'),
+    detail: { ...fields.detail, [STALL_CARD]: detail },
+    foldKey: stall.key,
+    refresh: true,
+    options: fields.options,
   };
 }
 
