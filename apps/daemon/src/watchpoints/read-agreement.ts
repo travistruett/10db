@@ -29,6 +29,7 @@ function wasAsked(read: WatchpointRead): boolean {
  * Only a read of a watchpoint the answered card named is scored, against the newest reading taken before the
  * answer. `cleanButSentBack` counts the clean reads the builder sent back. `firstAskedAt` is when the oldest read the
  * judge was asked for was taken, whether or not its card is answered yet. `projectId` null counts every project.
+ * @public The Decisions measures are its caller; while reads stay in shadow none is wired.
  */
 export function watchpointReadAgreement(
   db: DbReader,
