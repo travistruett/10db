@@ -14,7 +14,7 @@
   display: none;
 }
 
-/* The page's controls sit clear of the hairline, centred on the tabs' text. */
+/* The page's controls (`ControlSize.Toolbar`, 26 px) sit clear of the hairline, centred on the tabs' text. */
 .tabbedActions {
   padding-bottom: 6px;
 }

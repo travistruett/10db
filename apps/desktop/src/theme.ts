@@ -1,7 +1,10 @@
 import {
+  ActionIcon,
+  Button,
   Container,
   createTheme,
   defaultVariantColorsResolver,
+  Input,
   Modal,
   MultiSelect,
   NavLink,
@@ -19,6 +22,7 @@ import {
 import paper from './paper.module.css';
 import segmented from './segmented-control.module.css';
 import { CONTENT_WIDTH_PX, ContentWidth, isContentWidth } from './shell/content-width';
+import { ControlSize, TOOLBAR_CONTROL_PX } from './shell/control-size';
 import tooltip from './tooltip.module.css';
 import {
   SelenizedDark,
@@ -144,6 +148,37 @@ export const theme = createTheme({
       defaultProps: { px: 0 },
       vars: (_, { size }) => ({
         root: isContentWidth(size) ? { '--container-size': rem(CONTENT_WIDTH_PX[size]) } : {},
+      }),
+    }),
+    // A control on a page's tab row is `size={ControlSize.Toolbar}` (`shell/control-size.ts`): one height and type
+    // size for its buttons, icons and selects, whatever page it is on.
+    Button: Button.extend({
+      vars: (_, { size }) => ({
+        root:
+          size === ControlSize.Toolbar
+            ? {
+                '--button-height': rem(TOOLBAR_CONTROL_PX),
+                '--button-padding-x': rem(12),
+                '--button-fz': 'var(--mantine-font-size-xs)',
+              }
+            : {},
+      }),
+    }),
+    ActionIcon: ActionIcon.extend({
+      vars: (_, { size }) => ({
+        root: size === ControlSize.Toolbar ? { '--ai-size': rem(TOOLBAR_CONTROL_PX) } : {},
+      }),
+    }),
+    // Select, MultiSelect and TextInput draw through Input, so this sizes each of them too.
+    Input: Input.extend({
+      vars: (_, { size }) => ({
+        wrapper:
+          size === ControlSize.Toolbar
+            ? {
+                '--input-height': rem(TOOLBAR_CONTROL_PX),
+                '--input-fz': 'var(--mantine-font-size-xs)',
+              }
+            : {},
       }),
     }),
     Select: Select.extend({ defaultProps: { checkIconPosition: 'right' } }),
