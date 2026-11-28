@@ -34,6 +34,7 @@ import {
   WatchpointChoice,
   WatchpointFileStatus,
   WatchpointLoudness,
+  WatchpointReadVerdict,
   YourMcpSource,
   yourMcpServerKey,
   AccountCardChoice,
@@ -43,6 +44,7 @@ import {
   Answerer,
   type AccountId,
   type Rigor,
+  type WatchpointHit,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -59,6 +61,7 @@ import {
   getWorkstream,
   getWorkstreamRow,
   insertBatch,
+  insertEvidence,
   insertWorkstream,
   insertInboxItem,
   insertKind,
@@ -108,7 +111,8 @@ import { recordBreak } from '../mcp';
 import { createQueueWaits, createScheduler } from '../scheduler';
 import { startTaskWithPlan } from '../team';
 import { setProjectLiveSystems } from '../trust';
-import { announceWatchpointReading } from '../watchpoints';
+import { createInboxService } from '../inbox';
+import { announceWatchpointReading, applyReadAllowedAnswer, projectReadActs } from '../watchpoints';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { DEFAULT_RUNNER_LIMITS } from '../runner';
 import { createGit, type Git } from '../git';
@@ -4069,6 +4073,179 @@ describe('a worktree batch two tasks share', () => {
     expect(later.map((item) => item.detail)).toEqual([
       { watchpoints: [{ key: 'contracts', label: 'contracts' }] },
     ]);
+  });
+
+  it("an Ask hit the judge's acting read found clean is a notice with no card, and a finding is a card", async () => {
+    engine = await createTestEngine({});
+    const { workstream } = engine.addTask('Alpha', ['api']);
+    const task = getTask(engine.store.db, workstream.taskId);
+    const hit = (key: string): WatchpointHit => ({
+      watchpoint: {
+        key,
+        label: key,
+        why: 'why',
+        guidance: 'check',
+        loudness: WatchpointLoudness.Ask,
+      },
+      files: [
+        {
+          path: `src/api/${key}.ts`,
+          status: WatchpointFileStatus.Added,
+          added: 1,
+          removed: 0,
+          patch: '',
+          clipped: false,
+        },
+      ],
+    });
+    const read = (key: string, verdict: WatchpointReadVerdict, acted: boolean) => ({
+      key,
+      verdict,
+      meets: 0.5,
+      destructive: 0.5,
+      acted,
+    });
+    const announce = (reads: ReturnType<typeof read>[]) => {
+      engine.state.write((ctx) => {
+        announceWatchpointReading(ctx, {
+          workstreamId: workstream.id,
+          projectId: engine.project.id,
+          taskId: task.id,
+          taskTitle: task.title,
+          detail: { hits: reads.map((r) => hit(r.key)), reads, head: 'h', skipped: null },
+          landing: null,
+        });
+      });
+    };
+    const looks = () =>
+      listInbox(engine.store.db, {}).filter((item) => item.kind === InboxKind.Watchpoint);
+
+    announce([read('clean', WatchpointReadVerdict.Clean, true)]);
+    expect(looks()).toEqual([]);
+    expect(noticesPosted(engine.store.db)).toMatchObject([
+      { key: `watchpoint:${workstream.id}`, line: 'Alpha touched clean' },
+    ]);
+
+    // Clean beside a finding: one card naming only the finding. The same clean read kept in shadow is today's card.
+    announce([
+      read('clean', WatchpointReadVerdict.Clean, true),
+      read('risky', WatchpointReadVerdict.Finding, true),
+    ]);
+    expect(looks().map((item) => item.detail)).toMatchObject([
+      { watchpoints: [{ key: 'risky', label: 'risky' }] },
+    ]);
+    announce([read('clean', WatchpointReadVerdict.Clean, false)]);
+    expect(looks().map((item) => item.detail)).toMatchObject([
+      { watchpoints: [{ key: 'clean', label: 'clean' }] },
+    ]);
+  });
+
+  it('a clean read the builder sent back keeps the read in shadow after its week and raises one card, and the answer acts on it', async () => {
+    engine = await createTestEngine({});
+    const { workstream } = engine.addTask('Alpha', ['api']);
+    const task = getTask(engine.store.db, workstream.taskId);
+    const hit: WatchpointHit = {
+      watchpoint: {
+        key: 'contracts',
+        label: 'Contracts',
+        why: 'why',
+        guidance: 'check',
+        loudness: WatchpointLoudness.Ask,
+      },
+      files: [
+        {
+          path: 'src/api/contracts/x.ts',
+          status: WatchpointFileStatus.Added,
+          added: 1,
+          removed: 0,
+          patch: '',
+          clipped: false,
+        },
+      ],
+    };
+    const detail = {
+      hits: [hit],
+      reads: [
+        {
+          key: 'contracts',
+          verdict: WatchpointReadVerdict.Clean,
+          meets: 0.95,
+          destructive: 0.05,
+          acted: false,
+        },
+      ],
+      head: 'h',
+      skipped: null,
+    };
+    const announce = () => {
+      engine.state.write((ctx) => {
+        announceWatchpointReading(ctx, {
+          workstreamId: workstream.id,
+          projectId: engine.project.id,
+          taskId: task.id,
+          taskTitle: task.title,
+          detail,
+          landing: null,
+        });
+      });
+    };
+    const open = (kind: InboxKind) =>
+      listInbox(engine.store.db, { states: ['OPEN'] }).filter((item) => item.kind === kind);
+    // The read, kept in shadow, called the change clean; its Look card is today's, and the builder sent it back.
+    engine.state.write((ctx) => {
+      insertEvidence(ctx, {
+        workstreamId: workstream.id,
+        kind: EvidenceKind.Watchpoint,
+        command: null,
+        exitCode: null,
+        summary: '1 file under 1 watchpoint.',
+        logPath: null,
+        commitShas: [],
+        detail,
+      });
+    });
+    announce();
+    const [look] = open(InboxKind.Watchpoint);
+    if (look === undefined) throw new Error('no Look card');
+    engine.inbox.answer(look.id, { choice: WatchpointChoice.SendBack, note: 'Not friendly.' });
+
+    // Inside the shadow week the disagreement is only counted.
+    announce();
+    expect(open(InboxKind.Flag)).toEqual([]);
+    expect(projectReadActs(engine.store.db, engine.project.id, engine.clock.now()).acts).toBe(
+      false,
+    );
+
+    engine.clock.advance(8 * 24 * 60 * 60 * 1000);
+    announce();
+    announce();
+    const [card] = open(InboxKind.Flag);
+    expect(open(InboxKind.Flag)).toHaveLength(1);
+    expect(card).toMatchObject({
+      title: 'The judge read 1 watchpoint change as clean that you sent back',
+      options: [{ label: 'Let It Act' }, { label: 'Keep Asking Me' }],
+    });
+    expect(card?.body).toContain('Contracts, in "Alpha"');
+    expect(projectReadActs(engine.store.db, engine.project.id, engine.clock.now())).toEqual({
+      acts: false,
+      ask: true,
+    });
+
+    const answering = createInboxService({
+      state: engine.state,
+      onParkedAnswer: () => undefined,
+      onFlagAnswerInWrite: (ctx, item, answer) => {
+        applyReadAllowedAnswer(ctx, item, answer);
+        return undefined;
+      },
+    });
+    if (card === undefined) throw new Error('no disagreement card');
+    answering.answer(card.id, { choice: 'Let It Act' });
+    expect(projectReadActs(engine.store.db, engine.project.id, engine.clock.now())).toEqual({
+      acts: true,
+      ask: false,
+    });
+    expect(open(InboxKind.Flag)).toEqual([]);
   });
 });
 

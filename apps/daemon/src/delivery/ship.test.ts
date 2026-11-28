@@ -8,6 +8,7 @@ import {
   InboxAnswerRefused,
   InboxKind,
   WatchpointLoudness,
+  WatchpointReadVerdict,
   type BatchDto,
   type TaskDto,
   type WatchpointDetail,
@@ -1051,13 +1052,16 @@ describe('a pull request whose change hit a watchpoint set to Hold', () => {
   const WATCHED = 'src/api/watched.txt';
 
   /** A hit on the watchpoint; null for a hash means its diff could not be read in full. */
-  const hitOf = (hash: string | null = 'hash-1'): WatchpointHit => ({
+  const hitOf = (
+    hash: string | null = 'hash-1',
+    loudness: WatchpointLoudness = WatchpointLoudness.Hold,
+  ): WatchpointHit => ({
     watchpoint: {
       key: 'migrations',
       label: 'Migrations',
       why: 'A revert cannot undo one',
       guidance: 'Check it runs on existing data',
-      loudness: WatchpointLoudness.Hold,
+      loudness,
     },
     files: [{ path: WATCHED, status: 'A', added: 1, removed: 0, patch: '', clipped: false }],
     ...(hash === null ? {} : { hash }),
@@ -1193,6 +1197,40 @@ describe('a pull request whose change hit a watchpoint set to Hold', () => {
     expect(h.gh.autoMerged).toEqual([shipped.prUrl]);
     expect(lookCards()).toEqual([]);
   });
+
+  it.each([
+    { verdict: WatchpointReadVerdict.Finding, acted: true, held: true },
+    { verdict: WatchpointReadVerdict.Doubt, acted: true, held: true },
+    { verdict: WatchpointReadVerdict.Clean, acted: true, held: false },
+    // A read kept in shadow acts on nothing: the Ask hit is today's card and holds nothing.
+    { verdict: WatchpointReadVerdict.Finding, acted: false, held: false },
+  ])(
+    'ships an Ask hit read as $verdict (acted: $acted) held: $held',
+    async ({ verdict, acted, held }) => {
+      h = createDeliveryHarness();
+      const { batch, workstreams } = await openBatch('Add a migration', 'Alpha');
+      h.commit(WATCHED);
+      readingOf(h.only(workstreams).id, {
+        hits: [hitOf('hash-1', WatchpointLoudness.Ask)],
+        reads: [{ key: 'migrations', verdict, meets: 0.1, destructive: 0.1, acted }],
+      });
+      const shipped = await finishAll(batch);
+      if (held) {
+        expect(h.gh.autoMerged).toEqual([]);
+        expect(lookCards()).toHaveLength(1);
+        expect(lookCards()[0]?.options.map((o) => o.label)).toEqual(['merge', 'send_back']);
+        expect(lookCards()[0]?.detail).toMatchObject({
+          held: { batchId: batch.id, prUrl: shipped.prUrl },
+          watchpoints: [{ key: 'migrations', verdict }],
+        });
+      } else {
+        expect(h.gh.autoMerged).toEqual([shipped.prUrl]);
+        // The run raises the Look card when it records the reading, not the ship, so a read that holds nothing
+        // leaves no held card here.
+        expect(lookCards()).toEqual([]);
+      }
+    },
+  );
 
   it('is still held after a restart: a retry arms nothing and the card stays open', async () => {
     const { batch } = await heldPullRequest();

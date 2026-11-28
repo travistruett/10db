@@ -37,9 +37,21 @@ import {
 import { CardTier, postNotice } from '../inbox';
 import { quotedWords } from '../knowledge';
 import { holdingHits, holdsMerge } from './read';
+import { raiseReadDisagreement } from './read-disagreement-card';
 
 const hitsAt = (detail: WatchpointDetail | null, loudness: WatchpointLoudness): WatchpointHit[] =>
   detail?.hits.filter((h) => h.watchpoint.loudness === loudness) ?? [];
+
+/** The Ask hits the judge read as clean while its read acts: they are a notice, not a card, and hold nothing. */
+function cleanReadHits(detail: WatchpointDetail | null): WatchpointHit[] {
+  return (
+    detail?.hits.filter((hit) => {
+      if (hit.watchpoint.loudness !== WatchpointLoudness.Ask) return false;
+      const read = detail.reads?.find((r) => r.key === hit.watchpoint.key);
+      return read?.acted === true && read.verdict === WatchpointReadVerdict.Clean;
+    }) ?? []
+  );
+}
 
 const labelsOf = (hits: readonly WatchpointHit[]): string =>
   hits.map((h) => h.watchpoint.label).join(', ');
@@ -85,7 +97,10 @@ export function announceWatchpointReading(
   },
 ): void {
   raiseLookCard(ctx, input);
-  const shows = hitsAt(input.detail, WatchpointLoudness.Show);
+  if (hitsAt(input.detail, WatchpointLoudness.Ask).length > 0)
+    raiseReadDisagreement(ctx, input.projectId);
+  // A clean read of an Ask hit is told as a Show hit is, with no card: the judge read it and found nothing.
+  const shows = [...hitsAt(input.detail, WatchpointLoudness.Show), ...cleanReadHits(input.detail)];
   if (shows.length > 0)
     postNotice(ctx, {
       tier: CardTier.Notice,
@@ -174,10 +189,12 @@ export function raiseLookCard(
       h,
     ]),
   );
+  const cleared = new Set(cleanReadHits(detail).map((h) => h.watchpoint.key));
   const hits = (detail?.hits ?? []).filter(
     (h) =>
       (h.watchpoint.loudness === WatchpointLoudness.Ask ||
         h.watchpoint.loudness === WatchpointLoudness.Hold) &&
+      !cleared.has(h.watchpoint.key) &&
       (holding.has(h.watchpoint.key) ? !merged(h) : !looked.has(h.watchpoint.key)),
   );
   if (hits.length === 0) {
