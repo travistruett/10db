@@ -1,5 +1,7 @@
 import {
   BuilderOwns,
+  CardDecider,
+  DecisionRule,
   EventType,
   InboxKind,
   InboxState,
@@ -17,6 +19,7 @@ import {
 } from '@10db/contracts';
 import {
   acquireClaims,
+  activeClaims,
   claimHolder,
   clearWorkstreamNotices,
   copyHazardNames,
@@ -27,8 +30,10 @@ import {
   getHold,
   getInboxItem,
   getWorkstreamRow,
+  isRuleAsking,
   listInbox,
   listSignOffWaits,
+  releaseClaim,
   setWorkstreamNotice,
   type AcquireResult,
   type ClaimRow,
@@ -38,7 +43,9 @@ import { claimScopeOf } from '../delivery';
 import type { EventBus, StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import { DEADLOCK_DETAIL, deadlockAnswers, taskLetter } from './claim-deadlock';
-import { CardTier, decidedByBuilder } from '../inbox';
+import { readPair, recordBreak } from './claim-deadlock-pairs';
+import { DeadlockMove, deadlockMove } from './claim-deadlock-rule';
+import { CardTier, decidedByBuilder, postNotice } from '../inbox';
 
 /** How often a task waiting for a claim looks again; the holder's release is not pushed to it. */
 export const CLAIM_POLL_MS = 2_000;
@@ -66,8 +73,13 @@ export type ClaimResult =
       readonly inboxId: InboxItemId | null;
       /** What the refused agent does next. */
       readonly instruction: string;
-      /** The refusal tells the agent about claims the builder made its task yield (`ClaimWaits.yielded`). */
+      /**
+       * The refusal tells the agent about claims the builder or 10db made its task yield
+       * (`ClaimWaits.yielded`).
+       */
       readonly yielded: boolean;
+      /** The yield also queued the task behind the other one, so it hands off. */
+      readonly queued: boolean;
       /** The holder is parked for the update: true only now, so the answer is not kept under the opId. */
       readonly parked: boolean;
     };
@@ -101,6 +113,7 @@ function turnEndedRefusal(a: Asking, inboxId: InboxItemId | null): ClaimResult {
     heldBy: null,
     inboxId,
     yielded: false,
+    queued: false,
     parked: false,
     instruction: `Your turn ended before shared ${a.kind} ${a.name} was granted, so you did not get it. If you still need it in a later turn, call request_claim with a new opId then.`,
   };
@@ -147,15 +160,21 @@ function withdrawnRefusal(a: Asking, inboxId: InboxItemId): ClaimResult {
     heldBy: null,
     inboxId,
     yielded: false,
+    queued: false,
     parked: false,
     instruction: `The builder's question about shared ${a.kind} ${a.name} was closed without an answer, so you did not get it. If you still need it, call request_claim with a new opId.`,
   };
 }
 
-/** Claims the builder made a task give up to end a claim deadlock, until its agent is told. */
+/** Claims the builder or 10db made a task give up to end a claim deadlock, until its agent is told. */
 export interface Yielded {
   readonly claims: readonly { readonly kind: ClaimKind; readonly name: string }[];
-  readonly inboxId: InboxItemId;
+  /** The builder's deadlock card the yield answered; null when 10db's rule made the task yield. */
+  readonly inboxId: InboxItemId | null;
+  /** The task the rule's yield handed the claims to; null for the builder's answer. */
+  readonly to: WorkstreamId | null;
+  /** The yield also queued the task behind `to`. */
+  readonly queued: boolean;
 }
 
 export interface Asking {
@@ -169,6 +188,8 @@ export interface Asking {
   /** Aborts when the session stops, which ends the wait. */
   readonly signal: AbortSignal;
   readonly pollMs: number;
+  /** The clock a claim deadlock's age is read from, in milliseconds. */
+  now(): number;
   /** A pass lane's shared area: asked about first, then granted with its hold. */
   readonly shared?: SharedGrant;
   /**
@@ -262,7 +283,7 @@ export class ClaimWaits {
   }
 
   /**
-   * The builder made `workstreamId` give up `claims` to end a deadlock. Its waits end with a refusal
+   * The builder or 10db's rule made `workstreamId` give up `claims` to end a deadlock. Its waits end with a refusal
    * naming them, and until a request_claim call has passed that on, every new ask by the task answers it
    * at once: the agent learns it lost them before it edits there again. False, and nothing kept, when the
    * task has no wait in progress: it is not in a deadlock, so nothing is to be given up.
@@ -487,6 +508,82 @@ function waitNotice(a: Asking, heldBy: WorkstreamId): Notice {
   };
 }
 
+/**
+ * What the later asker's card and drawer say while its deadlock is younger than the yield: no Inbox card, since
+ * 10db ends it by itself.
+ */
+function deadlockWaitNotice(a: Asking, heldBy: WorkstreamId): Notice {
+  const db = a.state.db;
+  const holder = taskTitleOf(db, heldBy);
+  return {
+    key: waitNoticeKey(a),
+    tone: 'info',
+    line: `Waits for ${a.kind} ${a.name}; task "${holder}" waits for a claim this one holds`,
+    body: [
+      `Task "${holder}" holds ${a.kind} ${a.name} and is itself waiting for a claim task "${taskTitleOf(db, a.workstreamId)}" holds, so neither can go on.`,
+      'If it still stands after 2 minutes, this task gives up what the other waits for; its uncommitted edits stay its own.',
+      `Reason given: ${a.reason}`,
+    ].join(' '),
+  };
+}
+
+/**
+ * The later asker gives up what `holder` waits for, in one write that releases it, records the break between
+ * the pair and posts the undoable notice; then its waits are told. False, with nothing written, when it holds
+ * none of it any more: the waits changed, and a yield that frees nothing breaks nothing.
+ */
+function breakDeadlock(
+  a: Asking,
+  holder: WorkstreamId,
+  gives: readonly { readonly kind: ClaimKind; readonly name: string }[],
+  waits: ClaimWaits,
+): boolean {
+  const me = a.workstreamId;
+  const released = a.state.write((ctx) => {
+    const rows = activeClaims(ctx.tx, me).filter((row) =>
+      gives.some((c) => c.kind === row.kind && c.name === row.name),
+    );
+    if (rows.length === 0) return [];
+    for (const row of rows) releaseClaim(ctx, row.id);
+    const claims = rows.map((row) => ({ kind: row.kind, name: row.name }));
+    const pair = recordBreak(ctx, {
+      yielder: me,
+      other: holder,
+      contested: [...claims, { kind: a.kind, name: a.name }],
+      queue: false,
+    });
+    const yielder = taskTitleOf(ctx.tx, me);
+    const other = taskTitleOf(ctx.tx, holder);
+    const list = claims.map((c) => `${c.kind} ${c.name}`).join(', ');
+    postNotice(ctx, {
+      tier: CardTier.Notice,
+      projectId: a.projectId,
+      taskId: getWorkstreamRow(ctx.tx, me).taskId,
+      key: `${DEADLOCK_CARD}:${pair.a}:${pair.b}`,
+      tone: 'info',
+      line: `"${yielder}" gave up ${list} to "${other}" to end a claim deadlock`,
+      body: [
+        `Task "${yielder}" waited for ${a.kind} ${a.name}, which task "${other}" holds, while "${other}" waited for ${list}, which "${yielder}" held.`,
+        `After 2 minutes "${yielder}", the later to ask, gave up ${list}. "${other}" got its committed work only: the uncommitted edits there stay "${yielder}"'s own.`,
+        'Undo forgets this yield: the two tasks count as never having deadlocked.',
+      ].join('\n\n'),
+      decision: {
+        by: CardDecider.Rule,
+        rule: DecisionRule.ClaimDeadlock,
+        confidence: null,
+        undo: {
+          state: 'undoable',
+          action: { kind: 'forget_claim_deadlock', a: pair.a, b: pair.b },
+        },
+      },
+    });
+    return claims;
+  });
+  if (released.length === 0) return false;
+  waits.yielded(me, { claims: released, inboxId: null, to: holder, queued: false });
+  return true;
+}
+
 const deadlockKey = (a: Asking): string => `${DEADLOCK_CARD}:${a.workstreamId}:${a.kind}:${a.name}`;
 
 /**
@@ -537,19 +634,25 @@ export function deadlockWaitInstruction(
   return `Waiting would deadlock: task "${taskTitleOf(db, heldBy)}" holds ${kind} ${name} and waits for a claim you hold. The builder was asked in the Inbox which task yields its claim or is cancelled, and this wait goes on until they answer. Call request_claim again with the same opId to keep waiting, and edit nothing in ${kind} ${name} until a call returns granted: true.`;
 }
 
-/** The refusal that tells an agent which claims the builder made its task give up. */
+/** The refusal that tells an agent which claims the builder or 10db's rule made its task give up. */
 export function yieldRefusal(
+  db: DbReader,
   given: Yielded,
   asked: { readonly kind: ClaimKind; readonly name: string },
 ): ClaimResult {
   const list = given.claims.map((c) => `${c.kind} ${c.name}`).join(', ');
+  const opening =
+    given.to === null
+      ? `The builder answered a claim deadlock: this task gave up ${list}, which was released so the other task could go on.`
+      : `This task and task "${taskTitleOf(db, given.to)}" each waited for a claim the other holds, so 10db had this one give up ${list}; that task has it now.`;
   return {
     granted: false,
     heldBy: null,
     inboxId: given.inboxId,
     yielded: true,
+    queued: given.queued,
     parked: false,
-    instruction: `The builder answered a claim deadlock: this task gave up ${list}, which was released so the other task could go on. You no longer hold ${list}: edit nothing there until request_claim grants it to you again. Your uncommitted edits there stay as they are and are still your own: the other task does not commit them, and to commit them you ask for ${list} again. You did not get ${asked.kind} ${asked.name} either. Call request_claim with a new opId for each claim you still need.`,
+    instruction: `${opening} You no longer hold ${list}: edit nothing there until request_claim grants it to you again. Your uncommitted edits there stay as they are and are still your own: the other task does not commit them, and to commit them you ask for ${list} again. You did not get ${asked.kind} ${asked.name} either. Call request_claim with a new opId for each claim you still need.`,
   };
 }
 
@@ -567,6 +670,7 @@ function parkedRefusal(a: Asking, heldBy: WorkstreamId): ClaimResult {
     heldBy,
     inboxId: null,
     yielded: false,
+    queued: false,
     parked: true,
     instruction: `Task "${taskTitleOf(a.state.db, heldBy)}" holds ${a.kind} ${a.name} and is paused until 10db's update has installed, so it will not free it soon. You did not get ${a.kind} ${a.name}. Edit nothing in it. If you can finish without it, carry on. Otherwise commit any changes you have, call write_handoff naming what is left under progress.notDone, and end your turn: a fresh session of this step continues after the update and can ask again then.`,
   };
@@ -588,6 +692,7 @@ function signingOffRefusal(a: Asking, holder: WorkstreamId): ClaimResult | null 
       heldBy: holder,
       inboxId: null,
       yielded: false,
+      queued: false,
       parked: false,
       instruction: `${signing.title} is being signed off; do without ${a.kind} ${a.name} or ask again after your turn.`,
     };
@@ -628,14 +733,18 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  * waiting task that names the holder's task; it is cleared when the wait ends.
  *
  * When the holder itself waits, through any chain, for something this task holds (checked whenever the
- * holder changes), neither would ever move: a card asks the builder which task yields its claim or is
- * cancelled, and the wait goes on, waiting on the card. While the card is up the check runs on every
- * look: an answer that frees the claim lets this wait take it, a deadlock that ended by itself withdraws
- * the card and turns this into a plain wait, and a card closed while the deadlock stands is raised again.
- * Only the waiter whose card is up looks again, so one deadlock raises one card.
+ * holder changes), neither would ever move. This wait is the later asker, since the holder was already
+ * waiting, and `deadlockMove` decides what it does; while it is in the deadlock the check runs on every
+ * look, and a deadlock that ended by itself turns this into a plain wait. Under 2 minutes it shows that
+ * it waits on a task that waits on it. After that it gives up what the holder waits for (`breakDeadlock`)
+ * and ends with the yield's refusal; the holder's wait takes the claim at its next look. With the rule
+ * set to ask, a card asks the builder which task yields its claim or is cancelled instead, and the wait
+ * waits on the card: an answer that frees the claim lets this wait take it, and a card closed while the
+ * deadlock stands is raised again. The earlier asker never looks again, so one deadlock yields once and
+ * raises one card.
  *
- * A wait whose task the builder made yield claims (`ClaimWaits.yielded`) ends with a refusal naming
- * them. Starting to wait on a holder, or on a new one, tells `waits`, so the scheduler can give that
+ * A wait whose task the builder or the rule made yield claims (`ClaimWaits.yielded`) ends with a refusal
+ * naming them. Starting to wait on a holder, or on a new one, tells `waits`, so the scheduler can give that
  * holder a lane. Runs synchronously up to its first wait, so `wait` names the holder and card by the
  * time `ClaimWaits.join` returns.
  *
@@ -650,6 +759,10 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
   const ended = taskEnded(a.state.db);
   let heldBy: WorkstreamId | null = null;
   let noticeShown = false;
+  /** When this wait found the deadlock it is in; null while it is in none. */
+  let deadlockSince: number | null = null;
+  /** The notice shown is the deadlock's, so a poll that finds it again writes nothing. */
+  let deadlockNoticeShown = false;
   const showNotice = (notice: Notice | null): void => {
     if (notice === null && !noticeShown) return;
     noticeShown = notice !== null;
@@ -684,7 +797,7 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
           'This task has ended, so it no longer waits for the claim. End your turn.',
         );
       const given = waits.pendingYield(a.workstreamId);
-      if (given) return yieldRefusal(given, a);
+      if (given) return yieldRefusal(a.state.db, given, a);
       // A shared area is held for a turn: a wait outlived by its turn takes nothing.
       if (shared && !shared.turnOpen()) return turnEndedRefusal(a, null);
       const outcome = shared === undefined ? tryAcquire(a) : (heldNow(a) ?? (await shared.grant()));
@@ -710,14 +823,47 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
       // waits for this session to end: refuse instead of waiting, and the session ends by itself.
       if (waits.holderParked(holder)) return parkedRefusal(a, holder);
       const changed = holder !== heldBy;
-      if (changed || wait.inboxId !== null) {
+      if (changed || wait.inboxId !== null || deadlockSince !== null) {
         if (!waits.waitsOn(holder, a.workstreamId, ended)) {
           withdrawDeadlock(a);
           wait.inboxId = null;
+          deadlockSince = null;
+          deadlockNoticeShown = false;
           showNotice(waitNotice(a, holder));
-        } else if (changed || wait.inboxId === null || !cardOpen(a, wait.inboxId)) {
-          wait.inboxId = deadlock(a, holder, waits);
-          showNotice(null);
+        } else {
+          deadlockSince ??= a.now();
+          const gives = waits.claimsAwaitedFrom(a.workstreamId, holder);
+          const move = deadlockMove({
+            asking: isRuleAsking(a.state.db, a.projectId, DecisionRule.ClaimDeadlock),
+            ageMs: a.now() - deadlockSince,
+            breaks: readPair(a.state.db, a.workstreamId, holder)?.breaks ?? 0,
+            gives: gives.length,
+          });
+          switch (move) {
+            case DeadlockMove.Card:
+              if (changed || wait.inboxId === null || !cardOpen(a, wait.inboxId)) {
+                wait.inboxId = deadlock(a, holder, waits);
+                deadlockNoticeShown = false;
+                showNotice(null);
+              }
+              break;
+            case DeadlockMove.Wait:
+              if (wait.inboxId !== null) {
+                withdrawDeadlock(a);
+                wait.inboxId = null;
+              }
+              if (changed || !deadlockNoticeShown) {
+                showNotice(deadlockWaitNotice(a, holder));
+                deadlockNoticeShown = true;
+              }
+              break;
+            case DeadlockMove.Yield:
+            case DeadlockMove.YieldAndQueue:
+            case DeadlockMove.YieldQueueAndReport:
+              // Until the queue is built, a repeat yields as a first does. The loop's top answers the refusal.
+              if (breakDeadlock(a, holder, gives, waits)) continue;
+              break;
+          }
         }
       }
       if (changed) {

@@ -132,7 +132,14 @@ export function createClaimDeadlockAnswers(deps: {
       if (isTerminal(getWorkstreamRow(deps.state.db, id).state)) return;
       // The task is told through its wait, so a claim is released only from a task that waits: one
       // that does not is in no deadlock, and losing a claim untold would let two tasks edit one area.
-      if (!deps.waits.yielded(id, { claims: choice.claims, inboxId: item.id }))
+      if (
+        !deps.waits.yielded(id, {
+          claims: choice.claims,
+          inboxId: item.id,
+          to: null,
+          queued: false,
+        })
+      )
         refuseEnded(deps, item.id);
       deps.state.write((ctx) => {
         for (const claim of activeClaims(ctx.tx, id))
