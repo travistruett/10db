@@ -17,7 +17,8 @@ Status: designed, not built. This pull request holds the plan only.
   lane, its gate ran past its limit, or its stop hung), a defect task is filed in 10db's project first and the
   card names it.
 - A hand-made worktree whose pull request merged, that is clean, unlocked, idle for 24 hours and has no process in
-  it, is removed. Its branch stays. The Activity row has an Undo that puts the worktree back.
+  it, is removed. Its branch stays, and an ignored file only it holds (a hand-made `.env`) is saved under
+  `~/.10db/kept/` first. The Activity row has an Undo that puts the worktree and those files back.
 - A finished 10db worktree that holds files found nowhere else has them copied to `~/.10db/kept/<name>/`, each
   copy checked by size and hash, and is then removed. Files with an identical copy in the project's checkout, and
   files a tool writes again, are not saved.
@@ -33,7 +34,10 @@ count. Removing a worktree stops being a one-way door.
   inside those 20 minutes is the bug.
 - A restart loop. One restart per step, charged to the run's recovery attempts; more than one restart row for one
   step without a card is the bug.
-- A stop that hangs. The sweep never calls twice for one run, and a stop past its deadline ends in the card.
+- A stop that hangs. The runner stops a run once at a time, whoever asks (the sweep or a card's answer), and a
+  stop past its deadline ends in the card.
+- A `.env` removed unsaved by the card's Remove answer. Only the rule lists a worktree that holds one, and it
+  saves first; the ask-mode card and its answer keep today's listing, which leaves such a worktree out.
 - A file lost with a worktree. Nothing is removed until every copy has the same size and SHA-256 as its source; a
   copy that fails leaves the worktree and today's card.
 - A worktree removed while in use. Checked again in the job that removes it: lock, changes, 24 hours, `lsof`.
@@ -117,7 +121,7 @@ export const StallMove = { Card: 'card', Restart: 'restart', Wait: 'wait', OutOf
 export function stallMove(input: {
   readonly asking: boolean; // isRuleAsking(StuckRun)
   readonly kind: StallKind;
-  readonly inFlight: boolean; // a restart of this run has not returned
+  readonly inFlight: boolean; // Runner.isRestarting: a restart of this run has not returned
   readonly restarted: boolean; // a record exists for this run
   readonly stopHung: boolean; // its record has stopHungAt
   readonly recoveryLeft: boolean; // recoveryAttempts < maxRecoveryAttempts
@@ -128,25 +132,29 @@ export function stallMove(input: {
 export const STALL_RESTARTS_KEY = 'stall_restarts';
 export const StallRestart = z.object({
   workstreamId: WorkstreamId,
-  restartedAt: z.iso.datetime().nullable(), // null: the stop hung before any restart
+  restartedAt: z.iso.datetime().nullable(), // null: no restart was made (the stop hung, or no attempts were left)
   state: z.enum(WorkstreamState), // the state it stalled in
   stopHungAt: z.iso.datetime().nullable(),
   defectTaskId: TaskId.nullable(),
 });
 export function readRestart(db: DbReader, id: WorkstreamId): StallRestart | null;
+// Replaces the run's record with a fresh one: stopHungAt and defectTaskId null.
 export function recordRestart(w: WriteContext, input: { id: WorkstreamId; state: WorkstreamState; at: string }): void;
+// markHung and markDefect set their field, and make the record (restartedAt null) when the run has none.
 export function markHung(w: WriteContext, input: { id: WorkstreamId; state: WorkstreamState; at: string }): void;
-export function markDefect(w: WriteContext, id: WorkstreamId, taskId: TaskId): void;
-export function clearRestart(w: WriteContext, id: WorkstreamId): void; // the step finished, or the card's answer
+export function markDefect(w: WriteContext, input: { id: WorkstreamId; state: WorkstreamState; taskId: TaskId }): void;
+export function clearRestart(w: WriteContext, id: WorkstreamId): void; // the restarted step finished
 export function forgetEndedRestarts(w: WriteContext): void; // drops records of terminal runs
 
 // apps/daemon/src/runner/runner.ts
 export type StopReason = 'cancelled' | 'paused' | 'shutdown' | 'closed' | 'stalled';
 interface Runner {
+  // One restart per run at a time: a call while one is in flight answers that one's promise and stops nothing.
   restartStalled(
     id: WorkstreamId,
     opts?: { note?: string; deadlineMs?: number },
   ): Promise<'restarted' | 'stop_hung' | 'not_active'>;
+  isRestarting(id: WorkstreamId): boolean; // a restartStalled call for this run has not returned
 }
 
 // apps/daemon/src/inbox/out-of-moves-card.ts (stage 4 task 3 made it)
@@ -175,6 +183,11 @@ handMadeWorktreeIdleSince(repo: string, path: string): Promise<Date>; // newest 
 
 // apps/daemon/src/delivery/hand-made-worktrees.ts
 export const HAND_MADE_IDLE_MS = 24 * 60 * 60_000;
+// Merged, carried, unlocked and clean, with the ignored files that are not build output. Only the rule calls it.
+export interface MergedHandMadeCandidate extends MergedHandMade { readonly loose: readonly string[] }
+export async function mergedHandMadeCandidates(ctx: DeliveryContext, project: ProjectDto, signal: AbortSignal): Promise<MergedHandMadeCandidate[]>;
+// Signature and meaning unchanged: the candidates with no loose file. The merged card and its Remove answer call it.
+export async function mergedHandMadeWorktrees(ctx: DeliveryContext, project: ProjectDto, signal: AbortSignal): Promise<MergedHandMade[]>;
 export async function removeIdleMergedHandMade(ctx: DeliveryContext, project: ProjectDto, signal: AbortSignal): Promise<string[]>;
 
 // apps/daemon/src/inbox/activity-actions.ts
@@ -201,12 +214,13 @@ interface UndoMoves {
 | `restart`, no live lane                       | The fenced write: a row no longer active answers `not_active` (no notice, no charge); else Running → Recovering → Queued, as recovery does.                                        |
 | The restarted step finishes                   | `clearRestart`, where the runner resets `recoveryAttempts`. A later step's stall restarts once again.                                                                             |
 | `out_of_moves`                                | When `fileDefect`: `fileDefect` with signature `stall:<fault>:<state>`. The Stall card names the defect task, or says the report could not be filed. The run is left as it is.      |
-| Stall card: Spend More Attempts               | `clearRestart`, then `restartStalled`. `stop_hung` throws, so the card stays.                                                                                                     |
+| Stall card: Spend More Attempts               | `restartStalled`, whose write replaces the record. `stop_hung` throws, so the card and the record stay. A sweep during the stop sees `inFlight` and waits.                        |
 | Stall card: Change the Task                   | Refused without a note; with one, the same with the note in the next brief.                                                                                                       |
 | Stall card: Drop It                           | Cancels the run, as Cancel Run does today.                                                                                                                                        |
 | The run moves, or ends                        | The card closes by `stall_cleared`; `forgetEndedRestarts` drops a terminal run's record.                                                                                          |
-| The daemon restarts during a stop             | The in-flight set is gone and no record was written: startup recovery requeues the run, and the one restart is not spent.                                                         |
-| A merged hand-made worktree, idle 24 h        | In the project's ship queue: looked at again, then no process in it (`lsof`), then removed. One notice per worktree with Undo `restore_worktree`. Any doubt: left, no card.        |
+| The daemon restarts during a stop             | The runner's in-flight set is gone and no record was written: startup recovery requeues the run, and the one restart is not spent.                                                |
+| A merged hand-made worktree, idle 24 h        | In the project's ship queue: listed again by `mergedHandMadeCandidates`, no process in it (`lsof`), its loose ignored files that are `onlyHere` saved and verified, then removed. One notice per worktree with Undo `restore_worktree`. Any doubt or a failed copy: left, no card. |
+| The merged card and its Remove answer         | List with `mergedHandMadeWorktrees`, as today: a worktree holding a loose ignored file is neither offered nor removed.                                                            |
 | Undo on a hand-made removal                   | Path free and branch exists: `git worktree add`, then the kept files copied back with their modes; the kept folder stays. Else `ConflictError`, nothing changed.                   |
 | A finished worktree with files only it holds  | `onlyHere` → `saveKept` (verified) → removed as Remove Worktree does. One notice, Undo `final`. Nothing only it holds: removed, no notice beyond today's log.                      |
 | A copy fails, or the worktree is `unreadable` | Nothing is removed; today's card.                                                                                                                                                 |
@@ -216,7 +230,7 @@ interface UndoMoves {
 One track; each task is one pull request and a fresh implementer.
 
 1. `task-1.md`: the rule and the contracts. `stallMove`, `StallKind`, the three rules, `restore_worktree`.
-2. `task-2.md`: the restart. `restartStalled`, the record, the sweep's in-flight set, the notice.
+2. `task-2.md`: the restart. `restartStalled` and its in-flight set, the record, the sweep's call, the notice.
 3. `task-3.md`: the second stall. The defect, the Stall card and its answers. Needs stage 4 task 3 merged
    (`out-of-moves-card.ts`); if it has not, tasks 4 to 6 are built first.
 4. `task-4.md`: saving files. `kept-files.ts`, nothing calls it yet.

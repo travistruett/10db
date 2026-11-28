@@ -9,30 +9,41 @@ plan's, so read the merged file and use what it exports.
 **Files:**
 
 - `apps/daemon/src/inbox/out-of-moves-card.ts`: `OutOfMovesKind.Stall`; its case in `createOutOfMovesAnswers`.
-- `apps/daemon/src/stalls/card.ts`: `stallOutOfMovesCard(stall, { fault, defect, holds })`.
+- `apps/daemon/src/stalls/card.ts`: `stallOutOfMovesCard(stall, { reason, fault, defect, holds })`, `reason`
+  one of the three cases below.
 - `apps/daemon/src/stalls/sweep.ts`: the `out_of_moves` branch, and `stop_hung` raising this card.
 - `apps/daemon/src/daemon/start.ts`: pass `restartStalled` and `cancel` to the answers.
 - `apps/desktop/e2e/inbox.spec.ts`: extended. `apps/daemon/src/stalls/AGENTS.md`, `apps/daemon/src/inbox/AGENTS.md`.
 
-**Calls**, exactly: `fileDefect(w, { signature, title, description })`, `markDefect`, `markHung`, `clearRestart`,
-`readRestart`, `Runner.restartStalled`, `outOfMovesFields`, `OutOfMovesChoice`, `decidedByBuilder(BuilderOwns.OutOfMoves)`.
+**Calls**, exactly: `fileDefect(w, { signature, title, description })`, `markDefect`, `markHung`, `readRestart`,
+`Runner.restartStalled`, `outOfMovesFields`, `OutOfMovesChoice`, `decidedByBuilder(BuilderOwns.OutOfMoves)`.
 
 **The `out_of_moves` branch.** One write:
 
 - When `fileDefect` is true and the record has no `defectTaskId`: `fileDefect` with signature
   `stall:<fault>:<state>` (state lowercased), a title that says what stalled ("A run's stop did not finish in 2
   minutes"), and a description with the project, the task's title, the state, the times and the fault. A task id
-  goes to `markDefect`. Null means no 10db project here or an open task already has the signature.
+  goes to `markDefect`, which makes the record when the run has none (a first stall with no attempts left). Null
+  means no 10db project here or an open task already has the signature.
 - Then the card, whatever `fileDefect` answered. There is no wait and no silent path.
 
 **The card.** `stallCard`'s shape with the out-of-moves answers: it keeps `detail[STALL_CARD]`, `foldKey` and
 `closesWhen: { by: 'event', when: { event: 'stall_cleared', key } }`, so the sweep still closes it when the run
 moves, and adds `outOfMovesFields({ kind: OutOfMovesKind.Stall, more: 1, … })`.
 
-- Title: `Out of moves: <task title> stalled again`, or `… would not stop` for `StopHung`.
-- Body: what stalled and since when; "10db restarted it once from its handoff, and it stalled again." (or the
-  hung-stop sentence); the defect line: "10db filed this as its own defect: <title>." or "This looks like a 10db
-  defect; the report could not be filed here."; then what the run holds.
+- The card has three cases, since `stallMove`'s last row matches all three. Read them from the record, in this
+  order, and pass the case to `stallOutOfMovesCard`:
+
+  | Case             | When                                 | Title ends                      | Sentence                                                                    |
+  | ---------------- | ------------------------------------ | ------------------------------- | --------------------------------------------------------------------------- |
+  | The stop hung    | the record has `stopHungAt`          | `would not stop`                | "10db tried to stop it to restart it, and the stop did not finish in 2 minutes." |
+  | Stalled again    | the record has `restartedAt`         | `stalled again`                 | "10db restarted it once from its handoff, and it stalled again."            |
+  | No attempts left | neither (no record, or only a defect) | `stalled with no attempts left` | "It has used all its recovery attempts, so 10db did not restart it."        |
+
+- Title: `Out of moves: <task title> <title ending>`.
+- Body: what stalled and since when; the case's sentence; when `fileDefect`, the defect line: "10db filed this
+  as its own defect: <title>." or "This looks like a 10db defect; the report could not be filed here."; then what
+  the run holds.
 - "What it holds" (its lane, its claims by name, a gate slot when a gate process is recorded) is fixed text written
   when the card is raised, like `since`; the fingerprint includes it, so a change rewrites the card.
 - Options: Spend More Attempts ("Stops it and starts it once more from its handoff"), Change the Task ("The same,
@@ -40,8 +51,13 @@ moves, and adds `outOfMovesFields({ kind: OutOfMovesKind.Stall, more: 1, … })`
 
 **The answers.** Parse the detail (JSON from the database).
 
-- More: `clearRestart`, then `restartStalled(id)`. `stop_hung` throws so the card stays; `not_active` closes it.
-- Change: refused without a note (throw); with one, `restartStalled(id, { note })`.
+- More: `restartStalled(id)` and nothing before it. Its fenced write replaces the record (`recordRestart`), so
+  the answer never clears the record itself: a sweep during the stop reads `inFlight` from the runner and waits,
+  and one after it reads the fresh record. `stop_hung` throws so the card and the record stay; `not_active`
+  closes it.
+- Change: refused without a note (throw); with one, `restartStalled(id, { note })`, the same way.
+- An answer given while a restart of the run is in flight gets that restart's result: the runner stops a run once
+  at a time.
 - Drop: cancel, as `StallAction.CancelRun` does.
 - A row left Running with no live lane by a late stop is restarted through `restartStalled`'s no-lane path.
 
@@ -50,7 +66,8 @@ moves, and adds `outOfMovesFields({ kind: OutOfMovesKind.Stall, more: 1, … })`
 **Test.** No new unit test. Extend the case task 2 added: (d) a restarted run whose session goes silent again gets
 one open card with `OutOfMovesChoice`'s labels and no second restart; with the fault `NeverStarted` and a 10db
 project seeded, an Icebox task carrying `stall:never_started:starting` exists and the card's body names it; Drop
-It cancels the run. Extend `apps/desktop/e2e/inbox.spec.ts`'s out-of-moves case to seed a Stall card and check its
+It cancels the run; Spend More Attempts with a sweep run while its stop is pending requeues the run once. Extend
+`apps/desktop/e2e/inbox.spec.ts`'s out-of-moves case to seed a Stall card and check its
 three answers show. Click it through against the real daemon before review.
 
 **Spec:** the "Stuck run" row (Escalates when, What you see then) of "3. The decision-rights table", "8. Where this
