@@ -113,7 +113,7 @@ favors legibility and calm over decoration.
   daemon would refuse stays as a disabled button with its reason in a tooltip, and the reason never names
   the task.
 - **Goal line:** the Board has no goal strips and no goal drawer; a goal's detail lives in Factory. Choosing a
-  goal in the header's Goal select shows one compact line beside it: the status dot, "Idle · 4 in review ·
+  goal in the toolbar's Goal select shows one compact line at the toolbar's left: the status dot, "Idle · 4 in review ·
   1 ready", **Start Ready** and **Open in Factory ›**. With All goals selected nothing shows. A goal is never a
   card in a column: cards are tasks, and the columns stay about tasks. Each of a goal's task cards carries the
   goal's title as a small dimmed label, except while the Goal select shows that goal.
