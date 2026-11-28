@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   type ConversationId,
+  type DecisionRule,
   CARD_CLOSES_ITSELF,
   BuilderOwns,
   decisionDetail,
@@ -53,6 +54,8 @@ import {
 } from '@10db/contracts';
 import {
   findOpenByFoldKey,
+  recordRuleMark,
+  RuleMark,
   getInboxItem,
   getJudgeConfig,
   getPerson,
@@ -206,6 +209,11 @@ export interface FlagInput {
    * Without it a repeat is a silent no-op, which callers that raise on every poll rely on.
    */
   readonly refresh?: boolean;
+  /**
+   * The rule that would have decided this itself had it not been set to ask: a card raised new records
+   * it as sent up to the builder, once per card.
+   */
+  readonly sentUp?: DecisionRule;
   readonly options?: readonly InboxOption[];
   /** The label of the option the card recommends. */
   readonly recommendation?: string | null;
@@ -310,6 +318,7 @@ export function flagCard(ctx: WriteContext, input: FlagInput): InboxItemDto {
         detail: stored,
       });
   }
+  if (input.sentUp) recordRuleMark(ctx, input.projectId, input.sentUp, RuleMark.SentUp);
   return insertInboxItem(ctx, {
     projectId: input.projectId,
     kind: InboxKind.Flag,

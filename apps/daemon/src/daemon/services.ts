@@ -106,6 +106,8 @@ import {
   listInbox,
   listLinearPosts,
   pageActivity,
+  RULE_WINDOW_DAYS,
+  ruleStats,
   pageInbox,
   inboxCardContext,
   listModelProfiles,
@@ -1022,6 +1024,11 @@ export function createServices(deps: {
         connectedTeams: deps.slackConnections.connectedTeams(),
       }),
     pageActivity: (query) => pageActivity(db, query),
+    ruleStats(query) {
+      const now = deps.clock.now();
+      const since = new Date(now.getTime() - RULE_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      return { since, rules: ruleStats(db, { projectId: query.project ?? null, now }) };
+    },
     undoActivity: (seq) => activityActions.undo(seq),
     askNextTime: (seq, asking) => {
       activityActions.askNextTime(seq, asking);

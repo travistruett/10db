@@ -174,6 +174,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/judge/calls': 'No screen draws a setting.',
   '/judge/calls/page': 'No screen draws a setting.',
   '/judge/decisions': 'No screen draws a setting.',
+  '/rules/stats': 'No screen draws a setting.',
   '/judge/models': 'No screen draws a setting.',
   '/benchmarks/status': 'No screen draws a benchmark.',
   '/benchmarks/models': 'No screen draws a benchmark.',

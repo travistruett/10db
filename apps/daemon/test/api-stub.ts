@@ -44,6 +44,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     listInbox: () => [],
     pageInbox: track('pageInbox'),
     pageActivity: () => ({ rows: [], next: null }),
+    ruleStats: () => ({ since: new Date(0).toISOString(), rules: [] }),
     undoActivity: none,
     askNextTime: none,
     inboxCardContext: track('inboxCardContext'),

@@ -110,6 +110,8 @@ export function raiseMigrationsCard(
   paths: readonly string[],
 ): void {
   raise(inbox, batch.projectId, {
+    // Only a rule set to ask leaves the migrations to the builder.
+    sentUp: DecisionRule.MigrateAfterLanding,
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
     closesWhen: BY_ANSWER,

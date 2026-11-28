@@ -45,6 +45,7 @@ import {
   InboxState,
   JudgeCallsPageQuery,
   ActivityPageQuery,
+  RuleStatsQuery,
   ActivityRowRef,
   InboxPageQuery,
   JudgeConfigPatch,
@@ -2589,6 +2590,11 @@ export function createApp(deps: ApiDeps) {
       '/activity/page',
       validator('query', (query) => ActivityPageQuery.parse(query)),
       (c) => c.json(deps.services.pageActivity(c.req.valid('query'))),
+    )
+    .get(
+      '/rules/stats',
+      validator('query', (query) => RuleStatsQuery.parse(query)),
+      (c) => c.json(deps.services.ruleStats(c.req.valid('query'))),
     )
     .post('/activity/:seq/undo', async (c) => {
       await deps.services.undoActivity(

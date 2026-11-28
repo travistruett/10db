@@ -40,7 +40,7 @@ import type { ChatMergedCheck } from './chat-worktree-merged';
 import { raise, withdraw } from './context';
 import { dropOrphanStarts } from './start-refs';
 import { unseededIgnoredFiles } from './worktree-cleanup';
-import { announceSaved, saveLeftovers, type Leftovers } from './worktree-save';
+import { announceSaved, saveLeftovers, sentUpBy, type Leftovers } from './worktree-save';
 
 export interface SweepDeps {
   readonly state: StateStore;
@@ -153,18 +153,20 @@ async function readyToRemove(
   if (changed.length > 0 || ignored === null) {
     const outcome = ignored === null ? null : await save(changed, ignored);
     if (outcome?.kind === 'saved') return outcome;
-    raise(
-      deps.inbox,
-      project.id,
-      worktreeCards.orphanKept(main, path, ignored === null ? null : changed, ignored ?? []),
-    );
+    raise(deps.inbox, project.id, {
+      ...worktreeCards.orphanKept(main, path, ignored === null ? null : changed, ignored ?? []),
+      ...sentUpBy(outcome),
+    });
     return null;
   }
   const loose = looseWork(ignored);
   if (loose.length === 0) return { kind: 'saved', dir: null, saved: [] };
   const outcome = await save([], ignored);
   if (outcome.kind === 'saved') return outcome;
-  raise(deps.inbox, project.id, worktreeCards.orphanIgnored(main, path, loose));
+  raise(deps.inbox, project.id, {
+    ...worktreeCards.orphanIgnored(main, path, loose),
+    ...sentUpBy(outcome),
+  });
   return null;
 }
 

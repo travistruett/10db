@@ -265,7 +265,17 @@ export function createStallSweep(deps: {
     const changedOutOfMoves = outOfMoves.filter((input) => !saysTheSame(db, open, input));
     if (changed.length > 0 || changedOutOfMoves.length > 0)
       deps.state.write((ctx) => {
-        for (const stall of changed) flagCard(ctx, stallCard(stall));
+        for (const stall of changed) {
+          // An active run gets the Stuck card instead of a restart only when the rule asks.
+          const asked =
+            stall.kind === StallKind.Active &&
+            stall.workstreamId !== null &&
+            isRuleAsking(ctx.tx, stall.projectId, DecisionRule.StuckRun);
+          flagCard(ctx, {
+            ...stallCard(stall),
+            ...(asked ? { sentUp: DecisionRule.StuckRun } : {}),
+          });
+        }
         for (const input of changedOutOfMoves) raiseStallOutOfMoves(ctx, input);
       });
     const current = new Set(stalls.map((s) => s.key));

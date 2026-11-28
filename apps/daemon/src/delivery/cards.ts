@@ -4,6 +4,7 @@ import {
   BuilderOwns,
   CARD_OPENS,
   type CardDecision,
+  type DecisionRule,
   OPEN_INTEGRATIONS_DETAIL,
   type BatchDto,
   type BatchId,
@@ -59,6 +60,8 @@ export interface Card {
   readonly foldKey?: string;
   /** A repeat that folds replaces the open card's title, body, options and detail with this one's. */
   readonly refresh?: boolean;
+  /** The rule that would have decided this itself had it not been set to ask; see `FlagInput.sentUp`. */
+  readonly sentUp?: DecisionRule;
   readonly detail?: Record<string, Json>;
   /** The answers the card offers; none for a card the builder only dismisses. */
   readonly options?: readonly InboxOption[];

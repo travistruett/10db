@@ -191,6 +191,8 @@ import {
   listSkipsForWorkstream,
   getTaskStartDirt,
   isRuleAsking,
+  recordRuleMark,
+  RuleMark,
   recordTaskStartDirt,
   taskHasRunASession,
   listToolOpResults,
@@ -2369,12 +2371,12 @@ export function createRunner(opts: RunnerOptions): Runner {
       const to = row.stepIndex + 1 < row.steps.length ? row.stepIndex + 1 : -1;
       const next = row.steps[to];
       if (next && approvesPlanBefore(ctx.tx, row, to)) {
-        const gate = planGate(
-          row.steps,
-          to,
-          isRuleAsking(ctx.tx, row.projectId, DecisionRule.PlanGoesAhead),
-        );
+        const asking = isRuleAsking(ctx.tx, row.projectId, DecisionRule.PlanGoesAhead);
+        const gate = planGate(row.steps, to, asking);
         if (gate.kind === 'card') {
+          // A plan that would have gone ahead is a card only because the rule asks.
+          if (asking && planGate(row.steps, to, false).kind === 'ahead')
+            recordRuleMark(ctx, row.projectId, DecisionRule.PlanGoesAhead, RuleMark.SentUp);
           parkForPlanApproval(
             ctx,
             id,

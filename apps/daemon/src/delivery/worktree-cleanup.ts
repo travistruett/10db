@@ -21,7 +21,7 @@ import { baseNotices, NOTICE_KEY } from './notices';
 import { installedLockfileKey } from './installed-lockfile';
 import { mergeRef, startRef } from './start-refs';
 import { removeIfEmptyDirectory } from './worktree-leftover';
-import { announceSaved, saveLeftovers, type Leftovers } from './worktree-save';
+import { announceSaved, saveLeftovers, sentUpBy, type Leftovers } from './worktree-save';
 import { withWorktreeLock } from './worktree-lock';
 
 /**
@@ -102,11 +102,10 @@ async function retire(
         const ignored = await unseededIgnoredFiles(ctx.git, main, path, project.worktreeSeed);
         const outcome = ignored === null ? null : await save(changed, ignored);
         if (outcome?.kind !== 'saved') {
-          raise(
-            ctx.inbox,
-            project.id,
-            worktreeCards.keptDirty(batch, main, path, changed, ignored ?? []),
-          );
+          raise(ctx.inbox, project.id, {
+            ...worktreeCards.keptDirty(batch, main, path, changed, ignored ?? []),
+            ...sentUpBy(outcome),
+          });
           return { kind: 'kept', reason: 'changes', paths: changed };
         }
         saved = outcome;

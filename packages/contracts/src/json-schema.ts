@@ -135,6 +135,7 @@ import { GithubSigninDto, GithubStatusDto } from './github';
 import { AutoCeilingTodayDto } from './auto-ceiling';
 import { DecisionModelListDto } from './decision-models';
 import { DecisionStatsListDto } from './decision-stats';
+import { RuleStatsListDto } from './rule-stats';
 import { ActivityPageDto, ActivityPageQuery, ActivityRowRef, NoticePostedData } from './activity';
 import { InboxPageDto, InboxPageQuery } from './inbox-page';
 import { InboxCardContextDto } from './inbox-rows';
@@ -519,6 +520,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'github-status-dto': GithubStatusDto,
   'decision-model-list-dto': DecisionModelListDto,
   'decision-stats-list-dto': DecisionStatsListDto,
+  'rule-stats-list-dto': RuleStatsListDto,
   'judge-call-dto': JudgeCallDto,
   'judge-calls-page-dto': JudgeCallsPageDto,
   'judge-calls-page-query': JudgeCallsPageQuery,
