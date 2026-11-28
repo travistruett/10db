@@ -573,6 +573,9 @@ export function createServices(deps: {
         const found = deps.state.write((ctx) => dropPair(ctx, a, b));
         if (!found) throw new ConflictError('This claim deadlock has no record any more');
       },
+      restoreWorktree: () => {
+        throw new ConflictError('This worktree can’t be put back yet');
+      },
     },
   });
   /** What was found of a project's evals, with where 10db's own assessment of them stands. */

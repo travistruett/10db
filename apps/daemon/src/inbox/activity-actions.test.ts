@@ -33,6 +33,7 @@ function setup() {
     moves: {
       moveProject: (projectId, accountId) => moves.push({ projectId, accountId }),
       forgetClaimDeadlock: () => undefined,
+      restoreWorktree: () => undefined,
     },
   });
   /** Posts a rule-decided notice and returns its row's seq. */

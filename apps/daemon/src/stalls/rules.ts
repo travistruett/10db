@@ -21,6 +21,10 @@ export const StallAction = {
 } as const;
 export type StallAction = (typeof StallAction)[keyof typeof StallAction];
 
+/** What a stall is of: a queued run, a batch (both batch stalls), or an active run (the last loop's). */
+export const StallKind = { Queued: 'queued', Batch: 'batch', Active: 'active' } as const;
+export type StallKind = (typeof StallKind)[keyof typeof StallKind];
+
 export interface QueuedRun {
   readonly run: Pick<WorkstreamDto, 'id' | 'projectId' | 'taskId' | 'batchId' | 'state'>;
   readonly title: string;
@@ -70,6 +74,8 @@ export interface StallInput {
 
 export interface Stall {
   readonly key: string;
+  /** What the stall is of. Not part of `fingerprint`: it changes no word of the card. */
+  readonly kind: StallKind;
   readonly projectId: ProjectId;
   readonly workstreamId: WorkstreamId | null;
   readonly batchId: BatchId | null;
@@ -142,6 +148,7 @@ export function findStalls(input: StallInput): Stall[] {
       run.id,
       stall({
         key: runStallKey(run.id),
+        kind: StallKind.Queued,
         projectId: run.projectId,
         workstreamId: run.id,
         batchId: run.batchId,
@@ -176,6 +183,7 @@ export function findStalls(input: StallInput): Stall[] {
       stalls.push(
         stall({
           key: batchStallKey(batch.id),
+          kind: StallKind.Batch,
           projectId: batch.projectId,
           workstreamId: null,
           batchId: batch.id,
@@ -199,6 +207,7 @@ export function findStalls(input: StallInput): Stall[] {
       stalls.push(
         stall({
           key: batchStallKey(batch.id),
+          kind: StallKind.Batch,
           projectId: batch.projectId,
           workstreamId: null,
           batchId: batch.id,
@@ -231,6 +240,7 @@ export function findStalls(input: StallInput): Stall[] {
     stalls.push(
       stall({
         key: runStallKey(run.id),
+        kind: StallKind.Active,
         projectId: run.projectId,
         workstreamId: run.id,
         batchId: null,

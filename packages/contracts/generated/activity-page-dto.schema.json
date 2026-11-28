@@ -66,7 +66,10 @@
                   "stray-write",
                   "flaky-check",
                   "move-back-after-limit",
-                  "claim-deadlock"
+                  "claim-deadlock",
+                  "stuck-run",
+                  "merged-worktree",
+                  "worktree-leftovers"
                 ]
               },
               "confidence": {
@@ -135,6 +138,46 @@
                               "kind",
                               "a",
                               "b"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "restore_worktree"
+                              },
+                              "projectId": {
+                                "type": "string",
+                                "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "branch": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "keptDir": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "projectId",
+                              "path",
+                              "branch",
+                              "keptDir"
                             ],
                             "additionalProperties": false
                           }

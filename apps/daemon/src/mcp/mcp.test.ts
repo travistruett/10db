@@ -530,6 +530,7 @@ describe('edits left behind in a shared checkout', () => {
       state,
       moves: {
         moveProject: () => undefined,
+        restoreWorktree: () => undefined,
         forgetClaimDeadlock: (a, b) => {
           const found = state.write((ctx) => dropPair(ctx, a, b));
           if (!found) throw new ConflictError('This claim deadlock has no record any more');
