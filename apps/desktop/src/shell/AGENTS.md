@@ -113,7 +113,7 @@ Known limit: the guard holds one flag per frame, not one per view, so two dirty 
 `SurfaceDrawer` (`surface-drawer.tsx`) is the one slide-out: it draws into the frame's drawer layer over the
 content column (the nearest positioned box when drawn without a frame), 480 to 760 px wide and the whole surface under
 640 px. It is not modal (`role=dialog`, `aria-modal=false`, no overlay); focus moves in on opening and back on
-closing; Esc with focus inside, or ×, closes it. With `closeOnClickOutside` (the Board's task drawer) a press on
+closing; Esc with focus inside or fallen to the page (a pick that saves redraws its control), or ×, closes it. With `closeOnClickOutside` (the Board's task drawer) a press on
 the content beside it closes it too, except on an element marked `data-keeps-drawer` (a task card, which opens its
 own task instead) or outside the content box (menus, dialogs, the sidebar). With `showing` (what it shows, such as a record id), focus lost when its body redraws under a link comes back to it, so Esc still closes it. A `title` heads it on the top edge; a `footer` is a bar pinned to its bottom edge, below the scrolling body, for its actions (the area and hazard drawers' Cancel and Save). Use it for every side panel (Changes, an Inbox item, a Board
 task); never Mantine's `Drawer`.

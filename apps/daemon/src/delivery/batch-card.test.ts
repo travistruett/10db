@@ -1012,6 +1012,8 @@ describe('the failed workstream card', () => {
             shipGate: (gate) => ({
               run: async (request) => ({ ...(await gate.run(request)), exitCode: 1 }),
             }),
+            // No fix task: the failed gate keeps the batch FAILED.
+            maxFixAttempts: 0,
           });
           const made = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
           inbox.answer(made.card.id, { choice: 'Ship without it' });
@@ -1117,6 +1119,7 @@ describe('the failed workstream card', () => {
               shipGate: (gate) => ({
                 run: async (request) => ({ ...(await gate.run(request)), exitCode: 1 }),
               }),
+              maxFixAttempts: 0,
             },
             'FAILED',
           ],
@@ -1310,6 +1313,7 @@ describe('the failed workstream card', () => {
               return gateFails ? { ...result, exitCode: 1 } : result;
             },
           }),
+          maxFixAttempts: 0,
         },
       );
       inbox = answering();
@@ -1354,6 +1358,7 @@ describe('the failed workstream card', () => {
                 return gateFails ? { ...result, exitCode: 1 } : result;
               },
             }),
+            maxFixAttempts: 0,
           },
         );
         inbox = answering();

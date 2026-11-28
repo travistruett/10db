@@ -42,6 +42,10 @@ export const TakenClaims = z.object({
 });
 export type TakenClaims = z.infer<typeof TakenClaims>;
 
+/** The key of every yield notice between the pair, posted on the yielder's task. */
+export const deadlockNoticeKey = (a: WorkstreamId, b: WorkstreamId): string =>
+  `claim-deadlock:${a}:${b}`;
+
 /** Unset or unreadable reads as no pairs. */
 function readPairs(db: DbReader): DeadlockPair[] {
   const parsed = z.array(DeadlockPair).safeParse(getAppSetting(db, CLAIM_DEADLOCKS_KEY));
@@ -189,6 +193,31 @@ export function turnOver(db: DbReader, pair: DeadlockPair): boolean {
 export function queuedBehind(db: DbReader, id: WorkstreamId): WorkstreamId | null {
   const pair = readPairs(db).find((entry) => entry.queued?.yielder === id && !turnOver(db, entry));
   return pair?.queued?.behind ?? null;
+}
+
+/**
+ * Every pair whose record queues `yielder`, whether or not its turn is over: the scheduler ends a turn that
+ * is over (`endTurn`) before it launches the yielder.
+ */
+export function queuingPairs(db: DbReader, yielder: WorkstreamId): readonly DeadlockPair[] {
+  return readPairs(db).filter((pair) => pair.queued?.yielder === yielder);
+}
+
+/** Adds `claim` to the pair's contested claims, counting no break. Nothing when the pair has no record. */
+export function addContested(
+  w: WriteContext,
+  x: WorkstreamId,
+  y: WorkstreamId,
+  claim: ClaimRef,
+): void {
+  const pairs = readPairs(w.tx);
+  if (!pairs.some((pair) => isPair(pair, x, y))) return;
+  writePairs(
+    w,
+    pairs.map((pair) =>
+      isPair(pair, x, y) ? { ...pair, contested: union(pair.contested, [claim]) } : pair,
+    ),
+  );
 }
 
 /** @public */

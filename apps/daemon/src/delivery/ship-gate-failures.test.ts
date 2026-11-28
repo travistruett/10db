@@ -1,11 +1,31 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BatchDto } from '@10db/contracts';
-import { getBatch, insertEvidence, listTasks, listWorkstreams } from '@10db/db';
+import type { BatchDto, ProjectInput } from '@10db/contracts';
+import {
+  findOpenByFoldKey,
+  getBatch,
+  getTask,
+  insertEvidence,
+  listTasks,
+  listWorkstreams,
+  transitionBatch,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { tempDir } from '../../test/fixtures';
 import type { GateRunner } from '../verify';
+import { shipFailureFoldKey } from './cards';
+import { readGateFix } from './gate-fix';
+import { DEFAULT_DELIVERY_LIMITS, openPass, type PutBackKeptWork } from './index';
+
+const PAGES: Partial<ProjectInput> = {
+  areas: [
+    { name: 'api', globs: ['src/api/**'] },
+    { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+  ],
+};
+
+const nothingKept: PutBackKeptWork = () => Promise.resolve({ applied: [], left: [] });
 
 let h: DeliveryHarness;
 afterEach(() => {
@@ -25,7 +45,7 @@ function fakeGate(fails: number, tests: readonly string[]): string {
       'mkdir -p .gate',
       'n=$(cat .gate/runs 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > .gate/runs',
       `if [ "$n" -le ${String(fails)} ]; then`,
-      `  printf '%s\\n' '${failLines}' > .gate/test.log`,
+      `  printf '%s\\n' '${failLines}' 'AssertionError: expected 1 to be 2' > .gate/test.log`,
       "  echo 'FAILED test: pnpm test (log .gate/test.log)'",
       "  echo 'GATE FAIL: test — logs in .gate/; test 1s (1s)'",
       '  exit 1',
@@ -75,17 +95,64 @@ async function finish(batch: BatchDto, ownGate: number | null): Promise<BatchDto
 }
 
 describe('a shipping gate that fails', () => {
-  it("doesn't run it again when a failing test is in a file the batch changed", async () => {
+  it('files one fix task in the batch and reopens it, with no card, when a failing test is in a file the batch changed', async () => {
     h = createDeliveryHarness({ gateCommand: fakeGate(1, ['src/api/alpha.test.ts > works']) });
     const batch = await openBatch();
     h.commit('src/api/alpha.test.ts');
+    const tasks = listTasks(h.store.db, h.project.id).length;
+    const before = new Set(listWorkstreams(h.store.db, { batchId: batch.id }).map((ws) => ws.id));
+    const ticks = h.ticks.count;
     const ended = await finish(batch, 0);
-    expect(ended.state).toBe('FAILED');
+    expect(ended).toMatchObject({ state: 'OPEN', failure: null });
     expect(gateRuns()).toBe(1);
-    const card = h.only(h.cards());
-    expect(card.body).toContain('Start a fix task');
-    // The card still points at a fix task, and offers the answers the daemon acts on as well.
-    expect(card.detail?.['actions']).toEqual(['retry', 'abandon']);
+    expect(findOpenByFoldKey(h.store.db, h.project.id, shipFailureFoldKey(batch.id))).toBe(
+      undefined,
+    );
+    expect(h.cards()).toEqual([]);
+    const fix = h.only(
+      listWorkstreams(h.store.db, { batchId: batch.id }).filter((ws) => !before.has(ws.id)),
+    );
+    expect(fix.state).toBe('QUEUED');
+    const task = getTask(h.store.db, fix.taskId);
+    expect(task.title).toMatch(/^Fix the gate/);
+    expect(listTasks(h.store.db, h.project.id)).toHaveLength(tasks + 1);
+    expect(task.description).toContain('src/api/alpha.test.ts > works');
+    expect(task.description).toContain('AssertionError');
+    expect(task.description).toContain(join(h.repo, '.gate', 'test.log'));
+    expect(readGateFix(h.store.db, batch.id, DEFAULT_DELIVERY_LIMITS.maxFixAttempts).count).toBe(1);
+    expect(h.ticks.count).toBeGreaterThan(ticks);
+  });
+
+  it("keeps today's card for a Workbench pass's batch, and files no fix", async () => {
+    h = createDeliveryHarness({
+      ...PAGES,
+      gateCommand: fakeGate(1, ['src/settings/page.test.ts > works']),
+    });
+    const settings = h.addTask('Settings page', { areas: ['settings'] });
+    const opened = await openPass(
+      h.ctx,
+      { projectId: h.project.id, name: 'Polish pages', taskIds: [settings.id] },
+      { leaseMs: 60_000, putBack: nothingKept },
+    );
+    const batchId = opened.batch.id;
+    h.commit('.gitignore', '.gate/\n');
+    h.commit('src/settings/page.test.ts');
+    const tasks = listTasks(h.store.db, h.project.id).length;
+    // A pass's batch is never shipped by `checkBatch`: its runs are settled, then it is sent to ship.
+    for (const ws of listWorkstreams(h.store.db, { batchId })) h.settle(ws.id, 'DONE');
+    await h.jobs.idle();
+    h.state.write((w) =>
+      transitionBatch(w, batchId, { to: 'SHIPPING', patch: { failure: null }, reason: 'test' }),
+    );
+    h.shipper.resume(batchId);
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batchId)).toMatchObject({
+      state: 'FAILED',
+      failure: 'gate_failed',
+    });
+    expect(h.only(h.cards()).body).toContain('Start a fix task');
+    expect(listTasks(h.store.db, h.project.id)).toHaveLength(tasks);
+    expect(readGateFix(h.store.db, batchId, DEFAULT_DELIVERY_LIMITS.maxFixAttempts).count).toBe(0);
   });
 });
 
@@ -133,7 +200,7 @@ describe('a shipping gate that fails only in tests that pass when their files ar
     expect(h.only(filed).description).toContain('works');
   });
 
-  it('is the failure it was when the rerun fails too: the card is raised as before', async () => {
+  it('is the failure it was when the rerun fails too: a fix task in the batch, no card', async () => {
     const commands: string[] = [];
     h = createDeliveryHarness(
       { gateCommand: fakeGate(1, ['src/api/alpha.test.ts > works']) },
@@ -142,9 +209,12 @@ describe('a shipping gate that fails only in tests that pass when their files ar
     const batch = await openBatch();
     h.commit('src/api/alpha.test.ts');
     const ended = await finish(batch, 0);
-    expect(ended).toMatchObject({ state: 'FAILED', failure: 'gate_failed' });
+    expect(ended).toMatchObject({ state: 'OPEN', failure: null });
     expect(commands).toHaveLength(1);
-    expect(h.only(h.cards()).body).toContain('Start a fix task');
+    expect(h.cards()).toEqual([]);
+    expect(
+      listTasks(h.store.db, h.project.id).filter((t) => t.title.startsWith('Fix the gate')),
+    ).toHaveLength(1);
     expect(
       listTasks(h.store.db, h.project.id).filter((t) => t.title.startsWith('Fix flaky')),
     ).toEqual([]);

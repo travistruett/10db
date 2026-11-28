@@ -8,6 +8,7 @@ import {
   getTask,
   getWorkstream,
   listInbox,
+  listTasks,
   listWorkstreams,
   patchProject,
   setBatchNotice,
@@ -298,7 +299,7 @@ describe("the base, brought into a worktree batch's branch before the shipping g
     expect(h.cards()).toEqual([]);
   });
 
-  it('names what kept main out in the card of a shipping gate that failed', async () => {
+  it('names what kept main out in the fix task of a shipping gate that failed', async () => {
     const { batch, ws } = await opened(h);
     await commitIn(h, batch, 'src/api/both.txt');
     h.teammatePush('main', 'src/api/both.txt', 'theirs\n');
@@ -306,9 +307,13 @@ describe("the base, brought into a worktree batch's branch before the shipping g
 
     const failed = await ship(batch, ws);
 
-    expect(failed.state).toBe('FAILED');
-    const card = h.cards().find((c) => c.title.includes('the gate failed'));
-    expect(card?.body).toMatch(/^origin\/main conflicts with this branch in src\/api\/both\.txt/);
+    expect(failed.state).toBe('OPEN');
+    const fix = h.only(
+      listTasks(h.store.db, h.project.id).filter((t) => t.title.startsWith('Fix the gate')),
+    );
+    expect(fix.description).toMatch(
+      /^origin\/main conflicts with this branch in src\/api\/both\.txt/,
+    );
     expect(onOrigin(h, batch.branch)).toBeNull();
   });
 

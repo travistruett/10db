@@ -24,6 +24,7 @@ import {
   RoutedBy,
   AgentSkillNotInstallable,
   harnessOf,
+  isTerminal,
   requireHarness,
   WorkstreamId,
   WorkstreamState,
@@ -352,6 +353,7 @@ import {
   ClaimWaits,
   createClaimDeadlockAnswers,
   createMcpHandler,
+  forgetEndedPairs,
   forgetEndedYields,
   mintSessionToken,
   withdrawStaleClaimWaits,
@@ -2973,6 +2975,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // A yield the builder chose for a task that then ended is never delivered; drop it.
   const unsubscribeYields = forgetEndedYields(bus, claimWaits);
+  // A claim deadlock's record outlives neither task of its pair. The bus publishes after the commit.
+  const unsubscribeDeadlockPairs = bus.subscribe((event) => {
+    if (event.type !== EventType.WorkstreamChanged) return;
+    const to = Object.values(WorkstreamState).find((s) => s === event.data['to']);
+    if (to !== undefined && isTerminal(to))
+      state.write((ctx) => {
+        forgetEndedPairs(ctx);
+      });
+  });
   keepAwake.refresh();
   watcher?.sync();
   watcher
@@ -3996,6 +4007,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeFolderHold();
       folderHold.close();
       unsubscribeYields();
+      unsubscribeDeadlockPairs();
       unsubscribeHazards();
       hazardAssessor.stop();
       unsubscribeCoverage();

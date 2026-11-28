@@ -126,10 +126,13 @@ import {
   CLAIM_WAIT_SLICE_MS,
   ClaimWaits,
   deadlockWaitInstruction,
+  queuedRefusal,
   yieldRefusal,
   type ClaimResult,
   type SharedGrant,
 } from './claim-wait';
+import { queuedBehind } from './claim-deadlock-pairs';
+import { reportClaimDeadlock } from './claim-deadlock-report';
 import { createPlanToolHandlers, PLAN_TOOL_DESCRIPTIONS } from './plan-tools';
 import { judgeReportedRoutes } from './report-pages';
 import type { LinearReporter } from '../linear';
@@ -170,6 +173,8 @@ export interface McpDeps {
   readonly claimWaits?: ClaimWaits;
   /** How often a task waiting for a claim looks again; tests shorten it. */
   readonly claimPollMs?: number;
+  /** The clock a claim wait reads a deadlock's age from; `Date.now` when absent, and tests inject it. */
+  readonly now?: () => number;
   /** How long one request_claim call waits before answering "still waiting"; tests shorten it. */
   readonly claimWaitSliceMs?: number;
   /** Hands a builder message to its page's session, as the thread does; absent, it waits for the next. */
@@ -299,7 +304,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   file_follow_up:
     'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts. A step can file at most 10 (MAX_FOLLOW_UPS), counting small proposals 10db files by itself; after that the call is refused. The followUps of complete_step are not counted and are not refused by it.',
   request_claim:
-    'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. A long wait answers granted: false with waiting: true before the call times out: call again with the same opId to keep waiting. granted: false with waiting: false means you did not get it: the builder made your task give up claims to end a deadlock (you no longer hold them), or, for the migrations hazard, your branch could not take its base first. Follow the instruction it returns.',
+    'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. A long wait answers granted: false with waiting: true before the call times out: call again with the same opId to keep waiting. granted: false with waiting: false means you did not get it: the builder or 10db made your task give up claims to end a deadlock (you no longer hold them), or, for the migrations hazard, your branch could not take its base first. Follow the instruction it returns.',
   install_dependencies:
     "Install the dependency change you made in your copy's package.json files. Edit the manifests first, with each new or changed dependency pinned to an exact version (no ^, ~ or range), then call this: 10db resolves them, writes pnpm-lock.yaml and installs, outside your sandbox, so every workspace package still resolves its dependencies. Never run pnpm add or pnpm install yourself: your sandbox cannot, and it can leave the copy's node_modules broken. Commit the changed package.json files and pnpm-lock.yaml with the commit tool afterwards. If it answers installed: false, follow its instruction and call again with a new opId.",
   commit:
@@ -396,6 +401,7 @@ export function createToolHandlers(
                   inboxId: asked.inboxId,
                   instruction: given.instruction,
                   yielded: false,
+                  queued: false,
                   parked: false,
                 },
           ),
@@ -798,8 +804,21 @@ export function createToolHandlers(
         );
       }
       // Claims the builder made this task give up are told before anything else is granted.
+      // A queued refusal asks for a handoff: the task waits its turn behind the other one.
       const given = claimWaits.pendingYield(workstreamId);
-      if (given) return recordClaim(input.opId, yieldRefusal(given, { kind, name: input.name }));
+      if (given) {
+        if (given.queued) deps.askedToHandOff(sessionId);
+        return recordClaim(input.opId, yieldRefusal(db, given, { kind, name: input.name }));
+      }
+      // A task queued behind another gets nothing until its turn: it is answered at once, without a wait.
+      const behind = queuedBehind(db, workstreamId);
+      if (behind !== null) {
+        deps.askedToHandOff(sessionId);
+        return recordClaim(
+          input.opId,
+          queuedRefusal(db, workstreamId, behind, { kind, name: input.name }),
+        );
+      }
       // A pass page asking for migrations or deps leaves Your folder for a copy where the project
       // allows copies: the builder is asked to move it, and the claim is refused meanwhile. A page
       // never holds one: its launch claims only its pass's areas.
@@ -843,9 +862,11 @@ export function createToolHandlers(
         reason: input.reason,
         signal,
         pollMs: deps.claimPollMs ?? CLAIM_POLL_MS,
+        now: deps.now ?? Date.now,
         ...(shared ? { shared } : {}),
         handOver: (from) =>
           deps.handOverClaim({ grantee: workstreamId, from, claim: { kind, name: input.name } }),
+        reportRepeat: reportClaimDeadlock,
       });
       let timer: NodeJS.Timeout | undefined;
       // The slice listens to no signal: a session that stops ends the wait itself, with its error. It
@@ -922,6 +943,7 @@ export function createToolHandlers(
             instruction: settled.instruction,
           };
         }
+        if (!settled.granted && settled.queued) deps.askedToHandOff(sessionId);
         return recordClaim(
           input.opId,
           settled,

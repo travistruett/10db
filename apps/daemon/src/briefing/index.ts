@@ -15,6 +15,7 @@ export {
   HANDOFF_NUDGE_READ_ONLY,
   passReviewPrompt,
   RESULT_NUDGE,
+  type TakenWhileQueued,
 } from './prompts';
 export { changeUnderReviewBrief } from './change-under-review';
 export { failedSteps } from './failed-steps';

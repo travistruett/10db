@@ -5,8 +5,9 @@ import {
   type ActivityPageQuery,
   type DecisionRule,
   type ProjectId,
+  type TaskId,
 } from '@10db/contracts';
-import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, lt, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import { groupNotices, type PostedNotice } from './activity-group';
 import { ofActiveProject } from './projects';
@@ -118,6 +119,33 @@ function pageNotices(db: DbReader, q: ActivityPageQuery): ActivityPageDto {
     if (chunk.length < chunkSize || last === undefined) return { rows: grouped.rows, next: null };
     below = last.seq;
   }
+}
+
+/** The notices with this key posted under any of the tasks, oldest first: when each was posted and its line. */
+export function noticesByKey(
+  db: DbReader,
+  taskIds: readonly TaskId[],
+  key: string,
+): { readonly at: string; readonly line: string }[] {
+  if (taskIds.length === 0) return [];
+  return db
+    .select({ at: events.at, data: events.data })
+    .from(events)
+    .where(
+      and(
+        eq(events.entityType, 'task'),
+        inArray(events.entityId, [...taskIds]),
+        eq(events.type, EventType.NoticePosted),
+        sql`json_extract(${events.data}, '$.key') = ${key}`,
+      ),
+    )
+    .orderBy(asc(events.seq))
+    .all()
+    .flatMap((row) => {
+      // A logged event's data is JSON read back from the database: a boundary, so parse it.
+      const data = NoticePostedData.safeParse(row.data);
+      return data.success ? [{ at: row.at, line: data.data.line }] : [];
+    });
 }
 
 /** Whether a project has a notice with this key posted under it: the marker a one-time notice leaves. */
