@@ -1,6 +1,6 @@
 import { CloseButton, Group } from '@mantine/core';
 import { useElementSize } from '@mantine/hooks';
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useEffectEvent, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useFrameSlots } from './frame-slots';
 import classes from './surface-drawer.module.css';
@@ -77,7 +77,10 @@ export function SurfaceDrawer({
 
   // A pick that saves at once can redraw the control under the focus, which then falls to the page: Esc there
   // still belongs to the open drawer. Focus anywhere else (a field, a menu) keeps its own Esc, and a modal open
-  // over the drawer (a run window it opened) takes Esc for itself whatever holds the focus.
+  // over the drawer (a run window it opened) takes Esc for itself whatever holds the focus. Mantine closes a modal
+  // from a window listener in the capture phase; this one is added there once, when the drawer opens, so it runs
+  // before that of any modal opened over it and still finds the modal open.
+  const closeFromPage = useEffectEvent(onClose);
   useEffect(() => {
     if (!opened) return;
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
@@ -85,13 +88,13 @@ export function SurfaceDrawer({
       const focused = document.activeElement;
       if (focused !== null && focused !== document.body) return;
       if (document.querySelector('[role="dialog"][aria-modal="true"]') !== null) return;
-      onClose();
+      closeFromPage();
     };
-    document.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, { capture: true });
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keydown', onKeyDown, { capture: true });
     };
-  }, [opened, onClose]);
+  }, [opened]);
 
   useEffect(() => {
     if (!opened || !closeOnClickOutside) return;
