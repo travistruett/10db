@@ -26,6 +26,9 @@ export const DecisionRule = {
   FlakyCheck: 'flaky-check',
   MoveBack: 'move-back-after-limit',
   ClaimDeadlock: 'claim-deadlock',
+  StuckRun: 'stuck-run',
+  MergedWorktree: 'merged-worktree',
+  WorktreeLeftovers: 'worktree-leftovers',
   PlanReviewStep: 'plan-review-step',
   ProposalFiled: 'proposal-filed',
   PlanGoesAhead: 'plan-goes-ahead',
@@ -38,6 +41,9 @@ export const DECISION_RULE_NAMES: Record<DecisionRule, string> = {
   [DecisionRule.FlakyCheck]: 'A flaky check, rerun once',
   [DecisionRule.MoveBack]: 'A project moved back after its account’s limit reset',
   [DecisionRule.ClaimDeadlock]: 'A claim deadlock, ended by the later task yielding',
+  [DecisionRule.StuckRun]: 'A stuck run, restarted once from its handoff',
+  [DecisionRule.MergedWorktree]: 'A merged hand-made worktree, removed with its branch kept',
+  [DecisionRule.WorktreeLeftovers]: 'A finished worktree’s files, saved before it was removed',
   [DecisionRule.PlanReviewStep]: 'A planner’s ask for review, run as a Plan Review step',
   [DecisionRule.ProposalFiled]: 'A lane’s proposal, filed as a task without a card',
   [DecisionRule.PlanGoesAhead]: 'A plan that needs nothing from you, built after its review',
@@ -57,6 +63,15 @@ export const UndoAction = z.discriminatedUnion('kind', [
     kind: z.literal('forget_claim_deadlock'),
     a: WorkstreamId,
     b: WorkstreamId,
+  }),
+  /** Makes a removed hand-made worktree again at its path on its kept branch, with its saved files. */
+  z.strictObject({
+    kind: z.literal('restore_worktree'),
+    projectId: ProjectId,
+    path: z.string().min(1),
+    branch: z.string().min(1),
+    /** Where its ignored files were saved; null when it held none. */
+    keptDir: z.string().min(1).nullable(),
   }),
 ]);
 export type UndoAction = z.infer<typeof UndoAction>;

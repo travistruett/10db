@@ -40,6 +40,8 @@ export interface UndoMoves {
   moveProject(projectId: ProjectId, accountId: AccountId): void;
   /** Forgets the deadlock record of the pair, leaving every claim where it is. */
   forgetClaimDeadlock(a: WorkstreamId, b: WorkstreamId): void;
+  /** Makes a removed hand-made worktree again; a `ConflictError` when its path or branch is not as it was. */
+  restoreWorktree(action: Extract<UndoAction, { kind: 'restore_worktree' }>): void;
 }
 
 export function createActivityActions(deps: {
@@ -64,6 +66,9 @@ export function createActivityActions(deps: {
         return;
       case 'forget_claim_deadlock':
         deps.moves.forgetClaimDeadlock(action.a, action.b);
+        return;
+      case 'restore_worktree':
+        deps.moves.restoreWorktree(action);
         return;
     }
   }

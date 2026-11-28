@@ -9,6 +9,10 @@ The watchdog (`decisions/2026-11-25-queue-waits-live-in-the-scheduler.md`).
 - `rules.ts` is pure: `findStalls` reads the queued runs with their waits, the active runs, the open, shipping
   and cutting batches with the latest run of each of their tasks, and the `since` of each open card. A batch
   stall replaces its members' run stalls. Its test is the rule table.
+- `restart-rule.ts` is pure: `stallMove` says what to do about a stall, in order: the Stuck card (the rule is set to
+  ask, or the stall is not an active run's), wait (a restart of the run is in flight), restart (never restarted,
+  stop not hung, recovery attempts left), else out of moves, filing a defect only when a `StallFault` is set. Its
+  test is the rule table.
 - `sweep.ts` reads the active projects every minute (`STALL.sweepMs`, on the injected clock) and writes only
   Stuck cards: one `flagCard` refresh per stall whose card is missing or says something else
   (`fingerprint`), then `resolveStaleCards` for the `stall_cleared` cards whose stall is gone. A queued run with
