@@ -89,7 +89,7 @@
   its exit code and the masked last lines of its output, kept per project (`pictures-sign-in.<projectId>`) and cleared
   when a sign-in succeeds or the app address or dev login command changes. The builder's card is the sign-in check's
   (above). `Pictures.outlook(taskId)` is the one place that says what a task that names a page can expect of
-  its after: `none`, `wait` (an After capture of it is queued or running), `later` (a local copy not yet shipped) or
+  its after: `none` (with a `why` when it has no after: no app address, no page named, no capture recorded), `wait` (an After capture of it is queued or running), `later` (a local copy not yet shipped) or
   `skipped` with the reason (a separate copy, the recorded sign-in failure, a refused browser); the Linear `ended` and
   landing comments and the Slack post read it, and the Linear reporter waits on `wait`.
 - The broken preview (Workbench spec §8.2, §8.4,

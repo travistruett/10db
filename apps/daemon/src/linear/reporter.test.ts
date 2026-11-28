@@ -861,6 +861,66 @@ describe('the Linear reporter', () => {
     },
   );
 
+  /** Hands 10db a body for a landing's row and lets its own write finish; answers the comment written for it. */
+  const landingComment = async (id: LinearPostId): Promise<string> => {
+    const before = written.length;
+    // A script per session, in order: the earlier ones stay where the adapter counted them.
+    book[KEY] = [
+      ...(book[KEY] ?? []),
+      [
+        {
+          do: 'mcp',
+          tool: 'report_linear_post',
+          args: { postId: id, body: 'The change landed on build.', status: STATUS },
+        },
+        { do: 'turn_complete' },
+      ],
+    ];
+    clock.advance(30_000);
+    // The settle of the run before re-arms the task on the clock, so the clock is nudged while it is awaited.
+    await expect
+      .poll(
+        () => {
+          clock.advance(0);
+          return written.length;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(before + 1);
+    return written[before]?.body ?? '';
+  };
+
+  const landed = (key = 'landed:bat-1'): LinearPostId =>
+    oweOne(key, LinearEventKind.Landed, {
+      detail: { baseBranch: 'build', commit: 'a'.repeat(40), localCopy: true },
+    });
+
+  it('carries the after picture of a local copy in its landing comment, though its ended comment showed the before', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    keepPicture(ScreenKind.Before, 'before-bytes');
+    await endedComment(oweOne('ended:1:0', LinearEventKind.Ended));
+    expect(written[0]?.body).toContain('![1-home-before.png]');
+    // The change lands, and its after is taken once it has.
+    keepPicture(ScreenKind.After, 'after-bytes');
+    const body = await landingComment(landed());
+    expect(body).toContain('![1-home-after.png](https://uploads.linear.app/1-home-after.png)');
+    expect(body).not.toMatch(/pull request/i);
+  });
+
+  it('says why a landing comment has no after picture, with or without a before to show', async () => {
+    linearHeaders = { Authorization: 'Bearer lin_api_x' };
+    outlook = () => ({ kind: 'none', why: 'The task names no page to take a picture of' });
+    const bare = await landingComment(landed());
+    expect(bare).toContain(
+      'No before and after pictures were taken. The task names no page to take a picture of.',
+    );
+    keepPicture(ScreenKind.Before, 'before-bytes');
+    outlook = () => ({ kind: 'skipped', reason: 'The dev login command failed (exit 1)' });
+    const half = await landingComment(landed('landed:bat-2'));
+    expect(half).toContain('![1-home-before.png]');
+    expect(half).toContain('No after picture was taken. The dev login command failed (exit 1).');
+  });
+
   it('says once, with the reason, that a finished task has no pictures, and never names a pull request', async () => {
     linearHeaders = { Authorization: 'Bearer lin_api_x' };
     outlook = () => ({ kind: 'skipped', reason: 'The dev login command failed (exit 1)' });
