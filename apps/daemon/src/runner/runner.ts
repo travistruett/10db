@@ -76,6 +76,7 @@ import {
   PassTurnId,
   JudgeKind,
   Provider,
+  WatchpointLoudness,
   WatchpointReadVerdict,
   TakeOutStep,
   type CopyId,
@@ -433,6 +434,7 @@ import {
   watchpointBuildBrief,
   WATCHPOINT_HIT_SOURCES,
   evalDefinitionSource,
+  projectReadActs,
   readWatchpointHits,
   watchpointHitsAfter,
   watchpointPrinciples,
@@ -1872,16 +1874,21 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
         },
       });
-      // In shadow: each Ask hit is read and the read is kept on the reading, and nothing acts on it. The same head
-      // was read already (a Review or QA step with no new commits): the answered reads stand, the rest are asked again.
+      // Each Ask hit is read and the read is kept on the reading. It acts (holds a pull request, or is a notice with no
+      // card) only once the project's shadow week is over and no clean read was sent back; until then it is asked in
+      // shadow. The same head was read already (a Review or QA step with no new commits): the answered reads stand,
+      // as the project's read acts now, and the rest are asked again.
+      const acts =
+        detail.hits.some((h) => h.watchpoint.loudness === WatchpointLoudness.Ask) &&
+        projectReadActs(db, row.projectId, opts.clock.now()).acts;
       const kept =
         earlier?.head === head
-          ? (earlier.reads ?? []).filter(
-              (r) => r.verdict === WatchpointReadVerdict.Hold || r.meets !== null,
-            )
+          ? (earlier.reads ?? [])
+              .filter((r) => r.verdict === WatchpointReadVerdict.Hold || r.meets !== null)
+              .map((r) => (r.verdict === WatchpointReadVerdict.Hold ? r : { ...r, acted: acts }))
           : [];
       const fresh = await readWatchpointHits(
-        { judge: opts.judge, read },
+        { judge: opts.judge, read, acts },
         detail.hits.filter((h) => !kept.some((r) => r.key === h.watchpoint.key)),
         { projectId: row.projectId, workstreamId: id },
       );
