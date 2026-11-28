@@ -530,7 +530,7 @@ describe('edits left behind in a shared checkout', () => {
       state,
       moves: {
         moveProject: () => undefined,
-        restoreWorktree: () => undefined,
+        restoreWorktree: () => Promise.resolve(),
         forgetClaimDeadlock: (a, b) => {
           const found = state.write((ctx) => dropPair(ctx, a, b));
           if (!found) throw new ConflictError('This claim deadlock has no record any more');
@@ -544,7 +544,7 @@ describe('edits left behind in a shared checkout', () => {
         .map((r) => r.seq),
     );
     expect(queueSeq).toBeGreaterThan(seq);
-    actions.undo(queueSeq);
+    await actions.undo(queueSeq);
     expect(readPair(state.db, alpha.workstream.id, beta.workstream.id)).toBeNull();
     expect(takenFrom(state.db, alpha.workstream.id)).toHaveLength(1);
     expect(briefOfAlpha()).toContain(tookLine);
@@ -562,9 +562,7 @@ describe('edits left behind in a shared checkout', () => {
     });
     expect(takenFrom(state.db, alpha.workstream.id)).toEqual([]);
     expect(briefOfAlpha()).not.toContain('While you were queued');
-    expect(() => {
-      actions.undo(queueSeq);
-    }).toThrow(ConflictError);
+    await expect(actions.undo(queueSeq)).rejects.toThrow(ConflictError);
   });
 
   it('leaves named paths in a copy another task shares, and says why it leaves none alone', async () => {
