@@ -30,6 +30,7 @@ export const DEV_UI_READS: readonly string[] = [
   '/projects/:projectId/hazard-assessment',
   '/projects/:projectId/small-proposal-limit',
   '/projects/:projectId/routing-rules',
+  '/projects/:projectId/auto-ceiling',
   '/projects/:projectId/candidates',
   '/projects/:projectId/knowledge',
   '/passes',
