@@ -217,7 +217,7 @@ plus `created_at` and `updated_at`.
 | `facts` | subject, predicate, value, scope, `valid_from`, `valid_until`, `superseded_by`, withdrawn tombstone, source. Schema only in this slice. |
 | `deviations` | departure from plan or principle: cause, severity, signed reason, resolution |
 
-**System:** `events` (append-only: sequence, type, entity, JSON payload) and `app_settings`.
+**System:** `events` (sequence, type, entity, JSON payload; append-only, except that a finished session's `session.context` and `session.activity` events are deleted 14 days after its task ends, `decisions/2026-11-27-finished-sessions-lose-their-context-and-activity-events-after-14-days.md`) and `app_settings`.
 
 **Invariants:**
 - Every state change updates its row and appends its event in one transaction.
