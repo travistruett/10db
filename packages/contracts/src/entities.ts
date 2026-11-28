@@ -782,6 +782,12 @@ export const ProjectDto = z.object({
    * builder keeps the stack up.
    */
   appStartCommand: z.string().nullable(),
+  /**
+   * Applies pending migrations to the project's dev database (`pnpm db:migrate`): run by 10db in the
+   * project's folder under the gate's sandbox after a landing brings migration files; null when the
+   * builder has not said how the project migrates.
+   */
+  migrateCommand: z.string().nullable(),
   /** The viewports and themes each page's pictures are taken in. */
   screens: ScreensMatrix,
   /** Page names the builder left out of a Workbench rebuild: the setup never counts them as new. */
@@ -849,6 +855,8 @@ export const ProjectPatch = z
     previewCommand: ProjectCommand.nullable(),
     /** Run once, under the gate's sandbox with Docker allowed, when the app address is down; blank or null forgets it. */
     appStartCommand: ProjectCommand.nullable(),
+    /** Run under the gate's sandbox in the project's folder after a landing brings migrations; blank or null forgets it. */
+    migrateCommand: ProjectCommand.nullable(),
     screens: ScreensMatrix,
     /** Replaces the page names left out of a rebuild. */
     leftOutPages: z.array(AreaName).max(200),

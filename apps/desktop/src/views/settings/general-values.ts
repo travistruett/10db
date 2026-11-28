@@ -96,6 +96,8 @@ export interface GeneralValues {
   readonly previewCommand: string;
   /** Brings the dev stack up when a picture or the dev login finds the app address down; '' means none. */
   readonly appStartCommand: string;
+  /** Applies pending migrations to the dev database after a landing brings them; '' means none. */
+  readonly migrateCommand: string;
   /** The viewports, an emptied number being '', and the themes each page's pictures are taken in. */
   readonly screens: ScreensValues;
 }
@@ -146,6 +148,7 @@ export function generalValues(project: ProjectDto): GeneralValues {
     devLoginCommand: project.devLoginCommand ?? '',
     previewCommand: project.previewCommand ?? '',
     appStartCommand: project.appStartCommand ?? '',
+    migrateCommand: project.migrateCommand ?? '',
     screens: project.screens,
   };
 }
@@ -306,6 +309,9 @@ export function checkGeneral(
   const appStart = values.appStartCommand.trim();
   const appStartCommand = appStart === '' ? null : appStart;
   if (appStartCommand !== project.appStartCommand) patch.appStartCommand = appStartCommand;
+  const migrate = values.migrateCommand.trim();
+  const migrateCommand = migrate === '' ? null : migrate;
+  if (migrateCommand !== project.migrateCommand) patch.migrateCommand = migrateCommand;
   if ('matrix' in screens && !sameMatrix(screens.matrix, project.screens))
     patch.screens = screens.matrix;
   return { ok: true, patch: Object.keys(patch).length > 0 ? patch : null };

@@ -134,8 +134,8 @@ JudgeDecision.OwnershipTest = 'ownership_test'; // floor 0.8; question ids are O
 
 | #   | Case                                    | Result     |
 | --- | --------------------------------------- | ---------- |
-| 1   | `hits === null` or `diffHash === null`  | `hold`     |
-| 2   | `hits === 0`                            | `none`     |
+| 1   | `hits === 0`, whatever `diffHash` is    | `none`     |
+| 2   | `hits === null` or `diffHash === null`  | `hold`     |
 | 3   | `approved !== null && approved === diffHash` | `approved` |
 | 4   | otherwise                               | `hold`     |
 

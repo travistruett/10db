@@ -29,6 +29,10 @@ export const DecisionRule = {
   StuckRun: 'stuck-run',
   MergedWorktree: 'merged-worktree',
   WorktreeLeftovers: 'worktree-leftovers',
+  PlanReviewStep: 'plan-review-step',
+  ProposalFiled: 'proposal-filed',
+  PlanGoesAhead: 'plan-goes-ahead',
+  MigrateAfterLanding: 'migrate-after-landing',
 } as const;
 export type DecisionRule = (typeof DecisionRule)[keyof typeof DecisionRule];
 
@@ -40,6 +44,10 @@ export const DECISION_RULE_NAMES: Record<DecisionRule, string> = {
   [DecisionRule.StuckRun]: 'A stuck run, restarted once from its handoff',
   [DecisionRule.MergedWorktree]: 'A merged hand-made worktree, removed with its branch kept',
   [DecisionRule.WorktreeLeftovers]: 'A finished worktree’s files, saved before it was removed',
+  [DecisionRule.PlanReviewStep]: 'A planner’s ask for review, run as a Plan Review step',
+  [DecisionRule.ProposalFiled]: 'A lane’s proposal, filed as a task without a card',
+  [DecisionRule.PlanGoesAhead]: 'A plan that needs nothing from you, built after its review',
+  [DecisionRule.MigrateAfterLanding]: 'A landing’s migrations, applied to your dev database',
 };
 
 /** A move 10db can take back, with what the daemon needs to do it. */

@@ -23,7 +23,7 @@ import type { BaseUpdate } from './base-update';
 import { shipCards, wrongBranchCard, type ShipFailure } from './cards';
 import {
   copyLandingCards,
-  raiseMigrationsForLanding,
+  migrateAfterLanding,
   raiseWaitCard,
   withdrawWaitCards,
 } from './copy-landing-cards';
@@ -371,7 +371,7 @@ export function createCopyLanding(deps: CopyLandingDeps): CopyLanding {
     return 'done';
   }
 
-  /** Spec §5 step 5: SHIPPED and `landed` in one write, then the migrations card, then retirement. */
+  /** Spec §5 step 5: SHIPPED and `landed` in one write, then the landed migrations, then retirement. */
   async function landed(
     batch: BatchDto,
     project: ProjectDto,
@@ -385,7 +385,7 @@ export function createCopyLanding(deps: CopyLandingDeps): CopyLanding {
     ctx.logger.info({ batchId: batch.id, branch: batch.baseBranch }, 'batch landed');
     withdrawWaitCards(ctx, batch.projectId, batch.id);
     resolveShipCards(db, ctx.inbox, getBatch(db, batch.id));
-    await raiseMigrationsForLanding(ctx, batch, project, input.expected, input.candidate);
+    await migrateAfterLanding(ctx, batch, project, input.expected, input.candidate, signal);
     patch(batch.id, { step: CopyStep.Retiring });
     await retireCopy(ctx, batch.id, signal);
     return 'done';

@@ -9,6 +9,7 @@ import { flagCard, postNotice, rewordCard, withdrawCard, type InboxService } fro
 import type { Logger } from '../log';
 import type { Card, DeliveryNotice } from './cards';
 import type { CopyTeardown } from './copy-teardown-run';
+import type { DevMigrate } from './dev-migrate';
 import type { DeliveryJobs } from './jobs';
 import type { PutBackKeptWork } from './pass-open';
 import type { WorktreeDependencies } from './worktree-dependencies';
@@ -59,6 +60,8 @@ export interface DeliveryContext {
   readonly generators: WorktreeGenerators;
   /** Runs a retiring local copy's pinned teardown command. */
   readonly copyTeardown: CopyTeardown;
+  /** Runs a project's declared migrate command on its dev database after a landing brings migrations. */
+  readonly devMigrate: DevMigrate;
   /** The login environment network calls run in (environment/buildNetworkEnv). */
   networkEnv(): Readonly<Record<string, string>>;
   /** Asks the scheduler to look for work: a batch opened, grew or reopened. */

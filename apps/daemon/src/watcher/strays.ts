@@ -1,5 +1,6 @@
 import { ClaimKind, WHOLE_PROJECT_PAGE, type ProjectDto, type WorkstreamId } from '@10db/contracts';
 import { classifyPath } from '../guard';
+import { guardrailOf } from '../guardrails';
 import { isInsideClaudeCodeBookkeeping } from '../git';
 
 /** More strays than this in one batch become a single card. */
@@ -29,18 +30,17 @@ export function isSensitivePath(rel: string): boolean {
   return SENSITIVE_BASENAME.test(rel.slice(rel.lastIndexOf('/') + 1));
 }
 
-const GUARDRAIL_DIRECTORIES = ['.github/workflows', '.github/rulesets'] as const;
 const GUARDRAIL_BASENAME = /^(AGENTS\.md|CLAUDE\.md|lefthook\.ya?ml|\.lefthook\.ya?ml)$/;
 
 /**
  * Paths the builder alone owns, whose change is the builder's to keep or revert (the git guard, hooks, agent
- * instructions and rules, CI workflows, secrets): the sensitive paths above, plus the agent instructions of
- * any folder and the files that decide what a push or a commit runs. A write outside every claim to one of
- * these is a card; to any other path it is a notice in Activity.
+ * instructions and rules, CI workflows, secrets): the guardrail list (`guardrails/paths.ts`), the sensitive
+ * paths above, plus the agent instructions and lefthook's config of any folder. A write outside every claim to
+ * one of these is a card; to any other path it is a notice in Activity.
  */
 export function isGuardrailPath(rel: string): boolean {
+  if (guardrailOf(rel) !== null) return true;
   if (isSensitivePath(rel)) return true;
-  if (GUARDRAIL_DIRECTORIES.some((dir) => rel === dir || rel.startsWith(`${dir}/`))) return true;
   return GUARDRAIL_BASENAME.test(rel.slice(rel.lastIndexOf('/') + 1));
 }
 

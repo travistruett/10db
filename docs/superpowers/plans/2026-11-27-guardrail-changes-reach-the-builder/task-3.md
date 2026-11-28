@@ -23,7 +23,12 @@ Starts after task 2 has merged.
 head about to be pushed (or the pushed head, in `retryMerge`):
 
 1. `base = pullRequestBase(git, checkout, root, head)`.
-2. The changed paths of `base..head` and their diff, through the git module. `hits = guardrailHits(paths).length`;
+2. The changed paths of `base..head` and their diff, through the git module, **read without rename detection**
+   (`--no-renames`, as every diff read in `git.ts` is): a file moved out of a guardrail folder then lists as a
+   deletion of the guardrail path (a hit) and an addition of the new one. With detection only the new path would
+   list, no row would match, and a guardrail such as `.claude/hooks/git-guard.mjs` (which fails open) would leave
+   with no hold. If no existing git-module call returns this list, add one that passes `--no-renames`; never call
+   `git diff` with its default rename detection here. `hits = guardrailHits(paths).length`;
    `diffHash` is the sha256 of the diff of the hit paths only, so an unrelated later commit does not ask again.
    A null base or a failed read gives `hits: null`.
 3. `holdAction({ hits, diffHash, approved })`, with `approved` read from `guardrailHoldKey(root.id)` through
@@ -42,7 +47,21 @@ No judge call, watchpoint answer or card state is read here.
 
 **Before a push while held.** In `shipSteps` and `catchUpSteps`, when the read answers `hold` and a pull request
 already exists: `gh.prDisableAutoMerge({ repo, url }, call)` first, every time, whatever the in-memory
-`autoMergeArmed` set holds (a restart forgets it). gh saying auto-merge is not enabled is success. Any other
+`autoMergeArmed` set holds (a restart forgets it).
+
+How the pull request is known before the push:
+
+- `catchUpSteps`: `batch.prUrl`, which it already requires.
+- A fix batch in `shipSteps`: `fixPr`, which is found before step 3.
+- A root batch in `shipSteps`: the batch's recorded `prUrl` is not enough, because step 5 records it only after step
+  4b, so a ship that armed the pull request and then failed (or was stopped) has none, and its retry would push
+  while armed. Move the `gh.prView({ repo, ref: branch })` lookup of step 4 ahead of the push (before step 3) for
+  every batch without a `fixPr`, and use that one result as `existing` in step 4 instead of reading it again. A
+  push does not create a pull request, so the result before the push is the result after it; a lookup that fails
+  fails the ship at the same step it fails at today (`gh pr view`), now before the push. When it finds none, there
+  is nothing to turn off.
+
+gh saying auto-merge is not enabled is success. Any other
 failure stops before the push: `fail` with the step's own card in ship, `stop({ kind: 'other' })` in the
 catch-up, which rewinds. Then remove the root from `autoMergeArmed`.
 
@@ -78,7 +97,11 @@ A read that answers `hold` with a hash other than the open card's withdraws that
 - (c) a held pull request, then a CI-fix batch with no guardrail change ships into it: still no `prAutoMerge`, and
   the card stays open;
 - (d) a pull request armed and approved, then a push that changes the workflow again: `prDisableAutoMerge` is
-  called before the push; when the fake fails it, the remote branch has not moved.
+  called before the push; when the fake fails it, the remote branch has not moved. Run it for a root batch whose
+  first ship armed the pull request and failed before step 5, so `batch.prUrl` is null: the retry still turns
+  auto-merge off first;
+- (e) a change that moves `.claude/hooks/git-guard.mjs` to another folder is a hit (the path list sees the old
+  path), so the pull request is held.
 
 Show (a) red before the hold exists. `holdAction`'s rows are pure; add them to task 1's `guardrails.test.ts`
 only if (a) to (d) leave a row unexercised.

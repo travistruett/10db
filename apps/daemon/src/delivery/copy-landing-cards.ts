@@ -1,16 +1,26 @@
 import {
   BatchFailure,
   BuilderOwns,
+  CardDecider,
   CopyWait,
+  DecisionRule,
   Urgency,
   type BatchDto,
   type BatchId,
   type ProjectDto,
   type ProjectId,
 } from '@10db/contracts';
-import { findOpenByFoldKey, getBatch } from '@10db/db';
+import {
+  findOpenByFoldKey,
+  getAppSetting,
+  getBatch,
+  getProject,
+  isRuleAsking,
+  setAppSetting,
+} from '@10db/db';
 import { areaMatches } from '../guard';
 import type { StateStore } from '../events';
+import type { GateResult } from '../verify';
 import { BY_ANSWER, CardTier, decidedByBuilder, type InboxService } from '../inbox';
 import { shipFailureFoldKey, type Card, type ShipFailure } from './cards';
 import { raise, type DeliveryContext } from './context';
@@ -110,30 +120,138 @@ export function raiseMigrationsCard(
   });
 }
 
-/**
- * The migrations card for a landing of T..C (the journal's `baseTip` and `candidate`) into the base,
- * when it touched a `migrations` hazard path. Called live by the landing and again by recovery for a
- * copy found at `landed`; the card's key is the batch, so a repeat folds into the open one.
- */
-export async function raiseMigrationsForLanding(
-  ctx: Pick<DeliveryContext, 'git' | 'inbox' | 'logger' | 'state'>,
+/** The output lines a failed migrate's card and a migrate's notice keep. */
+const TAIL_LINES = 20;
+const tailOf = (output: string): string => output.trim().split('\n').slice(-TAIL_LINES).join('\n');
+
+/** The app setting that says the project was asked, once, how it migrates. */
+const migrateAskedKey = (projectId: ProjectId): string => `migrate-command-asked:${projectId}`;
+
+/** One card for the project's life: it has no migrate command, so 10db left the migrations to the builder. */
+function raiseMigrateCommandCard(
+  ctx: Pick<DeliveryContext, 'inbox' | 'state'>,
   batch: BatchDto,
   project: ProjectDto,
+  paths: readonly string[],
+): void {
+  const key = migrateAskedKey(project.id);
+  if (getAppSetting(ctx.state.db, key) !== undefined) return;
+  raise(ctx.inbox, project.id, {
+    tier: CardTier.Ask,
+    urgency: Urgency.Normal,
+    closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.YourHands),
+    title: `Tell 10db how ${project.name} migrates`,
+    body: `The landing of "${batch.title}" brought migrations into ${batch.baseBranch}:\n${lines(paths)}\n\nSet Migrate Command in Settings (such as pnpm db:migrate) and 10db applies new migrations to your dev database after each landing, or apply these by hand. 10db asks this once for the project.`,
+    foldKey: `migrate-command:${project.id}`,
+  });
+  ctx.state.write((w) => {
+    setAppSetting(w, key, true);
+  });
+}
+
+/** One card for the batch: the declared migrate command did not finish cleanly. */
+function raiseMigrateFailedCard(
+  inbox: InboxService,
+  batch: BatchDto,
+  command: string,
+  saw: string,
+  logPath: string,
+): void {
+  raise(inbox, batch.projectId, {
+    tier: CardTier.Ask,
+    urgency: Urgency.Normal,
+    closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.YourHands),
+    title: `"${command}" failed after "${batch.title}" landed`,
+    body: `10db ran your migrate command in your folder after the landing, and ${saw}. Your dev database may be partly migrated; fix it and apply the migrations by hand.\n\nLog: ${logPath}`,
+    foldKey: migrationsKey(batch.id),
+  });
+}
+
+/**
+ * After a landing of T..C (the journal's `baseTip` and `candidate`) into the base that touched a
+ * `migrations` hazard path, the project's declared migrate command runs on its dev database and the
+ * run is an Activity row. With the rule set to ask, or with no command declared, a card goes to the
+ * builder instead. Called live by the landing and again by recovery for a copy found at `landed`: the
+ * command is expected to apply only what is pending, so a re-run is safe, and each card's key folds a
+ * repeat into the open one.
+ */
+export async function migrateAfterLanding(
+  ctx: Pick<DeliveryContext, 'git' | 'inbox' | 'logger' | 'state' | 'devMigrate'>,
+  batch: BatchDto,
+  landedProject: ProjectDto,
   expected: string,
   candidate: string,
+  signal: AbortSignal,
 ): Promise<void> {
+  const errText = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error);
+  let migrations: readonly string[];
+  // The project as it is now: a Migrate Command set while the landing ran counts.
+  const project = getProject(ctx.state.db, landedProject.id);
   try {
     const files = await ctx.git.filesChangedBetween(project.repoPath, expected, candidate);
     const globs = project.hazards.filter((h) => h.name === 'migrations').flatMap((h) => h.globs);
-    const migrations = files.filter((f) => globs.some((g) => areaMatches(f, g)));
-    if (migrations.length > 0)
-      raiseMigrationsCard(ctx.inbox, getBatch(ctx.state.db, batch.id), migrations);
+    migrations = files.filter((f) => globs.some((g) => areaMatches(f, g)));
   } catch (error) {
-    ctx.logger.warn(
-      { batchId: batch.id, err: error instanceof Error ? error.message : String(error) },
-      'migrations card not raised',
-    );
+    ctx.logger.warn({ batchId: batch.id, err: errText(error) }, 'landed migrations not read');
+    return;
   }
+  if (migrations.length === 0) return;
+  const now = getBatch(ctx.state.db, batch.id);
+  if (isRuleAsking(ctx.state.db, project.id, DecisionRule.MigrateAfterLanding)) {
+    raiseMigrationsCard(ctx.inbox, now, migrations);
+    return;
+  }
+  const command = project.migrateCommand;
+  if (command === null) {
+    raiseMigrateCommandCard(ctx, now, project, migrations);
+    return;
+  }
+  let result: GateResult;
+  try {
+    result = await ctx.devMigrate.run({ project, batchId: batch.id, command, signal });
+  } catch (error) {
+    raiseMigrateFailedCard(
+      ctx.inbox,
+      now,
+      command,
+      `it could not run: ${errText(error)}`,
+      'none written',
+    );
+    return;
+  }
+  // Stopped by shutdown: recovery finds the copy still at `landed` and runs it again.
+  if (result.aborted) return;
+  const tail = tailOf(result.tail);
+  const output = tail === '' ? '' : `:\n\n${tail}`;
+  if (result.timedOut || result.exitCode !== 0) {
+    const saw = result.timedOut
+      ? `it was still running when its time ran out and was stopped${output}`
+      : `it exited ${String(result.exitCode)}${output}`;
+    raiseMigrateFailedCard(ctx.inbox, now, command, saw, result.logPath);
+    return;
+  }
+  ctx.inbox.notice({
+    tier: CardTier.Notice,
+    projectId: project.id,
+    taskId: null,
+    key: `migrate-after-landing:${batch.id}`,
+    tone: 'info',
+    line: `Your dev database was migrated after "${now.title}" landed`,
+    body: `10db ran "${command}" in your folder for:\n${lines(migrations)}${tail === '' ? '' : `\n\nIt printed:\n${tail}`}\n\nLog: ${result.logPath}`,
+    decision: {
+      by: CardDecider.Rule,
+      rule: DecisionRule.MigrateAfterLanding,
+      confidence: null,
+      undo: {
+        state: 'final',
+        reason:
+          "A migration that ran can't be taken back by 10db; it ran on your dev database only.",
+      },
+    },
+  });
 }
 
 function failure(

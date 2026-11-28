@@ -75,6 +75,8 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       current.appStartCommand === seed.appStartCommand
         ? next.appStartCommand
         : current.appStartCommand,
+    migrateCommand:
+      current.migrateCommand === seed.migrateCommand ? next.migrateCommand : current.migrateCommand,
     screens:
       JSON.stringify(current.screens) === JSON.stringify(seed.screens)
         ? next.screens

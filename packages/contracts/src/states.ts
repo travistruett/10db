@@ -183,6 +183,8 @@ export const ProposalKind = {
   ChangeTask: 'change_task',
   Principle: 'principle',
   Note: 'note',
+  /** A planner asks for its plan to be reviewed before Build: on Core work, a Plan Review step. */
+  PlanReview: 'plan_review',
   /** A change to a watchpoint: only the builder's accept writes it. */
   Watchpoint: 'watchpoint',
 } as const;

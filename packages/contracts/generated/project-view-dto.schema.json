@@ -318,6 +318,12 @@
         "null"
       ]
     },
+    "migrateCommand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "screens": {
       "type": "object",
       "properties": {
@@ -1364,6 +1370,7 @@
     "devLoginCommand",
     "previewCommand",
     "appStartCommand",
+    "migrateCommand",
     "screens",
     "leftOutPages",
     "createdAt",
