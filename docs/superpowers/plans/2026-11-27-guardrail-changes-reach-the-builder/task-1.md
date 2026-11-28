@@ -36,14 +36,18 @@ Notes on the rows:
   reference). If a file's main job differs from its row, call `report_deviation` and say which.
 - Row 8 excludes Claude Code's own bookkeeping: a path for which `isInsideClaudeCodeBookkeeping(rel)` is true
   matches no row, as `isSensitivePath` has it today. Lefthook's other accepted names (`.lefthook.yml`, the `.yaml`
-  spellings) match row 8 too, as `GUARDRAIL_BASENAME` does today, at the root only.
+  spellings) match row 8 too, **at the repository root only**: lefthook reads one config from the root, so a nested
+  `sub/lefthook.yml` does not hold a pull request. The stray check still treats it as a guardrail (next section),
+  so it stays a card and does not become a notice.
 - Judge policy, trust grants and standing approvals proper live in 10db's database (index, call 2). Rows 3, 4 and
   6 are the checkout files that grant the same things.
 
 **`watcher/strays.ts`.** `isGuardrailPath(rel)` becomes `guardrailOf(rel) !== null`, or one of the paths call 1
-keeps: `isSensitivePath(rel)` (which covers `.env*`, `.git/config`, `.git/info`), or an `AGENTS.md` or `CLAUDE.md`
-basename in any folder. Its answers do not change for any path it is asked about today except
-`lefthook-local.yml`, which becomes a guardrail. `isSensitivePath` is not changed.
+keeps: `isSensitivePath(rel)` (which covers `.env*`, `.git/config`, `.git/info`), or an `AGENTS.md`, `CLAUDE.md` or
+lefthook basename (`GUARDRAIL_BASENAME` stays, so `lefthook.yml` and its spellings are a guardrail in any folder,
+as today). Its answers do not change for any path it is asked about today except the root `lefthook-local.yml`,
+which becomes a guardrail through row 8 (a nested `lefthook-local.yml` stays a notice). `isSensitivePath` is not
+changed.
 
 **`ownershipTest`.** Pure, with no I/O:
 
