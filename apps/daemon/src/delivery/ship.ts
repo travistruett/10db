@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
   BatchFailure,
@@ -19,12 +20,14 @@ import {
   StepStatus,
   TaskStatus,
   WorkstreamState,
+  WorkspaceMode,
   type BatchDto,
   type BatchId,
   type Notice,
   type ProjectDto,
   type WorkstreamDto,
   type WorkstreamId,
+  type TaskId,
 } from '@10db/contracts';
 import {
   getLocalCopy,
@@ -36,6 +39,7 @@ import {
   getBatch,
   getProject,
   getTask,
+  insertTask,
   getWorkstream,
   hasToolOp,
   listBatches,
@@ -65,7 +69,7 @@ import {
   type PullRequestStatus,
   type RequiredChecks,
 } from '../github';
-import { commitAdaptsMerge, insertPlannedWorkstream, revertOfRun } from '../team';
+import { commitAdaptsMerge, insertPlannedWorkstream, planForStart, revertOfRun } from '../team';
 import { raiseGateHostCards, withdrawCard } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, gateTimeoutFor, type GateResult, type GateRunner } from '../verify';
@@ -89,6 +93,7 @@ import {
   prCardKey,
   prCards,
   shipCards,
+  shipFailureFoldKey,
   wrongBranchCard,
   type CatchUpStop,
   type Card,
@@ -113,7 +118,15 @@ import {
   type DeliveryLimits,
 } from './context';
 import { fileFlakyTests, rerunFlaky, type FlakyTest } from './flaky-tests';
-import { readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
+import { gateFailureAction, failureSignature } from './gate-failure-action';
+import { failureReasons, readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
+import { clearGateFix, readGateFix, recordFix } from './gate-fix';
+import {
+  GATE_FIX_TITLE_PREFIX,
+  gateFixCriterion,
+  gateFixDescription,
+  gateFixTitle,
+} from './gate-fix-text';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck, type LocalCheck } from './local-check';
 import {
@@ -675,6 +688,104 @@ export function createShipper(deps: ShipperDeps): Shipper {
       return;
     }
     fail(batch, shipCards.baseConflict(batch, update.paths, outcome.why));
+  }
+
+  /**
+   * The ship check failed in the batch's own change: in one write the batch goes SHIPPING → FAILED →
+   * OPEN, one fix task joins it with a queued workstream, the fix is counted against the batch's
+   * budget under `signature`, and the batch's ship card is withdrawn. The batch ships itself once the
+   * fix task is done. When no task can be filed, the gate's card is raised as before.
+   */
+  async function sendToFix(
+    batch: BatchDto,
+    steps: readonly GateStepFailure[],
+    gate: GateResult,
+    signature: string | null,
+    check: ShipCheckName,
+    note: string | null,
+    reran: boolean,
+  ): Promise<void> {
+    const reasons = new Map<string, string>();
+    for (const step of steps) {
+      if (step.logPath === null) continue;
+      const log = await readFile(step.logPath, 'utf8').catch(() => '');
+      for (const [key, reason] of failureReasons(log))
+        if (!reasons.has(key)) reasons.set(key, reason);
+    }
+    const write = (): { readonly why: string } | 'moved' | { readonly sent: TaskId } =>
+      deps.state.write((w) => {
+        if (getBatch(w.tx, batch.id).state !== BatchState.Shipping) return 'moved';
+        const tasks = members(w.tx, batch.id).map((m) => getTask(w.tx, m.taskId));
+        const [first] = tasks;
+        if (!first) return { why: 'the batch has no task to work beside' };
+        const reason = `the ${check} failed in the batch's change; a fix task joins the batch`;
+        transitionBatch(w, batch.id, {
+          to: BatchState.Failed,
+          patch: { failure: BatchFailure.GateFailed },
+          reason,
+        });
+        settleLeftOutCards(
+          w,
+          transitionBatch(w, batch.id, {
+            to: BatchState.Open,
+            patch: { failure: null },
+            reason: 'a fix task works on the failure',
+          }),
+        );
+        resetCopyJournal(w, batch.id);
+        const task = insertTask(
+          w,
+          batch.projectId,
+          {
+            title: gateFixTitle(check, steps, batch.title),
+            description: gateFixDescription({
+              check,
+              note,
+              steps,
+              reasons,
+              gate,
+              earlier: tasks
+                .filter((t) => t.title.startsWith(GATE_FIX_TITLE_PREFIX))
+                .map((t) => ({ title: t.title, status: t.status })),
+            }),
+            acceptanceCriteria: [gateFixCriterion(check)],
+            areas: [...new Set(tasks.flatMap((t) => t.areas))],
+            landing: first.landing,
+          },
+          {
+            workspaceMode:
+              batch.worktreePath === null ? WorkspaceMode.Shared : WorkspaceMode.Worktree,
+            reason: 'works in its batch',
+          },
+        );
+        insertPlannedWorkstream(w, task.id, planForStart(w.tx, task.id), batch.id);
+        recordFix(w, batch.id, signature, deps.limits.maxFixAttempts);
+        withdrawIn(w, batch.projectId, [shipFailureFoldKey(batch.id)]);
+        return { sent: task.id };
+      });
+    let outcome: ReturnType<typeof write>;
+    try {
+      outcome = write();
+    } catch (error) {
+      // The write rolled back, so the batch is still SHIPPING and the card below fails it.
+      if (!(error instanceof InvalidError || error instanceof ConflictError)) throw error;
+      outcome = { why: error.message };
+    }
+    if (outcome === 'moved') return;
+    if ('sent' in outcome) {
+      deps.logger.info(
+        {
+          batchId: batch.id,
+          taskId: outcome.sent,
+          count: readGateFix(db, batch.id, deps.limits.maxFixAttempts).count,
+        },
+        `ship ${check} failed in the batch's change; a fix task joins the batch`,
+      );
+      deps.onWorkQueued();
+      return;
+    }
+    deps.logger.warn({ batchId: batch.id, why: outcome.why }, 'no fix task filed for the gate');
+    fail(batch, shipCards.gateFailed(batch, gate, note, steps, reran, check));
   }
 
   /**
@@ -1282,43 +1393,75 @@ export function createShipper(deps: ShipperDeps): Shipper {
       }
     }
     if (first.gate.exitCode !== 0 && !flakesPassed) {
-      const steps = await readGateFailures(checkout, first.gate.tail);
-      if (!(await outsideTheBatch(batchId, checkout, steps))) {
-        fail(batch, shipCards.gateFailed(batch, first.gate, cardNote(first), steps, false, name));
-        return false;
-      }
-      // Every failing test is one the batch couldn't have caused: one more run, by itself,
-      // before the builder hears of it, and never a fix session.
-      deps.logger.info(
-        { batchId, tests: steps.flatMap((s) => s.tests).length },
-        'ship gate failed only in tests the batch did not change; running it again',
-      );
-      const second = await gateOnce();
-      if (second === null) return false;
-      if (second.gate.timedOut) {
-        fail(
-          batch,
-          shipCards.gateTimedOut(
-            batch,
-            gateTimeoutFor(deps.state.db, project.id, check.command, deps.limits.gateTimeoutMs),
-            second.gate.logPath,
-            cardNote(second),
-            name,
-          ),
-        );
-        return false;
-      }
-      if (second.gate.exitCode !== 0) {
-        const again = await readGateFailures(checkout, second.gate.tail);
-        fail(
-          batch,
-          (await outsideTheBatch(batchId, checkout, again))
-            ? shipCards.gateFailedUnrelated(batch, cardNote(second), again)
-            : shipCards.gateFailed(batch, second.gate, cardNote(second), again, true, name),
-        );
-        return false;
-      }
-      showNotice(deps.state, batchId, gateNotices.rerunPassed(steps));
+      // A pass's batch never ships again by itself, and a separate copy's reopened batch would lose
+      // the landing a failure reports, so neither gets a fix task.
+      const eligible = batch.passId == null && getLocalCopy(db, batchId) === null;
+      type Run = NonNullable<Awaited<ReturnType<typeof gateOnce>>>;
+      // What a failed run leads to: one more run, a fix task in the batch, or the card.
+      const decide = async (
+        run: Run,
+        steps: readonly GateStepFailure[],
+        reran: boolean,
+      ): Promise<boolean> => {
+        const outside = await outsideTheBatch(batchId, checkout, steps);
+        const signature = failureSignature(steps, run.gate.tail);
+        const action = gateFailureAction({
+          outside,
+          reran,
+          eligible,
+          signature,
+          fix: readGateFix(db, batchId, deps.limits.maxFixAttempts),
+        });
+        switch (action.kind) {
+          case 'rerun': {
+            // Every failing test is one the batch couldn't have caused: one more run, by itself,
+            // before anything else.
+            deps.logger.info(
+              { batchId, tests: steps.flatMap((s) => s.tests).length },
+              'ship gate failed only in tests the batch did not change; running it again',
+            );
+            const second = await gateOnce();
+            if (second === null) return false;
+            if (second.gate.timedOut) {
+              fail(
+                batch,
+                shipCards.gateTimedOut(
+                  batch,
+                  gateTimeoutFor(
+                    deps.state.db,
+                    project.id,
+                    check.command,
+                    deps.limits.gateTimeoutMs,
+                  ),
+                  second.gate.logPath,
+                  cardNote(second),
+                  name,
+                ),
+              );
+              return false;
+            }
+            if (second.gate.exitCode === 0) {
+              showNotice(deps.state, batchId, gateNotices.rerunPassed(steps));
+              return true;
+            }
+            return decide(second, await readGateFailures(checkout, second.gate.tail), true);
+          }
+          case 'fix':
+            await sendToFix(batch, steps, run.gate, signature, name, cardNote(run), reran);
+            return false;
+          // Out of moves raises the gate's own cards until it has a card of its own.
+          case 'legacy_card':
+          case 'out_of_moves':
+            fail(
+              batch,
+              outside && reran
+                ? shipCards.gateFailedUnrelated(batch, cardNote(run), steps)
+                : shipCards.gateFailed(batch, run.gate, cardNote(run), steps, reran, name),
+            );
+            return false;
+        }
+      };
+      return decide(first, await readGateFailures(checkout, first.gate.tail), false);
     }
     return true;
   }
@@ -1469,13 +1612,14 @@ export function createShipper(deps: ShipperDeps): Shipper {
         );
       }
       // 5. Record it.
-      deps.state.write((w) =>
+      deps.state.write((w) => {
         transitionBatch(w, batchId, {
           to: BatchState.Shipped,
           patch: { prUrl },
           reason: 'pull request open',
-        }),
-      );
+        });
+        clearGateFix(w, batchId);
+      });
       deps.logger.info({ batchId, branch, prUrl }, 'batch shipped');
       resolveShipCards(db, deps.inbox, getBatch(db, batchId));
       await afterEnd(batchId, worktreePath, signal);
@@ -2637,6 +2781,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
           reason: 'abandoned by the builder',
         });
         settleLeftOutCards(w, moved);
+        clearGateFix(w, batchId);
         return moved;
       });
       for (const ws of toCancel) deps.inbox.cancelForWorkstream(ws.id);

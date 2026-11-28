@@ -5,7 +5,7 @@ const EXCERPT_LINES = 300;
 /** The most bytes of it. */
 const EXCERPT_BYTES = 64 * 1024;
 /** The longest title a task has. */
-const TITLE_MAX = 200;
+export const TITLE_MAX = 200;
 /** The longest job name kept in a log's file name. */
 const LOG_NAME_MAX = 80;
 
@@ -66,7 +66,7 @@ export function fenceAround(text: string): string {
 }
 
 /** One line of text from a name that came from outside: control characters become spaces. */
-function oneLine(text: string): string {
+export function oneLine(text: string): string {
   return text
     .replace(/\p{Cc}+/gu, ' ')
     .replace(/\s+/g, ' ')
