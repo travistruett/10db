@@ -37,3 +37,10 @@
   left `builderCalls` out or found calls; otherwise the build starts with a `plan-goes-ahead` notice in the same write. A Plan step whose planner
   proposed `plan_review` carries `planReviewAsked`, and the end of that step puts the Plan Review after it
   (`withAskedPlanReview`), entered at once so a replan keeps it.
+- A stalled active run is stopped and queued again by `restartStalled` (`stalls/AGENTS.md`), one call per run at a time
+  (`isRestarting`). Its lane stops with the `stalled` reason, which ends the session, the gate and the acceptance read
+  like `shutdown` and writes no workstream state (`leavesStateAlone`): the one fenced write of `requeueStalled`, after the
+  lane has ended, requeues with `freshAction`, charges one recovery attempt, records the restart and posts its notice. A
+  stop that outlasts its deadline (`STALL_STOP_DEADLINE_MS`, on the injected clock) answers `stop_hung` and writes
+  nothing. A step that makes progress (`progressed`) clears the run's restart record with the attempts. Every place that
+  reads a stop reason handles `stalled`: add a new reason to each, `leavesStateAlone` included.

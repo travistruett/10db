@@ -336,6 +336,7 @@ import {
   yourMcpForSession,
 } from '../session-setup';
 import { takeFoundHostsReading } from '../registries';
+import { clearRestart, postRestartNotice, recordRestart, STALL_STOP_DEADLINE_MS } from '../stalls';
 import {
   escalateStep,
   planAddedStep,
@@ -487,8 +488,19 @@ const HANDOFF_BASELINE_MARGIN_PCT = 5;
 /** A hook call's input, as the agent sent it: read as a record where a skip keys it. */
 const ToolInputRecord = z.record(z.string(), z.unknown());
 
-/** Why a lane is stopped; `closed` is the runner closing a pass task's session itself. */
-export type StopReason = 'cancelled' | 'paused' | 'shutdown' | 'closed';
+/**
+ * Why a lane is stopped; `closed` is the runner closing a pass task's session itself, and `stalled` the
+ * stall restart stopping a silent run, whose own ending writes no state.
+ */
+export type StopReason = 'cancelled' | 'paused' | 'shutdown' | 'closed' | 'stalled';
+
+/** How a stall's restart ended: see `Runner.restartStalled`. */
+export type StallRestartResult = 'restarted' | 'stop_hung' | 'not_active';
+
+/** A stop whose lane ends without writing workstream state: the one that stopped it, or recovery, does. */
+function leavesStateAlone(reason: StopReason | null): boolean {
+  return reason === 'shutdown' || reason === 'stalled';
+}
 
 export interface RunnerLimits {
   readonly maxRecoveryAttempts: number;
@@ -636,6 +648,19 @@ export interface Runner {
   stopAccount(accountId: AccountId, reason: StopReason): Promise<void>;
   stopAll(reason: StopReason): Promise<void>;
   isRunning(id: WorkstreamId): boolean;
+  /**
+   * Stops a stalled run's session and gate and queues it again from its latest handoff, claims kept and
+   * one recovery attempt charged, with its record and notice in the same write. One call per run at a
+   * time: a call while one is in flight answers that one's promise and stops nothing. `stop_hung`: the
+   * stop outlasted `deadlineMs` (two minutes by default) and nothing was written; `not_active`: the run
+   * is no longer starting, running or verifying, so nothing was written. `note` reaches the next brief.
+   */
+  restartStalled(
+    id: WorkstreamId,
+    opts?: { note?: string; deadlineMs?: number },
+  ): Promise<StallRestartResult>;
+  /** Whether a `restartStalled` call for the run has not returned. */
+  isRestarting(id: WorkstreamId): boolean;
   /**
    * Whether the lane waits for the start hold (an overloaded Mac, the update drain) before its next
    * session or its gate: it keeps its claims and frees none until the hold clears.
@@ -5121,6 +5146,8 @@ export function createRunner(opts: RunnerOptions): Runner {
             }
           : {}),
       });
+      // The step moved on, so a later stall of it is a new one, restarted once again.
+      if (progressed) clearRestart(ctx, id);
     });
     return outcome;
   }
@@ -5559,7 +5586,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const run = listEvidence(db, id).filter((e) => e.kind === 'gate').length + 1;
     const gateAbort = new AbortController();
     ctl.gateAbort = gateAbort;
-    if (ctl.stopReason === 'cancelled' || ctl.stopReason === 'shutdown') gateAbort.abort();
+    if (ctl.stopReason === 'cancelled' || leavesStateAlone(ctl.stopReason)) gateAbort.abort();
     // A batch's branch takes its base as origin has it now, so the gate tests what would merge
     // rather than the base it was cut from. It runs once the gate holds its slot, so no other gate's
     // merge changes the tree under a running gate. Work outside a batch has no base to take.
@@ -5742,7 +5769,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       return;
     }
     // The base merge left conflict markers: no gate ran, and a session resolves them.
-    if (before.update?.kind === 'conflicted' && ctl.stopReason !== 'shutdown') {
+    if (before.update?.kind === 'conflicted' && !leavesStateAlone(ctl.stopReason)) {
       sendToMerge(id, ctl, row, before.update);
       return;
     }
@@ -5750,7 +5777,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // not fail. The task stops with a card that says the install is broken, and no attempt is counted
     // (a fix session could not repair it: 10db installs, and already did). With no trustworthy pnpm
     // no install ran and a Retry meets the same refusal, so that has its own kind for the failure line.
-    if (before.update?.kind === 'install_broken' && ctl.stopReason !== 'shutdown') {
+    if (before.update?.kind === 'install_broken' && !leavesStateAlone(ctl.stopReason)) {
       fail(id, ctl.fence, {
         kind:
           before.update.noPnpm === true
@@ -5763,7 +5790,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // A merge of the base lost a migration and the merge stands: no gate ran, and this counts as one
     // that failed, so a fix session re-creates it, told how by the note and the batch's notice. With a
     // notice whose list can't be read there is nothing to re-create, and the note says that instead.
-    if (before.update?.kind === 'uncarried' && ctl.stopReason !== 'shutdown')
+    if (before.update?.kind === 'uncarried' && !leavesStateAlone(ctl.stopReason))
       result = { ...result, exitCode: 1, aborted: false };
     // Shutdown killed the gate: record nothing. The workstream stays VERIFYING and recovery re-runs it.
     if (result.aborted) return;
@@ -5810,7 +5837,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           cancelNow(id, ctl.fence);
           return;
         }
-        if (stopRequested(ctl) === 'shutdown') return;
+        if (leavesStateAlone(stopRequested(ctl))) return;
         const deferred = opts.state.write((ctx) => {
           const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
           const implementLeft = current.steps
@@ -5846,7 +5873,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       }
       // Shutdown stopped it: record nothing, and recovery runs the gate again.
       // An acceptance check a stop cut short is the same: stay Verifying, and the gate and the check run again.
-      if (stopRequested(ctl) === 'shutdown' || acceptance === ACCEPTANCE_STOPPED) return;
+      if (leavesStateAlone(stopRequested(ctl)) || acceptance === ACCEPTANCE_STOPPED) return;
       const landing = opts.state.write((ctx): boolean => {
         insertEvidence(ctx, evidence);
         // Before the acceptance card, which names the suites the change touched.
@@ -5970,7 +5997,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     if (row.nextAction.kind === 'verify' || row.state === S.Verifying) return;
     const abort = new AbortController();
     ctl.gateAbort = abort;
-    if (ctl.stopReason === 'cancelled' || ctl.stopReason === 'shutdown') abort.abort();
+    if (ctl.stopReason === 'cancelled' || leavesStateAlone(ctl.stopReason)) abort.abort();
     try {
       await opts.baseUpdates.atLaunch(row.batchId, abort.signal);
     } catch (error) {
@@ -5999,7 +6026,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     if (!claim) return;
     const abort = new AbortController();
     ctl.gateAbort = abort;
-    if (ctl.stopReason === 'cancelled' || ctl.stopReason === 'shutdown') abort.abort();
+    if (ctl.stopReason === 'cancelled' || leavesStateAlone(ctl.stopReason)) abort.abort();
     try {
       const taken = await opts.migrationsBase.take(id, abort.signal);
       if (taken.kind !== 'held') return;
@@ -6200,6 +6227,130 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
   }
 
+  /** The restarts of stalled runs that have not returned, by run: one stop at a time, whoever asks. */
+  const restarting = new Map<WorkstreamId, Promise<StallRestartResult>>();
+
+  /**
+   * Ends the lane's session and gate for a stall, and answers `ended` when its ending came in time or
+   * `hung` when `deadlineMs` passed first. The lane's own ending writes no state for a `stalled` stop.
+   */
+  async function stopForStall(ctl: Control, deadlineMs: number): Promise<'ended' | 'hung'> {
+    // A stop already asked for (a cancel, a shutdown) keeps its own reason; this one only waits for it.
+    ctl.stopReason ??= 'stalled';
+    ctl.gateAbort?.abort();
+    ctl.acceptAbort?.abort();
+    ctl.holdAbort?.abort();
+    ctl.endWaits?.();
+    const ending = (async (): Promise<'ended' | 'hung'> => {
+      try {
+        await ctl.handle?.stop();
+        await ctl.done;
+        return 'ended';
+      } catch (error) {
+        opts.logger.warn(
+          { err: error instanceof Error ? error.message : String(error) },
+          'a stalled run did not stop cleanly',
+        );
+        return 'hung';
+      }
+    })();
+    return new Promise((resolve) => {
+      const timer = opts.clock.setTimeout(() => {
+        resolve('hung');
+      }, deadlineMs);
+      void ending.then((result) => {
+        timer.cancel();
+        resolve(result);
+      });
+    });
+  }
+
+  /**
+   * The one write that requeues a stalled run, as recovery does, charges an attempt, records the
+   * restart and posts its notice. A run no longer active (it finished while it stopped) is left alone.
+   */
+  function requeueStalled(
+    id: WorkstreamId,
+    fence: number | null,
+    stalled: WorkstreamRow,
+    note: string | undefined,
+  ): 'restarted' | 'not_active' {
+    try {
+      return opts.state.write((ctx) => {
+        const row = getWorkstreamRow(ctx.tx, id);
+        if (row.state !== S.Starting && row.state !== S.Running && row.state !== S.Verifying)
+          return 'not_active';
+        const text = note?.trim() ?? '';
+        const evidence =
+          text === ''
+            ? null
+            : insertEvidence(ctx, {
+                workstreamId: id,
+                kind: EvidenceKind.Builder,
+                command: null,
+                exitCode: null,
+                summary: text,
+                logPath: null,
+                commitShas: [],
+              });
+        const verifying = row.state === S.Verifying || row.nextAction.kind === 'verify';
+        const resumed = freshAction(ctx.tx, id);
+        const nextAction: NextAction = evidence
+          ? { kind: 'fix', evidenceId: evidence.id, providerSessionId: null }
+          : verifying
+            ? { kind: 'verify' }
+            : carryingUndelivered(ctx.tx, id, resumed);
+        for (const session of listSessions(ctx.tx, id))
+          if (session.endedAt === null) endSession(ctx, session.id, 'stalled');
+        transitionWorkstream(ctx, id, {
+          to: S.Recovering,
+          fence,
+          patch: { currentSessionId: null, gatePid: null, gatePidStart: null },
+          reason: 'no activity; restarting',
+        });
+        transitionWorkstream(ctx, id, {
+          to: S.Queued,
+          fence,
+          patch: { nextAction, recoveryAttempts: row.recoveryAttempts + 1 },
+          reason: 'restarted after it showed no activity',
+        });
+        clearLease(ctx, id);
+        recordRestart(ctx, { id, state: stalled.state, at: ctx.now });
+        postRestartNotice(ctx, {
+          projectId: row.projectId,
+          taskId: row.taskId,
+          workstreamId: id,
+          title: taskTitleOf(id),
+          state: stalled.state,
+          since: stalled.lastActivityAt ?? stalled.updatedAt,
+          fromHandoff: resumed.kind === 'continue_from_handoff',
+        });
+        return 'restarted';
+      });
+    } catch (error) {
+      // A newer lease took the run meanwhile: it is no longer this stall's to move.
+      if (error instanceof StaleFenceError) return 'not_active';
+      throw error;
+    }
+  }
+
+  async function restartNow(
+    id: WorkstreamId,
+    opt: { note?: string; deadlineMs?: number },
+  ): Promise<StallRestartResult> {
+    const stalled = getWorkstreamRow(db, id);
+    if (
+      stalled.state !== S.Starting &&
+      stalled.state !== S.Running &&
+      stalled.state !== S.Verifying
+    )
+      return 'not_active';
+    const ctl = active.get(id);
+    if (ctl && (await stopForStall(ctl, opt.deadlineMs ?? STALL_STOP_DEADLINE_MS)) === 'hung')
+      return 'stop_hung';
+    return requeueStalled(id, ctl?.fence ?? null, stalled, opt.note);
+  }
+
   const runner: Runner = {
     launch(id, fence) {
       if (active.has(id)) return;
@@ -6263,6 +6414,16 @@ export function createRunner(opts: RunnerOptions): Runner {
       await Promise.all([...active.keys()].map((id) => runner.stop(id, reason)));
     },
     isRunning: (id) => active.has(id),
+    restartStalled(id, restartOpts = {}) {
+      const pending = restarting.get(id);
+      if (pending) return pending;
+      const call = restartNow(id, restartOpts).finally(() => {
+        restarting.delete(id);
+      });
+      restarting.set(id, call);
+      return call;
+    },
+    isRestarting: (id) => restarting.has(id),
     isParked: (id) => active.get(id)?.parked === true,
     handOff(projectId, accountId, reason) {
       for (const c of active.values())

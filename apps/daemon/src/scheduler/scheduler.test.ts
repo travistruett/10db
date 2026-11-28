@@ -5,6 +5,7 @@ import {
   ConversationOwnerKind,
   ConversationProfile,
   ConversationState,
+  DecisionRule,
   mintId,
   REVERTED_NOTICE_KEY,
   type AccountId,
@@ -50,6 +51,7 @@ import {
   runNext,
   schema,
   seedProject,
+  setRuleAsking,
   setWorkstreamNotice,
   transitionBatch,
   transitionWorkstream,
@@ -278,6 +280,14 @@ function pause(project: ReturnType<typeof seedProject>): void {
 function moveWorkstream(id: WorkstreamId, to: 'STARTING' | 'FAILED' | 'CANCELLED' | 'QUEUED') {
   state.write((ctx) => transitionWorkstream(ctx, id, { to, fence: null }));
 }
+
+/** The restart side of a stall sweep whose runs the scheduler tests never restart. */
+const noRestarts = {
+  restart: () => Promise.resolve('not_active' as const),
+  isRestarting: () => false,
+  isRunning: () => true,
+  maxRecoveryAttempts: 3,
+};
 
 describe('scheduler', () => {
   it('launches nothing while held, queued work and awaited holders alike, and launches it once released', async () => {
@@ -696,6 +706,7 @@ describe('scheduler', () => {
       gateTimeoutFloorMs: 30 * 60_000,
       clock,
       logger: silentLogger,
+      ...noRestarts,
     });
     const rows = () => ({
       runs: store.db.select().from(schema.workstreams).all(),
@@ -737,7 +748,11 @@ describe('scheduler', () => {
   });
 
   it('flags a started run Stuck only for silence after the hold that kept it waiting, and after the daemon start', async () => {
-    queue();
+    const a = queue();
+    // The rule set to ask keeps today's card; otherwise the run is restarted with none.
+    state.write((ctx) => {
+      setRuleAsking(ctx, a.project.id, DecisionRule.StuckRun, true);
+    });
     const waits = createQueueWaits({ state, clock });
     await scheduler(undefined, undefined, undefined, waits).tick();
     const sweep = createStallSweep({
@@ -750,6 +765,7 @@ describe('scheduler', () => {
       gateTimeoutFloorMs: 30 * 60_000,
       clock,
       logger: silentLogger,
+      ...noRestarts,
     });
     const openStuck = () =>
       listInbox(store.db, { states: ['OPEN'] }).filter((c) => c.title.startsWith('Stuck:'));

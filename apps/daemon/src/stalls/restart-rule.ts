@@ -1,5 +1,8 @@
 import { StallKind } from './rules';
 
+/** How long a stalled run's session may take to stop before the stop counts as hung. */
+export const STALL_STOP_DEADLINE_MS = 2 * 60_000;
+
 /** The part of 10db that failed when a run stalled: what a defect task is filed for. */
 export const StallFault = {
   /** Running or Verifying with no live lane. */
