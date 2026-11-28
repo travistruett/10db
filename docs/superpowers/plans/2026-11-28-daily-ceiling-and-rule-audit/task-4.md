@@ -4,7 +4,8 @@ Read the index's Brief and Global Constraints first. Size: Feature (a read and a
 
 **Files:**
 
-- New `packages/contracts/src/rule-stats.ts`: `RuleStatsDto`, `RuleStatsListDto { since, rules }`, `sampleFirst`.
+- `packages/contracts/src/rule-stats.ts` (task 3 made it with `RULE_MARKS_KEPT`): add `RuleStatsDto`,
+  `RuleStatsListDto { since, rules }`, `sampleFirst`.
 - `packages/db/src/store/rule-record.ts`: `ruleStats`. `apps/daemon/src/api/app.ts`: `GET /rules/stats?project=`.
 - The sites that read `isRuleAsking` (`stalls/sweep.ts`, `watcher/watcher.ts`, `accounts/move-back.ts`,
   `mcp/claim-wait.ts`, `mcp/tools.ts`, `delivery/worktree-save.ts`, `delivery/hand-made-worktrees.ts`,
@@ -20,7 +21,10 @@ Read the index's Brief and Global Constraints first. Size: Feature (a read and a
 - `decided`: `notice.posted` events whose `decision.rule` is the rule, counted in SQL with `json_extract`, as
   `store/activity.ts` filters them. `lastWeek` and `weekBefore` are that count for the last 7 days and the 7
   before. These events are kept (only `session.context` and `session.activity` are pruned).
-- `undone` and `sentUp`: the times in `rules.record`. An app's row was never recorded, so it is not in `undone`.
+- `undone` and `sentUp`: the entries in `rules.record`. An app's row was never recorded, so it is not in `undone`.
+  Each mark keeps only its newest `RULE_MARKS_KEPT` (200) entries, so either count tops out at 200 for a rule that
+  asks on a busy path. The DTO carries the count as it is; the tab shows a count of `RULE_MARKS_KEPT` or more as
+  "200+", and a count under it as the number.
 - `asking`: the rule asks in the project named, or in any project when none is.
 - With `project`, every count is that project's; without, all active projects'.
 
@@ -28,7 +32,8 @@ Read the index's Brief and Global Constraints first. Size: Feature (a read and a
 (`lastWeek - weekBefore`), largest first; then the rest by `decided`, largest first; ties by the rule's name.
 The list is the eleven rules, so it is not paged.
 
-**The tab.** Columns: Rule (its `DECISION_RULE_NAMES` name), Decided, Undone, Sent Up, This Week, Last Week. A row
+**The tab.** Columns: Rule (its `DECISION_RULE_NAMES` name), Decided, Undone, Sent Up (shows "200+" at the cap above), This Week,
+Last Week. A row
 in the first group carries a "Worth a Look" badge with the hint "Deciding more each week, never undone". A rule
 that asks shows "Asks you" beside its name. A project select filters it, as Activity's does. Empty state: "10db
 has decided nothing by rule in the last 30 days."

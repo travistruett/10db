@@ -88,8 +88,11 @@ export const autoCeilingFoldKey = (projectId: ProjectId, day: string, carryOns: 
 // packages/db/src/store/rule-record.ts: app setting `rules.record`
 export const RULE_WINDOW_DAYS = 30; export const RULE_UNDOS_TO_ASK = 2;
 export const RuleMark = { Undone: 'undone', SentUp: 'sent_up' } as const;
-/** Appends a time, drops those past the window, and answers the count left for this project, rule and mark. */
-export function recordRuleMark(ctx: WriteContext, projectId: ProjectId, rule: DecisionRule, mark: RuleMark): number;
+export const RULE_MARKS_KEPT = 200; // packages/contracts/src/rule-stats.ts: newest entries kept per mark, so a count tops out here
+export const RuleMarkEntry = z.object({ at: z.iso.datetime(), seq: z.int().nullable() }); // seq: the undone row's notice.posted event
+/** Appends an entry (`seq` for an undone row), drops those past the window and the oldest past RULE_MARKS_KEPT, and answers the count left for this project, rule and mark. */
+export function recordRuleMark(ctx: WriteContext, projectId: ProjectId, rule: DecisionRule, mark: RuleMark, seq?: number): number;
+export function ruleMarkEntries(db: DbReader, projectId: ProjectId, rule: DecisionRule, mark: RuleMark): RuleMarkEntry[]; // oldest first
 export function clearRuleMarks(ctx: WriteContext, projectId: ProjectId, rule: DecisionRule, mark: RuleMark): void;
 export function ruleStats(db: DbReader, input: { projectId: ProjectId | null; now: Date }): RuleStatsDto[];
 // packages/contracts/src/rule-stats.ts; GET /rules/stats?project=
