@@ -27,4 +27,5 @@
   `holdAction` reads the whole pull request's diff at ship step 4b, `catchUpSteps` and `retryMerge`; `turnOnAutoMerge`
   and `mergeNow` stay the only callers of `gh.prAutoMerge` and `gh.prMerge`; while held, `gh.prDisableAutoMerge` runs
   before every push.
+- `kept-files.ts` saves and verifies a worktree's only copies; it removes nothing.
 - Failed ship gate (`decisions/2026-11-27-a-failing-ship-gate-is-fixed-by-10db-until-it-is-out-of-moves.md`): `gate-failure-action.ts` decides; `sendToFix` reopens the batch with one counted fix task (`gate-fix.ts`) and withdraws the card in one write; pass, copy and out-of-moves batches keep the card; SHIPPED and abandon run `clearGateFix`.
