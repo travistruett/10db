@@ -1,4 +1,43 @@
 {
+  "Fix the gate: 1 test fails in test · Greet the e2e": [
+    [
+      {
+        "do": "tool",
+        "toolName": "Write",
+        "input": {
+          "file_path": "src/greeting/fix.txt",
+          "content": "tried\n"
+        }
+      },
+      {
+        "do": "mcp",
+        "tool": "commit",
+        "args": {
+          "opId": "op-e2e-oom-fix",
+          "paths": ["src/greeting/fix.txt"],
+          "message": "Try a fix for the gate"
+        }
+      },
+      {
+        "do": "turn_complete",
+        "text": "Committed a fix attempt."
+      }
+    ],
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": {
+          "opId": "op-e2e-oom-review",
+          "summary": "The attempt is committed.",
+          "verdict": "approve"
+        }
+      },
+      {
+        "do": "turn_complete"
+      }
+    ]
+  ],
   "Write the greeting": [
     [
       {

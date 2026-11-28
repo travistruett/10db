@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import {
   chromium,
   expect,
@@ -9,7 +10,7 @@ import {
 } from '@playwright/test';
 import { z } from 'zod';
 import { daemonUrl } from './daemon-url';
-import { E2E_DATA } from './paths';
+import { E2E_DATA, E2E_DIR } from './paths';
 import { test } from './routed-test';
 import { auth, createProject } from './shape-project';
 import { freeLoopbackPort, startTlsStandIn, type TlsStandIn } from './tls-standin';
@@ -33,6 +34,7 @@ const OpenCards = z.array(
 test.describe.configure({ mode: 'serial' });
 
 let projectId = '';
+let oomProjectId = '';
 
 /** Answers every card this spec left open, so later specs read no stray cards. */
 async function resolveOwnCards(request: APIRequestContext): Promise<void> {
@@ -40,15 +42,16 @@ async function resolveOwnCards(request: APIRequestContext): Promise<void> {
     headers: auth,
     maxRetries: 2,
   });
-  const own = OpenCards.parse(await response.json()).filter((card) => card.projectId === projectId);
+  const own = OpenCards.parse(await response.json()).filter(
+    (card) => card.projectId === projectId || card.projectId === oomProjectId,
+  );
   for (const card of own) {
+    // An out-of-moves card's first answer starts more work; Drop It ends it.
+    const choice = card.options.find((option) => option.label === 'Drop It') ?? card.options[0];
     const answered = await request.post(`${daemonUrl}/inbox/${card.id}/answer`, {
       headers: auth,
       // A flag closes on any word; a question needs one of its options, and records nothing.
-      data:
-        card.options[0] === undefined
-          ? { choice: 'dismissed' }
-          : { choice: card.options[0].label, record: null },
+      data: choice === undefined ? { choice: 'dismissed' } : { choice: choice.label, record: null },
     });
     expect(answered.ok()).toBe(true);
   }
@@ -206,6 +209,188 @@ test('an acceptance card shows what it could not confirm and what Accept Without
   ).toBeVisible();
   await page.getByRole('button', { name: /^Accept Without Proof/ }).click();
   await expect(rowsOf(page).filter({ hasText: title })).toHaveCount(0);
+});
+
+const OOM_PROJECT = 'e2e-out-of-moves';
+const OOM_REPO = join(E2E_DIR, 'out-of-moves-repo');
+const OOM_BRANCH = '10db/out-of-moves-e2e';
+const OOM_BATCH = 'Greet the e2e';
+const OOM_TASK = 'Greet in the e2e';
+const OOM_CARD = `Out of moves: 1 test fails in test · ${OOM_BATCH}`;
+/** The fix task 10db files for the gate; `script-book.json` holds its sessions under this title. */
+const OOM_FIX = `Fix the gate: 1 test fails in test · ${OOM_BATCH}`;
+
+const Batches = z.array(z.looseObject({ id: z.string(), title: z.string(), state: z.string() }));
+const TaskRows = z.array(z.looseObject({ title: z.string(), workstreamId: z.string().optional() }));
+
+/**
+ * The out-of-moves project's repository: a gate that always fails one test in vitest's words, and the
+ * batch's branch, checked out, whose one commit adds that test's file, so the failure is the batch's own.
+ * Answers the commit the branch was cut from.
+ */
+function createOutOfMovesRepository(): string {
+  mkdirSync(OOM_REPO, { recursive: true });
+  const globalConfig = join(E2E_DIR, 'out-of-moves-gitconfig');
+  writeFileSync(globalConfig, '');
+  const env = {
+    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: globalConfig,
+  };
+  const git = (...args: string[]): string =>
+    execFileSync('git', args, { cwd: OOM_REPO, env, encoding: 'utf8' }).trim();
+  git('init', '-b', 'main');
+  git('config', 'maintenance.auto', 'false');
+  git('config', 'gc.auto', '0');
+  git('config', 'receive.autogc', 'false');
+  git('config', 'user.email', 'e2e@10db.invalid');
+  git('config', 'user.name', '10db e2e');
+  git('config', 'commit.gpgsign', 'false');
+  // The ship reruns a failing test file with `pnpm exec vitest`, which on a runner that has vitest on its
+  // PATH writes its cache under `node_modules`; untracked, that would make the checkout dirty before the
+  // second ship and raise the dirty-checkout card in place of the out-of-moves one.
+  writeFileSync(join(OOM_REPO, '.gitignore'), '.gate/\nnode_modules/\n');
+  writeFileSync(
+    join(OOM_REPO, 'gate.sh'),
+    [
+      'mkdir -p .gate',
+      "printf '%s\\n' ' FAIL  daemon  src/greeting/hello.test.ts > greets' 'AssertionError: expected 1 to be 2' > .gate/test.log",
+      "echo 'FAILED test: pnpm test (log .gate/test.log)'",
+      "echo 'GATE FAIL: test — logs in .gate/; test 1s (1s)'",
+      'exit 1',
+      '',
+    ].join('\n'),
+  );
+  git('add', '.gitignore', 'gate.sh');
+  git('commit', '-m', 'Initial commit');
+  const base = git('rev-parse', 'HEAD');
+  git('checkout', '-b', OOM_BRANCH);
+  mkdirSync(join(OOM_REPO, 'src/greeting'), { recursive: true });
+  writeFileSync(join(OOM_REPO, 'src/greeting/hello.test.ts'), "it('greets', () => {});\n");
+  git('add', 'src/greeting/hello.test.ts');
+  git('commit', '-m', 'Add the greeting test');
+  return base;
+}
+
+/**
+ * A pull-request project whose batch's task is done, seeded the way a start and a finished run leave it:
+ * starting a real batch needs a GitHub origin and a signed-in gh. Each implement step's check passes; only
+ * the ship gate fails.
+ */
+async function seedOutOfMovesProject(request: APIRequestContext): Promise<string> {
+  const baseSha = createOutOfMovesRepository();
+  const created = await request.post(`${daemonUrl}/projects`, {
+    headers: auth,
+    data: {
+      name: OOM_PROJECT,
+      repoPath: OOM_REPO,
+      gateCommand: 'sh gate.sh',
+      changedCheckCommand: 'true',
+      areas: [{ name: 'greeting', globs: ['src/greeting/**'] }],
+      handoffPct: 40,
+      nudgePct: 50,
+      delivery: 'pull_request',
+      workspaceMode: 'shared',
+    },
+  });
+  expect(created.ok()).toBe(true);
+  const id = z.looseObject({ id: z.string() }).parse(await created.json()).id;
+  const task = await request.post(`${daemonUrl}/projects/${id}/tasks`, {
+    headers: auth,
+    data: { title: OOM_TASK, acceptanceCriteria: ['it greets'], areas: ['greeting'] },
+  });
+  expect(task.ok()).toBe(true);
+  execFileSync(
+    'pnpm',
+    [
+      'exec',
+      'tsx',
+      'scripts/seed-worktree-batches.ts',
+      resolve(E2E_DATA, '10db.sqlite'),
+      JSON.stringify({
+        projectId: id,
+        worktreeRoot: E2E_DIR,
+        open: [
+          {
+            taskId: z.looseObject({ id: z.string() }).parse(await task.json()).id,
+            title: OOM_BATCH,
+            state: 'DONE',
+            worktree: false,
+            branch: OOM_BRANCH,
+            baseSha,
+            repo: 'e2e/out-of-moves',
+          },
+        ],
+        shipped: [],
+      }),
+    ],
+    { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
+  );
+  return id;
+}
+
+test('a ship gate out of moves asks Spend More Attempts, Change the Task or Drop It, and More files another fix', async ({
+  page,
+  request,
+}) => {
+  // Two fix runs on the fake adapter and three gate runs.
+  test.setTimeout(240_000);
+  oomProjectId = await seedOutOfMovesProject(request);
+  const batch = async () => {
+    const response = await request.get(`${daemonUrl}/projects/${oomProjectId}/batches`, {
+      headers: auth,
+      maxRetries: 2,
+    });
+    const found = Batches.parse(await response.json()).find((b) => b.title === OOM_BATCH);
+    if (!found) throw new Error(`no batch "${OOM_BATCH}"`);
+    return found;
+  };
+  const fixes = async () => {
+    const response = await request.get(`${daemonUrl}/projects/${oomProjectId}/tasks`, {
+      headers: auth,
+      maxRetries: 2,
+    });
+    return TaskRows.parse(await response.json()).filter((t) => t.title === OOM_FIX);
+  };
+  const { id: batchId } = await batch();
+  // The gate fails in the batch's own test: 10db files a fix task and the batch reopens. The fix runs,
+  // the gate fails the same way, and 10db stops with one card.
+  const shipped = await request.post(`${daemonUrl}/batches/${batchId}/ship`, { headers: auth });
+  expect(shipped.ok()).toBe(true);
+  await expect.poll(async () => (await batch()).state, { timeout: 180_000 }).toBe('FAILED');
+  expect(await fixes()).toHaveLength(1);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(`/inbox?project=${oomProjectId}`);
+  const row = rowsOf(page).filter({ hasText: OOM_CARD });
+  await row.click();
+  // Exact: the card body repeats this line and adds the gate's note that the project has no origin to fetch.
+  await expect(
+    page.getByText('The same tests failed again after the fix.', { exact: true }),
+  ).toBeVisible();
+  // The answers are the card's options, drawn as radios (each name starts with its key hint), sent by Send Answer.
+  await expect(page.getByRole('radio', { name: /Change the Task/ })).toBeVisible();
+  await expect(page.getByRole('radio', { name: /Drop It/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Abandon', exact: true })).toHaveCount(0);
+  await page.getByRole('radio', { name: /Spend More Attempts/ }).click();
+  await page.getByRole('button', { name: /^Send Answer/ }).click();
+  // The gate runs again and fails as before; with more allowed, a second fix task reopens the batch.
+  await expect.poll(fixes, { timeout: 60_000 }).toHaveLength(2);
+
+  // The second fix would run and fail the gate again: it is cancelled and the batch abandoned.
+  for (const fix of await fixes()) {
+    if (fix.workstreamId !== undefined)
+      await request.post(`${daemonUrl}/workstreams/${fix.workstreamId}/cancel`, { headers: auth });
+  }
+  await expect
+    .poll(
+      async () =>
+        (await request.post(`${daemonUrl}/batches/${batchId}/abandon`, { headers: auth })).ok() ||
+        (await batch()).state === 'ABANDONED',
+      { timeout: 30_000 },
+    )
+    .toBe(true);
 });
 
 const Shared = z.looseObject({ state: z.string() });

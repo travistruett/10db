@@ -35,12 +35,15 @@ const Seed = z.object({
         WorkstreamState.Held,
         WorkstreamState.Running,
         WorkstreamState.Verifying,
+        WorkstreamState.Done,
       ]),
       /** False for a shared-mode project's batch, which has no worktree of its own. */
       worktree: z.boolean().default(true),
       /** A real branch and the commit it was cut from, in place of the title's slug and the zero sha. */
       branch: z.string().min(1).optional(),
       baseSha: z.string().length(40).optional(),
+      /** The GitHub `owner/name` a cut records; a ship reads it before its gate. */
+      repo: z.string().min(1).optional(),
     }),
   ),
   shipped: z.array(z.object({ title: z.string().min(1), prUrl: z.string().min(1) })),
@@ -48,12 +51,18 @@ const Seed = z.object({
 
 /** The states a workstream passes through on its way from QUEUED. */
 const PATH: Readonly<
-  Record<'QUEUED' | 'HELD' | 'RUNNING' | 'VERIFYING', readonly WorkstreamStateValue[]>
+  Record<'QUEUED' | 'HELD' | 'RUNNING' | 'VERIFYING' | 'DONE', readonly WorkstreamStateValue[]>
 > = {
   QUEUED: [],
   HELD: [WorkstreamState.Held],
   RUNNING: [WorkstreamState.Starting, WorkstreamState.Running],
   VERIFYING: [WorkstreamState.Starting, WorkstreamState.Running, WorkstreamState.Verifying],
+  DONE: [
+    WorkstreamState.Starting,
+    WorkstreamState.Running,
+    WorkstreamState.Verifying,
+    WorkstreamState.Done,
+  ],
 };
 
 const [databasePath, json] = process.argv.slice(2);
@@ -66,7 +75,12 @@ const slug = (title: string): string => title.toLowerCase().replaceAll(/[^a-z0-9
 function cut(
   title: string,
   index: number,
-  git: { readonly branch?: string; readonly baseSha?: string; readonly worktree?: boolean } = {},
+  git: {
+    readonly branch?: string;
+    readonly baseSha?: string;
+    readonly worktree?: boolean;
+    readonly repo?: string;
+  } = {},
 ): ReturnType<typeof insertBatch> {
   return store.write((ctx) => {
     const batch = insertBatch(ctx, {
@@ -80,6 +94,7 @@ function cut(
     patchBatch(ctx, batch.id, {
       branch: git.branch ?? `10db/${slug(title)}`,
       baseSha: git.baseSha ?? '0'.repeat(40),
+      ...(git.repo === undefined ? {} : { repo: git.repo }),
     });
     return transitionBatch(ctx, batch.id, { to: BatchState.Open, reason: 'seeded' });
   }).value;
@@ -90,6 +105,7 @@ seed.open.forEach((entry, index) => {
     worktree: entry.worktree,
     ...(entry.branch === undefined ? {} : { branch: entry.branch }),
     ...(entry.baseSha === undefined ? {} : { baseSha: entry.baseSha }),
+    ...(entry.repo === undefined ? {} : { repo: entry.repo }),
   });
   store.write((ctx) => {
     const workstream = insertWorkstream(ctx, entry.taskId, {

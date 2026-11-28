@@ -307,6 +307,7 @@ import {
   clearPictureSignInCard,
   createInboxService,
   createJudgeOutageCard,
+  createOutOfMovesAnswers,
   createParkAnswers,
   createPrecedentService,
   leftWithBuilder,
@@ -1093,6 +1094,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       (!runner.isRunning(id) || runner.isParked(id) || isLaneWaitingOnCard(state.db, id)),
   });
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerOutOfMovesCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerStallCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
@@ -1267,6 +1269,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onFlagAnswer: (item, answer) => {
       runner?.retryTurn(item, answer);
       answerBatchCard?.(item, answer);
+      answerOutOfMovesCard?.(item, answer);
       answerAccountCard?.(item, answer);
       answerGitCard?.(item, answer);
       answerSelfUpdateCard?.(item, answer);
@@ -1858,6 +1861,30 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       scheduler?.requestTick();
     },
     shipper,
+  });
+  answerOutOfMovesCard = createOutOfMovesAnswers({
+    db,
+    moreFixes: (id, more, forceInside) => {
+      shipper.moreFixes(id, more, forceInside);
+    },
+    fixWithNote: (id, note, failure) => {
+      shipper.fixWithNote(id, note, failure);
+    },
+    abandon: (id) => {
+      shipper.abandon(id);
+    },
+    shipWithout: (id, workstreamId) => {
+      shipper.shipWithout(id, workstreamId);
+    },
+    retry: (id, note) => {
+      starter.retry(id, note);
+      scheduler?.requestTick();
+    },
+    cancel: (id) => {
+      if (!runner) throw new RunnerNotStartedError();
+      return runner.cancel(id);
+    },
+    log: logger,
   });
   const watcher =
     opts.watch === false
