@@ -27,9 +27,9 @@ describe('DaemonProvider', () => {
     const failing: ConnectionResolver = () =>
       Promise.reject(new Error('Set VITE_DAEMON_TOKEN to the daemon UI token'));
     renderWithDaemon(<StatusProbe />, { resolve: failing });
-    expect(await screen.findByText('Connecting to the 10db daemon…')).toBeTruthy();
-    // The screen says what happens next; the reason is in a tooltip.
-    const note = await screen.findByText(/Still trying to reach the 10db daemon/);
+    expect(await screen.findByText('Starting 10db…')).toBeTruthy();
+    // The screen says what happens next; the reason is behind Details.
+    const note = await screen.findByText('Details');
     fireEvent.mouseEnter(note);
     expect((await screen.findByRole('tooltip')).textContent).toMatch(/Set VITE_DAEMON_TOKEN/);
     expect(screen.queryByTestId('probe')).toBeNull();
