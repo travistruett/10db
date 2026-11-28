@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runCommand, httpApi, type CommandDeps } from '@10db/agent-skill';
-import { ProjectDto } from '@10db/contracts';
+import { mintId, ProjectDto } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
@@ -131,6 +131,15 @@ describe('the 10db-task skill against the real daemon', () => {
     expect(out.projects[0]?.openTasks.find((t) => t.id === second.id)?.dependsOn).toEqual([
       first.id,
     ]);
+  });
+
+  // A task row carries no projectId, so join must take the project from where it found the task. The
+  // demo project delivers locally, so the daemon's own refusal shows the post reached the project.
+  it('join posts to the project that holds the task', async () => {
+    const { first } = await createTwoTasks();
+    await expect(skill().run('join', first.id, mintId('Batch'))).rejects.toThrow(
+      /delivers locally/,
+    );
   });
 
   it('project prints the gate command and base branch', async () => {
