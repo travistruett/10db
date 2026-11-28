@@ -156,7 +156,7 @@ test('answering a question with a digit and Enter selects the next row and lower
   await page.unrouteAll({ behavior: 'ignoreErrors' });
 });
 
-test('an acceptance card shows what it could not confirm and what Keep As Is does', async ({
+test('an acceptance card shows what it could not confirm and what Accept Without Proof does', async ({
   page,
 }) => {
   const title = 'Check these criteria: Greet by name';
@@ -200,9 +200,11 @@ test('an acceptance card shows what it could not confirm and what Keep As Is doe
   await expect(page.getByText('The greeting names the user')).toBeVisible();
   await expect(page.getByText('It is one line')).toHaveCount(0);
   await expect(
-    page.getByText('Already shipped. Keep As Is changes nothing; Send Back files a fix task.'),
+    page.getByText(
+      'Already shipped. Accept Without Proof changes nothing. Send Back files a fix task.',
+    ),
   ).toBeVisible();
-  await page.getByRole('button', { name: /^Keep As Is/ }).click();
+  await page.getByRole('button', { name: /^Accept Without Proof/ }).click();
   await expect(rowsOf(page).filter({ hasText: title })).toHaveCount(0);
 });
 

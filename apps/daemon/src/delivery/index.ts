@@ -72,6 +72,7 @@ export { StartChoice } from './cards';
 export { createWorktreeCardAnswers } from './worktree-card';
 export { resolveBranchReadyCards } from './branch-ready';
 export { resolveOverBatchCards } from './stale-cards';
+export { runSecondReviews, secondReviewRequested, shipAnywayOffered } from './second-review';
 export { createStartCardAnswers } from './start-card';
 export { createLostMigrationsAnswers } from './lost-migrations';
 export { removeMergedBranches } from './branch-sweep';

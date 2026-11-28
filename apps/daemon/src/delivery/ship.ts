@@ -98,6 +98,7 @@ import {
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { returnCheckout } from './checkout-return';
 import { keptRevertOf, settleLeftOutCards } from './left-out-settle';
+import { shipAnywayRefusal } from './second-review';
 import { resolveShipCards } from './stale-cards';
 import {
   ghCall,
@@ -1568,6 +1569,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
       );
   }
 
+  /**
+   * Every ship the builder asks for (the Board's and a failed card's) waits while work a reviewer rejected has
+   * not had 10db's second review, so no path ships it unreviewed.
+   */
+  function refuseUntilReviewedAgain(batch: BatchDto): void {
+    const waiting = shipAnywayRefusal(db, batch.id, batch.title);
+    if (waiting) throw waiting;
+  }
+
   function ship(batchId: BatchId): BatchDto {
     const batch = getBatch(db, batchId);
     refusePassBatch(batch);
@@ -1575,6 +1585,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     switch (batch.state) {
       case BatchState.Open: {
         if (unfinished) throw unfinished;
+        refuseUntilReviewedAgain(batch);
         refuseWhileHeld(batch);
         const shipping = toShipping(batchId, 'shipped anyway by the builder');
         resume(batchId);
@@ -1599,6 +1610,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
           deps.onWorkQueued();
           return reopened;
         }
+        refuseUntilReviewedAgain(batch);
         refuseWhileHeld(batch);
         const shipping = toShipping(batchId, 'retried by the builder');
         resume(batchId);
@@ -2549,7 +2561,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
     resume,
     ship,
     shipAnyway(batchId) {
-      const unfinished = unfinishedWork(getBatch(db, batchId));
+      const batch = getBatch(db, batchId);
+      const unfinished = unfinishedWork(batch);
       if (unfinished) throw unfinished;
       return ship(batchId);
     },

@@ -7,6 +7,7 @@ import {
   secondQuestions,
   unaskedDescription,
 } from './read';
+import { proofNeedsHands } from './hands';
 
 const A = 'adds the flag';
 const B = 'prints the help';
@@ -88,13 +89,39 @@ describe('acceptanceMove', () => {
   const move = (results: AcceptanceCriterionResult[], reviewFollows: boolean, atLimit: boolean) =>
     acceptanceMove({ results, reviewFollows, atLimit });
 
-  it('sends back on not met, goes on with a card at the limit or an unclear one with no review', () => {
+  it('sends an unproven criterion back for proof while the budget lasts, and raises a card only when it is spent', () => {
     expect(move(rs('met', 'not_met'), true, false)).toBe(AcceptanceMove.SendBack);
     expect(move(rs('not_met'), true, true)).toBe(AcceptanceMove.GoOnWithCard);
-    expect(move(rs('unclear'), false, false)).toBe(AcceptanceMove.GoOnWithCard);
+    expect(move(rs('unclear'), false, false)).toBe(AcceptanceMove.SendBack);
     expect(move(rs('unclear'), true, false)).toBe(AcceptanceMove.GoOn);
     expect(move(rs('met', 'unread'), false, false)).toBe(AcceptanceMove.GoOn);
     expect(move(rs('unread', 'unclear'), false, true)).toBe(AcceptanceMove.GoOnWithCard);
+  });
+
+  it('raises the your-hands card at once for a criterion only the builder can prove', () => {
+    const hands: AcceptanceCriterionResult[] = [
+      { criterion: 'the picker works on a real device', verdict: 'not_met', note: '' },
+    ];
+    expect(move(hands, true, false)).toBe(AcceptanceMove.GoOnWithCard);
+    const mixed = [...hands, ...rs('not_met')];
+    expect(move(mixed, true, false)).toBe(AcceptanceMove.SendBack);
+    expect(move(mixed, true, true)).toBe(AcceptanceMove.GoOnWithCard);
+    const unclearHands: AcceptanceCriterionResult[] = [
+      { criterion: 'it works on the host', verdict: 'unclear', note: '' },
+    ];
+    expect(move(unclearHands, true, false)).toBe(AcceptanceMove.GoOnWithCard);
+  });
+});
+
+describe('proofNeedsHands', () => {
+  it('names what to do for a device, the host or a sign-in, and nothing for a criterion a session can prove', () => {
+    expect(proofNeedsHands('the picker works on a real device')).toBe(
+      'Try it on your device, then check that: the picker works on a real device',
+    );
+    expect(proofNeedsHands('the build runs on the host')).toContain('Run it on your Mac');
+    expect(proofNeedsHands('a user signed in to Linear sees the issue')).toContain('Sign in');
+    expect(proofNeedsHands('the sign-in page shows an error for a bad password')).toBeNull();
+    expect(proofNeedsHands('adds the flag')).toBeNull();
   });
 });
 

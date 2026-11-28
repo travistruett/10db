@@ -1,4 +1,5 @@
 import { AcceptanceVerdict, type AcceptanceCriterionResult } from '@10db/contracts';
+import { proofNeedsHands } from './hands';
 
 /** Under one half a criterion could read both met and not met at once. */
 const FLOOR_MIN = 0.5;
@@ -97,17 +98,35 @@ export const AcceptanceMove = {
 export type AcceptanceMove = (typeof AcceptanceMove)[keyof typeof AcceptanceMove];
 
 /**
- * What the run does next: a criterion not met sends it back while rounds remain; at the limit, or with an unclear
- * one and no Review to read it, it goes on and leaves one card; else it goes on. Unread never counts against it.
+ * The results that are unproven: not met, or unclear where no Review follows to read it (a Review reads an
+ * unclear criterion itself, unless only the builder can prove it). Unread never counts: the call that would have
+ * read it gave no answer.
+ */
+export function unprovenResults(
+  results: readonly AcceptanceCriterionResult[],
+  reviewFollows: boolean,
+): AcceptanceCriterionResult[] {
+  return results.filter(
+    (r) =>
+      r.verdict === AcceptanceVerdict.NotMet ||
+      (r.verdict === AcceptanceVerdict.Unclear &&
+        (!reviewFollows || proofNeedsHands(r.criterion) !== null)),
+  );
+}
+
+/**
+ * What the run does next. An unproven criterion goes back for proof while the fix budget lasts, with no card; the
+ * budget spent leaves one card, and nothing here ever accepts the criterion: only the builder's answer to that card
+ * does. A criterion only the builder can prove (`proofNeedsHands`) is not sent back, since no round could prove it:
+ * it leaves its card at once, unless another unproven one still has a round to use first.
  */
 export function acceptanceMove(input: {
   results: readonly AcceptanceCriterionResult[];
   reviewFollows: boolean;
   atLimit: boolean;
 }): AcceptanceMove {
-  const has = (v: AcceptanceVerdict): boolean => input.results.some((r) => r.verdict === v);
-  if (has(AcceptanceVerdict.NotMet))
-    return input.atLimit ? AcceptanceMove.GoOnWithCard : AcceptanceMove.SendBack;
-  if (has(AcceptanceVerdict.Unclear) && !input.reviewFollows) return AcceptanceMove.GoOnWithCard;
-  return AcceptanceMove.GoOn;
+  const unproven = unprovenResults(input.results, input.reviewFollows);
+  if (unproven.length === 0) return AcceptanceMove.GoOn;
+  const sessionCanProve = unproven.some((r) => proofNeedsHands(r.criterion) === null);
+  return sessionCanProve && !input.atLimit ? AcceptanceMove.SendBack : AcceptanceMove.GoOnWithCard;
 }

@@ -266,8 +266,9 @@ export function subscribeToEvents(listener: (event: DaemonEvent) => void): () =>
 
 /**
  * One live event stream. A fresh UI starts at the daemon's head; afterwards it resumes from the
- * last seq it saw, across drops and across a daemon restart on a new port, so nothing is lost
- * or applied twice. Each event refetches the queries it touches.
+ * last seq it saw, across drops and across a daemon restart on a new port, so nothing is applied
+ * twice. A cursor far behind is started at the head instead (the daemon's `REPLAY_LIMIT`); every query is
+ * refetched at each open, so only listeners miss those. Each event refetches the queries it touches.
  */
 export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
   const { client, connection } = useDaemon();
