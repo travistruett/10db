@@ -26,6 +26,10 @@ export const DecisionRule = {
   FlakyCheck: 'flaky-check',
   MoveBack: 'move-back-after-limit',
   ClaimDeadlock: 'claim-deadlock',
+  PlanReviewStep: 'plan-review-step',
+  ProposalFiled: 'proposal-filed',
+  PlanGoesAhead: 'plan-goes-ahead',
+  MigrateAfterLanding: 'migrate-after-landing',
 } as const;
 export type DecisionRule = (typeof DecisionRule)[keyof typeof DecisionRule];
 
@@ -34,6 +38,10 @@ export const DECISION_RULE_NAMES: Record<DecisionRule, string> = {
   [DecisionRule.FlakyCheck]: 'A flaky check, rerun once',
   [DecisionRule.MoveBack]: 'A project moved back after its account’s limit reset',
   [DecisionRule.ClaimDeadlock]: 'A claim deadlock, ended by the later task yielding',
+  [DecisionRule.PlanReviewStep]: 'A planner’s ask for review, run as a Plan Review step',
+  [DecisionRule.ProposalFiled]: 'A lane’s proposal, filed as a task without a card',
+  [DecisionRule.PlanGoesAhead]: 'A plan that needs nothing from you, built after its review',
+  [DecisionRule.MigrateAfterLanding]: 'A landing’s migrations, applied to your dev database',
 };
 
 /** A move 10db can take back, with what the daemon needs to do it. */

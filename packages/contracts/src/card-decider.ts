@@ -40,6 +40,19 @@ export const BUILDER_OWNS_LABELS: Record<BuilderOwns, string> = {
   [BuilderOwns.OutOfMoves]: 'Out of Moves',
 };
 
+/**
+ * A decision a plan needs from the builder: which of the seven it is, and the call in a line. A plan step names
+ * the ones its brief declares; a plan review names the ones the plan makes that its brief does not.
+ */
+export const BuilderCall = z.strictObject({
+  owns: z.enum(BuilderOwns),
+  call: z.string().min(1).max(300),
+});
+export type BuilderCall = z.infer<typeof BuilderCall>;
+
+/** The most builder calls one step result names: one per thing the builder owns. */
+export const MAX_BUILDER_CALLS = 7;
+
 /** The `detail` keys a card's declared decider is stored under. */
 export const CARD_DECIDER = 'decider';
 export const CARD_OWNS = 'owns';

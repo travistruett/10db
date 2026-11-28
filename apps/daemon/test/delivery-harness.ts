@@ -45,6 +45,7 @@ import {
   createShipper,
   createWorktreeDependencies,
   createCopyTeardown,
+  createDevMigrate,
   createWorktreeGenerators,
   DEFAULT_DELIVERY_LIMITS,
   subscribeShipTrigger,
@@ -406,6 +407,11 @@ export function createDeliveryHarness(
     copyTeardown: createCopyTeardown({
       ...worktreeTools,
       logger: logs.logger,
+    }),
+    devMigrate: createDevMigrate({
+      ...worktreeTools,
+      logger: logs.logger,
+      usesDocker: () => Promise.resolve(false),
     }),
   };
   const running = new Set<WorkstreamId>();

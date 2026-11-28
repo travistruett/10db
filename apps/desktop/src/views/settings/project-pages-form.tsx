@@ -17,6 +17,7 @@ export function ProjectPagesForm({ project }: { readonly project: ProjectDto }) 
     'appUrl',
     'previewCommand',
     'appStartCommand',
+    'migrateCommand',
     'devLoginCommand',
     'screens',
   ]);
@@ -69,6 +70,22 @@ export function ProjectPagesForm({ project }: { readonly project: ProjectDto }) 
             error={errors.appStartCommand}
             onChange={(e) => {
               set({ appStartCommand: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Migrate Command"
+          description="Applies new migrations to your dev database after a landing."
+          help="Run by 10db in your project's folder under the gate's sandbox, with localhost allowed, when a landing brings migration files, such as pnpm db:migrate. Point it only at your dev database: it is your command, so if it reaches a remote database through Docker or its own config, 10db runs it there too. It should apply only what is pending, so running it twice is safe. A failure leaves one Inbox card with its output. Leave it blank and 10db asks once, then leaves migrating to you."
+        >
+          <TextInput
+            aria-label="Migrate Command"
+            placeholder="pnpm db:migrate (optional)"
+            styles={MONO_INPUT}
+            value={values.migrateCommand}
+            error={errors.migrateCommand}
+            onChange={(e) => {
+              set({ migrateCommand: e.currentTarget.value });
             }}
           />
         </SettingRow>

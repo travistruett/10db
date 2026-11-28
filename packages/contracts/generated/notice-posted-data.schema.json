@@ -61,7 +61,11 @@
             "stray-write",
             "flaky-check",
             "move-back-after-limit",
-            "claim-deadlock"
+            "claim-deadlock",
+            "plan-review-step",
+            "proposal-filed",
+            "plan-goes-ahead",
+            "migrate-after-landing"
           ]
         },
         "confidence": {

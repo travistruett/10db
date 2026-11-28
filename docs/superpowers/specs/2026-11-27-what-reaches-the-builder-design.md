@@ -1,6 +1,6 @@
 # What reaches the builder
 
-**Status:** designed on 2026-11-27 and ruled on by the builder the same day; not built. **Size:** a roadmap; each stage in §9 is sized by its own code.
+**Status:** designed on 2026-11-27 and ruled on by the builder the same day; Stage 10 built (proposals routed, Core plans go ahead after their review, the declared migrate command runs after a landing). **Size:** a roadmap; each stage in §9 is sized by its own code.
 
 **Builds on:** the trust decision
 (`docs/architecture/decisions/2026-11-12-10db-trusts-the-developer-and-contains-the-agent.md`), the failures spec

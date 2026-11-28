@@ -134,6 +134,7 @@
   close raises the out-of-moves card again beside a card saying why.
 - A flag answer whose own move closes the card (a retry cancels its run's cards, an abandon its batch's) is still
   recorded on it: `InboxService.answer` writes the answer to a flag `onFlagAnswer` closed instead of refusing it.
+<<<<<<< 3082a1077c50c31fcbc5ff4411f61cc9f9d46105
 - A CI stop has its card or its pending notice, never neither, and replaces "Pull request checks failed":
   `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's `prCardKey.checks` card in the stop's write, and
   `pr-watch` raises none while `ciStopped` is set. A stop at the limit or on an unchanged head shows the
@@ -142,3 +143,16 @@
   `ci_out_of_moves.<root id>` setting holds the stop time, More's `ignoreFixesBefore`, Change's note (the next fix
   task opens with it) and Drop's `dropped`, which keeps the close's "pull request closed" card away; the write that
   records the merge or close deletes it, last. (Kept here: `delivery/AGENTS.md` is at its word budget.)
+||||||| 3ceec6753
+- The CI cap card replaces "Pull request checks failed": `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's
+  `prCardKey.checks` card in the stop card's write, and `pr-watch` raises none while `ciStopped` is set.
+=======
+- The CI cap card replaces "Pull request checks failed": `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's
+  `prCardKey.checks` card in the stop card's write, and `pr-watch` raises none while `ciStopped` is set.
+- A lane's proposal is routed in `proposal-task.ts` (`decisions/2026-11-27-a-lanes-proposal-is-routed-by-rule.md`):
+  `planReviewRoute` turns `plan_review` on Core work into a step, `proposalFiling` lets a `prerequisite` past the size
+  rule only, and `fileProposalByItself` files a prerequisite once, matched by its first description line. Each move
+  posts a rule notice; a proposal that still cards says what it costs (`proposalCardBody`). Accepting a `plan_review`
+  card marks the lane's Plan step as the automatic route does (`acceptPlanReview`); once that step has ended the answer
+  is refused, since a yes could add nothing.
+>>>>>>> 318164fc1681cafb2362a2447510270e15bc903d

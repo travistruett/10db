@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `migrate_command` text;
