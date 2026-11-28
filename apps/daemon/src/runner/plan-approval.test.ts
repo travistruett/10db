@@ -3,7 +3,7 @@ import { createDeliveryJobs } from '../delivery';
 import { createGit } from '../git';
 import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from '../recovery';
-import { activeClaims, updateInboxItem, getWorkstreamRow, listInbox } from '@10db/db';
+import { activeClaims, updateInboxItem, getWorkstreamRow, listInbox, pageActivity } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 
@@ -26,6 +26,17 @@ const approve = (opId: string) => ({
   args: { opId, summary: 'Looks right.', verdict: 'approve' },
 });
 const turn = { do: 'turn_complete' as const };
+/** A plan whose brief needs nothing from the builder. */
+const needsNothing = (opId: string) => ({
+  ...planResult(opId, 'PLAN: edit src/api/a.txt.'),
+  args: { opId, summary: 'PLAN: edit src/api/a.txt.', verdict: null, builderCalls: [] },
+});
+/** A plan review that approves and says it found no call of the builder's the brief leaves out. */
+const foundNothing = (opId: string) => ({
+  do: 'mcp' as const,
+  tool: 'complete_step',
+  args: { opId, summary: 'Looks right.', verdict: 'approve', builderCalls: [] },
+});
 const implement = (opId: string) => [
   { do: 'tool' as const, toolName: 'Write', input: { file_path: 'src/api/a.txt', content: opId } },
   { do: 'mcp' as const, tool: 'commit', args: { opId, paths: ['src/api/a.txt'], message: opId } },
@@ -105,6 +116,56 @@ describe('parking a task for the builder to approve its plan', () => {
   });
 });
 
+describe('a plan whose brief needs nothing from the builder', () => {
+  it('goes ahead after its plan review with no card and one Activity row, and one naming a call of the builder’s still cards', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [needsNothing('op-plan-0101'), turn],
+        [foundNothing('op-plan-0102'), turn],
+        implement('op-plan-0103'),
+        [approve('op-plan-0104'), turn],
+        [approve('op-plan-0105'), turn],
+      ],
+      Beta: [
+        [
+          {
+            ...planResult('op-plan-0111', 'PLAN: buy a plan.'),
+            args: {
+              opId: 'op-plan-0111',
+              summary: 'PLAN: buy a plan.',
+              verdict: null,
+              builderCalls: [{ owns: 'money', call: 'Buy a paid Sentry plan' }],
+            },
+          },
+          turn,
+        ],
+        [approve('op-plan-0112'), turn],
+      ],
+    });
+    const { workstream } = critical(true);
+    await runWhileQueued(workstream.id);
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(planCards()).toHaveLength(0);
+    const ahead = pageActivity(engine.store.db, { pageSize: 50 }).rows.filter(
+      (r) => r.key === `plan-ahead:${workstream.id}`,
+    );
+    expect(ahead).toHaveLength(1);
+    expect(ahead[0]?.decision).toMatchObject({ by: 'rule', rule: 'plan-goes-ahead' });
+
+    const beta = engine.addTask('Beta', ['ui'], [], {
+      flow: 'full',
+      criteria: 4,
+      riskTags: ['security'],
+      approvesPlan: true,
+    });
+    await runWhileQueued(beta.workstream.id);
+    const [card] = openPlanCards();
+    expect(ws(beta.workstream.id).nextAction).toMatchObject({ kind: 'plan_approval' });
+    expect(card?.body).toContain('Buy a paid Sentry plan (Money)');
+    expect(card?.detail).toMatchObject({ decider: 'builder', owns: 'money' });
+  });
+});
+
 describe('a row with Plan and no Plan Review', () => {
   it('parks after Plan, and Approve runs Build', async () => {
     engine = await createTestEngine({
@@ -134,6 +195,44 @@ describe('a row with Plan and no Plan Review', () => {
     await runWhileQueued(workstream.id);
     expect(ws(workstream.id).state).toBe('DONE');
     expect(engine.adapter.prompts).toHaveLength(4);
+  });
+
+  it('adds a Plan Review the planner proposes on Core work, with no card, and the plan goes ahead after it', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          {
+            do: 'mcp' as const,
+            tool: 'propose',
+            args: {
+              opId: 'op-plan-0141',
+              kind: 'plan_review',
+              title: 'Review my plan',
+              body: 'The plan touches the claim tables.',
+            },
+          },
+          needsNothing('op-plan-0142'),
+          turn,
+        ],
+        [foundNothing('op-plan-0143'), turn],
+        implement('op-plan-0144'),
+        [approve('op-plan-0145'), turn],
+        [approve('op-plan-0146'), turn],
+      ],
+    });
+    const { workstream } = critical(true, []);
+    await runWhileQueued(workstream.id);
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual([
+      'plan',
+      'plan_review',
+      'implement',
+      'review',
+      'qa',
+    ]);
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(listInbox(engine.store.db, {}).filter((i) => i.state === 'OPEN')).toEqual([]);
+    const rows = pageActivity(engine.store.db, { pageSize: 50 }).rows;
+    expect(rows.filter((r) => r.decision?.rule === 'plan-review-step')).toHaveLength(1);
   });
 });
 

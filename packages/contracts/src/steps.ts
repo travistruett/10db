@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BuilderCall, MAX_BUILDER_CALLS } from './card-decider';
 import { ModelSetting } from './catalogue';
 import { WatchpointNotes } from './watchpoint-hit';
 import { ModelProfileId, PersonaId, SessionId, TaskId } from './ids';
@@ -22,6 +23,12 @@ export const StepResult = z.object({
   at: z.iso.datetime(),
   /** A Review or QA step's check of each watchpoint file it read: ✓ or ⚠ and why. */
   watchpointNotes: WatchpointNotes.optional(),
+  /**
+   * A Plan step's calls its brief needs the builder for (empty when none), or a Plan Review's calls the plan
+   * makes that its brief does not declare. Absent when the step did not say, which a plan's approval reads as
+   * doubt.
+   */
+  builderCalls: z.array(BuilderCall).max(MAX_BUILDER_CALLS).optional(),
 });
 export type StepResult = z.infer<typeof StepResult>;
 
@@ -133,6 +140,11 @@ export const WorkstreamStep = z.object({
   shippedAtLimit: ShippedAtLimit.optional(),
   /** Times the acceptance check sent this build step's work back; absent until it has. */
   acceptanceSentBack: z.int().min(0).optional(),
+  /**
+   * Set on a Plan step whose planner asked for its plan to be reviewed (a `plan_review` proposal): a Plan
+   * Review step is added after it when it ends. Absent otherwise.
+   */
+  planReviewAsked: z.literal(true).optional(),
 });
 export type WorkstreamStep = z.infer<typeof WorkstreamStep>;
 

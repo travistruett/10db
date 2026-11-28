@@ -97,6 +97,7 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
     devLoginCommand: null,
     previewCommand: null,
     appStartCommand: null,
+    migrateCommand: null,
     screens: SCREENS_MATRIX_DEFAULT,
     leftOutPages: [],
     provider: Provider.Claude,

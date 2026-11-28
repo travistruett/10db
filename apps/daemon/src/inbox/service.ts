@@ -103,7 +103,7 @@ import { applyGateHostChoice } from './gate-host-card';
 import { applyHazardChoice } from './hazard-card';
 import { GRANT_CALL_DETAIL, LIMIT_DETAIL } from './limit-card';
 import { applyMcpApproval } from './mcp-approval';
-import { declaredKinds, taskFieldsFromProposal } from './proposal-task';
+import { acceptPlanReview, declaredKinds, taskFieldsFromProposal } from './proposal-task';
 
 /** The detail key, and fold key prefix, of the flag that offers to deliver a stored answer again. */
 const REDELIVER_KEY = 'redeliverCard';
@@ -571,6 +571,8 @@ function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: Inb
     throw new ConflictError(`Proposal ${proposal.id} is already ${proposal.status}`);
   }
   const accepted = answer.choice === 'accept';
+  // Refused while nothing is written when the plan step that asked has ended.
+  if (accepted && proposal.kind === ProposalKind.PlanReview) acceptPlanReview(ctx, item.detail);
   resolveProposal(ctx, proposalId.data, {
     status: accepted ? 'accepted' : 'rejected',
     rationale: answer.note ?? null,

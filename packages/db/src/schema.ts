@@ -336,6 +336,8 @@ export const projects = sqliteTable('projects', {
   previewCommand: text('preview_command'),
   /** Brings the dev stack up when a picture or the dev login finds the app address down; null when the builder keeps it up. */
   appStartCommand: text('app_start_command'),
+  /** Applies pending migrations to the dev database after a landing brings them; null when the project has not said. */
+  migrateCommand: text('migrate_command'),
   /** The viewports and themes a page's pictures are taken in. */
   screens: text('screens', { mode: 'json' })
     .$type<ScreensMatrix>()

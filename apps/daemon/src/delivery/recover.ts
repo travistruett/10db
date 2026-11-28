@@ -40,7 +40,7 @@ import {
   type Card,
   type ShipFailure,
 } from './cards';
-import { copyLandingCards, raiseMigrationsForLanding } from './copy-landing-cards';
+import { copyLandingCards, migrateAfterLanding } from './copy-landing-cards';
 import { retireCopy } from './copy-retire';
 import { cuttingTasks, forgetCuttingTasks } from './cutting-tasks';
 import { forgetStartSiblings } from './start-siblings';
@@ -293,7 +293,11 @@ export async function recoverBatches(deps: {
       );
   }
 
-  const copiesToRetire: BatchDto[] = [];
+  // Each with the landing's T..C when it was found at `landed`, whose migrations are run before it retires.
+  const copiesToRetire: {
+    readonly batch: BatchDto;
+    readonly landing: { readonly expected: string; readonly candidate: string } | null;
+  }[] = [];
   if (deps.worktrees) {
     // 5. Finished batches whose path is still set: the removal and clear a crash cut short. A dirty
     // ABANDONED worktree, or a finished one holding git-ignored files 10db didn't seed, is kept, with
@@ -318,9 +322,9 @@ export async function recoverBatches(deps: {
       if (getBatch(db, batch.id).worktreePath === null) report.retired.push(batch.id);
     }
 
-    // 5a. Finished local copies not yet retired: a landed copy's migrations card is raised by its key here,
-    // and the retirement (its teardown, which may run long) is queued after the sweeps below, so startup
-    // never waits on it, shutdown stops it, and no sweep takes its scratch worktree for an orphan.
+    // 5a. Finished local copies not yet retired: the retirement (a landed copy's migrate command, then its
+    // teardown, both of which may run long) is queued after the sweeps below, so startup never waits on
+    // it, shutdown stops it, and no sweep takes its scratch worktree for an orphan.
     try {
       for (const copy of listOpenLocalCopies(db)) {
         const batch = getBatch(db, copy.batchId);
@@ -331,20 +335,14 @@ export async function recoverBatches(deps: {
         )
           continue;
         try {
-          if (
+          const landing =
             batch.state === BatchState.Shipped &&
             copy.step === CopyStep.Landed &&
             copy.baseTip !== null &&
             copy.candidate !== null
-          )
-            await raiseMigrationsForLanding(
-              deps.worktrees.ctx,
-              batch,
-              getProject(db, batch.projectId),
-              copy.baseTip,
-              copy.candidate,
-            );
-          copiesToRetire.push(batch);
+              ? { expected: copy.baseTip, candidate: copy.candidate }
+              : null;
+          copiesToRetire.push({ batch, landing });
         } catch (error) {
           deps.logger.warn({ batchId: batch.id, err: message(error) }, 'copy not retired');
         }
@@ -377,10 +375,19 @@ export async function recoverBatches(deps: {
     await settleAbandonedBranches(deps.worktrees.ctx);
     await listStrayBranches(deps.worktrees.ctx);
     const ctx = deps.worktrees.ctx;
-    for (const batch of copiesToRetire)
-      deps.jobs.run(jobKey(batch, JobQueue.Ship), (signal) =>
-        retireCopy(ctx, batch.id, signal).then(() => undefined),
-      );
+    for (const { batch, landing } of copiesToRetire)
+      deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
+        if (landing !== null)
+          await migrateAfterLanding(
+            ctx,
+            batch,
+            getProject(db, batch.projectId),
+            landing.expected,
+            landing.candidate,
+            signal,
+          );
+        await retireCopy(ctx, batch.id, signal);
+      });
   }
 
   // 7. OPEN batches whose work all settled ship.
