@@ -98,6 +98,7 @@ const sweep = () =>
     git: h.git,
     inbox: h.inbox,
     root: h.worktreeRoot,
+    keptRoot: h.keptRoot,
     logger: silentLogger,
     merged: chatBranchMerged(h.ctx, new AbortController().signal),
   });
@@ -107,6 +108,8 @@ describe('the startup sweep and a chat worktree', () => {
   describe('on a pull request project', () => {
     beforeEach(() => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      // These cases are about the card a kept worktree raises; saving its files is worktree-ship.test.ts's.
+      h.askBeforeSaving();
     });
 
     it.each([
@@ -184,6 +187,7 @@ describe('the startup sweep and a chat worktree', () => {
         git: h.git,
         inbox: h.inbox,
         root: h.worktreeRoot,
+        keptRoot: h.keptRoot,
         logger: silentLogger,
         merged: chatBranchMerged({ ...h.ctx, gh: down }, new AbortController().signal),
       });

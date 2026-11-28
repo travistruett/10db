@@ -1,7 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { mintId, type BatchDto, type BatchId } from '@10db/contracts';
+import { DecisionRule, mintId, type BatchDto, type BatchId } from '@10db/contracts';
 import {
   clearWorktreePath,
   deleteAppSetting,
@@ -15,6 +23,7 @@ import {
   patchBatch,
   seedProject,
   setAppSetting,
+  setRuleAsking,
   transitionBatch,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -31,6 +40,8 @@ let h: DeliveryHarness;
 let elsewhere: TempDir;
 beforeEach(() => {
   h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+  // These cases are about the card a kept worktree raises; saving its files is worktree-ship.test.ts's.
+  h.askBeforeSaving();
   elsewhere = tempDir('elsewhere');
 });
 afterEach(() => {
@@ -586,6 +597,7 @@ describe('sweepWorktrees', () => {
       git: h.git,
       inbox: h.inbox,
       root: h.worktreeRoot,
+      keptRoot: h.keptRoot,
       logger: silentLogger,
     });
 
@@ -908,5 +920,28 @@ describe('sweepWorktrees', () => {
 
   it('sweeps nothing when the root was never made', async () => {
     expect(await sweep()).toEqual([]);
+  });
+
+  it("saves an orphan's only-here files under the kept folder, named by its folder, then removes it with no card", async () => {
+    // This file asks before saving; this case turns the rule back to its default, which saves.
+    h.state.write((c) => {
+      setRuleAsking(c, h.project.id, DecisionRule.WorktreeLeftovers, false);
+    });
+    writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
+    const orphan = worktreeAt(under('orphan'), ours(mintId('Batch')));
+    writeFileSync(join(orphan, '.env'), 'mine\n');
+    writeFileSync(join(orphan, 'notes.txt'), 'mine too\n');
+
+    expect((await sweep()).map(comparable)).toEqual([comparable(orphan)]);
+
+    expect(existsSync(orphan)).toBe(false);
+    const [stamp] = readdirSync(join(h.keptRoot, 'orphan'));
+    const saved = join(h.keptRoot, 'orphan', stamp ?? '');
+    expect(readFileSync(join(saved, '.env'), 'utf8')).toBe('mine\n');
+    expect(readFileSync(join(saved, 'notes.txt'), 'utf8')).toBe('mine too\n');
+    expect(h.cards()).toEqual([]);
+    expect(h.notices().map((n) => n.line)).toEqual([
+      'Saved 2 files from a finished worktree and removed it',
+    ]);
   });
 });

@@ -1,5 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { BuilderOwns, type BatchDto, type WorkstreamDto } from '@10db/contracts';
 import {
@@ -712,6 +722,11 @@ describe('Retry of a FAILED worktree batch', () => {
 });
 
 describe('Abandon of a worktree batch', () => {
+  // The rule that saves files is off here: these cases are about the card a kept worktree raises.
+  beforeEach(() => {
+    h.askBeforeSaving();
+  });
+
   it('removes a clean worktree and clears its path', async () => {
     const { batch } = await opened(h);
     const wt = pathOf(batch);
@@ -775,6 +790,11 @@ describe('Abandon of a worktree batch', () => {
 });
 
 describe('a finished worktree with git-ignored files', () => {
+  // With the rule set to ask, today's card is raised; saving the files is the next describe's.
+  beforeEach(() => {
+    h.askBeforeSaving();
+  });
+
   const keptTitle = (batch: BatchDto) =>
     `10db kept the worktree of "${batch.title}": it holds git-ignored files`;
 
@@ -1022,5 +1042,119 @@ describe('a finished worktree with git-ignored files', () => {
             : [],
         );
     }
+  });
+});
+
+describe('a finished worktree whose own files are saved first', () => {
+  /** The folder a save made for the batch under the kept root, and the files it holds. */
+  const savedFor = (batch: BatchDto): { dir: string; files: string[] } | null => {
+    const parent = join(h.keptRoot, batch.id);
+    if (!existsSync(parent)) return null;
+    const [stamp] = readdirSync(parent);
+    if (stamp === undefined) return null;
+    const dir = join(parent, stamp);
+    return {
+      dir,
+      files: readdirSync(dir, { recursive: true, withFileTypes: true })
+        .filter((e) => e.isFile())
+        .map((e) => relative(dir, join(e.parentPath, e.name)))
+        .sort(),
+    };
+  };
+
+  /** Closes the batch the way a shipped one ends, so the next `retireWorktree` finds it finished. */
+  const close = (batch: BatchDto): void => {
+    h.state.write((c) => {
+      transitionBatch(c, batch.id, { to: 'SHIPPING' });
+      transitionBatch(c, batch.id, { to: 'CLOSED' });
+    });
+  };
+
+  const savedNotices = () => h.notices().filter((n) => n.key.startsWith('worktree-saved:'));
+
+  it("saves a shipped batch's .env under the kept folder, verified, then removes the worktree with one notice and no card", async () => {
+    ignore('.env', '.env.shared', '*.tsbuildinfo');
+    const { batch, ws } = await opened(h);
+    const wt = pathOf(batch);
+    await commitIn(h, batch, 'src/api/alpha.txt');
+    // A hand-made .env, a copy of a file the checkout holds, and build info the gate writes again.
+    write(wt, ['.env.shared', 'tsconfig.tsbuildinfo']);
+    writeFileSync(join(h.repo, '.env.shared'), 'local\n');
+    writeFileSync(join(wt, '.env'), 'secret\n');
+    chmodSync(join(wt, '.env'), 0o600);
+    h.settle(ws.id, 'DONE');
+    h.shipper.checkBatch(batch.id);
+    await h.jobs.idle();
+
+    expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'SHIPPED', worktreePath: null });
+    expect(existsSync(wt)).toBe(false);
+    expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
+    const saved = savedFor(batch);
+    expect(saved?.files).toEqual(['.env']);
+    expect(readFileSync(join(saved?.dir ?? '', '.env'), 'utf8')).toBe('secret\n');
+    expect(statSync(join(saved?.dir ?? '', '.env')).mode & 0o777).toBe(0o600);
+    const notice = h.only(savedNotices());
+    expect(notice.key).toBe(`worktree-saved:${wt}`);
+    expect(notice.line).toBe('Saved 1 file from a finished worktree and removed it');
+    expect(notice.decision).toMatchObject({ by: 'rule', rule: 'worktree-leftovers' });
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('removes a worktree whose leftovers all have copies in the checkout or are rewritten, saving nothing', async () => {
+    ignore('.env.shared', '*.tsbuildinfo');
+    const { batch } = await opened(h);
+    const wt = pathOf(batch);
+    write(wt, ['.env.shared', 'tsconfig.tsbuildinfo']);
+    writeFileSync(join(h.repo, '.env.shared'), 'local\n');
+    close(batch);
+
+    expect(await retireWorktree(h.ctx, batch.id)).toEqual({ kind: 'retired' });
+
+    expect(existsSync(wt)).toBe(false);
+    expect(savedFor(batch)).toBeNull();
+    expect(savedNotices()).toEqual([]);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it("keeps the worktree and raises today's card when the copy can't be made", async () => {
+    ignore('.env');
+    const { batch } = await opened(h);
+    const wt = pathOf(batch);
+    write(wt, ['.env']);
+    close(batch);
+    // The kept folder's parent can't take a new folder, so the save fails before it copies anything.
+    const parent = dirname(h.keptRoot);
+    chmodSync(parent, 0o500);
+    try {
+      expect(await retireWorktree(h.ctx, batch.id)).toEqual({
+        kind: 'kept',
+        reason: 'ignored',
+        paths: ['.env'],
+      });
+    } finally {
+      chmodSync(parent, 0o700);
+    }
+
+    expect(getBatch(h.store.db, batch.id).worktreePath).toBe(wt);
+    expect(readFileSync(join(wt, '.env'), 'utf8')).toBe('local\n');
+    expect(h.only(h.cards()).title).toBe(
+      `10db kept the worktree of "${batch.title}": it holds git-ignored files`,
+    );
+    expect(savedNotices()).toEqual([]);
+  });
+
+  it("copies nothing and raises today's card when the rule is set to ask", async () => {
+    ignore('.env');
+    h.askBeforeSaving();
+    const { batch } = await opened(h);
+    const wt = pathOf(batch);
+    write(wt, ['.env']);
+    close(batch);
+
+    expect((await retireWorktree(h.ctx, batch.id)).kind).toBe('kept');
+
+    expect(getBatch(h.store.db, batch.id).worktreePath).toBe(wt);
+    expect(existsSync(h.keptRoot)).toBe(false);
+    expect(h.only(h.cards()).title).toContain('it holds git-ignored files');
   });
 });

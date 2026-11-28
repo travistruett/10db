@@ -1,12 +1,18 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { chmod, copyFile, constants, lstat, mkdir, readlink, symlink } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, sep } from 'node:path';
 import { surelyInside } from '../git';
 import { isBuildOutput } from './build-output';
 
 /** The mode of every folder a save makes: nobody but the builder reads what a worktree held. */
 export const KEPT_DIR_MODE = 0o700;
+
+/** Where saved files go: the builder's kept folder, beside the worktree folder under `~/.10db`. */
+export function keptRoot(): string {
+  return join(homedir(), '.10db', 'kept');
+}
 
 /** The permission bits a saved file keeps from its source. */
 const FILE_MODE_BITS = 0o7777;

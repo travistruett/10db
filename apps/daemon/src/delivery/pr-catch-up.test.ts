@@ -60,7 +60,9 @@ async function shippedWith(
 ): Promise<BatchDto> {
   const world = await committed(h, { path, content });
   if (opts.keepWorktree) {
-    // A hand-made, git-ignored .env 10db didn't seed: the worktree stays after the ship.
+    // A hand-made, git-ignored .env 10db didn't seed: with the saving rule asking, the worktree
+    // stays after the ship.
+    h.askBeforeSaving();
     writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
     writeFileSync(join(pathOf(world.batch), '.env'), 'SECRET=1\n');
   }

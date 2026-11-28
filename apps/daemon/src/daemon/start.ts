@@ -227,6 +227,7 @@ import {
   openPass,
   readPnpmVersion,
   recoverBatches,
+  keptRoot,
   closeFinishedSkippedCards,
   resolveOverBatchCards,
   runSecondReviews,
@@ -1745,6 +1746,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     putBack: (input) =>
       putBackKeptWork({ state, git, inbox, jobs: deliveryJobs, logger, clock }, input),
     worktreeRoot,
+    keptRoot: keptRoot(),
     // Not behind the gate slots: waiting out a long gate would hold the cut. A cut whose lockfile has
     // a template clones it; the first cut of a lockfile downloads the whole tree (the run's store is
     // empty), so several such cuts at once are several downloads.
