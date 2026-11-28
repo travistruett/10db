@@ -5,7 +5,7 @@
   reads eval files at HEAD and result files in the checkout (projects keep them out of git), and never runs an
   eval or calls a model. 10db defines no eval format; the daemon
   reads each project's own (`apps/daemon/src/evals/`).
-- The header's SegmentedControl (Evals | Models, as Factory's Live | Metrics) picks the page. Evals is four stat
+- `PageTabs` on `PageIntro`'s toolbar (Evals | Models, as Factory's Live | Metrics) pick the page; the title row holds only the title and `ScopeBadge`. Evals is four stat
   tiles (`StatTile`, `shell/stat-tile.tsx`, shared with Factory's glance) over one raised table (`evals-table.tsx`,
   25 a page with `usePaging`). The tiles are toggle filters (`aria-pressed`, outlined in their colour; the active one
   clears itself): Passing, Failing, Not Run Yet (suites with no results) and No Eval (LLM work with no eval plus eval

@@ -31,6 +31,8 @@ export function PageTabs<T extends string>({
     <Tabs
       value={value}
       onChange={(next) => {
+        // Mantine reports a click on the open tab too; it changes nothing, so the page hears nothing.
+        if (next === value) return;
         const tab = tabs.find((t) => t.value === next);
         if (tab !== undefined) onChange(tab.value);
       }}
