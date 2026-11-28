@@ -267,8 +267,8 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   `PageIntro` (`apps/desktop/src/shell/page-intro.tsx`) holds at most one dim byline (13 px, one line, about 90
   characters) that may end in a quiet "How X works" link to the page's guide, and the page's controls at the
   right: page-level selects, then utilities as icons, then its one primary action. With tabs (`PageTabs`,
-  underlined, on the left) the controls sit on the tabs' row instead, over one hairline under the whole row, drawn `xs` and held at 26 px
-  (shorter than the 36 px tabs, centred on their text).
+  underlined, on the left) the controls sit on the tabs' row instead, over one hairline under the whole row, each at
+  `size={ControlSize.Toolbar}`: 26 px with 12 px type, shorter than the 36 px tabs and centred on their text.
   A part that is absent takes no space. The type scale under the title: in-content section heads 14 / 600, card and row titles
   14 / 500, a drawer's title 16 / 600, body 14, meta 12. A split view's pane may have a 13 px / 600 label row with
   its own actions. Workspaces, where the content is the work, keep compact headers of their own: an open Workbench pass.

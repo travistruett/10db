@@ -64,7 +64,7 @@ export function AssessAction({
   }
   return (
     <Button
-      size="xs"
+      size={size}
       variant={variant}
       loading={assessment.busy}
       leftSection={<IconSparkles size={14} stroke={1.5} />}

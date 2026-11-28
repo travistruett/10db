@@ -13,6 +13,7 @@ import { ModelClass, settingsSearch } from './focus-target';
 import { SettingsSectionKey } from './sections';
 import { SettingsPageHeader } from './settings-page';
 import { useViewedAccount, ViewedAccountSelect } from './viewed-account';
+import { ControlSize } from '../../shell/control-size';
 
 const CLASS_TABS: readonly PageTab<ModelClass>[] = [
   { value: ModelClass.Agent, label: 'Language Models' },
@@ -31,7 +32,7 @@ function DecisionBilling() {
         Account: {account.label}
       </Text>
       <Button
-        size="xs"
+        size={ControlSize.Toolbar}
         variant="default"
         renderRoot={(props) => (
           <Link
@@ -92,7 +93,7 @@ export function ModelsSection() {
           >
             <ActionIcon
               variant="default"
-              size="input-xs"
+              size={ControlSize.Toolbar}
               aria-label="Refresh Models"
               loading={refresh.isPending}
               onClick={() => {

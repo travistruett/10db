@@ -14,27 +14,9 @@
   display: none;
 }
 
-/* The page's controls are shorter than the tabs (26 px against 36 px), so they sit clear of the hairline,
-   centred on the tabs' text, and read lighter than the tabs. One height here keeps every page's tab row alike,
-   whatever size a control is drawn at elsewhere. */
+/* The page's controls (`ControlSize.Toolbar`, 26 px) sit clear of the hairline, centred on the tabs' text. */
 .tabbedActions {
   padding-bottom: 6px;
-}
-
-.tabbedActions :global(.mantine-Button-root) {
-  height: 26px;
-}
-
-.tabbedActions :global(.mantine-ActionIcon-root) {
-  width: 26px;
-  min-width: 26px;
-  height: 26px;
-  min-height: 26px;
-}
-
-.tabbedActions :global(.mantine-Input-input) {
-  height: 26px;
-  min-height: 26px;
 }
 
 .guide {

@@ -83,8 +83,9 @@ is mounted:
 - `RenderLayout` (the screen frame) has a panel host only while a section registers a panel.
 - `PageIntro` (`page-intro.tsx`): not a slot, but the top of a view's content: an optional one-line byline (13 px, a
   sentence) ending in an optional `GuideLink`, and the view's `actions` at its right; with `PageTabs` the actions
-  move to the tabs' row, which draws one hairline under the whole row for the tabs' underline to sit on. Controls beside tabs are
-  drawn `xs` and `page-intro.module.css` holds every one at 26 px, centred on the tabs' text, clear of the hairline. A view
+  move to the tabs' row, which draws one hairline under the whole row for the tabs' underline to sit on. Every control beside tabs
+  takes `size={ControlSize.Toolbar}` (`control-size.ts`, drawn by `theme.ts` for Button, ActionIcon and Input): 26 px
+  with 12 px type, centred on the tabs' text, clear of the hairline. A view
   that lays its own row out passes `toolbar`. A page has one header, the title row; the content never repeats
   it. The title row holds the title, `ScopeBadge` (`scope-badge.tsx`, the project a page shows) and status, never
   a page's controls (DESIGN.md, Page header). Nothing is drawn when every part is absent.

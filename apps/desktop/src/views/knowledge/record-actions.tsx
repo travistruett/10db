@@ -24,6 +24,7 @@ import { PrincipleDialog } from './principle-dialog';
 import { ReasonDialog } from './reason-dialog';
 import { placeOf, recordTarget } from './target-select';
 import { RemoveDialog } from './remove-dialog';
+import { ControlSize } from '../../shell/control-size';
 
 /** Which dialog a row or a proposal has open. */
 const Open = {
@@ -70,7 +71,7 @@ export function NewDecisionButton({ project }: { readonly project: ProjectViewDt
   return (
     <>
       <Button
-        size="xs"
+        size={ControlSize.Toolbar}
         onClick={() => {
           setOpen(true);
         }}
@@ -105,7 +106,7 @@ export function NewPrincipleButton({ project }: { readonly project: ProjectViewD
   return (
     <>
       <Button
-        size="xs"
+        size={ControlSize.Toolbar}
         onClick={() => {
           setOpen(true);
         }}

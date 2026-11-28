@@ -1,5 +1,6 @@
 import type { ProjectId, ProjectViewDto } from '@10db/contracts';
 import { Select } from '@mantine/core';
+import { ControlSize } from './control-size';
 
 const ALL = 'all';
 
@@ -19,7 +20,7 @@ export function ProjectFilter({
   return (
     <Select
       aria-label="Project"
-      size="xs"
+      size={ControlSize.Toolbar}
       w={200}
       allowDeselect={false}
       data={[

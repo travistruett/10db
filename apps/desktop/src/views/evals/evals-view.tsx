@@ -37,6 +37,7 @@ import { EvalFilter, EvalsTable, evalRows, rowMatches, suiteFilter } from './eva
 import { EvalsSkeleton } from './evals-skeleton';
 import { NewEvalModal, type NewEvalPrefill } from './new-eval-modal';
 import { SuiteDrawer } from './suite-drawer';
+import { ControlSize } from '../../shell/control-size';
 
 const EvalsPage = { Evals: 'evals', Models: 'models' } as const;
 type EvalsPage = (typeof EvalsPage)[keyof typeof EvalsPage];
@@ -330,7 +331,7 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
         tabs={<PageTabs label="Evals view" tabs={EVALS_TABS} value={page} onChange={setPage} />}
         actions={
           <Button
-            size="xs"
+            size={ControlSize.Toolbar}
             leftSection={<IconPlus size={14} stroke={1.5} />}
             onClick={() => {
               setNewEval({ origin: NewEvalOrigin.Page });

@@ -21,6 +21,7 @@ import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { ActivityContent } from './activity-content';
 import { activityRowOf, ActivityRowItem } from './activity-row-item';
 import classes from './activity-drawer.module.css';
+import { ControlSize } from '../../shell/control-size';
 
 /** How many notices show at first, and how many more each Show More adds. */
 const FIRST_SHOWN = 20;
@@ -38,6 +39,7 @@ export function ActivityButton({ project }: { readonly project: ProjectId | null
     <>
       <Tooltip label="Activity" position="bottom">
         <ActionIcon
+          size={ControlSize.Toolbar}
           variant={opened ? 'light' : 'subtle'}
           color="gray"
           aria-label="Activity"
