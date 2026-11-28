@@ -40,9 +40,11 @@ export const TaskView = z.looseObject({
   projectId: z.string().optional(),
   status: z.string().optional(),
   boardStatus: z.string().optional(),
-  dependsOn: z.unknown(),
-  rigor: z.unknown(),
-  effectiveRigor: z.unknown(),
+  // The project's task list leaves out what a task has none of (no dependencies) and, for a task done and
+  // merged, its rigor and kinds; only open tasks are shown, and those carry them.
+  dependsOn: z.array(z.string()).default([]),
+  rigor: z.unknown().optional(),
+  effectiveRigor: z.unknown().optional(),
   kinds: z.array(z.object({ key: z.string() })).default([]),
 });
 export type TaskView = z.infer<typeof TaskView>;

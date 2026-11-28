@@ -20,6 +20,7 @@ import type { RunningDaemon } from '../src/daemon';
 import { secretFingerprint, type Keychain } from '../src/environment';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
+import { taskListOf } from './task-list';
 import { createMemoryKeychain, createTempRepo, tempDir, waitForAsync } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
@@ -87,7 +88,7 @@ async function startedTaskOn(api: Api, repoPath: string, accountId: string) {
     acceptanceCriteria: ['x'],
     areas: ['src'],
   });
-  const task = (await api.get(`/projects/${project.id}/tasks`, z.array(TaskDto)))[0];
+  const task = (await api.get(`/projects/${project.id}/tasks`, taskListOf(project.id)))[0];
   if (!task) throw new Error('no task');
   await api.post(`/tasks/${task.id}/start`, z.unknown());
   return { project: moved, task };

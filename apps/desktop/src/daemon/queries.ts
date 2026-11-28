@@ -1,5 +1,6 @@
 import {
   ChangesScope,
+  fromTaskRow,
   BatchDto,
   AgentSkillStatus,
   BoardColumnDto,
@@ -14,6 +15,7 @@ import {
   AgentCopyState,
   SystemCheckDto,
   TaskDto,
+  TaskRowDto,
   TaskStartResult,
   WorkstreamChangesDto,
   WorkstreamDto,
@@ -73,7 +75,7 @@ export const queryKeys = {
 } as const;
 
 const ProjectList = z.array(ProjectViewDto);
-const TaskList = z.array(TaskDto);
+const TaskRowList = z.array(TaskRowDto);
 const BatchList = z.array(BatchDto);
 export const WorkstreamList = z.array(WorkstreamDto);
 const BoardColumnList = z.array(BoardColumnDto);
@@ -95,18 +97,41 @@ export function useProjects() {
   });
 }
 
+/** The project's task list as its rows say it; a task's description and criteria are in `useTask`. */
+async function readTaskList(client: DaemonClient, projectId: ProjectId): Promise<TaskDto[]> {
+  const rows = await readJson(
+    await client.projects[':projectId'].tasks.$get({ param: { projectId } }),
+    TaskRowList,
+  );
+  return rows.map((row) => fromTaskRow(projectId, row));
+}
+
+/**
+ * The project's tasks. Each carries what the Board and the lists show; its `description`, `acceptanceCriteria`
+ * and the reasons for its rigor are empty here, and `useTask` reads them.
+ */
 export function useTasks(projectId: ProjectId | null) {
   const { client } = useDaemon();
   return useQuery({
     queryKey: projectId ? queryKeys.tasks(projectId) : ['tasks', 'none'],
-    queryFn: async () =>
-      projectId
-        ? readJson(
-            await client.projects[':projectId'].tasks.$get({ param: { projectId } }),
-            TaskList,
-          )
-        : [],
+    queryFn: async () => (projectId ? readTaskList(client, projectId) : []),
     enabled: projectId !== null,
+  });
+}
+
+/**
+ * One task whole, as its drawer shows it: the description, the criteria and why it has its rigor. Under
+ * `['tasks']`, so whatever refreshes the lists refreshes it.
+ */
+export function useTask(taskId: TaskId | null) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: ['tasks', 'task', taskId],
+    queryFn: async () =>
+      taskId
+        ? readJson(await client.tasks[':taskId'].$get({ param: { taskId } }), TaskDto)
+        : undefined,
+    enabled: taskId !== null,
   });
 }
 
@@ -119,11 +144,7 @@ export function useTasksOfProjects(projectIds: readonly ProjectId[]) {
   return useQueries({
     queries: projectIds.map((projectId) => ({
       queryKey: queryKeys.tasks(projectId),
-      queryFn: async () =>
-        readJson(
-          await client.projects[':projectId'].tasks.$get({ param: { projectId } }),
-          TaskList,
-        ),
+      queryFn: () => readTaskList(client, projectId),
     })),
   });
 }

@@ -51,8 +51,12 @@ pub const FROZEN_AFTER_MAX: Duration = Duration::from_mins(8);
 pub const FREEZE_WINDOW: Duration = Duration::from_mins(10);
 /// How long a killed daemon gets to exit before the supervisor moves on without collecting it.
 const KILL_WAIT: Duration = Duration::from_secs(5);
-/// How long one /health probe may take to connect, and again to answer.
-const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long one /health probe may take from connecting to the first bytes of the answer. A daemon
+/// saturated by its sessions answers in seconds, not never, so a slow answer counts as an answer;
+/// only the silence of `FROZEN_AFTER` gets a daemon killed.
+const HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
+/// How many of the latest probes the kill's log line reports.
+const PROBE_HISTORY: usize = 6;
 /// The daemon's liveness route, the same one its instance lock probes.
 const HEALTH_PATH: &str = "/health";
 /// What a healthy daemon's /health reply starts with.
@@ -228,25 +232,48 @@ fn process_gone(pid: u32) -> bool {
     }
 }
 
-/// Whether the daemon on loopback `port` answers `GET /health` with a 200 in time.
-fn health_answers(port: u16) -> bool {
+/// How long the daemon on loopback `port` took to answer `GET /health` with a 200, or `None` when
+/// it did not answer that way within `timeout` in all.
+fn health_probe(port: u16, timeout: Duration) -> Option<Duration> {
+    let started = Instant::now();
     let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-    let Ok(mut stream) = TcpStream::connect_timeout(&address, HEALTH_TIMEOUT) else {
-        return false;
-    };
-    if stream.set_read_timeout(Some(HEALTH_TIMEOUT)).is_err()
-        || stream.set_write_timeout(Some(HEALTH_TIMEOUT)).is_err()
-    {
-        return false;
-    }
+    let mut stream = TcpStream::connect_timeout(&address, timeout).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
     let request = format!(
         "GET {HEALTH_PATH} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
     );
-    if stream.write_all(request.as_bytes()).is_err() {
-        return false;
-    }
+    stream.write_all(request.as_bytes()).ok()?;
+    // A zero read timeout is an error, so the last millisecond is kept.
+    let left = timeout
+        .saturating_sub(started.elapsed())
+        .max(Duration::from_millis(1));
+    stream.set_read_timeout(Some(left)).ok()?;
     let mut status = [0_u8; HEALTH_OK.len()];
-    stream.read_exact(&mut status).is_ok() && &status == HEALTH_OK
+    stream.read_exact(&mut status).ok()?;
+    (&status == HEALTH_OK).then(|| started.elapsed())
+}
+
+/// Whether the daemon on loopback `port` answers `GET /health` with a 200 in time.
+fn health_answers(port: u16) -> bool {
+    health_probe(port, HEALTH_TIMEOUT).is_some()
+}
+
+/// The latest probes, oldest first, as the kill's log line reports them: each answer's time, or
+/// "no answer".
+fn describe_probes(probes: &[Option<Duration>]) -> String {
+    if probes.is_empty() {
+        return "none".to_owned();
+    }
+    probes
+        .iter()
+        .map(|probe| {
+            probe.map_or_else(
+                || "no answer".to_owned(),
+                |took| format!("{:.1} s", took.as_secs_f64()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The pid in `daemon.lock`, or `None` when the file is absent or holds no pid.
@@ -481,6 +508,8 @@ struct HealthWatch {
     start_deadline: Duration,
     /// A `daemon.json` has named the child: from then on only the freeze watch applies.
     served: bool,
+    /// The latest `PROBE_HISTORY` probes, oldest first: how long each answer took, `None` for none.
+    probes: Vec<Option<Duration>>,
 }
 
 impl HealthWatch {
@@ -492,7 +521,15 @@ impl HealthWatch {
             spawned: Instant::now(),
             start_deadline,
             served: false,
+            probes: Vec::new(),
         }
+    }
+
+    fn note_probe(&mut self, took: Option<Duration>) {
+        if self.probes.len() == PROBE_HISTORY {
+            self.probes.remove(0);
+        }
+        self.probes.push(took);
     }
 
     fn check(&mut self, pid: u32, data_dir: &Path) -> ChildHealth {
@@ -508,7 +545,9 @@ impl HealthWatch {
             return ChildHealth::Fine;
         };
         self.served = true;
-        if health_answers(port) {
+        let took = health_probe(port, HEALTH_TIMEOUT);
+        self.note_probe(took);
+        if took.is_some() {
             self.last_answer = Some(Instant::now());
             return ChildHealth::Fine;
         }
@@ -593,8 +632,9 @@ fn wait_for_exit(
                     report(
                         log_dir,
                         &format!(
-                            "the daemon stopped answering /health for {} s; killing it to start another",
-                            frozen_after.as_secs()
+                            "the daemon stopped answering /health for {} s; killing it to start another (latest probes: {})",
+                            frozen_after.as_secs(),
+                            describe_probes(&watch.probes)
                         ),
                     );
                     // Before the kill, so the next daemon never starts without it.
@@ -769,6 +809,45 @@ mod tests {
         assert_eq!(freezes.frozen_after(quiet), FROZEN_AFTER);
         freezes.record(quiet);
         assert_eq!(freezes.frozen_after(quiet), Duration::from_secs(60));
+    }
+
+    /// A daemon that takes `delay` to answer `/health`, on a loopback port of its own.
+    fn slow_health_server(delay: Duration) -> u16 {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind");
+        let port = listener.local_addr().expect("address").port();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut request = [0_u8; 512];
+                let _ = stream.read(&mut request);
+                thread::sleep(delay);
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+            }
+        });
+        port
+    }
+
+    #[test]
+    fn a_slow_health_answer_still_counts_and_reports_how_long_it_took() {
+        // The probe once gave up after 2 s, which read a saturated daemon as a silent one.
+        let delay = Duration::from_secs(3);
+        let took = health_probe(slow_health_server(delay), HEALTH_TIMEOUT).expect("answered");
+        assert!(took >= delay, "took {took:?}");
+        assert!(took < HEALTH_TIMEOUT, "took {took:?}");
+    }
+
+    #[test]
+    fn the_kill_line_lists_how_long_the_latest_probes_took() {
+        let probes = [
+            Some(Duration::from_millis(3_240)),
+            Some(Duration::from_millis(9_960)),
+            None,
+            None,
+        ];
+        assert_eq!(
+            describe_probes(&probes),
+            "3.2 s, 10.0 s, no answer, no answer"
+        );
+        assert_eq!(describe_probes(&[]), "none");
     }
 
     #[test]

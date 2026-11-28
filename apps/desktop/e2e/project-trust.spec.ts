@@ -312,13 +312,20 @@ test('a builder sees what a lane gets, adds a Production proposal and turns on a
     headers: auth,
     maxRetries: 2,
   });
-  const filed = ((await tasks.json()) as { title: string; description: string }[]).find(
+  const taskId = ((await tasks.json()) as { id: string; title: string }[]).find(
     (t) => t.title === 'Write the eval for Summarizer',
-  );
-  expect(filed?.description).toContain('A human-written summary per case');
-  expect(filed?.description).toContain('.claude/skills/llm-eval/SKILL.md');
-  expect(filed?.description).toContain('src/summarize.py');
-  expect(filed?.description).toContain('Never run the live command');
-  expect(filed?.description).toContain('Bad: "case 3"');
-  expect(filed?.description).toContain('`acme/model-b`');
+  )?.id;
+  expect(taskId).toBeDefined();
+  // The list leaves the description out; the task's own read has it.
+  const own = await request.get(`${daemonUrl}/tasks/${String(taskId)}`, {
+    headers: auth,
+    maxRetries: 2,
+  });
+  const filed = (await own.json()) as { description: string };
+  expect(filed.description).toContain('A human-written summary per case');
+  expect(filed.description).toContain('.claude/skills/llm-eval/SKILL.md');
+  expect(filed.description).toContain('src/summarize.py');
+  expect(filed.description).toContain('Never run the live command');
+  expect(filed.description).toContain('Bad: "case 3"');
+  expect(filed.description).toContain('`acme/model-b`');
 });

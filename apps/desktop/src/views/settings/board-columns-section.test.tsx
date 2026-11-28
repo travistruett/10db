@@ -1,4 +1,4 @@
-import type { BoardColumnDto, TaskDto } from '@10db/contracts';
+import { toTaskRow, type BoardColumnDto, type TaskDto } from '@10db/contracts';
 import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -14,7 +14,9 @@ function serve(columns: BoardColumnDto[], tasks: TaskDto[]) {
   server.use(
     http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
     http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json(columns)),
-    http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+    http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+      HttpResponse.json(tasks.map(toTaskRow)),
+    ),
     ...baseHandlers(),
   );
   renderApp('/settings/board-columns');
