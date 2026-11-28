@@ -283,7 +283,9 @@ rule tables; the rest extend the `loop` and `inbox` e2e flows.
   can't run them (`PLAN_LOGIN_CANT_DECIDE`). With only a Claude plan or only a ChatGPT plan, every judge row falls
   to its rule where one alone is sure and otherwise to the builder, and the card says a Decisions account would
   have settled it. Stage 12 closes the gap by asking the same typed question in a short session on the project's
-  own account, Claude or Codex.
+  own account, Claude or Codex. Built: with no Decisions account, a call whose task or project runs on a Claude
+  or ChatGPT/Codex plan is asked that way, and the note appears only when that session also failed. The limits
+  decisions stay as today (`decisions/2026-11-27-the-judge-asks-a-plan-only-project-in-a-one-shot-session.md`).
 - **The ceiling** counts dollars on Bedrock and API keys, and the share of the plan's limit on a Claude or ChatGPT
   plan.
 - **Stakeholder routing** is Slack and the same everywhere.

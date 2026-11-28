@@ -9,6 +9,7 @@ import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { ArtificialAnalysisStatusLine } from './artificial-analysis-status-line';
 import { catalogueLine } from './model-format';
 import { OpenRouterStatusLine } from './openrouter-status-line';
+import { ControlSize } from '../../shell/control-size';
 
 /** Where the page's prices, scores and speed come from, behind one icon button; each source's own status is in it. */
 export function DataSources() {
@@ -23,7 +24,7 @@ export function DataSources() {
         <Tooltip label="Data Sources" position="bottom" disabled={opened}>
           <ActionIcon
             variant="default"
-            size="input-xs"
+            size={ControlSize.Toolbar}
             aria-label="Data Sources"
             onClick={() => {
               setOpened((open) => !open);

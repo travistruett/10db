@@ -124,6 +124,8 @@ import {
   type JudgeCallHealth,
   JUDGE_LOG_RETENTION_MS,
   type JudgeService,
+  type SessionAsker,
+  type SessionScope,
 } from '../judge';
 import { createBenchmarkServices } from './benchmark-services';
 import { checkoutState } from './checkout-state';
@@ -527,6 +529,8 @@ import { acquireInstanceLock } from './instance-lock';
 import { takeFrozenKill } from './frozen-kill';
 import { devUiToken, removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
 import { createAnswerWriter } from './answer-writer-launch';
+import { createSessionJudge } from './judge-session';
+import type { ProjectQuestionDeps } from './project-question';
 import { createAreaNamer } from './area-namer';
 import { systemListeners, type ListenerReader } from './listening-ports';
 import { loopbackProbe, type AddressProbe } from './loopback-probe';
@@ -978,10 +982,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // The inbox is built after the judge, so the outage watch is set once it exists.
   let watchJudgeOutage: ((health: JudgeCallHealth) => void) | null = null;
+  // The project-account questions need the account pauses, built later; until then none is asked.
+  let sessionJudge: ((scope: SessionScope) => SessionAsker | null) | null = null;
   const judge = createJudge({
     state,
     clock,
     onCallHealth: (health) => watchJudgeOutage?.(health),
+    sessionJudge: (scope) => sessionJudge?.(scope) ?? null,
     fetch: outbound,
     decisionModelIds: () => decisionModels.ids(),
     readCredential: readJudgeCredential,
@@ -2664,7 +2671,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // Slack tokens are kept by workspace: the old single item and contacts of no signed-in workspace go.
   if (slackClients !== null) cleanUpSlackSignIns({ state, keychain: judgeKeychain, log: logger });
   const slackConnections = createSlackConnections({ state, off: slackClients === null });
-  const answerWriter = createAnswerWriter({
+  const projectQuestions: ProjectQuestionDeps = {
     adapter,
     launcher,
     db: state.db,
@@ -2680,7 +2687,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         homes: takeoverCodexHomes,
       };
     },
-  });
+  };
+  const answerWriter = createAnswerWriter(projectQuestions);
+  sessionJudge = createSessionJudge(projectQuestions);
   const replyWatches = createReplyWatches({
     state,
     slack: slackClients,

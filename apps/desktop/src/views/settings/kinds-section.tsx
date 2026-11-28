@@ -8,6 +8,7 @@ import { TiebreakOrder } from './kind-tiebreak-order';
 import { rigorLabel } from './rigor-labels';
 import { ROLES } from './role-labels';
 import { RaisedPanel } from '../../shell/raised-panel';
+import { ControlSize } from '../../shell/control-size';
 
 /** The switches a kind has on, as the short words the list shows. */
 function switchesOf(kind: KindDto): string[] {
@@ -77,7 +78,7 @@ export function KindsButtons({ actions }: { readonly actions: KindsActions }) {
   return (
     <>
       <Button
-        size="xs"
+        size={ControlSize.Toolbar}
         variant="default"
         onClick={() => {
           actions.setOrdering(true);
@@ -86,7 +87,7 @@ export function KindsButtons({ actions }: { readonly actions: KindsActions }) {
         Tiebreak Order
       </Button>
       <Button
-        size="xs"
+        size={ControlSize.Toolbar}
         onClick={() => {
           actions.setAdding(true);
         }}
