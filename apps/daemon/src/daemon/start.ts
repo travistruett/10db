@@ -305,6 +305,7 @@ import {
   cannotSignInCard,
   CardTier,
   clearPictureSignInCard,
+  createGuardrailAnswers,
   createInboxService,
   createJudgeOutageCard,
   createOutOfMovesAnswers,
@@ -1104,6 +1105,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerStallCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  // Made once `git` is, below the inbox service that routes the answers to it.
+  let guardrailAnswers: ReturnType<typeof createGuardrailAnswers> | null = null;
   let answerSelfUpdateCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   // Started once recovery is through; a launch before then waits for no before picture.
   let pictures: Pictures | null = null;
@@ -1251,10 +1254,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         else if (chatWorkRef !== null)
           after = applyChatWorkAnswer(chatWorkRef, logger, ctx, item, answer);
       }
-      if (retried === null) return after;
+      // A Revert on a guardrail stray-write card runs as a job once the answer is committed.
+      const reverting = guardrailAnswers?.onAnswer(ctx, item, answer);
+      if (retried === null && reverting === undefined) return after;
       return () => {
         after?.();
-        lateLinearReporter?.wake(retried);
+        reverting?.();
+        if (retried !== null) lateLinearReporter?.wake(retried);
       };
     },
     onCheckAnswer: (ctx, item, answer) => {
@@ -1677,6 +1683,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'gate' }),
     hold: loadGuard,
     priority: GatePriority.Advice,
+  });
+  guardrailAnswers = createGuardrailAnswers({
+    state,
+    git,
+    clock,
+    logger: logger.child({ component: 'guardrail-revert' }),
+    home: builderHome,
   });
   const answerGit = createGitCardAnswers(git);
   answerGitCard = (item, answer) => {

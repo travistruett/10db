@@ -107,7 +107,17 @@ import {
   STRAY_BULK_THRESHOLD,
   strayFoldKey,
 } from './strays';
-import { BY_ANSWER, CardTier, decidedByBuilder } from '../inbox';
+import {
+  BY_ANSWER,
+  CardTier,
+  decidedByBuilder,
+  GUARDRAIL_DIFF_DETAIL,
+  guardrailDiffOf,
+  guardrailStrayOptions,
+  guardrailStrayTitle,
+  type GuardrailDiff,
+} from '../inbox';
+import { guardrailOf } from '../guardrails';
 
 const WATCH_BATCH_MS = 500;
 /**
@@ -209,9 +219,14 @@ export interface Watcher {
 }
 
 const STRAY_TITLE = 'Write outside every claim';
+/** The title of the card for one write to a path on the guardrail list: "A lane edited your <label>". */
+const isGuardrailStrayTitle = (title: string): boolean => title.startsWith(guardrailStrayTitle(''));
+/** The title of a card for one stray write. */
+const isSingleStrayTitle = (title: string): boolean =>
+  title === STRAY_TITLE || isGuardrailStrayTitle(title);
 /** The title of a single stray card, or of a bulk one: "<n> writes outside every claim". */
 const isStrayTitle = (title: string): boolean =>
-  title === STRAY_TITLE || /^\d+ writes outside every claim$/.test(title);
+  isSingleStrayTitle(title) || /^\d+ writes outside every claim$/.test(title);
 
 function isRealDirectory(path: string): boolean {
   try {
@@ -445,8 +460,37 @@ export function createWatcher(deps: {
       ...card,
       body: `${card.body}\nVersion ${shortSha(sha)}`,
       detail: { ...card.detail, ...stampDetail(site.root, sha, card.foldKey) },
-      options: trustOptions(trust),
+      options: card.options ?? trustOptions(trust),
     });
+  }
+
+  /**
+   * The paths among `rels` that are on the guardrail list and hold a file that can be stamped, with the list's
+   * label, the stamp and the file's diff: what their card shows. A path the list lacks (agent instructions, `.env`,
+   * git's own files), one with no stamp, and any path past the bulk threshold keep the card they always had.
+   */
+  async function guardrailDiffs(
+    site: Site,
+    rels: readonly string[],
+    stamps: ReadonlyMap<string, string | null>,
+  ): Promise<Map<string, { label: string; sha: string; diff: GuardrailDiff }>> {
+    const found = new Map<string, { label: string; sha: string; diff: GuardrailDiff }>();
+    const candidates = rels
+      .filter((rel) => guardrailOf(rel) !== null)
+      .slice(0, STRAY_BULK_THRESHOLD);
+    await Promise.all(
+      candidates.map(async (rel) => {
+        const guard = guardrailOf(rel);
+        const sha = stamps.has(rel) ? (stamps.get(rel) ?? null) : stampFile(site.root, rel);
+        if (guard === null || sha === null) return;
+        found.set(rel, {
+          label: guard.label,
+          sha,
+          diff: await guardrailDiffOf(deps.git, site.root, rel),
+        });
+      }),
+    );
+    return found;
   }
 
   // The paths a notice has already said were written outside every claim, per checkout: a path is
@@ -501,7 +545,7 @@ export function createWatcher(deps: {
   const labelled = (site: Site, rel: string): string =>
     site.worktree === null ? rel : `${site.worktree}: ${rel}`;
 
-  function raise(
+  async function raise(
     project: ProjectDto,
     site: Site,
     strays: readonly string[],
@@ -513,9 +557,10 @@ export function createWatcher(deps: {
     notes: ReadonlyMap<string, string> = new Map(),
     /** The sha256 already read for a path (null: unreadable), so its card stamps the text that was judged. */
     stamps: ReadonlyMap<string, string | null> = new Map(),
-  ): string[] {
+  ): Promise<string[]> {
     const raised = withoutTrusted(project, site, strays, stamps);
     if (raised.length === 0) return raised;
+    const guarded = await guardrailDiffs(site, raised, stamps);
     const runs =
       raised.length > LEFT_BY_MAX_PATHS ? [] : retryableFailedRuns(project, site.batchId);
     const left = leftBy(raised, site.root, runs, (rel) => {
@@ -558,6 +603,8 @@ export function createWatcher(deps: {
           ...candidates,
         ]),
       ];
+      // A path on the guardrail list is a card with the file's diff, and Keep or Revert.
+      const shown = guarded.get(rel);
       flagStamped(
         site,
         rel,
@@ -568,17 +615,19 @@ export function createWatcher(deps: {
           urgency: Urgency.High,
           closesWhen: BY_ANSWER,
           decision: decidedByBuilder(BuilderOwns.Guardrails),
-          title: STRAY_TITLE,
+          title: shown === undefined ? STRAY_TITLE : guardrailStrayTitle(shown.label),
           body: `${labelled(site, rel)}${leavers.length === 0 ? during : leftNote(leavers)}${note === undefined ? '' : `\n${note}`}`,
           detail: {
             path: rel,
             candidates: leavers.length === 0 ? [...candidates] : named,
             ...(isSensitivePath(rel) ? sensitiveDetail : {}),
+            ...(shown === undefined ? {} : { [GUARDRAIL_DIFF_DETAIL]: shown.diff.detail }),
           },
+          ...(shown === undefined ? {} : { options: guardrailStrayOptions(shown.diff.tracked) }),
           foldKey: strayFoldKey(site.scope, rel),
         },
         TrustChoice.Trust,
-        stamps.get(rel),
+        shown === undefined ? stamps.get(rel) : shown.sha,
       );
     };
     sensitive.forEach(single);
@@ -1184,7 +1233,7 @@ export function createWatcher(deps: {
       return unlistedCovered;
     };
     for (const item of open) {
-      if (item.title === STRAY_TITLE) {
+      if (isSingleStrayTitle(item.title)) {
         const path = item.detail?.['path'];
         if (typeof path !== 'string' || !covered([path])) continue;
         if (withoutVersion(item.body) !== labelled(site, path)) continue;
@@ -1347,7 +1396,7 @@ export function createWatcher(deps: {
       try {
         const item = getInboxItem(db, row.id);
         if (item.state !== InboxState.Open) continue;
-        const single = item.title === STRAY_TITLE;
+        const single = isSingleStrayTitle(item.title);
         const detailPath = item.detail?.['path'];
         const listed = item.detail?.['paths'];
         const count = item.detail?.['count'];
@@ -1549,7 +1598,7 @@ export function createWatcher(deps: {
     );
     for (const { rel, files } of directories)
       if (files.every((f) => fileAllowed.has(f))) allowed.add(rel);
-    raise(
+    await raise(
       project,
       site,
       dueStrays(

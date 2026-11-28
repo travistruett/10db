@@ -1,6 +1,7 @@
 import {
   ACCOUNT_CARD_DETAIL,
   CARD_CLOSES_ITSELF,
+  GUARDRAIL_DIFF_DETAIL,
   OPEN_INTEGRATIONS_DETAIL,
   AccountCardDetail,
   AccountProblem,
@@ -20,6 +21,7 @@ import { ExternalLink } from '../board/pull-request-link';
 import { StepLogLink, useBatchActions } from './batch-card-actions';
 import { CardOpensLink, cardOpens } from './card-opens-link';
 import { CommandBlock } from './command-block';
+import { GuardrailDiffBlock } from './guardrail-diff-block';
 import { AcceptanceCard } from './acceptance-card';
 import { WatchpointCard } from './watchpoint-card';
 import { CheckCard } from './check-card';
@@ -124,12 +126,21 @@ export function CardBody({ item }: { readonly item: InboxItemDto }) {
     );
   }
   // A long body folds to its first lines, so the answer sits near the top of the card.
-  return (
+  const body = (
     <Spoiler maxHeight={BODY_FOLD_PX} showLabel="Show All" hideLabel="Show Less">
       <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
         <CodeSpans text={item.body} />
       </Text>
     </Spoiler>
+  );
+  // A lane's write to a guardrail file shows what it changed under the words.
+  if (item.kind !== InboxKind.Flag || item.detail?.[GUARDRAIL_DIFF_DETAIL] === undefined)
+    return body;
+  return (
+    <Stack gap="xs">
+      {body}
+      <GuardrailDiffBlock detail={item.detail} />
+    </Stack>
   );
 }
 
