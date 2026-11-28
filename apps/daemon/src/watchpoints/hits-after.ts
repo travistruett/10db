@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   WATCHPOINT_FILE_PATCH_BYTES,
   WATCHPOINT_LINE_SCAN_BYTES,
@@ -87,6 +88,41 @@ function withSections(
       ? file
       : { ...file, status: section.status, patch: section.patch, clipped: section.clipped };
   });
+}
+
+/** The most diff text read to hash one hit's files; past it the hit has no hash. */
+export const WATCHPOINT_HASH_READ_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The sha256 of the hit's files' whole diff over the run's own range, in path order, so an approval names exactly the
+ * change it saw. Undefined when that diff could not be read in full: past the read cap, a file with no section, or a
+ * read that failed, since a diff 10db did not see whole is not one it can approve.
+ */
+async function hashOfHit(
+  read: WatchpointChangeReader,
+  files: readonly WatchpointFileHit[],
+): Promise<string | undefined> {
+  if (files.length === 0) return undefined;
+  try {
+    const changes = await read(
+      files.map((f) => f.path),
+      WATCHPOINT_HASH_READ_BYTES,
+    );
+    if (changes.truncated) return undefined;
+    const sections = splitPatch(changes.diff, {
+      fileBytes: WATCHPOINT_HASH_READ_BYTES,
+      diffCut: false,
+    });
+    const whole: string[] = [];
+    for (const path of files.map((f) => f.path).sort()) {
+      const section = sections.get(path);
+      if (section === undefined || section.clipped) return undefined;
+      whole.push(section.patch);
+    }
+    return createHash('sha256').update(whole.join('')).digest('hex');
+  } catch {
+    return undefined;
+  }
 }
 
 /** Past the row's patch budget a file keeps its counts and says it was clipped. */
@@ -231,5 +267,12 @@ export async function watchpointHitsAfter(input: {
       return evalDefinition === undefined ? out : { ...out, evalDefinition };
     }),
   }));
-  return withShadow({ hits: withinRowBudget(final), head: input.head, skipped: null });
+  // The hash is taken from the whole diff, before any clip: it names the change, not what the row kept of it.
+  const hashed = await Promise.all(
+    final.map(async (hit): Promise<WatchpointHit> => {
+      const hash = await hashOfHit(input.read, hit.files);
+      return hash === undefined ? hit : { ...hit, hash };
+    }),
+  );
+  return withShadow({ hits: withinRowBudget(hashed), head: input.head, skipped: null });
 }

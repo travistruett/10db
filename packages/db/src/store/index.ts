@@ -15,6 +15,7 @@ export * from './decisions';
 export * from './events';
 export * from './evidence';
 export * from './watchpoint-settings';
+export * from './watchpoint-reads';
 export * from './watchpoint-stats';
 export * from './gate-history';
 export * from './goal-digest';

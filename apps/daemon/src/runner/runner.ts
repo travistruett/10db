@@ -76,6 +76,7 @@ import {
   PassTurnId,
   JudgeKind,
   Provider,
+  WatchpointReadVerdict,
   TakeOutStep,
   type CopyId,
   type PassId,
@@ -431,6 +432,7 @@ import {
   watchpointBuildBrief,
   WATCHPOINT_HIT_SOURCES,
   evalDefinitionSource,
+  readWatchpointHits,
   watchpointHitsAfter,
   watchpointPrinciples,
   touchedPrincipleWatchpoints,
@@ -1869,6 +1871,23 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
         },
       });
+      // In shadow: each Ask hit is read and the read is kept on the reading, and nothing acts on it. The same head
+      // was read already (a Review or QA step with no new commits): the answered reads stand, the rest are asked again.
+      const kept =
+        earlier?.head === head
+          ? (earlier.reads ?? []).filter(
+              (r) => r.verdict === WatchpointReadVerdict.Hold || r.meets !== null,
+            )
+          : [];
+      const fresh = await readWatchpointHits(
+        { judge: opts.judge, read },
+        detail.hits.filter((h) => !kept.some((r) => r.key === h.watchpoint.key)),
+        { projectId: row.projectId, workstreamId: id },
+      );
+      const reads = detail.hits.flatMap((h) =>
+        [...kept, ...fresh].filter((r) => r.key === h.watchpoint.key).slice(0, 1),
+      );
+      if (reads.length > 0) detail = { ...detail, reads };
     } catch (error) {
       opts.logger.warn(
         { workstreamId: id, err: error instanceof Error ? error.message : String(error) },

@@ -56,6 +56,11 @@ export const JudgeDecision = {
   /** Watchpoints: does a run's change do what a watchpoint's question asks about, in the files its rules left open? */
   WatchpointQuestion: 'watchpoint_question',
   /**
+   * Watchpoints: do the hunks of a hit on a watchpoint set to Ask meet the watchpoint's guidance, and is the change
+   * destructive? Read in shadow until the builder lets it act.
+   */
+  WatchpointRead: 'watchpoint_read',
+  /**
    * Ownership: which of the builder's three judgment questions (a move that can't be taken back, a change to what
    * the product does or looks like, a promise in the builder's name) a shipped change raises, in shadow.
    */
@@ -132,6 +137,9 @@ const ACCEPTANCE_SECOND_DECISION: JudgeDecisionConfig = {
 /** A watchpoint's question ships switched off and in shadow: its answer is logged and kept, and acts on nothing. */
 const WATCHPOINT_QUESTION_DECISION: JudgeDecisionConfig = { ...DEFAULT_DECISION, enabled: false };
 
+/** A watchpoint read is configured as a watchpoint's question is: switched off, floor 0.8, in shadow. */
+const WATCHPOINT_READ_DECISION: JudgeDecisionConfig = { ...DEFAULT_DECISION, enabled: false };
+
 export const JudgeConfig = z.object({
   enabled: z.boolean(),
   /** The OpenRouter, Anthropic API key or Bedrock account decisions run on; null until the builder picks one. */
@@ -155,6 +163,9 @@ export const JudgeConfig = z.object({
     }),
     [JudgeDecision.WatchpointQuestion]: JudgeDecisionConfig.default({
       ...WATCHPOINT_QUESTION_DECISION,
+    }),
+    [JudgeDecision.WatchpointRead]: JudgeDecisionConfig.default({
+      ...WATCHPOINT_READ_DECISION,
     }),
     [JudgeDecision.OwnershipTest]: shapeDecision(),
   }),
@@ -183,6 +194,7 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
     [JudgeDecision.Acceptance]: { ...ACCEPTANCE_DECISION },
     [JudgeDecision.AcceptanceSecond]: { ...ACCEPTANCE_SECOND_DECISION },
     [JudgeDecision.WatchpointQuestion]: { ...WATCHPOINT_QUESTION_DECISION },
+    [JudgeDecision.WatchpointRead]: { ...WATCHPOINT_READ_DECISION },
     [JudgeDecision.OwnershipTest]: { ...DEFAULT_DECISION },
   },
 };
@@ -238,6 +250,7 @@ export const JudgeConfigPatch = z
         [JudgeDecision.Acceptance]: JudgeDecisionConfigPatch,
         [JudgeDecision.AcceptanceSecond]: JudgeDecisionConfigPatch,
         [JudgeDecision.WatchpointQuestion]: JudgeDecisionConfigPatch,
+        [JudgeDecision.WatchpointRead]: JudgeDecisionConfigPatch,
         [JudgeDecision.OwnershipTest]: JudgeDecisionConfigPatch,
       })
       .partial()
