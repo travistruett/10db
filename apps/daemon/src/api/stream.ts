@@ -49,7 +49,6 @@ export function streamEvents(
     if (live) deliver(event);
     else buffered.push(event);
   });
-  // Read after subscribing, so an event written between the two is buffered rather than skipped.
   const head = services.eventsHead();
   if (head - lastSent > REPLAY_LIMIT) lastSent = head;
   for (;;) {
