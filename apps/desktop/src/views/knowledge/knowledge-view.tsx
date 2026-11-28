@@ -4,17 +4,7 @@ import {
   type PrincipleId,
   type ProjectViewDto,
 } from '@10db/contracts';
-import {
-  Badge,
-  Button,
-  Container,
-  Group,
-  Paper,
-  Stack,
-  Tabs,
-  Text,
-  VisuallyHidden,
-} from '@mantine/core';
+import { Badge, Button, Container, Group, Paper, Stack, Text, VisuallyHidden } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
@@ -25,7 +15,8 @@ import {
   type RecordRef,
   type TracedRecord,
 } from '../../daemon/knowledge-queries';
-import { PageIntro } from '../../shell/page-intro';
+import { PageIntro, PageTabs } from '../../shell/page-intro';
+import { ScopeBadge } from '../../shell/scope-badge';
 import { TitleRow } from '../../shell/title-row';
 import { useSelectedProject } from '../../shell/selected-project';
 import { DecisionList } from './decision-list';
@@ -50,29 +41,15 @@ const SEARCH_DEBOUNCE_MS = 250;
 const KnowledgeTab = { Principles: 'principles', Decisions: 'decisions' } as const;
 type KnowledgeTab = (typeof KnowledgeTab)[keyof typeof KnowledgeTab];
 
-const TABS: readonly string[] = Object.values(KnowledgeTab);
-function isKnowledgeTab(value: string | null): value is KnowledgeTab {
-  return value !== null && TABS.includes(value);
-}
-
-/** The Principles tab, with the number of proposals waiting under Pending. */
-function PrinciplesTab({ pending }: { readonly pending: number }) {
+/** The number of proposals waiting under Pending, after the Principles tab's label. */
+function PendingCount({ pending }: { readonly pending: number }) {
   return (
-    <Tabs.Tab
-      value={KnowledgeTab.Principles}
-      rightSection={
-        pending > 0 ? (
-          <Badge size="sm" circle>
-            {/* The name computation drops a leading space inside VisuallyHidden, so the number is
-                hidden from assistive tech and the hidden text carries the whole phrase. */}
-            <span aria-hidden="true">{pending}</span>
-            <VisuallyHidden>{`${String(pending)} pending`}</VisuallyHidden>
-          </Badge>
-        ) : undefined
-      }
-    >
-      Principles
-    </Tabs.Tab>
+    <Badge size="sm" circle>
+      {/* The name computation drops a leading space inside VisuallyHidden, so the number is
+          hidden from assistive tech and the hidden text carries the whole phrase. */}
+      <span aria-hidden="true">{pending}</span>
+      <VisuallyHidden>{`${String(pending)} pending`}</VisuallyHidden>
+    </Badge>
   );
 }
 
@@ -134,22 +111,27 @@ function ShelfNote({
   );
 }
 
-/** The view's header; the project's create button rides in `actions` once a project is chosen. */
+/** The view's header; once a project is chosen its tabs and create button sit on the toolbar under the byline. */
 function KnowledgeHeader({
   project,
+  tabs,
   actions,
 }: {
   readonly project?: string;
+  readonly tabs?: ReactNode;
   readonly actions?: ReactNode;
 }) {
   return (
     <>
       <TitleRow
         title="Knowledge"
-        {...(project === undefined ? {} : { meta: project })}
+        {...(project === undefined ? {} : { meta: <ScopeBadge name={project} /> })}
+      />
+      <PageIntro
+        description="What you, your agents and 10db have recorded for this project."
+        {...(tabs === undefined ? {} : { tabs })}
         {...(actions === undefined ? {} : { actions })}
       />
-      <PageIntro description="What you, your agents and 10db have recorded for this project." />
     </>
   );
 }
@@ -218,6 +200,21 @@ function ProjectKnowledge({
     <>
       <KnowledgeHeader
         project={project.name}
+        tabs={
+          <PageTabs
+            label="Knowledge"
+            tabs={[
+              {
+                value: KnowledgeTab.Principles,
+                label: 'Principles',
+                ...(pending > 0 ? { rightSection: <PendingCount pending={pending} /> } : {}),
+              },
+              { value: KnowledgeTab.Decisions, label: 'Decisions' },
+            ]}
+            value={tab}
+            onChange={setTab}
+          />
+        }
         actions={
           tab === KnowledgeTab.Principles ? (
             <NewPrincipleButton project={project} />
@@ -226,64 +223,49 @@ function ProjectKnowledge({
           )
         }
       />
-      <Tabs
-        value={tab}
-        onChange={(next) => {
-          if (isKnowledgeTab(next)) setTab(next);
-        }}
-        keepMounted={false}
-      >
-        <Tabs.List>
-          <PrinciplesTab pending={pending} />
-          <Tabs.Tab value={KnowledgeTab.Decisions}>Decisions</Tabs.Tab>
-        </Tabs.List>
-        <Tabs.Panel value={KnowledgeTab.Principles} pt="md">
-          <Stack gap="sm">
-            <ShelfNote
-              what="principles"
-              shelf={principleShelf}
-              pending={pending}
-              onShelf={setChosenShelf}
+      {tab === KnowledgeTab.Principles ? (
+        <Stack gap="sm">
+          <ShelfNote
+            what="principles"
+            shelf={principleShelf}
+            pending={pending}
+            onShelf={setChosenShelf}
+          />
+          {principleShelf === KnowledgeShelf.Pending ? (
+            <ProposalList
+              projectId={project.id}
+              filter={{ ...filters, q }}
+              controls={principleControls}
+              onTrace={setTraced}
+              actions={(proposal) => <ProposalActions project={project} proposal={proposal} />}
             />
-            {principleShelf === KnowledgeShelf.Pending ? (
-              <ProposalList
-                projectId={project.id}
-                filter={{ ...filters, q }}
-                controls={principleControls}
-                onTrace={setTraced}
-                actions={(proposal) => <ProposalActions project={project} proposal={proposal} />}
-              />
-            ) : (
-              <PrincipleList
-                filter={filterFor(principleShelf)}
-                controls={principleControls}
-                onTrace={setTraced}
-                openId={traced?.id ?? null}
-                actions={(principle) => (
-                  <PrincipleActions project={project} principle={principle} />
-                )}
-              />
-            )}
-          </Stack>
-        </Tabs.Panel>
-        <Tabs.Panel value={KnowledgeTab.Decisions} pt="md">
-          <Stack gap="sm">
-            <ShelfNote
-              what="decisions"
-              shelf={decisionShelf}
-              pending={0}
-              onShelf={setDecisionShelf}
-            />
-            <DecisionList
-              filter={filterFor(decisionShelf)}
-              controls={decisionControls}
+          ) : (
+            <PrincipleList
+              filter={filterFor(principleShelf)}
+              controls={principleControls}
               onTrace={setTraced}
               openId={traced?.id ?? null}
-              actions={(decision) => <DecisionActions project={project} decision={decision} />}
+              actions={(principle) => <PrincipleActions project={project} principle={principle} />}
             />
-          </Stack>
-        </Tabs.Panel>
-      </Tabs>
+          )}
+        </Stack>
+      ) : (
+        <Stack gap="sm">
+          <ShelfNote
+            what="decisions"
+            shelf={decisionShelf}
+            pending={0}
+            onShelf={setDecisionShelf}
+          />
+          <DecisionList
+            filter={filterFor(decisionShelf)}
+            controls={decisionControls}
+            onTrace={setTraced}
+            openId={traced?.id ?? null}
+            actions={(decision) => <DecisionActions project={project} decision={decision} />}
+          />
+        </Stack>
+      )}
       <ProvenanceDrawer
         record={traced}
         onTrace={setTraced}

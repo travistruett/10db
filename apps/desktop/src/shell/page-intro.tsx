@@ -6,6 +6,8 @@ import classes from './page-intro.module.css';
 export interface PageTab<T extends string> {
   readonly value: T;
   readonly label: string;
+  /** Drawn after the label, such as a count waiting under the tab. */
+  readonly rightSection?: ReactNode;
 }
 
 /**
@@ -35,7 +37,11 @@ export function PageTabs<T extends string>({
     >
       <Tabs.List className={classes['tabList']} aria-label={label}>
         {tabs.map((tab) => (
-          <Tabs.Tab key={tab.value} value={tab.value}>
+          <Tabs.Tab
+            key={tab.value}
+            value={tab.value}
+            {...(tab.rightSection === undefined ? {} : { rightSection: tab.rightSection })}
+          >
             {tab.label}
           </Tabs.Tab>
         ))}
