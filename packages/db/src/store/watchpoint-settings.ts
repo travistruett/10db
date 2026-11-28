@@ -1,11 +1,15 @@
 import { z } from 'zod';
 import {
+  InvalidError,
   ProjectWatchpoints,
   revisedWatchpoints,
+  withWatchpointEntry,
+  WatchpointProposalScope,
   INITIAL_WATCHPOINTS,
   STARTER_REVISION,
   YourWatchpoints,
   type Watchpoint,
+  type WatchpointProposal,
   type ProjectWatchpointEntry,
   type ProjectId,
 } from '@10db/contracts';
@@ -51,4 +55,54 @@ export function writeProjectWatchpoints(
   entries: readonly ProjectWatchpointEntry[],
 ): void {
   setAppSetting(ctx, projectKey(projectId), ProjectWatchpoints.parse(entries));
+}
+
+/** The entry a list holds for a key, or null: what a watchpoint proposal is checked against. */
+export function storedWatchpointEntry(
+  db: DbReader,
+  projectId: ProjectId,
+  scope: WatchpointProposalScope,
+  key: string,
+): ProjectWatchpointEntry | null {
+  const list =
+    scope === WatchpointProposalScope.You
+      ? readYourWatchpoints(db)
+      : readProjectWatchpoints(db, projectId);
+  return list.find((entry) => entry.key === key) ?? null;
+}
+
+/**
+ * Writes an accepted watchpoint proposal into its list: the entry replaces the one with its key, or is added. The
+ * entry the card showed as there now must still be there, so a change the builder made since is never written over;
+ * a list the change would leave invalid (more than the limit) refuses it too, and the card stays open.
+ */
+export function applyWatchpointProposal(
+  ctx: WriteContext,
+  projectId: ProjectId,
+  proposal: WatchpointProposal,
+  shown: ProjectWatchpointEntry | null,
+): void {
+  const now = storedWatchpointEntry(ctx.tx, projectId, proposal.scope, proposal.entry.key);
+  if (JSON.stringify(now) !== JSON.stringify(shown))
+    throw new InvalidError(
+      'This watchpoint changed after the proposal was made; reject it and ask for a new one',
+    );
+  switch (proposal.scope) {
+    case WatchpointProposalScope.Project: {
+      const next = ProjectWatchpoints.safeParse(
+        withWatchpointEntry(readProjectWatchpoints(ctx.tx, projectId), proposal.entry),
+      );
+      if (!next.success) throw new InvalidError(`The project's watchpoints can't take this change`);
+      writeProjectWatchpoints(ctx, projectId, next.data);
+      return;
+    }
+    case WatchpointProposalScope.You: {
+      const next = YourWatchpoints.safeParse(
+        withWatchpointEntry(readYourWatchpoints(ctx.tx), proposal.entry),
+      );
+      if (!next.success) throw new InvalidError(`Your watchpoints can't take this change`);
+      writeYourWatchpoints(ctx, next.data);
+      return;
+    }
+  }
 }

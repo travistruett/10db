@@ -1,6 +1,7 @@
 import { HealthResponse, PROTOCOL_VERSION } from '@10db/contracts';
-import { Box, Center, Loader, Stack, Text, Tooltip } from '@mantine/core';
+import { Box, Center, Image, Loader, Stack, Text, Tooltip } from '@mantine/core';
 import { createContext, use, useEffect, useState, type ReactNode } from 'react';
+import appIcon from '../../app-icon.svg';
 import { VersionMismatch } from '../shell/version-mismatch';
 import { createDaemonClient, readJson, type DaemonClient } from './client';
 import type { ConnectionResolver, DaemonConnection } from './connection';
@@ -97,6 +98,9 @@ function sameConnection(a: DaemonConnection, b: DaemonConnection): boolean {
 /** How long the connecting screen waits, from when it shows, before it adds its help to a failed connection. */
 const CONNECTING_HELP_AFTER_MS = 10_000;
 
+/** How long the first connection may take before the screen says it is slow: a launch is refused while 10db boots. */
+const SLOW_AFTER_MS = 4000;
+
 function ConnectingScreen({
   lastError,
   help,
@@ -107,6 +111,15 @@ function ConnectingScreen({
   readonly helpAfterMs: number;
 }) {
   const [helpDue, setHelpDue] = useState(false);
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSlow(true);
+    }, SLOW_AFTER_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, []);
   useEffect(() => {
     if (help === undefined || help === null) return undefined;
     const timer = setTimeout(() => {
@@ -118,20 +131,32 @@ function ConnectingScreen({
   }, [help, helpAfterMs]);
   return (
     <Center h="100vh">
-      <Stack align="center" gap="xs">
-        <Loader size="sm" />
-        <Text>Connecting to the 10db daemon…</Text>
-        {lastError !== null && (
-          // The reason is for the curious; what the builder needs is that it keeps trying.
-          <Tooltip label={lastError} multiline maw={480}>
-            {/* Focusable, so the reason is there for the keyboard and a screen reader as well. */}
-            <Text size="sm" c="dimmed" maw={480} ta="center" tabIndex={0}>
-              Still trying to reach the 10db daemon. It retries on its own.
-            </Text>
-          </Tooltip>
-        )}
+      <Stack align="center" gap="lg">
+        <Image src={appIcon} alt="" w={72} h={72} />
+        <Stack align="center" gap={6} role="status" mih={72}>
+          <Text size="lg" fw={500}>
+            Starting 10db…
+          </Text>
+          {lastError !== null && (
+            <>
+              {slow ? (
+                <Text size="sm" c="dimmed" maw={420} ta="center">
+                  Taking longer than usual. 10db keeps trying.
+                </Text>
+              ) : null}
+              {/* The reason is for the curious; what the builder needs is that it keeps trying. */}
+              <Tooltip label={lastError} multiline maw={480}>
+                {/* Focusable, so the reason is there for the keyboard and a screen reader as well. */}
+                <Text size="xs" c="dimmed" td="underline" tabIndex={0}>
+                  Details
+                </Text>
+              </Tooltip>
+            </>
+          )}
+        </Stack>
+        <Loader type="dots" size="md" color="teal" />
         {helpDue && lastError !== null ? (
-          <Box maw={420} px="md" mt="sm">
+          <Box maw={420} px="md">
             {help}
           </Box>
         ) : null}
