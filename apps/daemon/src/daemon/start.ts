@@ -197,6 +197,7 @@ import {
   createBranchCardAnswers,
   createCiStopAnswers,
   createGuardrailHoldAnswers,
+  answerWatchpointCardBeforeShipper,
   createWatchpointHoldAnswers,
   createGhCardAnswers,
   createStartCardAnswers,
@@ -1282,7 +1283,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onWatchpointAnswer: (ctx, item, answer) => {
       // Merge or Send Back on a Look card that holds a pull request: the shipper arms it or closes it once committed.
       if (watchpointHoldAnswers === null)
-        throw new ConflictError('The shipper has not started, so the card cannot be answered yet');
+        return answerWatchpointCardBeforeShipper(ctx, item, answer);
       return watchpointHoldAnswers.onAnswerInWrite(ctx, item, answer);
     },
     onPlanAnswer: (ctx, item, answer) => {

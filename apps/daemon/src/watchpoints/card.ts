@@ -62,6 +62,9 @@ export interface HeldLanding {
 
 /** What a Look card's body says when the landing is a pass's pull request or a local copy, which are not held yet. */
 const CANT_HOLD = "This landing can't be held yet, so the change may already be merged.";
+/** Said on a held card before its pull request is open, so Send Back is not answered expecting a pull request to close. */
+const NO_PULL_REQUEST_YET =
+  'The pull request is not open yet. The ship opens it held, and this card comes back with its link; Send Back now only files the task, and answering again files another.';
 const UNREADABLE_DIFF =
   "10db could not read this whole diff, so it can't approve it. Merge the pull request on GitHub, or send it back.";
 
@@ -258,7 +261,7 @@ function lookBody(
       : `\n\nAlso waiting in this pull request: ${landing.alsoWaiting.join(', ')}. Send Back closes it for them too.`;
   const parts = [
     `The change touched ${labelsOf(hits)}, which holds its pull request until you answer.`,
-    ...(landing.prUrl === null ? [] : [`Pull request: ${landing.prUrl}`]),
+    landing.prUrl === null ? NO_PULL_REQUEST_YET : `Pull request: ${landing.prUrl}`,
     says.unreadable
       ? UNREADABLE_DIFF
       : 'Merge approves exactly the diff of these files you were shown and lets the pull request merge as the batch asked. A later change to them asks again. Send Back closes the pull request and files a task with your note.',
