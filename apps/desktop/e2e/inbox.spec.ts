@@ -364,7 +364,10 @@ test('a ship gate out of moves asks Spend More Attempts, Change the Task or Drop
   await page.goto(`/inbox?project=${oomProjectId}`);
   const row = rowsOf(page).filter({ hasText: OOM_CARD });
   await row.click();
-  await expect(page.getByText('The same tests failed again after the fix.')).toBeVisible();
+  // Exact: the card body repeats this line and adds the gate's note that the project has no origin to fetch.
+  await expect(
+    page.getByText('The same tests failed again after the fix.', { exact: true }),
+  ).toBeVisible();
   // The answers are the card's options, drawn as radios (each name starts with its key hint), sent by Send Answer.
   await expect(page.getByRole('radio', { name: /Change the Task/ })).toBeVisible();
   await expect(page.getByRole('radio', { name: /Drop It/ })).toBeVisible();
