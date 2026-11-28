@@ -629,9 +629,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     .getByText('Separate copy')
     .click();
   await expect(page.getByRole('radio', { name: 'Separate copy' })).toBeChecked();
-  // The pick saves at once and can take focus out of the drawer, where Escape no longer reaches it, and the
-  // drawer covers the Board's toolbar: it is closed by its button and gone before the toolbar is used.
-  await taskDrawer.getByRole('button', { name: 'Close' }).click();
+  // The pick saves at once and leaves focus on the page; Esc still closes the drawer, which covers the toolbar.
+  await page.keyboard.press('Escape');
   await expect(taskDrawer).toBeHidden();
   await page.getByRole('button', { name: 'More board actions' }).click();
   await page.getByRole('menuitem', { name: /Start Ready Tasks/ }).click();

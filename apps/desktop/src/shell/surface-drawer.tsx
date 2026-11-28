@@ -17,7 +17,7 @@ const FULL_UNDER_PX = 640;
  * the view beside it stays usable. A click outside leaves it open unless `closeOnClickOutside` is set;
  * then a press on the content beside it closes it, except on an element marked `data-keeps-drawer` (a
  * card that opens its own drawer) or anything outside the content (menus, dialogs, the sidebar). Esc
- * while focus is inside it, or its close button, closes it. It slides in over 150 ms, or appears at once
+ * while focus is inside it or has fallen to the page, or its close button, closes it. It slides in over 150 ms, or appears at once
  * with reduced motion.
  */
 export function SurfaceDrawer({
@@ -74,6 +74,22 @@ export function SurfaceDrawer({
     if (!opened || showing === undefined) return;
     if (!drawer.current?.contains(document.activeElement)) drawer.current?.focus();
   }, [opened, showing]);
+
+  // A pick that saves at once can redraw the control under the focus, which then falls to the page: Esc there
+  // still belongs to the open drawer. Focus anywhere else (a field, a menu, a dialog) keeps its own Esc.
+  useEffect(() => {
+    if (!opened) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const focused = document.activeElement;
+      if (focused !== null && focused !== document.body) return;
+      onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [opened, onClose]);
 
   useEffect(() => {
     if (!opened || !closeOnClickOutside) return;
