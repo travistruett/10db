@@ -181,7 +181,7 @@ export async function judgeNewTests(
   input: JudgeNewTestsInput,
 ): Promise<TestValueFlag[]> {
   try {
-    if (!(await deps.judge.ready(JudgeDecision.TestValue))) return [];
+    if (!(await deps.judge.ready(JudgeDecision.TestValue, { taskId: input.taskId }))) return [];
     const cases = await collectCases(deps.git, input);
     const flags: TestValueFlag[] = [];
     for (let at = 0; at < cases.length; at += PARALLEL) {
