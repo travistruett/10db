@@ -1,5 +1,5 @@
 import type { AccountDto } from '@10db/contracts';
-import { Alert, Button, Divider, Group, Paper, Stack, Title } from '@mantine/core';
+import { Alert, Button, Divider, Group, Paper, Stack } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import type { UseQueryResult } from '@tanstack/react-query';
@@ -34,6 +34,7 @@ import {
 } from './overview-rows';
 import { MARK_OF_KIND } from './row-mark';
 import { SettingsSectionKey } from './sections';
+import { SectionHeading } from './section-heading';
 
 interface Shell {
   readonly id: string;
@@ -248,7 +249,7 @@ export function OverviewSection() {
         if (inGroup.length === 0) return null;
         return (
           <Stack key={group} gap="xs">
-            <Title order={5}>{GROUP_TITLE[group]}</Title>
+            <SectionHeading title={GROUP_TITLE[group]} />
             <Paper withBorder radius="md" style={{ overflow: 'hidden' }}>
               {inGroup.map((row, i) => (
                 <Fragment key={row.id}>

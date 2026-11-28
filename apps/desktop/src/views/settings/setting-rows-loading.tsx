@@ -1,6 +1,11 @@
 import { Box, Divider, Group, Paper, Skeleton, Stack } from '@mantine/core';
 import { SKELETON_ON_PANEL, useLoadingDelayElapsed } from '../../shell/page-loading';
-import { SETTING_CONTROL_WIDTH, SETTING_TEXT_MIN_WIDTH, SettingsCardHeading } from './setting-row';
+import {
+  SETTING_CONTROL_MIN_WIDTH,
+  SETTING_CONTROL_WIDTH,
+  SETTING_TEXT_MIN_WIDTH,
+  SettingsCardHeading,
+} from './setting-row';
 
 /**
  * What a card of `SettingRow`s shows while its values load: the same bordered card, the same padding and
@@ -36,9 +41,11 @@ export function SettingRowsLoading({
                 </Stack>
                 <Skeleton
                   height={36}
-                  width={SETTING_CONTROL_WIDTH}
                   radius="sm"
-                  style={{ flex: 'none' }}
+                  style={{
+                    flex: `0 1 ${String(SETTING_CONTROL_WIDTH)}px`,
+                    minWidth: SETTING_CONTROL_MIN_WIDTH,
+                  }}
                 />
               </Group>
             </Box>

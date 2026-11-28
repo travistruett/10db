@@ -1,7 +1,7 @@
-import { Box, Divider, Group, Paper, Stack, Text, Title } from '@mantine/core';
+import { Box, Divider, Group, Paper, Stack, Text } from '@mantine/core';
 import { Children, Fragment, useEffect, useId, useRef, type ReactNode } from 'react';
 import { HelpHint } from './help-hint';
-import { HeadingRow } from './section-heading';
+import { SectionHeading } from './section-heading';
 
 /** A settings card's heading: its title, an optional info button and one dimmed line, and the card's action. */
 export function SettingsCardHeading({
@@ -16,15 +16,11 @@ export function SettingsCardHeading({
   readonly action?: ReactNode;
 }) {
   return (
-    <HeadingRow
-      line={description === undefined || description === '' ? undefined : description}
-      action={action}
-      heading={
-        <Group gap={4} wrap="nowrap">
-          <Title order={4}>{title}</Title>
-          {help ? <HelpHint label={title}>{help}</HelpHint> : null}
-        </Group>
-      }
+    <SectionHeading
+      title={title}
+      {...(description === undefined || description === '' ? {} : { line: description })}
+      {...(help ? { help } : {})}
+      {...(action === undefined ? {} : { action })}
     />
   );
 }
@@ -93,6 +89,9 @@ export const SETTING_TEXT_MIN_WIDTH = 240;
 /** The width of a row's control column. */
 export const SETTING_CONTROL_WIDTH = 320;
 
+/** How far a row's control column gives way in a narrow window. */
+export const SETTING_CONTROL_MIN_WIDTH = 240;
+
 /** One setting: its name and one line on the left, its control on the right. */
 export function SettingRow({
   label,
@@ -138,7 +137,13 @@ export function SettingRow({
       ) : (
         <Group justify="space-between" wrap="nowrap" gap="xl">
           {text}
-          <Box w={SETTING_CONTROL_WIDTH} style={{ flex: 'none' }}>
+          {/* Every row in a card has the same width, so a column that gives way in a narrow window still lines up. */}
+          <Box
+            style={{
+              flex: `0 1 ${String(SETTING_CONTROL_WIDTH)}px`,
+              minWidth: SETTING_CONTROL_MIN_WIDTH,
+            }}
+          >
             {children}
           </Box>
         </Group>

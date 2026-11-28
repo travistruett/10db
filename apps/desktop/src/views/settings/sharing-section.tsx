@@ -1,5 +1,5 @@
 import type { ProjectDto, SlackChannelDto } from '@10db/contracts';
-import { Alert, Button, Group, Select, Skeleton, Stack, Switch, Text } from '@mantine/core';
+import { Alert, Button, Group, Select, Stack, Switch, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useSlackStatus } from '../../daemon/people';
 import { usePatchProject } from '../../daemon/queries';
@@ -11,6 +11,7 @@ import {
 } from '../../daemon/sign-in-queries';
 import { SettingsSectionKey } from './sections';
 import { SettingRow, SettingsCard } from './setting-row';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 
 const channelLabel = (channel: SlackChannelDto): string =>
   channel.isPrivate ? `${channel.name} (private)` : `#${channel.name}`;
@@ -52,7 +53,9 @@ function SlackPictures({ project }: { readonly project: ProjectDto }) {
   const ready = status.data !== undefined && lack === null;
   const channels = useSlackChannels(project.id, ready);
   if (sharing.data === undefined || integrations.data === undefined || status.data === undefined)
-    return <Skeleton height={120} radius="md" />;
+    return (
+      <PageLoading shape={PageLoadingShape.Cards} rows={1} label="Reading the Slack settings" />
+    );
   const current = sharing.data;
   const list = channels.data?.state === 'ok' ? channels.data.channels : [];
   const data = list.map((c) => ({ value: c.id, label: channelLabel(c) }));

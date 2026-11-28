@@ -29,6 +29,7 @@ import { PersonAnswers } from './person-answers';
 import { PersonModal } from './person-modal';
 import { StakeholderTimers } from './stakeholder-timers';
 import { RaisedPanel } from '../../../shell/raised-panel';
+import { SettingsPageHeader } from '../settings-page';
 
 /** The table's column titles, which its placeholder draws too while the people load. */
 const PEOPLE_COLUMNS = {
@@ -172,173 +173,178 @@ export function PeopleSection() {
   const onlyYou = people.isSuccess && rows.every((p) => p.isBuilder);
 
   return (
-    <Stack gap="xl">
-      <Stack gap="sm">
-        <Group justify="space-between" align="flex-end" wrap="nowrap">
-          <Text c="dimmed" size="sm">
-            Who answers your projects' questions, and how 10db reaches each one.
-          </Text>
-          {onlyYou ? null : (
-            <Button
-              onClick={() => {
-                setEditing(null);
-              }}
-            >
-              Add Person
-            </Button>
-          )}
-        </Group>
-        <ConnectSlack />
-        {people.isPending ? (
-          <PageLoading
-            shape={PageLoadingShape.Table}
-            label="Loading people"
-            columns={Object.values(PEOPLE_COLUMNS)}
-            minWidth={PEOPLE_MIN_WIDTH}
-            rows={3}
-            cellLines={2}
-            verticalSpacing="sm"
-            horizontalSpacing="md"
-          />
-        ) : null}
-        {people.isError ? (
-          <Alert color="red" title="Couldn't load people">
-            {people.error.message}
-          </Alert>
-        ) : null}
-        {people.isSuccess ? (
-          <RaisedPanel>
-            <Table.ScrollContainer minWidth={PEOPLE_MIN_WIDTH}>
-              <Table verticalSpacing="sm" horizontalSpacing="md">
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>{PEOPLE_COLUMNS.name.title}</Table.Th>
-                    <Table.Th>{PEOPLE_COLUMNS.howSent.title}</Table.Th>
-                    <Table.Th>{PEOPLE_COLUMNS.answers.title}</Table.Th>
-                    <Table.Th aria-label="Actions" />
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {rows.map((person) => (
-                    <Table.Tr key={person.id}>
-                      <Table.Td>
-                        <Group gap="sm" wrap="nowrap">
-                          <Initials person={person} />
-                          <Stack gap={4} align="flex-start">
-                            <Text size="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>
-                              {rowName(person)}
-                            </Text>
-                            <Group gap={4} wrap="nowrap">
-                              <ReachChip person={person} />
-                            </Group>
-                          </Stack>
-                        </Group>
-                      </Table.Td>
-                      <Table.Td style={{ whiteSpace: 'nowrap' }}>{howSent(person)}</Table.Td>
-                      <Table.Td>
-                        <PersonAnswers person={person} />
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap={4} justify="flex-end" wrap="nowrap">
-                          <Tooltip label="Edit" withArrow>
-                            <ActionIcon
-                              variant="subtle"
-                              color="gray"
-                              aria-label={`Edit ${person.name}`}
-                              onClick={() => {
-                                setEditing(person);
-                              }}
-                            >
-                              <IconPencil size={16} stroke={1.5} />
-                            </ActionIcon>
-                          </Tooltip>
-                          {person.isBuilder ? null : (
-                            <Tooltip label="Remove" withArrow>
+    <>
+      <SettingsPageHeader
+        sectionKey={SettingsSectionKey.People}
+        {...(onlyYou
+          ? {}
+          : {
+              actions: (
+                <Button
+                  onClick={() => {
+                    setEditing(null);
+                  }}
+                >
+                  Add Person
+                </Button>
+              ),
+            })}
+      />
+      <Stack gap="xl">
+        <Stack gap="sm">
+          <ConnectSlack />
+          {people.isPending ? (
+            <PageLoading
+              shape={PageLoadingShape.Table}
+              label="Loading people"
+              columns={Object.values(PEOPLE_COLUMNS)}
+              minWidth={PEOPLE_MIN_WIDTH}
+              rows={3}
+              cellLines={2}
+              verticalSpacing="sm"
+              horizontalSpacing="md"
+            />
+          ) : null}
+          {people.isError ? (
+            <Alert color="red" title="Couldn't load people">
+              {people.error.message}
+            </Alert>
+          ) : null}
+          {people.isSuccess ? (
+            <RaisedPanel>
+              <Table.ScrollContainer minWidth={PEOPLE_MIN_WIDTH}>
+                <Table verticalSpacing="sm" horizontalSpacing="md">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>{PEOPLE_COLUMNS.name.title}</Table.Th>
+                      <Table.Th>{PEOPLE_COLUMNS.howSent.title}</Table.Th>
+                      <Table.Th>{PEOPLE_COLUMNS.answers.title}</Table.Th>
+                      <Table.Th aria-label="Actions" />
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {rows.map((person) => (
+                      <Table.Tr key={person.id}>
+                        <Table.Td>
+                          <Group gap="sm" wrap="nowrap">
+                            <Initials person={person} />
+                            <Stack gap={4} align="flex-start">
+                              <Text size="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>
+                                {rowName(person)}
+                              </Text>
+                              <Group gap={4} wrap="nowrap">
+                                <ReachChip person={person} />
+                              </Group>
+                            </Stack>
+                          </Group>
+                        </Table.Td>
+                        <Table.Td style={{ whiteSpace: 'nowrap' }}>{howSent(person)}</Table.Td>
+                        <Table.Td>
+                          <PersonAnswers person={person} />
+                        </Table.Td>
+                        <Table.Td>
+                          <Group gap={4} justify="flex-end" wrap="nowrap">
+                            <Tooltip label="Edit" withArrow>
                               <ActionIcon
                                 variant="subtle"
-                                color="red"
-                                aria-label={`Remove ${person.name}`}
-                                loading={remove.isPending && remove.variables === person.id}
+                                color="gray"
+                                aria-label={`Edit ${person.name}`}
                                 onClick={() => {
-                                  setRemoving(person);
+                                  setEditing(person);
                                 }}
                               >
-                                <IconTrash size={16} stroke={1.5} />
+                                <IconPencil size={16} stroke={1.5} />
                               </ActionIcon>
                             </Tooltip>
-                          )}
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            </Table.ScrollContainer>
-          </RaisedPanel>
-        ) : null}
-        {onlyYou ? (
-          <EmptyState
-            icon={IconUsers}
-            title="Only you answer questions"
-            action={{
-              label: 'Add Person',
-              icon: IconUserPlus,
-              onClick: () => {
-                setEditing(null);
-              },
-            }}
-          >
-            Add a teammate, and 10db can route a project&apos;s product, design or legal questions
-            to them.
-          </EmptyState>
-        ) : null}
-      </Stack>
-      {remove.isError ? (
-        <Alert color="red" variant="light">
-          {remove.error.message}
-        </Alert>
-      ) : null}
-      <Modal
-        opened={removing !== null}
-        onClose={() => {
-          setRemoving(null);
-        }}
-        title={`Remove ${removing?.name ?? ''}?`}
-      >
-        <Stack gap="md">
-          <Text size="sm">
-            Their Slack contact is deleted. Questions already sent to them stay in the Waiting tab.
-          </Text>
-          <Group justify="flex-end">
-            <Button
-              variant="default"
-              onClick={() => {
-                setRemoving(null);
+                            {person.isBuilder ? null : (
+                              <Tooltip label="Remove" withArrow>
+                                <ActionIcon
+                                  variant="subtle"
+                                  color="red"
+                                  aria-label={`Remove ${person.name}`}
+                                  loading={remove.isPending && remove.variables === person.id}
+                                  onClick={() => {
+                                    setRemoving(person);
+                                  }}
+                                >
+                                  <IconTrash size={16} stroke={1.5} />
+                                </ActionIcon>
+                              </Tooltip>
+                            )}
+                          </Group>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </Table.ScrollContainer>
+            </RaisedPanel>
+          ) : null}
+          {onlyYou ? (
+            <EmptyState
+              icon={IconUsers}
+              title="Only you answer questions"
+              action={{
+                label: 'Add Person',
+                icon: IconUserPlus,
+                onClick: () => {
+                  setEditing(null);
+                },
               }}
             >
-              Cancel
-            </Button>
-            <Button
-              color="red"
-              onClick={() => {
-                if (removing) remove.mutate(removing.id);
-                setRemoving(null);
-              }}
-            >
-              Remove Person
-            </Button>
-          </Group>
+              Add a teammate, and 10db can route a project&apos;s product, design or legal questions
+              to them.
+            </EmptyState>
+          ) : null}
         </Stack>
-      </Modal>
-      <StakeholderTimers />
-      <PersonModal
-        person={editing ?? null}
-        people={people.data ?? []}
-        opened={editing !== undefined}
-        onClose={() => {
-          setEditing(undefined);
-        }}
-      />
-    </Stack>
+        {remove.isError ? (
+          <Alert color="red" variant="light">
+            {remove.error.message}
+          </Alert>
+        ) : null}
+        <Modal
+          opened={removing !== null}
+          onClose={() => {
+            setRemoving(null);
+          }}
+          title={`Remove ${removing?.name ?? ''}?`}
+        >
+          <Stack gap="md">
+            <Text size="sm">
+              Their Slack contact is deleted. Questions already sent to them stay in the Waiting
+              tab.
+            </Text>
+            <Group justify="flex-end">
+              <Button
+                variant="default"
+                onClick={() => {
+                  setRemoving(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                color="red"
+                onClick={() => {
+                  if (removing) remove.mutate(removing.id);
+                  setRemoving(null);
+                }}
+              >
+                Remove Person
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+        <StakeholderTimers />
+        <PersonModal
+          person={editing ?? null}
+          people={people.data ?? []}
+          opened={editing !== undefined}
+          onClose={() => {
+            setEditing(undefined);
+          }}
+        />
+      </Stack>
+    </>
   );
 }

@@ -1,0 +1,58 @@
+/* One step: its number on a thread that runs down to the next, its words, then its picture. */
+.step {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 188px) minmax(0, 1fr);
+  column-gap: var(--mantine-spacing-md);
+  align-items: start;
+}
+
+.marker {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+}
+
+/* The thread from one step's number to the next, through the gap between them. */
+.marker::after {
+  content: '';
+  position: absolute;
+  top: 28px;
+  bottom: calc(-1 * var(--mantine-spacing-lg) + 6px);
+  left: 50%;
+  width: 1px;
+  background: var(--mantine-color-default-border);
+}
+
+.step:last-child .marker::after {
+  display: none;
+}
+
+.number {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--mantine-color-default-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--mantine-color-dimmed);
+}
+
+/* A picture is a still of the real interface: set apart on the panel tone, and never a thing to press. */
+.picture {
+  background: var(--tendb-color-panel);
+  border-radius: var(--mantine-radius-md);
+  padding: 10px 12px;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.example {
+  border-left: 2px solid var(--mantine-color-default-border);
+  padding: 2px 0 2px var(--mantine-spacing-sm);
+}

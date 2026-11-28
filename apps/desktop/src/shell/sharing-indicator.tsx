@@ -46,6 +46,9 @@ const STEP_BROKEN: Readonly<Record<SharingStep, string>> = {
   [SharingStep.Shared]: 'the share stopped',
 };
 
+/** Remote access's mark: the title row's indicator, the Settings nav and the page's own pictures all draw it. */
+export const SharingIcon = IconDeviceMobile;
+
 const ICON_COLOR: Readonly<Record<SharingState, string>> = {
   [SharingState.Ready]: 'var(--mantine-color-green-6)',
   [SharingState.Paused]: 'var(--mantine-color-orange-6)',
@@ -139,7 +142,7 @@ export function SharingIndicator() {
         >
           <HoverCard.Target>
             <ActionIcon variant="subtle" color="gray" aria-label={name}>
-              <IconDeviceMobile size={16} stroke={1.8} color={ICON_COLOR[status.state]} />
+              <SharingIcon size={16} stroke={1.8} color={ICON_COLOR[status.state]} />
             </ActionIcon>
           </HoverCard.Target>
         </Box>

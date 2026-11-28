@@ -1,10 +1,11 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Button, Group, Skeleton, Switch, Text, Textarea } from '@mantine/core';
+import { Button, Group, Switch, Text, Textarea } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useProjectIntegrations, useSetLinearReporter } from '../../daemon/sign-in-queries';
 import { SettingsSectionKey } from './sections';
 import { useDraft } from './settings-drafts';
 import { SettingRow, SettingsCard } from './setting-row';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 
 /**
  * Settings › This Project › Linear: whether a task made from a Linear issue keeps the issue updated, and the
@@ -27,7 +28,10 @@ export function ProjectLinear({ project }: { readonly project: ProjectDto }) {
     );
   const linear = integrations.data?.linear;
   const value = draft.value;
-  if (linear === undefined || value === undefined) return <Skeleton height={160} radius="md" />;
+  if (linear === undefined || value === undefined)
+    return (
+      <PageLoading shape={PageLoadingShape.Cards} rows={1} label="Reading the Linear settings" />
+    );
   return (
     <SettingsCard
       title="Issue Updates"

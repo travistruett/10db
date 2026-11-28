@@ -1,25 +1,23 @@
-import { ActionIcon, Button, Group, SegmentedControl, Stack, Text, Tooltip } from '@mantine/core';
-import { TitleRow } from '../../shell/title-row';
+import { ActionIcon, Button, Group, Stack, Text, Tooltip } from '@mantine/core';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { IconCpu, IconPlus, IconRefresh } from '@tabler/icons-react';
 import { EmptyState } from '../../shell/empty-state';
 import { useJudgeStatus } from '../../daemon/judge-queries';
 import { useRefreshModels } from '../../daemon/model-queries';
+import { PageTabs, type PageTab } from '../../shell/page-intro';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { AgentModelsView } from './agent-models-view';
 import { DataSources, DataSourcesWarning } from './data-sources';
 import { DecisionModelsView } from './decision-models-view';
 import { ModelClass, settingsSearch } from './focus-target';
 import { SettingsSectionKey } from './sections';
+import { SettingsPageHeader } from './settings-page';
 import { useViewedAccount, ViewedAccountSelect } from './viewed-account';
 
-const CLASS_OPTIONS = [
+const CLASS_TABS: readonly PageTab<ModelClass>[] = [
   { value: ModelClass.Agent, label: 'Language Models' },
   { value: ModelClass.Decision, label: 'Decision Models' },
 ];
-
-const isModelClass = (value: string): value is ModelClass =>
-  value === ModelClass.Agent || value === ModelClass.Decision;
 
 /** The account the decision models run on, with a link to where it is picked. */
 function DecisionBilling() {
@@ -29,7 +27,7 @@ function DecisionBilling() {
   if (account === null) return null;
   return (
     <Group gap="xs" wrap="nowrap">
-      <Text size="sm" c="dimmed">
+      <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
         Account: {account.label}
       </Text>
       <Button
@@ -51,9 +49,9 @@ function DecisionBilling() {
 }
 
 /**
- * Settings › Models: what the Playbook and the decisions choose from. A title with the data sources and a
- * refresh, then Language Models or Decision Models as the address says, each with the account that bills it.
- * A failure of one class hides only that class.
+ * Settings › Models: what the Playbook and the decisions choose from. Its header's tabs are Language Models and
+ * Decision Models, kept in the address; at their right sit the account that bills the open class, the data
+ * sources and a refresh. A failure of one class hides only that class.
  */
 export function ModelsSection() {
   const viewed = useViewedAccount();
@@ -63,19 +61,34 @@ export function ModelsSection() {
   const refresh = useRefreshModels();
 
   const header = (
-    <TitleRow
-      title="Models"
+    <SettingsPageHeader
+      sectionKey={SettingsSectionKey.Models}
+      tabs={
+        <PageTabs
+          label="Kind of model"
+          tabs={CLASS_TABS}
+          value={modelClass}
+          onChange={(value) => {
+            void navigate({
+              to: '/settings/$section',
+              params: { section: SettingsSectionKey.Models },
+              search: (previous) => ({ ...previous, class: value }),
+              replace: true,
+            });
+          }}
+        />
+      }
       actions={
         <>
-          {refresh.isError ? (
-            <Text size="xs" c="red" role="alert">
-              {refresh.error.message}
-            </Text>
-          ) : null}
+          {modelClass === ModelClass.Agent ? (
+            <ViewedAccountSelect viewed={viewed} width={200} />
+          ) : (
+            <DecisionBilling />
+          )}
           <DataSources />
           <Tooltip
             label="Fetch prices from models.dev and re-read every account's model list"
-            position="left"
+            position="bottom-end"
           >
             <ActionIcon
               variant="default"
@@ -142,28 +155,11 @@ export function ModelsSection() {
     <Stack gap="xl">
       {header}
       <DataSourcesWarning />
-      {/* The class switch and what bills that class, on one line above the page it heads. */}
-      <Group justify="space-between" align="center" wrap="nowrap">
-        <SegmentedControl
-          aria-label="Kind of model"
-          data={CLASS_OPTIONS}
-          value={modelClass}
-          onChange={(value) => {
-            if (isModelClass(value))
-              void navigate({
-                to: '/settings/$section',
-                params: { section: SettingsSectionKey.Models },
-                search: (previous) => ({ ...previous, class: value }),
-                replace: true,
-              });
-          }}
-        />
-        {modelClass === ModelClass.Agent ? (
-          <ViewedAccountSelect viewed={viewed} />
-        ) : (
-          <DecisionBilling />
-        )}
-      </Group>
+      {refresh.isError ? (
+        <Text size="xs" c="red" role="alert">
+          {refresh.error.message}
+        </Text>
+      ) : null}
       {modelClass === ModelClass.Agent ? agentBody() : <DecisionModelsView />}
     </Stack>
   );

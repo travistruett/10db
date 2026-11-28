@@ -4,7 +4,7 @@ import {
   type InstalledPluginDto,
   type TrustSwitches,
 } from '@10db/contracts';
-import { Alert, Button, Divider, Group, Paper, Stack, Switch, Text, Title } from '@mantine/core';
+import { Alert, Button, Divider, Group, Paper, Stack, Switch, Text } from '@mantine/core';
 import { Fragment, useId } from 'react';
 import { useSetTrust, useTrust } from '../../daemon/trust-queries';
 import { HelpHint, HelpText } from './help-hint';
@@ -17,6 +17,11 @@ import {
   TENDB_NOT_READY_LABEL,
   TRUST_ROWS,
 } from './trust-rows';
+import { usePageGuide } from '../../shell/page-guide';
+import { SectionHeading } from './section-heading';
+import { SettingsSectionKey } from './sections';
+import { SettingsPageHeader } from './settings-page';
+import { TrustGuide, TRUST_GUIDE } from './trust-guide';
 
 /** A row's one-line description, with the note on each agent behind an info button. */
 export function TrustRowText({
@@ -93,20 +98,17 @@ function JudgeList({
   const headingId = useId();
   return (
     <Stack gap="xs" role="region" aria-labelledby={headingId}>
-      <Stack gap={2}>
-        <Group gap={4} wrap="nowrap">
-          <Title order={5} id={headingId}>
-            Judge
-          </Title>
-          <HelpHint label="Judge">
+      <SectionHeading
+        id={headingId}
+        title="Judge"
+        line="What decides a new task's routine calls on each account."
+        help={
+          <>
             <HelpText>{JUDGE_LIST_NOTE}</HelpText>
             <HelpText>{NATIVE_JUDGE_NOTE}</HelpText>
-          </HelpHint>
-        </Group>
-        <Text size="xs" c="dimmed">
-          What decides a new task's routine calls on each account.
-        </Text>
-      </Stack>
+          </>
+        }
+      />
       <Paper withBorder radius="md" component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
         {judges.map((row, i) => (
           <Fragment key={row.accountId}>
@@ -167,92 +169,108 @@ export function TrustSection() {
   const set = useSetTrust();
   const switches = trust.data?.switches;
   const plugins = trust.data?.plugins ?? [];
-  if (trust.isError) return <Alert color="red">{trust.error.message}</Alert>;
+  const guide = usePageGuide(TRUST_GUIDE);
+  const header = (
+    <>
+      <SettingsPageHeader sectionKey={SettingsSectionKey.Trust} guide={guide.opener} />
+      <TrustGuide guide={guide} project={null} />
+    </>
+  );
+  if (trust.isError)
+    return (
+      <>
+        {header}
+        <Alert color="red">{trust.error.message}</Alert>
+      </>
+    );
   return (
-    <Stack gap="xl">
-      <SettingsCard>
-        {TRUST_ROWS.map((row) => (
-          <SettingRow
-            key={row.key}
-            label={row.label}
-            description={
-              <TrustRowText
-                label={row.label}
-                description={row.description}
-                providers={row.providers}
-                whileOn={switches?.[row.key] === true ? row.whileOn : null}
-              />
-            }
-          >
-            <Group justify="flex-end">
-              <Switch
-                aria-label={row.label}
-                checked={switches?.[row.key] ?? false}
-                disabled={switches === undefined}
-                onChange={(e) => {
-                  const on = e.currentTarget.checked;
-                  set.mutate((saved) => ({ ...saved, [row.key]: on }));
-                }}
-              />
-            </Group>
-          </SettingRow>
-        ))}
-      </SettingsCard>
-      <SettingsCard
-        title="Your Plugins"
-        description="Each follows Claude Code until you switch it here."
-      >
-        {switches !== undefined && plugins.length === 0 ? (
-          <Text size="sm" c="dimmed" px="md" py="sm">
-            Claude Code lists no plugins installed for you.
-          </Text>
-        ) : null}
-        {switches === undefined
-          ? null
-          : plugins.map((plugin) => (
-              <SettingRow
-                key={plugin.id}
-                label={plugin.id}
-                description={<PluginText plugin={plugin} switches={switches} />}
-              >
-                <Group justify="flex-end" gap="xs" wrap="nowrap">
-                  {switches.plugins[plugin.id] === undefined ? null : (
-                    <Button
-                      variant="subtle"
-                      size="compact-xs"
-                      aria-label={`Follow Claude Code: ${plugin.id}`}
+    <>
+      {header}
+      <Stack gap="xl">
+        <SettingsCard>
+          {TRUST_ROWS.map((row) => (
+            <SettingRow
+              key={row.key}
+              label={row.label}
+              description={
+                <TrustRowText
+                  label={row.label}
+                  description={row.description}
+                  providers={row.providers}
+                  whileOn={switches?.[row.key] === true ? row.whileOn : null}
+                />
+              }
+            >
+              <Group justify="flex-end">
+                <Switch
+                  aria-label={row.label}
+                  checked={switches?.[row.key] ?? false}
+                  disabled={switches === undefined}
+                  onChange={(e) => {
+                    const on = e.currentTarget.checked;
+                    set.mutate((saved) => ({ ...saved, [row.key]: on }));
+                  }}
+                />
+              </Group>
+            </SettingRow>
+          ))}
+        </SettingsCard>
+        <SettingsCard
+          title="Your Plugins"
+          description="Each follows Claude Code until you switch it here."
+        >
+          {switches !== undefined && plugins.length === 0 ? (
+            <Text size="sm" c="dimmed" px="md" py="sm">
+              Claude Code lists no plugins installed for you.
+            </Text>
+          ) : null}
+          {switches === undefined
+            ? null
+            : plugins.map((plugin) => (
+                <SettingRow
+                  key={plugin.id}
+                  label={plugin.id}
+                  description={<PluginText plugin={plugin} switches={switches} />}
+                >
+                  <Group justify="flex-end" gap="xs" wrap="nowrap">
+                    {switches.plugins[plugin.id] === undefined ? null : (
+                      <Button
+                        variant="subtle"
+                        size="compact-xs"
+                        aria-label={`Follow Claude Code: ${plugin.id}`}
+                        disabled={!switches.yourPlugins}
+                        onClick={() => {
+                          set.mutate((saved) => ({
+                            ...saved,
+                            plugins: without(saved.plugins, plugin.id),
+                          }));
+                        }}
+                      >
+                        Follow Claude Code
+                      </Button>
+                    )}
+                    <Switch
+                      aria-label={plugin.id}
+                      checked={plugin.on}
+                      // With Your plugins off no plugin comes along, whatever its own switch says.
                       disabled={!switches.yourPlugins}
-                      onClick={() => {
+                      onChange={(e) => {
+                        const on = e.currentTarget.checked;
                         set.mutate((saved) => ({
                           ...saved,
-                          plugins: without(saved.plugins, plugin.id),
+                          plugins: { ...saved.plugins, [plugin.id]: on },
                         }));
                       }}
-                    >
-                      Follow Claude Code
-                    </Button>
-                  )}
-                  <Switch
-                    aria-label={plugin.id}
-                    checked={plugin.on}
-                    // With Your plugins off no plugin comes along, whatever its own switch says.
-                    disabled={!switches.yourPlugins}
-                    onChange={(e) => {
-                      const on = e.currentTarget.checked;
-                      set.mutate((saved) => ({
-                        ...saved,
-                        plugins: { ...saved.plugins, [plugin.id]: on },
-                      }));
-                    }}
-                  />
-                </Group>
-              </SettingRow>
-            ))}
-      </SettingsCard>
-      <YourMcpServers />
-      {trust.data === undefined ? null : (
-        <JudgeList judges={trust.data.judges} tendbReady={trust.data.tendbReady} />
-      )}
-    </Stack>
+                    />
+                  </Group>
+                </SettingRow>
+              ))}
+        </SettingsCard>
+        <YourMcpServers />
+        {trust.data === undefined ? null : (
+          <JudgeList judges={trust.data.judges} tendbReady={trust.data.tendbReady} />
+        )}
+      </Stack>
+    </>
   );
 }

@@ -125,7 +125,7 @@ function StatusRow({
   );
 }
 
-/** Settings › Agent Skill: what the 10db-task skill lets an agent do, its switch, and where it is linked. */
+/** Settings › Agent Skill: the 10db-task skill's switch, what it lets an agent do in its help, and where it is linked. */
 export function AgentSkillSection() {
   const query = useAgentSkill();
   const set = useSetAgentSkill();
@@ -133,21 +133,23 @@ export function AgentSkillSection() {
   const installable = status?.installable === true;
   return (
     <Stack gap="xl">
-      <Stack gap="xs">
-        <Text size="sm" c="dimmed">
-          The 10db-task skill lets a Claude Code or Codex session in any repo work with 10db:
-        </Text>
-        <Stack gap={6}>
-          {USES.map(({ icon: Icon, text }) => (
-            <Group key={text} gap="xs" wrap="nowrap">
-              <Icon size={16} stroke={1.5} aria-hidden style={{ flex: 'none' }} />
-              <Text size="sm">{text}</Text>
-            </Group>
-          ))}
-        </Stack>
-      </Stack>
       <SettingsCard>
-        <SettingRow label={LABEL} description={DESCRIPTION} help={<HelpText>{HELP}</HelpText>}>
+        <SettingRow
+          label={LABEL}
+          description={DESCRIPTION}
+          help={
+            <>
+              <HelpText>With it, a session can:</HelpText>
+              {USES.map(({ icon: Icon, text }) => (
+                <Group key={text} gap="xs" wrap="nowrap">
+                  <Icon size={14} stroke={1.5} aria-hidden style={{ flex: 'none' }} />
+                  <HelpText>{text}</HelpText>
+                </Group>
+              ))}
+              <HelpText>{HELP}</HelpText>
+            </>
+          }
+        >
           <Group justify="flex-end">
             <Switch
               aria-label={LABEL}

@@ -79,7 +79,9 @@ favors legibility and calm over decoration.
     `<Paper variant="raised">` (`paper.module.css`). A page's table or chart sits in `RaisedPanel`
     (`shell/raised-panel.tsx`), flush with the table drawn transparent (`DataTable`'s
     `backgroundColor="transparent"`, no `withTableBorder`) or `padded` for a chart; a table gets its depth
-    from the panel, never from a global `Table` selector. Factory's project cards are accordion items, not
+    from the panel, never from a global `Table` selector. A chart's own filters sit on its panel's top edge,
+    a select at the left and a mode at the right (Models' Rigor and Every Effort | Best Value Only), apart
+    from the page's toolbar and its section heading. Factory's project cards are accordion items, not
     `Paper`, so their stylesheet reads the same two tokens.
 - **Card state:** the card's border takes the status color (blue running, yellow waiting on you, orange
   paused, red failed, green done); a queued card's border is its own tone, so it shows none. No fill, no left stripe, no pulsing. A
@@ -176,6 +178,15 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   `docs/architecture/decisions/2026-11-13-agent-output-renders-as-hardened-markdown.md`, with a Selenized Shiki
   theme for code. **Tool calls** are rows, not cards; cards stay for what the builder answers.
 - **Keys:** ⌘↩ sends in every composer; on Sessions, ⌘T (anywhere), ⌘W, ⌘⇧T, ⌘1–9, ⌘⇧[ ], ⌃Tab, ⌘J, ⌘⇧D (Changes) and Esc. A session's work bar answers 1 (Here) and 2 (On a New Branch).
+- **Teaching:** a page never opens with an intro block or a standing banner. It says what it is for in its
+  byline; why and how live in a guide (`PageGuide`, `apps/desktop/src/shell/page-guide.tsx`), a centred modal
+  the builder opens from the byline, the page's empty state or a hover card, and that never opens by itself.
+  A guide is one sentence, up to three numbered steps each with a still of the real interface built from the
+  app's own components, and one line on scope; it fits 1200 × 800 without scrolling and holds no links out.
+  An empty state teaches the first time: its action, then the guide as its second button. A control whose
+  options lead to different outcomes gets one hover card on its label or column header (`HelpHint` with
+  `options`), never one per option: a bold title, one line per option with a small still where it helps, and
+  the guide as its last line. It opens after 300 ms, on focus and on a tap.
 - **Alerts:** an `Alert` is for something the builder must act on, such as a missing tool or a
   refused key. A condition that clears on its own, such as a rate-limited sync, is a dimmed
   `xs` line with an icon in the header of the view it affects.
@@ -203,9 +214,9 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   light `Button` with an icon. The action is never a link inside the sentence.
 - **Segmented controls:** every `SegmentedControl` takes one look from the theme (`segmented-control.module.css`):
   a track in the window's base tone, an indicator one tone up, dimmed labels and a bright, semibold active one,
-  so the choice reads as a control on any surface. A switch that decides what a whole page shows (Models'
-  Agent Models | Decision Models) heads the page in a bordered band in the base tone, with its one line and its
-  account.
+  so the choice reads as a control on any surface. It is only for a value: a setting, a table cell or a chart's
+  mode. It never moves between pages or tabs; those are underlined tabs in the page's `PageIntro` toolbar (Models'
+  Language Models | Decision Models, kept in the address).
 - **Buttons:** one filled primary per group. A standalone secondary action is `variant="default"`
   (bordered, neutral); `subtle` only inside dense rows and menus; never `outline` beside a filled
   primary, where its colored border competes with it.
@@ -245,11 +256,15 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
 - **Page header:** a page has one header, the frame's title row (`TitleRow`,
   `apps/desktop/src/shell/title-row.tsx`), at the top of the content column on the content's own tone: the title
   at 14 px / 600 (a title can itself be the switcher, as a session's is), an optional dim meta line, then the actions at the right (28 px
-  controls, `default` or one `primary`, then ⋯). Nothing in the content repeats it: no second title or byline that
-  names the same thing and no heading larger than the title. Under it, at the top of the content, `PageIntro`
-  (`apps/desktop/src/shell/page-intro.tsx`) holds at most one dim intro line (13 px, a sentence) and one toolbar,
-  underlined tabs on the left and filters on the right, whose first label sits on the content's edge. A part that
-  is absent takes no space. The type scale under the title: in-content section heads 14 / 600, card and row titles
+  controls, `default` or one `primary`, then ⋯). A Settings page's title row holds only its title, the project's
+  badge on a This Project page, and the frame's global indicators: no select, filter, refresh, help or error
+  text (`views/settings/settings-page.tsx`). Nothing in the content repeats the title: no second title or
+  byline that names the same thing and no heading larger than the title. Under it, at the top of the content,
+  `PageIntro` (`apps/desktop/src/shell/page-intro.tsx`) holds at most one dim byline (13 px, one line, about 90
+  characters) that may end in a quiet "How X works" link to the page's guide, and the page's controls at the
+  right: page-level selects, then utilities as icons, then its one primary action. With tabs (`PageTabs`,
+  underlined, on the left) the controls sit on the tabs' row instead, over one hairline under the whole row.
+  A part that is absent takes no space. The type scale under the title: in-content section heads 14 / 600, card and row titles
   14 / 500, a drawer's title 16 / 600, body 14, meta 12. A split view's pane may have a 13 px / 600 label row with
   its own actions. Workspaces, where the content is the work, keep compact headers of their own: an open Workbench pass.
   Sessions' title row is the frame's: the session's title, which is the switcher (the title and a ⌄ as one quiet

@@ -112,7 +112,8 @@ Read the ones for what you touch, and write a view's notes there, not here. This
 
 - The window's frame is `src/shell/app-frame.tsx` (`src/shell/AGENTS.md`): a sidebar (a 200 px labelled rail, or 76 px icons only, and an
   optional panel the builder can resize (340 px until dragged), all bg1) beside a content column (bg0) with its own 44 px title row. A view draws its title and actions
-  into the title row with `TitleRow`, and what sits under it at the top of its content with `PageIntro` (an
+  into the title row with `TitleRow` (a Settings page only its title and project badge, through
+  `SettingsPageHeader`), and what sits under it at the top of its content with `PageIntro` (an
   optional one-line byline cut to one line with its text as a tooltip, an optional toolbar of tabs and filters);
   workspaces keep compact headers.
   `src/shell/page-loading.tsx` is what a page, panel, drawer or modal body shows while its data loads: animated
