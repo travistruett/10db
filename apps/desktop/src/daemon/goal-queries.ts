@@ -1,4 +1,4 @@
-import { GoalDigestDto, GoalListDto, type GoalId, type ProjectId } from '@10db/contracts';
+import { GoalDigestDto, GoalDto, GoalListDto, type GoalId, type ProjectId } from '@10db/contracts';
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { readJson, type DaemonClient } from './client';
 import { useDaemon } from './provider';
@@ -37,6 +37,19 @@ export function useGoals(projectId: ProjectId | null) {
           )
         : { goals: [], ungrouped: null },
     enabled: projectId !== null,
+  });
+}
+
+/** One goal on its own, for a page that knows only the goal's id; its project's list holds the rest. */
+export function useGoal(goalId: GoalId | null) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: ['goals', 'one', goalId],
+    queryFn: async () =>
+      goalId === null
+        ? null
+        : readJson(await client.goals[':goalId'].$get({ param: { goalId } }), GoalDto),
+    enabled: goalId !== null,
   });
 }
 

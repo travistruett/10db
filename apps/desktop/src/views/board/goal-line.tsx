@@ -30,15 +30,15 @@ interface GoalLineProps {
   readonly ready: number;
   /** Opens the batch sheet over this goal's ready tasks. */
   readonly onStartReady: () => void;
-  /** Goes to Factory with this goal open: its detail lives there, not on the Board. */
-  readonly onOpenFactory: () => void;
+  /** Goes to the goal's page: its detail lives there, not on the Board. */
+  readonly onOpenGoal: () => void;
 }
 
 /**
  * The one line beside the Goal select once a goal is chosen: where it stands, the action that moves
- * its ready tasks, and the way into Factory, where goals are read.
+ * its ready tasks, and the way to the goal's page, where goals are read.
  */
-export function GoalLine({ summary, ready, onStartReady, onOpenFactory }: GoalLineProps) {
+export function GoalLine({ summary, ready, onStartReady, onOpenGoal }: GoalLineProps) {
   const look = GOAL_STATUS_LOOK[summary.digest.status];
   const removal = useRemoveDraftGoalAction(summary);
   return (
@@ -64,9 +64,9 @@ export function GoalLine({ summary, ready, onStartReady, onOpenFactory }: GoalLi
         variant="subtle"
         size="compact-sm"
         rightSection={<IconChevronRight size={14} stroke={1.5} />}
-        onClick={onOpenFactory}
+        onClick={onOpenGoal}
       >
-        Open in Factory
+        Open Goal
       </Button>
       {removal.offer === 'available' ? (
         <>

@@ -1,0 +1,36 @@
+/* The goals list: one line per goal on shared columns, so status, progress and the next step read down one edge. */
+.row {
+  display: grid;
+  grid-template-columns:
+    16px minmax(240px, 3fr) 110px 40px minmax(0, 130px) minmax(0, 1.6fr)
+    136px 40px;
+  column-gap: 16px;
+  align-items: center;
+  min-height: 44px;
+  padding-inline: 16px;
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
+.row:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.head {
+  composes: row;
+  min-height: 32px;
+  border-top: 0;
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+}
+
+.head:hover {
+  background: none;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 16px 6px;
+  border-top: 1px solid var(--mantine-color-default-border);
+}

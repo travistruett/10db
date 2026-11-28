@@ -7,7 +7,7 @@ import { RelativeTime } from './relative-time';
 import { StatusDot } from './status-dot';
 import type { TaskRow } from './task-rows';
 
-/** A task's link: its drawer over Factory, with the page's own filters kept. */
+/** A task's link: its drawer over the page the list is on, with the page's own search kept. */
 function drawerSearch(row: TaskRow) {
   return <T extends object>(prev: T) => ({ ...prev, task: row.taskId });
 }
@@ -44,11 +44,11 @@ function TaskRowsLoading() {
 /**
  * The goal's tasks as one list. Each row is a state dot, the title, its state, a pull request
  * link and the last activity; only a running row adds its step, model and context. A row opens the
- * task's drawer over Factory. A failed run is retried from Needs you, and a run is cancelled from its
+ * task's drawer over the page it is on. A failed run is retried from Needs you, and a run is cancelled from its
  * card or drawer, so a row has no buttons of its own.
  */
 export function GoalTasks({ rows, loading, error }: GoalTasksProps) {
-  const navigate = useNavigate({ from: '/factory' });
+  const navigate = useNavigate();
   return (
     <Stack gap={4}>
       <Text size="xs" c="dimmed" fw={600} tt="uppercase">
@@ -78,12 +78,12 @@ export function GoalTasks({ rows, loading, error }: GoalTasksProps) {
               onClick={(event) => {
                 // The task's link and the pull request link act on their own.
                 if (event.target instanceof Element && event.target.closest('a, button')) return;
-                void navigate({ search: drawerSearch(row) });
+                void navigate({ to: '.', search: drawerSearch(row) });
               }}
             >
               <StatusDot color={row.color} />
               <Text size="sm" style={{ flex: 1, minWidth: 0 }} lineClamp={1}>
-                <Link from="/factory" to="/factory" search={drawerSearch(row)}>
+                <Link to="." search={drawerSearch(row)}>
                   {row.label}
                 </Link>
               </Text>

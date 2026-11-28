@@ -16,6 +16,7 @@ import { inboxSearch } from './views/inbox/inbox-search';
 import { InboxView } from './views/inbox/inbox-view';
 import { KnowledgeView } from './views/knowledge/knowledge-view';
 import { EvalsView } from './views/evals/evals-view';
+import { GoalsView } from './views/goals/goals-view';
 import { recordSearch } from './views/sessions/plan/record/record-tabs';
 import { useRenderMode } from './screens/render-context';
 import { PlanScreen } from './views/sessions/plan/plan-screen';
@@ -158,7 +159,7 @@ function projectFilter(search: Record<string, unknown>): { project?: ProjectId }
 const factoryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/factory',
-  // `goal` opens that goal's row, so the Board's "Open in Factory" lands on the goal expanded. `task` opens
+  // `goal` opens that goal's row, so a goal page's "Show in Factory" lands on the goal expanded. `task` opens
   // that task's drawer over the page, so Back and a shared link reopen it.
   validateSearch: (
     search: Record<string, unknown>,
@@ -220,6 +221,28 @@ const knowledgeRoute = createRoute({
     return principle.success ? { principle: principle.data } : {};
   },
   component: KnowledgePage,
+});
+function GoalsPage() {
+  const search = goalsRoute.useSearch();
+  return (
+    <ViewBoundary name="Goals">
+      <GoalsView {...search} />
+    </ViewBoundary>
+  );
+}
+const goalsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/goals',
+  // `goal` opens that goal's page, and `task` that task's drawer over it, so Back and a shared link reopen them.
+  validateSearch: (search: Record<string, unknown>): { goal?: GoalId; task?: TaskId } => {
+    const goal = GoalId.safeParse(search['goal']);
+    const task = TaskId.safeParse(search['task']);
+    return {
+      ...(goal.success ? { goal: goal.data } : {}),
+      ...(task.success ? { task: task.data } : {}),
+    };
+  },
+  component: GoalsPage,
 });
 const evalsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -291,6 +314,7 @@ const routeTree = rootRoute.addChildren([
   planScreenRoute,
   indexRoute,
   boardRoute,
+  goalsRoute,
   factoryRoute,
   recordRoute,
   inboxRoute,

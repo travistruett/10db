@@ -42,6 +42,7 @@ import { useTaskNotices } from '../../daemon/activity-queries';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { useReportUnsaved } from '../../shell/unsaved-guard';
 import { OpenPlanSession } from '../sessions/plan/open-plan-session';
+import { TaskGoalLink } from '../goals/task-goal-link';
 import { OpenTaskLink } from '../sessions/open-task-link';
 import { PlanContextDisclosure } from './plan-context-disclosure';
 import { TaskSizeLine } from '../sessions/plan/task-size-line';
@@ -353,6 +354,7 @@ export function TaskDrawer({
               {task.why}
             </Text>
           ) : null}
+          <TaskGoalLink task={task} />
         </Stack>
         <TaskNotices
           taskId={task.id}

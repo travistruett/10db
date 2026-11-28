@@ -4,11 +4,14 @@ import {
   type MilestoneCut,
   type ShapeProposalDto,
   type ShapeProposalId,
+  type GoalId,
+  type ShapeConvertResult,
   type ShapeStartCountsDto,
   type ShapeViewDto,
 } from '@10db/contracts';
 import { Anchor, Button, Checkbox, Group, Radio, ScrollArea, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
+import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useStartCounts, type ConvertShapeResult } from '../../../daemon/shape-queries';
 import { FormModal } from '../../../shell/form-modal';
@@ -49,6 +52,37 @@ function notesCount(view: ShapeViewDto, row: ShapeProposalDto): number {
   const review = rowReview(view, row);
   const questions = row.kind === 'goal' ? 0 : review.tasks.flatMap((t) => t.questions).length;
   return review.findings.length + questions;
+}
+
+/** The goals an Accept made, each with its title from the Plan's row and its task count. */
+function madeGoals(
+  result: ShapeConvertResult,
+  rows: readonly ShapeProposalDto[],
+): { readonly goalId: GoalId; readonly title: string; readonly tasks: number }[] {
+  if (result.createdNow === 0) return [];
+  return result.results.flatMap((r) => {
+    const row = rows.find((p) => p.key === r.key);
+    return r.kind === 'goal' && r.goalId !== undefined && row !== undefined
+      ? [{ goalId: r.goalId, title: proposalTitle(row), tasks: r.taskIds.length }]
+      : [];
+  });
+}
+
+/** "Board polish is a goal now, with 2 tasks. Nothing has started; find it under Goals." */
+function madeLine(
+  made: readonly { readonly title: string; readonly tasks: number }[],
+  start: ShapeConvertResult['start'],
+): string {
+  const head =
+    made.length === 1 && made[0] !== undefined
+      ? `${made[0].title} is a goal now, with ${String(made[0].tasks)} ${made[0].tasks === 1 ? 'task' : 'tasks'}.`
+      : `${String(made.length)} goals made: ${made.map((m) => m.title).join(', ')}.`;
+  const started = start?.started.length ?? 0;
+  const tail =
+    started === 0
+      ? 'Nothing has started; find it under Goals.'
+      : `${String(started)} ${started === 1 ? 'task' : 'tasks'} started; follow ${made.length === 1 ? 'it' : 'them'} under Goals.`;
+  return `${head} ${tail}`;
 }
 
 export interface ConvertModalProps {
@@ -116,9 +150,13 @@ export function ConvertModal({
   // Nothing in what is ticked would start: Accept and Start is not offered.
   const startsAny = counts === undefined || counts.now + counts.forLane + counts.forOthers > 0;
   // After an Accept the start could not follow, or had nothing new: the modal stays until Done.
-  const [after, setAfter] = useState<{ readonly line: string; readonly refused: boolean } | null>(
-    null,
-  );
+  const [after, setAfter] = useState<{
+    readonly line: string;
+    readonly refused: boolean;
+    /** The goal this Accept made, when it made one: Open Goal goes to its page. */
+    readonly goalId?: GoalId;
+  } | null>(null);
+  const navigate = useNavigate();
   if (!opened && after !== null) setAfter(null);
   const beside = refusals.length > 0 ? refusals : failure === null ? [] : [failure];
   const rehearsing = view.turn.rehearsing;
@@ -143,8 +181,15 @@ export function ConvertModal({
     const result = await onConvert(ids, options);
     if (result?.kind !== 'converted') return;
     const outcome = result.result.start;
+    const made = madeGoals(result.result, rows);
     if (outcome?.refused != null)
-      setAfter({ line: `Accepted. The start was refused: ${outcome.refused}`, refused: true });
+      setAfter({
+        line: `Accepted. The start was refused: ${outcome.refused}`,
+        refused: true,
+        ...(made[0] === undefined ? {} : { goalId: made[0].goalId }),
+      });
+    else if (made[0] !== undefined)
+      setAfter({ line: madeLine(made, outcome), refused: false, goalId: made[0].goalId });
     else if (outcome?.started.length === 0 && outcome.left.length === 0)
       setAfter({ line: 'Nothing new to start', refused: false });
     else onClose();
@@ -204,7 +249,22 @@ export function ConvertModal({
               ) : null}
             </>
           ) : (
-            <Button onClick={onClose}>Done</Button>
+            <>
+              <Button variant={after.goalId === undefined ? 'filled' : 'default'} onClick={onClose}>
+                Done
+              </Button>
+              {after.goalId === undefined ? null : (
+                <Button
+                  onClick={() => {
+                    const goal = after.goalId;
+                    onClose();
+                    if (goal !== undefined) void navigate({ to: '/goals', search: { goal } });
+                  }}
+                >
+                  Open Goal
+                </Button>
+              )}
+            </>
           )}
         </>
       }
