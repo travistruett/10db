@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { chmod, copyFile, constants, lstat, mkdir, readlink, symlink } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, sep } from 'node:path';
 import { surelyInside } from '../git';
 import { isBuildOutput } from './build-output';
@@ -28,11 +27,6 @@ export class KeptCopyError extends Error {
 /** A name or path that would land outside the kept folder. */
 export class KeptPathError extends Error {
   override readonly name = 'KeptPathError';
-}
-
-/** Where saved files go: beside the worktree base, never pruned by 10db. */
-export function keptRoot(): string {
-  return join(homedir(), '.10db', 'kept');
 }
 
 /** True for a file a tool writes again and nobody makes by hand: build output, `next-env.d.ts`, `.DS_Store`. */
