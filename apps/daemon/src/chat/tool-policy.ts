@@ -20,6 +20,8 @@ export const CHAT_TOOL_POLICY: Readonly<Record<ChatToolName, ChatToolPolicy>> = 
   [BuilderToolName.ListProjects]: R,
   [BuilderToolName.ListKinds]: R,
   [BuilderToolName.ListTasks]: R,
+  [BuilderToolName.ListGoals]: R,
+  [BuilderToolName.GetGoal]: R,
   [BuilderToolName.CreateTask]: R,
   [BuilderToolName.EditTask]: R,
   [BuilderToolName.RemoveTask]: A,
