@@ -336,6 +336,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     connectAccount: track('connectAccount'),
     cancelAccountConnect: track('cancelAccountConnect'),
     accountUsage: track('accountUsage'),
+    autoCeilingToday: track('autoCeilingToday'),
     listAccountPauses: track('listAccountPauses'),
     resumeAccount: track('resumeAccount'),
     ...overrides,

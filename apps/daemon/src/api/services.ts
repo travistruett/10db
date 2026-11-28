@@ -70,6 +70,7 @@ import type {
   AccountSecretInput,
   AccountSignInDto,
   AccountUsageDto,
+  AutoCeilingTodayDto,
   BatchDto,
   BatchId,
   BatchStartInput,
@@ -1217,6 +1218,8 @@ export interface ApiServices extends PlanRecordServices {
   cancelAccountConnect(id: AccountId): Promise<void>;
   /** A month's tokens and dollars, in total and per project; `null` is the current month. */
   accountUsage(id: AccountId, month: string | null): AccountUsageDto;
+  /** What 10db's own work for the project counted today against its ceiling, and the measure in use. */
+  autoCeilingToday(projectId: ProjectId): AutoCeilingTodayDto;
   /** The accounts paused now, with why, since when and until when. */
   listAccountPauses(): AccountPauseDto[];
   /** Lifts a refused or monthly-cap pause and answers the pauses still in force; a usage-limit pause is a conflict. */

@@ -88,6 +88,7 @@ import {
   createAccountPreparer,
   createAccountRuntime,
   createAccountService,
+  createAutoCeiling,
   createModelListWait,
   createListRefresh,
   createMcpSignIns,
@@ -309,6 +310,8 @@ import {
   cannotSignInCard,
   CardTier,
   clearPictureSignInCard,
+  createAutoCeilingAnswers,
+  createAutoCeilingCards,
   createGuardrailAnswers,
   createInboxService,
   createJudgeOutageCard,
@@ -1108,6 +1111,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerOutOfMovesCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerStallCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerAutoCeilingCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   // Made once `git` is, below the inbox service that routes the answers to it.
   let guardrailAnswers: ReturnType<typeof createGuardrailAnswers> | null = null;
@@ -1298,6 +1302,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerBatchCard?.(item, answer);
       answerOutOfMovesCard?.(item, answer);
       answerAccountCard?.(item, answer);
+      answerAutoCeilingCard?.(item, answer);
       answerGitCard?.(item, answer);
       answerSelfUpdateCard?.(item, answer);
       answerBranchCard?.(item, answer);
@@ -2033,6 +2038,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       scheduler?.requestTick();
     },
   });
+  // 10db's own work stops for the day at the project's ceiling; a Carry On Today wakes the scheduler.
+  const autoCeiling = createAutoCeiling({ state, clock });
+  const autoCeilingCards = createAutoCeilingCards({ state, inbox, ceiling: autoCeiling });
+  answerAutoCeilingCard = createAutoCeilingAnswers({
+    carryOn: (projectId, day) => {
+      autoCeiling.carryOn(projectId, day);
+      scheduler?.requestTick();
+    },
+  });
   const startGate = createStartGate();
   const preparer = createAccountPreparer({
     state,
@@ -2529,6 +2543,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     launcher,
     startGate,
     modelWait,
+    ceiling: autoCeiling,
     accounts: {
       ...accounts,
       prepare: (account, projectId) => {
@@ -2600,6 +2615,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     awaitedHolders: () => claimWaits.awaitedHolders(),
     held: () => admission.held(),
     waits: queueWaits,
+    ceiling: {
+      reached: (projectId) => autoCeiling.reached(projectId),
+      raise: (projectId, waiting) => {
+        autoCeilingCards.raise(projectId, waiting);
+      },
+      closeEarlierDays: () => {
+        autoCeilingCards.closeEarlierDays();
+      },
+    },
   });
   scheduler = createdScheduler;
   // The watchdog: one Stuck card per run or batch that stopped moving. It writes nothing else.
@@ -3486,6 +3510,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     shipper,
     accounts: accountService,
+    autoCeiling,
     worktreeRoot,
     git,
     branchOnOrigin: (repoPath, branch) =>

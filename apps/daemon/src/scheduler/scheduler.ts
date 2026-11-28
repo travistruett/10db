@@ -59,11 +59,14 @@ import {
   passAreasOf,
 } from '@10db/db';
 import {
+  isChecked,
   unready,
   type AccountPreparer,
   type AccountRuntime,
+  type AutoCeiling,
   type ModelListWait,
 } from '../accounts';
+import type { AutoCeilingCards, WaitingRun } from '../inbox';
 import type { Clock, Timer } from '../clock';
 import { batchLaunchVerdict, claimScopeOf, LaunchVerdict } from '../delivery';
 import type { StateStore } from '../events';
@@ -141,6 +144,12 @@ export interface SchedulerOptions {
   readonly keptWork: { ready(run: WorkstreamDto): boolean };
   /** Where each tick records what every queued run it passed over waits for. */
   readonly waits?: QueueWaits;
+  /**
+   * The daily ceiling of 10db's own work: a checked run of a project that has reached it is passed over
+   * and named on the project's one card. Without it nothing is held.
+   */
+  readonly ceiling?: Pick<AutoCeiling, 'reached'> &
+    Pick<AutoCeilingCards, 'raise' | 'closeEarlierDays'>;
 }
 
 export interface Scheduler {
@@ -512,6 +521,17 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     // own card, and a project with several queued lanes isn't asked again.
     const blockedThisTick = new Set<string>();
     const awaited = opts.awaitedHolders?.() ?? new Set<WorkstreamId>();
+    // Each project's ceiling is read once a tick, and the checked runs it held are named on its one card.
+    const ceilingState = new Map<ProjectId, boolean>();
+    const ceilingHeld = new Map<ProjectId, WaitingRun[]>();
+    const ceilingReached = (projectId: ProjectId): boolean => {
+      let reached = ceilingState.get(projectId);
+      if (reached === undefined) {
+        reached = (opts.ceiling?.reached(projectId) ?? null) !== null;
+        ceilingState.set(projectId, reached);
+      }
+      return reached;
+    };
     let launched = 0;
     // Read once a tick, when work first has no room; a session asked to close leaves it.
     let warm: WarmLane[] | null = null;
@@ -640,6 +660,18 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         }
         opts.accounts.readList?.(account.id);
         open.add(account.id);
+      }
+      // 10db's own work for a project at today's ceiling waits for tomorrow or a Carry On Today; the
+      // builder's own runs, and every check above, are not touched by it.
+      if (opts.ceiling) {
+        const row = getWorkstreamRow(db, ws.id);
+        if (isChecked(row) && ceilingReached(project.id)) {
+          const waiting = ceilingHeld.get(project.id) ?? [];
+          waiting.push({ title: task.title, rerun: !row.selfStarted });
+          ceilingHeld.set(project.id, waiting);
+          found(ws.id, queueWait.ceiling());
+          continue;
+        }
       }
       const room = roomForLane(
         { global, byProject, byAccount, byPass },
@@ -791,6 +823,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       launchedIds.add(ws.id);
       opts.runner.launch(ws.id, fence);
     }
+    for (const [projectId, waiting] of ceilingHeld) opts.ceiling?.raise(projectId, waiting);
     showPassFolders(snapshot, folderHeld);
     return launched;
   }
@@ -844,6 +877,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     const run = chain.then(async () => {
       requeueExpiredPauses();
       pruneWarned();
+      opts.ceiling?.closeEarlierDays();
       const snapshot = await branchSnapshot();
       // Stopped while the branches were read: whoever stopped it (a shutdown, the self-update before
       // it quits the app) counts on no lane starting afterwards.

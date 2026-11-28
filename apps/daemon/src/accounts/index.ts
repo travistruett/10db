@@ -14,4 +14,5 @@ export { createModelListWait, MODEL_LIST_WAIT_MS, type ModelListWait } from './m
 export { giveOpenRouterHomes, removeLegacyOpenRouterKey } from './account-homes';
 export { createMcpSignIns, type McpSignIns } from './mcp-sign-ins';
 export { capStatus } from './cap';
+export { createAutoCeiling, isChecked, type AutoCeiling } from './auto-ceiling';
 export { ceilingLimit, limitShare, type LimitShareState } from './limit-share';

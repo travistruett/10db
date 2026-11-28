@@ -3,6 +3,7 @@ export * from './acceptance';
 export * from './activity';
 export * from './allowed-commands';
 export * from './batch-workflow';
+export * from './auto-ceiling';
 export * from './batches';
 export * from './benchmarks';
 export * from './builder-mcp-tools';

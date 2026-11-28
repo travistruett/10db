@@ -53,6 +53,7 @@ import {
   createAccountMoves,
   createAccountPauses,
   createAccountRuntime,
+  createAutoCeiling,
   createMoveBack,
   MoveCause,
   createStartGate,
@@ -60,6 +61,7 @@ import {
   type AccountLimits,
   type AccountMoves,
   type AccountRuntime,
+  type AutoCeiling,
   type StartGate,
   type UsageReport,
 } from '../src/accounts';
@@ -215,6 +217,8 @@ export interface TestEngine {
   readonly dataDir: string;
   readonly accounts: AccountRuntime;
   readonly moves: AccountMoves;
+  /** The daily ceiling of 10db's own work, as the daemon gives the runner and the scheduler. */
+  readonly autoCeiling: AutoCeiling;
   readonly keychain: Keychain;
   readonly rateLimited: { accountId: AccountId; resetsAt: Date | null }[];
   /** Every usage report the runner passed on, before the limits acted on it. */
@@ -569,6 +573,7 @@ export async function createTestEngine(
       accounts.saved(id, answering);
     },
   });
+  const autoCeiling = createAutoCeiling({ state, clock });
   const guarded = protectedPaths({ dataDir: data.path, home: homedir(), loginConfigDir: null });
   const server = serve({
     fetch: createMcpHandler({
@@ -653,6 +658,7 @@ export async function createTestEngine(
       },
     },
     startGate,
+    ceiling: autoCeiling,
     onLaneFreed: () => undefined,
     ...runnerOverrides,
   });
@@ -716,6 +722,7 @@ export async function createTestEngine(
     dataDir: data.path,
     accounts,
     moves,
+    autoCeiling,
     keychain,
     rateLimited,
     usageReports,

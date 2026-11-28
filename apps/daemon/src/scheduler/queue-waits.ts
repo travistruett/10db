@@ -197,6 +197,13 @@ export const queueWait = {
     endless: input.holderEnded,
     on: input.holder,
   }),
+  /** 10db's own work for the project reached today's ceiling; it starts tomorrow or on Carry On Today. */
+  ceiling: (): FoundWait => ({
+    kind: QueueWaitKind.Ceiling,
+    line: "for tomorrow: this project's own work reached today's ceiling",
+    endless: false,
+    on: null,
+  }),
   /** Queued behind the task it deadlocked with twice, until that task ends or frees what they fought over. */
   turn: (input: {
     readonly title: string;

@@ -29,6 +29,8 @@ export const QueueWaitKind = {
   KeptWork: 'kept_work',
   /** It gave up a claim to another task twice and waits for that task. */
   Turn: 'turn',
+  /** Its project's own work reached today's ceiling; it starts tomorrow or on Carry On Today. */
+  Ceiling: 'ceiling',
 } as const;
 export type QueueWaitKind = (typeof QueueWaitKind)[keyof typeof QueueWaitKind];
 

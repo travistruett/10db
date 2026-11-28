@@ -1007,7 +1007,8 @@
                     "claim",
                     "parked",
                     "kept_work",
-                    "turn"
+                    "turn",
+                    "ceiling"
                   ]
                 },
                 "line": {

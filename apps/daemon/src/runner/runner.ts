@@ -228,11 +228,13 @@ import {
 import { handoffStands, nextUnaskedRun, workLeftIn, type UnaskedRun } from './handoff-rule';
 import {
   ceilingLimit,
+  isChecked,
   limitShare,
   unready,
   type AccountLimits,
   type AccountPreparer,
   type AccountRuntime,
+  type AutoCeiling,
   type LimitShareState,
   type ModelListWait,
   type StartGate,
@@ -596,6 +598,11 @@ export interface RunnerOptions {
     Pick<AccountLimits, 'usageReported'>;
   /** One start at a time on a subscription account. */
   readonly startGate: StartGate;
+  /**
+   * The daily ceiling of 10db's own work. A checked run that reaches it between two sessions goes back
+   * to the queue, where the scheduler holds it. Absent, nothing is held.
+   */
+  readonly ceiling?: Pick<AutoCeiling, 'reached'>;
   onLaneFreed(): void;
   /** Runs after every session ends (the watcher's step-end diff). Errors are logged, never thrown. */
   readonly afterSession?: (workstreamId: WorkstreamId) => Promise<void>;
@@ -6148,6 +6155,17 @@ export function createRunner(opts: RunnerOptions): Runner {
           return;
         }
         const lane = getProject(db, getWorkstreamRow(db, id).projectId);
+        // 10db's own work stops at the project's daily ceiling, passed here mid-run: the run goes back to
+        // the queue, which the scheduler holds. The scheduler never launches a checked run at the
+        // ceiling, so this is reached once; the builder's own runs are never checked.
+        if (
+          opts.ceiling !== undefined &&
+          isChecked(getWorkstreamRow(db, id)) &&
+          opts.ceiling.reached(lane.id) !== null
+        ) {
+          requeue(id, ctl, "the project's own work reached today's ceiling", 'waits for tomorrow');
+          return;
+        }
         // A running session finished on the account it started on; the next one runs where the project is now.
         ctl.accountId = lane.accountId;
         // The scheduler checked before the launch; a lane checks again before each further session (accounts spec §6).

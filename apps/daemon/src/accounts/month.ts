@@ -16,6 +16,23 @@ export function monthOf(at: Date): MonthWindow {
   return { month: `${String(start.getFullYear())}-${pad(start.getMonth() + 1)}`, start, end };
 }
 
+export interface DayWindow {
+  readonly day: string;
+  readonly start: Date;
+  readonly end: Date;
+}
+
+/** The calendar day containing `at`, in the machine's local time. */
+export function dayOf(at: Date): DayWindow {
+  const start = new Date(at.getFullYear(), at.getMonth(), at.getDate());
+  const end = new Date(at.getFullYear(), at.getMonth(), at.getDate() + 1);
+  return {
+    day: `${String(start.getFullYear())}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`,
+    start,
+    end,
+  };
+}
+
 /** A `YYYY-MM` month, in local time. */
 export function monthWindow(month: string): MonthWindow {
   const valid = Month.parse(month);
