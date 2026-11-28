@@ -28,9 +28,10 @@ import type { Logger } from '../log';
 // `runSecondReviews` runs from `daemon/start.ts` after the failing write's own card is raised. It records the
 // request (`second_review.<id>` in `app_settings`) and calls `starter.retry(id, undefined, { reviewOnly: true })`:
 // only the rejecting step runs again, with its send-back count kept, so a repeated rejection fails the run at once.
-// The failed card then offers Ship Anyway (`batchCardFields(..., shipAnyway)`); until then it does not, and
-// `Shipper.shipAnyway` refuses with `shipAnywayRefusal`. A builder's own Retry forgets the request. The batch
-// strip's Ship Anyway button still shows (it reads only run states) and the refusal explains why.
+// The failed card then offers Ship Anyway (`batchCardFields(..., shipAnyway)`); until then it does not, and every
+// ship the builder asks for (`Shipper.ship` from the Board's batch strip, `Shipper.shipAnyway` from the card)
+// refuses with `shipAnywayRefusal`. The strip's button still shows (it reads only run states), so a click before
+// the second review gets that refusal. A builder's own Retry of the run forgets the request.
 
 const key = (id: WorkstreamId): string => `second_review.${id}`;
 
