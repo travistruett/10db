@@ -26,3 +26,4 @@ export {
   subscribeWatchpointCoverage,
 } from './coverage-triggers';
 export { watchpointPrinciples } from './knowledge';
+export { proposeWatchpointChange } from './proposal';
