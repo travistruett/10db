@@ -30,3 +30,11 @@ The watchdog (`decisions/2026-11-25-queue-waits-live-in-the-scheduler.md`).
   the item stopped ("since …", in the Mac's own time), never a duration: the card is rewritten only when its
   fingerprint changes, so a duration would go stale. The answers act;
   the sweep never cancels, retries or abandons.
+- A stalled active run is restarted instead of carded when `stallMove` says so (`Runner.restartStalled`; the Stuck run
+  rule is not set to ask). The sweep calls it without waiting, and keeps any open Stuck card for the run: the runner
+  marks the restart in flight before it returns, so the next sweep waits. A stop that outlasts
+  `STALL_STOP_DEADLINE_MS` (or a restart that throws) is marked in the record (`markHung`) and raises today's Stuck
+  card in the same write, so every stall ends in a notice or a card. `restart-record.ts` holds the per-run record in
+  `app_settings` (`stall_restarts`) and `forgetEndedRestarts` drops a terminal run's; `notices.ts` posts the
+  restart's notice (rule `stuck-run`, undo `final`). The sweep writes a restart record and a card, never a requeue
+  itself: the runner does that, in one write with the record and notice.

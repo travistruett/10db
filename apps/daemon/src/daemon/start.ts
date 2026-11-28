@@ -473,7 +473,7 @@ import {
 import { createFolderHold } from '../folder-hold';
 import { createStatusService } from '../status';
 import { createAdmission, createQueueWaits, createScheduler, type Scheduler } from '../scheduler';
-import { createStallCardAnswers, createStallSweep } from '../stalls';
+import { createStallCardAnswers, createStallSweep, forgetEndedRestarts } from '../stalls';
 import {
   createDrain,
   createScriptInstaller,
@@ -2567,6 +2567,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     gateTimeoutFloorMs: limits.gateTimeoutMs,
     clock,
     logger: logger.child({ component: 'stalls' }),
+    restart: (id) => createdRunner.restartStalled(id),
+    isRestarting: (id) => createdRunner.isRestarting(id),
+    isRunning: (id) => createdRunner.isRunning(id),
+    maxRecoveryAttempts: limits.maxRecoveryAttempts,
   });
 
   // The changed-files check after a page's turn (Workbench spec §8.1): advice, through the shared
@@ -3032,6 +3036,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     if (to !== undefined && isTerminal(to))
       state.write((ctx) => {
         forgetEndedPairs(ctx);
+        forgetEndedRestarts(ctx);
       });
   });
   keepAwake.refresh();
