@@ -37,6 +37,7 @@ import {
   startCounts,
   type ShapeService,
 } from '../shape';
+import { watchpointReadRow } from '../watchpoints';
 
 /** Shape's side of the HTTP API: conversations, their messages, Propose, Convert and the two undos. */
 export type ShapeApiServices = Pick<
@@ -245,7 +246,10 @@ export function createShapeServices(deps: {
     shapeMeasures: () => ({
       sizing: sizingMeasure(state.db),
       questions: questionCardRates(state.db),
-      shadow: shadowAgreement(state.db, deps.clock.now()),
+      shadow: [
+        ...shadowAgreement(state.db, deps.clock.now()),
+        watchpointReadRow(state.db, deps.clock.now()),
+      ],
     }),
     getShapeJev: (projectId) => {
       getProject(state.db, projectId);

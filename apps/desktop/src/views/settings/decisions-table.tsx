@@ -11,11 +11,13 @@ import { Badge, Group, Table, Text, UnstyledButton } from '@mantine/core';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { DECISION_GROUP_LABEL, DECISIONS, groupedDecisions } from './decision-catalogue';
 import {
+  decisionIsRunning,
   decisionStatus,
   DecisionStatus,
   lastThirtyDays,
   modelName,
   statsFor,
+  watchpointReadOutcome,
 } from './decision-numbers';
 import { RaisedPanel } from '../../shell/raised-panel';
 
@@ -149,7 +151,15 @@ export function DecisionsTable({
       accessor: 'outcome',
       title: 'Outcome',
       noWrap: true,
-      render: (row) => ofDecision(row, (d) => thirty(d).outcome),
+      render: (row) =>
+        ofDecision(row, (d) =>
+          d === JudgeDecision.WatchpointRead
+            ? watchpointReadOutcome(
+                decisionIsRunning(status, d),
+                shadow?.find((a) => a.decision === d),
+              )
+            : thirty(d).outcome,
+        ),
     },
     {
       accessor: 'cost',

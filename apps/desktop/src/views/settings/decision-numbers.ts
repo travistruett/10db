@@ -2,10 +2,12 @@ import {
   JudgeDecision,
   JudgeOutcome,
   SHADOW_MIN_SCORED,
+  type AskedDecision,
   type DecisionModelDto,
   type DecisionStatsDto,
   type DecisionStatsListDto,
   type JudgeCallDto,
+  type JudgeStatusDto,
   type ShadowAgreementDto,
 } from '@10db/contracts';
 import { DECISIONS, DecisionMode } from './decision-catalogue';
@@ -27,6 +29,31 @@ export function decisionStatus(
   if (!allOn) return DecisionStatus.AllOff;
   if (!decisionOn) return DecisionStatus.Off;
   return mode === DecisionMode.Shadow ? DecisionStatus.Shadow : DecisionStatus.Acting;
+}
+
+/**
+ * Whether the decision can be asked on this account now: decisions and this one are on, and the account they run on
+ * has a usable key. Without it nothing is asked and a reading has nothing to compare.
+ */
+export function decisionIsRunning(status: JudgeStatusDto, decision: AskedDecision): boolean {
+  return (
+    status.config.enabled &&
+    !status.off &&
+    status.config.decisions[decision].enabled &&
+    status.account?.secretState === 'set'
+  );
+}
+
+/** What the watchpoint read's row says in place of a count: how it agreed, or that it is not running. */
+export function watchpointReadOutcome(
+  running: boolean,
+  agreement: ShadowAgreementDto | undefined,
+): string {
+  if (!running) return 'Not running on this account';
+  if (agreement === undefined) return '—';
+  return agreement.scored === 0
+    ? 'None scored yet'
+    : `${String(agreement.agreed)} of ${String(agreement.scored)} agreed`;
 }
 
 /** The decision's stats: its entry, a zero entry when the list loaded without it (no calls), undefined while unread. */
