@@ -292,6 +292,8 @@ import {
   createProjectMcpReader,
   flagFailedRun,
   flagMcpFailure,
+  OutOfMovesKind,
+  outOfMovesFields,
   withdrawFailedCard,
   type InboxService,
   type WaitObserver,
@@ -1407,12 +1409,17 @@ export function createRunner(opts: RunnerOptions): Runner {
     clearLease(ctx, id);
   }
 
-  /** The task's failed card; `review` is the reviewer's rejection that ended the workstream, when one did. */
+  /**
+   * The task's failed card; `review` is the reviewer's rejection that ended the workstream, when one did.
+   * `outOfMoves` says the run used up its retries: the card asks the out-of-moves answers instead of the
+   * batch's, and keeps the batch card's detail so the batch's own settling still finds it.
+   */
   function flagFailed(
     row: WorkstreamRow,
     reason: string,
     review?: ReviewCardDetail,
     kind?: WorkstreamFailure,
+    outOfMoves = false,
   ): void {
     // Work a reviewer rejected is offered Ship anyway only once 10db's second review has rejected it too.
     const batch = batchCardFields(
@@ -1424,16 +1431,26 @@ export function createRunner(opts: RunnerOptions): Runner {
         secondReviewRequested(db, row.id),
       ),
     );
+    const oom = outOfMoves
+      ? outOfMovesFields({
+          kind: OutOfMovesKind.Run,
+          more: opts.limits.maxFixAttempts,
+          batchId: row.batchId,
+          workstreamId: row.id,
+        })
+      : null;
+    const options = oom?.options ?? batch?.options;
     // Where a lane run's work went is added to the card by its take-out, once it has moved it.
     const lane = laneBranchOf(row);
     opts.state.write((ctx) => {
       flagFailedRun(ctx, row, {
         body: reason,
-        ...(batch ? { options: batch.options } : {}),
-        ...(batch || review || lane
+        ...(options ? { options } : {}),
+        ...(batch || oom || review || lane
           ? {
               detail: {
                 ...batch?.detail,
+                ...oom?.detail,
                 ...(review ? { [REVIEW_CARD_DETAIL]: review } : {}),
                 ...(lane ? { [LANE_BRANCH_DETAIL]: lane.lane } : {}),
               },
@@ -1465,12 +1482,13 @@ export function createRunner(opts: RunnerOptions): Runner {
     fence: number | null,
     failure: Failure,
     review?: ReviewCardDetail,
+    outOfMoves = false,
   ): void {
     const row = getWorkstreamRow(db, id);
     opts.state.write((ctx) => {
       failIn(ctx, id, fence, row, failure);
     });
-    flagFailed(row, failure.reason, review, failure.kind);
+    flagFailed(row, failure.reason, review, failure.kind, outOfMoves);
   }
 
   /** A step entered now; its floor is the sessions this workstream has run so far. */
@@ -5062,10 +5080,16 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
     const attempt = free ? row.attempt : row.attempt + 1;
     if (attempt > opts.limits.maxFixAttempts) {
-      fail(id, ctl.fence, {
-        kind: WorkstreamFailure.RetryLimit,
-        reason: `The ${currentStep(row).role} step ended with uncommitted changes in its claims after ${String(row.attempt)} fix attempts and merge sessions, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
-      });
+      fail(
+        id,
+        ctl.fence,
+        {
+          kind: WorkstreamFailure.RetryLimit,
+          reason: `The ${currentStep(row).role} step ended with uncommitted changes in its claims after ${String(row.attempt)} fix attempts and merge sessions, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
+        },
+        undefined,
+        true,
+      );
       return;
     }
     opts.state.write((ctx) => {
@@ -5100,14 +5124,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       const base = batch?.baseBranch ?? 'the base';
       const sessions = `${String(row.attempt)} fix and merge sessions of this step`;
       const limit = `its retry limit (${String(opts.limits.maxFixAttempts)}, and one more session for a merge) is used up`;
-      fail(id, ctl.fence, {
-        kind: WorkstreamFailure.RetryLimit,
-        // A merge this gate made just now left markers no session has seen: they are not "still" there.
-        reason:
-          update.fresh === true
-            ? `A new merge of ${base} left conflict markers in ${update.paths.join(', ')} that no session has seen yet, but the step has no session left to resolve them: it ran ${sessions}, and ${limit}`
-            : `The conflict markers of the merge of ${base} are still in ${update.paths.join(', ')} after ${sessions}, and ${limit}`,
-      });
+      fail(
+        id,
+        ctl.fence,
+        {
+          kind: WorkstreamFailure.RetryLimit,
+          // A merge this gate made just now left markers no session has seen: they are not "still" there.
+          reason:
+            update.fresh === true
+              ? `A new merge of ${base} left conflict markers in ${update.paths.join(', ')} that no session has seen yet, but the step has no session left to resolve them: it ran ${sessions}, and ${limit}`
+              : `The conflict markers of the merge of ${base} are still in ${update.paths.join(', ')} after ${sessions}, and ${limit}`,
+        },
+        undefined,
+        true,
+      );
       return;
     }
     opts.state.write((ctx) => {
@@ -5814,10 +5844,16 @@ export function createRunner(opts: RunnerOptions): Runner {
         lane === null
           ? ''
           : `. This run's commits are on branch ${lane.lane}, not on ${lane.base}, until it lands: if your gate reads git history, diffs HEAD or checks that the index is clean, it saw the run's work as uncommitted`;
-      fail(id, ctl.fence, {
-        kind: WorkstreamFailure.GateFailed,
-        reason: `The gate failed ${String(attempt)} times (last exit ${String(result.exitCode)})${unlanded}`,
-      });
+      fail(
+        id,
+        ctl.fence,
+        {
+          kind: WorkstreamFailure.GateFailed,
+          reason: `The gate failed ${String(attempt)} times (last exit ${String(result.exitCode)})${unlanded}`,
+        },
+        undefined,
+        true,
+      );
       return;
     }
     const failedStep = currentStep(row);
@@ -6433,7 +6469,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           },
         );
         return () => {
-          flagFailed(row, reason);
+          flagFailed(row, reason, undefined, undefined, true);
           opts.onLaneFreed();
         };
       }
@@ -6546,7 +6582,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           },
         );
         return () => {
-          flagFailed(row, reason);
+          flagFailed(row, reason, undefined, undefined, true);
           opts.onLaneFreed();
         };
       }

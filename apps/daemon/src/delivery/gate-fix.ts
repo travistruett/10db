@@ -48,10 +48,7 @@ export function recordFix(
   });
 }
 
-/**
- * Allows `max` more fix tasks, as the builder asked.
- * @public
- */
+/** Allows `max` more fix tasks, as the builder asked. */
 export function grantMore(
   w: WriteContext,
   batchId: BatchId,
