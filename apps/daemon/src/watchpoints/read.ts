@@ -91,15 +91,32 @@ const QUESTIONS: Readonly<Record<string, NoulQuestion>> = {
   },
 };
 
-/** What the call's row records: each answer read at even odds, always in shadow. */
-function shadowReading(probabilities: Readonly<Record<string, number>>): AssessReading {
-  const meets = probabilities[MEETS] ?? 0;
-  const destructive = probabilities[DESTRUCTIVE] ?? 0;
-  const sides = [meets, destructive].map((p) => Math.max(p, 1 - p));
-  return {
-    answer: `${meets >= 0.5 ? 'meets' : 'does not meet'}, ${destructive >= 0.5 ? 'destructive' : 'not destructive'}`,
-    confidence: Math.min(...sides),
-    outcome: JudgeOutcome.Shadow,
+/**
+ * What the call's row records: each answer read at even odds. In shadow the row is `Shadow`; once the read acts it
+ * is `Acted` for a clean read and `BelowFloor` for any other, the verdict that holds the pull request.
+ */
+function readingOf(
+  acts: boolean,
+): (probabilities: Readonly<Record<string, number>>, floor: number) => AssessReading {
+  return (probabilities, floor) => {
+    const meets = probabilities[MEETS] ?? 0;
+    const destructive = probabilities[DESTRUCTIVE] ?? 0;
+    const sides = [meets, destructive].map((p) => Math.max(p, 1 - p));
+    const clean =
+      readVerdict({
+        loudness: WatchpointLoudness.Ask,
+        asked: true,
+        answered: true,
+        meets,
+        destructive,
+        partial: false,
+        floor,
+      }) === WatchpointReadVerdict.Clean;
+    return {
+      answer: `${meets >= 0.5 ? 'meets' : 'does not meet'}, ${destructive >= 0.5 ? 'destructive' : 'not destructive'}`,
+      confidence: Math.min(...sides),
+      outcome: !acts ? JudgeOutcome.Shadow : clean ? JudgeOutcome.Acted : JudgeOutcome.BelowFloor,
+    };
   };
 }
 
@@ -121,25 +138,34 @@ function fencedHit(hit: WatchpointHit, diff: QuestionDiff): string {
 }
 
 /** A read with no answer: a doubt, which holds. */
-const unanswered = (key: string): WatchpointRead => ({
+const unanswered = (key: string, acted: boolean): WatchpointRead => ({
   key,
   verdict: WatchpointReadVerdict.Doubt,
   meets: null,
   destructive: null,
-  acted: false,
+  acted,
 });
 
+/** What reads need beyond the judge and the diff reader: whether this project's read acts or stays in shadow. */
+interface ReadDeps {
+  readonly judge: Judge;
+  readonly read: WatchpointChangeReader;
+  /** True once `readActs` lets the project's reads act; absent is shadow. */
+  readonly acts?: boolean;
+}
+
 async function readOne(
-  deps: { readonly judge: Judge; readonly read: WatchpointChangeReader },
+  deps: ReadDeps,
   hit: WatchpointHit,
   ids: { readonly projectId: ProjectId; readonly workstreamId: WorkstreamId },
 ): Promise<WatchpointRead> {
   const key = hit.watchpoint.key;
+  const acted = deps.acts === true;
   try {
     const paths = hit.files.map((f) => f.path);
     const diff = await questionDiff(deps.read, paths);
     // Nothing of the files could be read: the judge has nothing to read, and the hit is a doubt.
-    if (diff.shown.length === 0) return unanswered(key);
+    if (diff.shown.length === 0) return unanswered(key, acted);
     const partial = diff.truncated || diff.more > 0 || diff.shown.length < paths.length;
     const answer = await deps.judge.assess({
       decision: JudgeDecision.WatchpointRead,
@@ -149,9 +175,10 @@ async function readOne(
         diff_truncated: diff.truncated,
       },
       questions: QUESTIONS,
-      read: shadowReading,
+      read: readingOf(acted),
       timeoutMs: WATCHPOINT_READ_TIMEOUT_MS,
-      // A shadow decision's failures are its own: they never raise the outage card or show as falling back.
+      // The read's failures are its own: they never raise the outage card or show as falling back. A call that
+      // gave no answer is a doubt, which holds the pull request with a card of its own when the read acts.
       secondary: true,
       ...ids,
     });
@@ -172,23 +199,23 @@ async function readOne(
         }) ?? WatchpointReadVerdict.Doubt,
       meets,
       destructive,
-      acted: false,
+      acted,
     };
   } catch {
     // A diff that can't be read is a read with no answer; the reading goes on.
-    return unanswered(key);
+    return unanswered(key, acted);
   }
 }
 
 /**
  * The judge's read of each hit of the run, one `WatchpointRead` per Hold or Ask hit and none for a Show hit. A Hold
- * hit is `hold` with no call. Each Ask hit is one `judge.assess` call of `JudgeDecision.WatchpointRead`, asked in
- * shadow: whether its hunks meet the watchpoint's guidance, and whether the change is destructive. With no judge
- * ready nothing is asked and an Ask hit is `unread`. Every entry has `acted` false: nothing acts on a read yet.
- * Never throws.
+ * hit is `hold` with no call. Each Ask hit is one `judge.assess` call of `JudgeDecision.WatchpointRead`: whether its
+ * hunks meet the watchpoint's guidance, and whether the change is destructive. `acted` is true on an Ask hit's read
+ * only when `deps.acts` says the project's read acts and a judge was ready to ask; otherwise it is asked in shadow.
+ * With no judge ready nothing is asked and an Ask hit is `unread`, which never acts. Never throws.
  */
 export async function readWatchpointHits(
-  deps: { readonly judge: Judge; readonly read: WatchpointChangeReader },
+  deps: ReadDeps,
   hits: readonly WatchpointHit[],
   ids: { readonly projectId: ProjectId; readonly workstreamId: WorkstreamId },
 ): Promise<WatchpointRead[]> {

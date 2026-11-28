@@ -1,6 +1,7 @@
 import { WatchpointLoudness, WatchpointReadVerdict } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { holdsMerge, readVerdict } from './read';
+import { readActs } from './read-agreement';
 
 const FLOOR = 0.8;
 
@@ -96,5 +97,53 @@ describe('readVerdict', () => {
     const got = readVerdict(input);
     expect(got).toBe(verdict);
     expect(got === null ? false : holdsMerge(got)).toBe(holds);
+  });
+});
+
+const NOW = new Date('2026-12-10T12:00:00.000Z');
+const daysBefore = (days: number): Date => new Date(NOW.getTime() - days * 24 * 60 * 60 * 1000);
+
+interface ActsRow {
+  readonly name: string;
+  readonly input: Parameters<typeof readActs>[0];
+  readonly result: ReturnType<typeof readActs>;
+}
+
+const ACTS: readonly ActsRow[] = [
+  {
+    name: "1 the builder's yes acts, even over a clean read sent back and before the week",
+    input: { firstAskedAt: daysBefore(1), cleanButSentBack: 2, allowed: true, now: NOW },
+    result: { acts: true, ask: false },
+  },
+  {
+    name: "2 the builder's no stays in shadow and never asks again, a week on",
+    input: { firstAskedAt: daysBefore(30), cleanButSentBack: 2, allowed: false, now: NOW },
+    result: { acts: false, ask: false },
+  },
+  {
+    name: '3 never asked stays in shadow',
+    input: { firstAskedAt: null, cleanButSentBack: 0, allowed: null, now: NOW },
+    result: { acts: false, ask: false },
+  },
+  {
+    name: '3 less than a week old stays in shadow, and a disagreement does not ask yet',
+    input: { firstAskedAt: daysBefore(6.9), cleanButSentBack: 1, allowed: null, now: NOW },
+    result: { acts: false, ask: false },
+  },
+  {
+    name: '4 a clean read sent back after the week stays in shadow and asks once',
+    input: { firstAskedAt: daysBefore(7), cleanButSentBack: 1, allowed: null, now: NOW },
+    result: { acts: false, ask: true },
+  },
+  {
+    name: '5 a week with no disagreement acts, with no minimum of scored reads',
+    input: { firstAskedAt: daysBefore(7), cleanButSentBack: 0, allowed: null, now: NOW },
+    result: { acts: true, ask: false },
+  },
+];
+
+describe('readActs', () => {
+  it.each(ACTS)('$name', ({ input, result }) => {
+    expect(readActs(input)).toEqual(result);
   });
 });

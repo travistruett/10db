@@ -22,7 +22,8 @@ export {
 export { agentNotesOf, newestWatchpointRow, reviewerNotesOf, withNotes } from './notes';
 export { askWatchpointQuestions, questionDiff } from './question';
 export { holdingHits, readWatchpointHits } from './read';
-export { watchpointReadRow } from './read-agreement';
+export { projectReadActs, watchpointReadRow } from './read-agreement';
+export { applyReadAllowedAnswer } from './read-disagreement-card';
 export type { QuestionCandidates } from './covers';
 export {
   coverageSubjects,

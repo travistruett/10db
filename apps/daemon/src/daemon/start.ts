@@ -288,6 +288,7 @@ import { readCommitted, readComposeServices } from '../folders';
 import { createHazardAssessor, subscribeHazardAssessment } from '../hazards';
 import {
   announceCoverage,
+  applyReadAllowedAnswer,
   backgroundSubjects,
   createWatchpointCoverage,
   subscribeWatchpointCoverage,
@@ -1239,6 +1240,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onFlagAnswerInWrite: (ctx, item, answer) => {
       const retried = answerReporterCard(ctx, item, answer);
       applyPrecedentConflictAnswer(ctx, item, answer);
+      // Let It Act or Keep Asking Me on the watchpoint read's card is stored for its project in this write.
+      applyReadAllowedAnswer(ctx, item, answer);
       const madeRoutine: { programKey: string; scope: PrecedentScope }[] = [];
       let after: (() => void) | undefined;
       if (
