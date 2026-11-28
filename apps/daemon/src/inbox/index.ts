@@ -7,7 +7,6 @@ export {
 export { createJudgeOutageCard } from './judge-outage-card';
 export {
   AutoCeilingChoice,
-  autoCeilingFoldKey,
   createAutoCeilingAnswers,
   createAutoCeilingCards,
   type AutoCeilingCards,
