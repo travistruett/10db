@@ -553,13 +553,13 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(page.getByText(`Review: ${TASK}`)).toHaveCount(0);
   await expect(page.getByText(QUESTION)).toHaveCount(0);
   // The ask watchpoint left one Look card for the task, written as the run moved on. It shows the same hunk and
-  // notes as For You, and Looks Right closes it.
+  // notes as For You, and Looks Right closes it and records the builder's verdict as a decision.
   const lookTitle = page.getByText(`Look at these changes: ${TASK}`);
   await lookTitle.first().click();
   // The bar says what the answers do; the card's body already names the areas.
   await expect(
     page.getByText(
-      'Nothing is waiting on this. Looks Right closes it; Send Back files a follow-up task.',
+      'Nothing is waiting on this. Looks Right records it as a decision; Send Back files a follow-up task.',
     ),
   ).toBeVisible();
   // View Task, in the card's bar, opens the task's drawer over the Inbox; Back closes it and the card is still there.
@@ -584,6 +584,16 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(page.getByText('added line 1: hello')).toBeAttached();
   await page.getByRole('button', { name: 'Looks Right', exact: true }).click();
   await expect(lookTitle).toHaveCount(0);
+  const looked = await request.get(`${daemonUrl}/projects/${projectId}/knowledge`, {
+    headers: { Authorization: `Bearer ${E2E_TOKEN}` },
+    params: { q: 'look right', kind: 'decision' },
+  });
+  expect(looked.ok()).toBe(true);
+  const lookedAt = z
+    .object({ items: z.array(z.looseObject({ question: z.string(), choice: z.string() })) })
+    .parse(await looked.json())
+    .items.map((item) => `${item.question} ${item.choice}`);
+  expect(lookedAt).toContain(`Did the changes to Greetings in "${TASK}" look right? Looks right`);
 
   // A locked card's reason is reachable from the keyboard, not only on hover.
   await open(page, 'Board');

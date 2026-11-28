@@ -82,6 +82,35 @@ export const ProjectWatchpoints = z
   .refine(keysAreUnique, KEYS_UNIQUE);
 export type ProjectWatchpoints = z.infer<typeof ProjectWatchpoints>;
 
+/** Which list a proposed watchpoint change is for: the project's own, or the builder's for every project. */
+export const WatchpointProposalScope = { Project: 'project', You: 'you' } as const;
+export type WatchpointProposalScope =
+  (typeof WatchpointProposalScope)[keyof typeof WatchpointProposalScope];
+
+/**
+ * A change an agent proposes to a watchpoint list: the entry is added, or replaces the one with its key. A project
+ * entry may be `off`, which turns one of the builder's watchpoints off there. Nothing changes until the builder
+ * accepts it.
+ */
+export const WatchpointProposal = z.discriminatedUnion('scope', [
+  z.strictObject({
+    scope: z.literal(WatchpointProposalScope.Project),
+    entry: ProjectWatchpointEntry,
+  }),
+  z.strictObject({ scope: z.literal(WatchpointProposalScope.You), entry: Watchpoint }),
+]);
+export type WatchpointProposal = z.infer<typeof WatchpointProposal>;
+
+/** A list with `entry` in place of the one with its key, or added at the end when none has it. */
+export function withWatchpointEntry<T extends { readonly key: string }>(
+  list: readonly T[],
+  entry: T,
+): T[] {
+  return list.some((e) => e.key === entry.key)
+    ? list.map((e) => (e.key === entry.key ? entry : e))
+    : [...list, entry];
+}
+
 /** Where an effective watchpoint came from: the builder's list, the project's own, or the project's replacement of one. */
 export const WatchpointOrigin = { You: 'you', Project: 'project', Override: 'override' } as const;
 export type WatchpointOrigin = (typeof WatchpointOrigin)[keyof typeof WatchpointOrigin];

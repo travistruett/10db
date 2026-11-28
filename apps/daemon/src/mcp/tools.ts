@@ -108,6 +108,7 @@ import {
 } from '../inbox';
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
+import { proposeWatchpointChange } from '../watchpoints';
 import type { Logger } from '../log';
 import {
   askMoveToCopy,
@@ -292,7 +293,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   record_decision:
     'Record a routine engineering decision you made within your authority, with its rationale.',
   propose:
-    'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal whose kinds ask for no card is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set kinds (the keys of what the work touches: security, auth, migration, dependency, schema, infra, ui, docs, or another the builder made) when the work has them, and joinsRunningBatch when it must join a batch that is running; a kind that asks for a card (security, auth, migration and dependency do) or a batch request raises the card. A step can have at most 10 tasks filed without a person, between this and file_follow_up; past that, a proposal raises the card. The followUps of complete_step (review roles) are a separate allowance: they do not count toward the 10 and the 10 does not block them.',
+    'Propose a new task, a task change, a principle (with the principle field: statement, kind, topicKey, scope), or a watchpoint change (with the watchpoint field: scope and the entry to add, replace by key, or turn off; you never edit a watchpoint yourself). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal whose kinds ask for no card is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set kinds (the keys of what the work touches: security, auth, migration, dependency, schema, infra, ui, docs, or another the builder made) when the work has them, and joinsRunningBatch when it must join a batch that is running; a kind that asks for a card (security, auth, migration and dependency do) or a batch request raises the card. A step can have at most 10 tasks filed without a person, between this and file_follow_up; past that, a proposal raises the card. The followUps of complete_step (review roles) are a separate allowance: they do not count toward the 10 and the 10 does not block them.',
   report_deviation:
     "Report a departure from the plan or a principle, with your signed reason. When 10db asks you to commit uncommitted paths that are not this task's work (another writer's edits in a shared checkout), name them in leaveUncommitted instead of committing them: 10db leaves them and stops sending your step back for them; it does so only in a checkout another writer shares (the builder's own, or a copy other tasks work in too), outside a Workbench pass. leftUncommitted says which it left, and when it left none of them, instruction says why.",
   file_follow_up:
@@ -613,6 +614,12 @@ export function createToolHandlers(
       const { project } = context();
       if (input.principle && input.kind !== ProposalKind.Principle)
         throw new InvalidError('The principle field is only for proposals of kind "principle".');
+      if (input.watchpoint && input.kind !== ProposalKind.Watchpoint)
+        throw new InvalidError('The watchpoint field is only for proposals of kind "watchpoint".');
+      if (input.kind === ProposalKind.Watchpoint && input.watchpoint === undefined)
+        throw new InvalidError(
+          'A watchpoint proposal needs the watchpoint field: the scope and the entry to add or replace.',
+        );
       if (input.principle?.area !== undefined) requireArea(input.principle.area);
       let draft: PrincipleDraft | null = null;
       if (input.kind === ProposalKind.Principle) {
@@ -630,6 +637,20 @@ export function createToolHandlers(
           const declared = [...new Set([...(input.kinds ?? []), ...(input.riskTags ?? [])])];
           const known = listKinds(ctx.tx);
           const taskKinds = withKindsNamed([], declared, known, 'agent');
+          if (input.watchpoint) {
+            const { proposalId } = proposeWatchpointChange(ctx, {
+              projectId: project.id,
+              proposal: input.watchpoint,
+              body: input.body,
+              sourceId,
+            });
+            return record(
+              'propose',
+              input.opId,
+              { proposalId, taskId: null, principleId: null },
+              ctx,
+            );
+          }
           if (draft) {
             // Every principle gets a card, so its kinds are the one thing the card must add.
             const carries = carriesKinds(declared, known);

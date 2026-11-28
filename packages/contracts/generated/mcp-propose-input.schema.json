@@ -13,7 +13,8 @@
         "new_task",
         "change_task",
         "principle",
-        "note"
+        "note",
+        "watchpoint"
       ]
     },
     "title": {
@@ -99,6 +100,235 @@
       },
       "required": [
         "statement"
+      ]
+    },
+    "watchpoint": {
+      "description": "For kind \"watchpoint\": the watchpoint to add, or to replace by its key, in this project (scope \"project\", where an entry may also be { key, off: true }) or for every project (scope \"you\"). The body says why.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "const": "project"
+            },
+            "entry": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]*$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "why": {
+                      "type": "string",
+                      "maxLength": 400
+                    },
+                    "globs": {
+                      "minItems": 1,
+                      "maxItems": 64,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "lines": {
+                      "default": [],
+                      "maxItems": 16,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      }
+                    },
+                    "question": {
+                      "default": null,
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 400
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "guidance": {
+                      "type": "string",
+                      "maxLength": 2000
+                    },
+                    "knowledge": {
+                      "default": [],
+                      "maxItems": 8,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "maxLength": 80,
+                        "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                      }
+                    },
+                    "loudness": {
+                      "type": "string",
+                      "enum": [
+                        "show",
+                        "ask",
+                        "hold"
+                      ]
+                    },
+                    "starter": {
+                      "default": null,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "label",
+                    "why",
+                    "globs",
+                    "guidance",
+                    "loudness"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]*$"
+                    },
+                    "off": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "off"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "scope",
+            "entry"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "const": "you"
+            },
+            "entry": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]*$"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "why": {
+                  "type": "string",
+                  "maxLength": 400
+                },
+                "globs": {
+                  "minItems": 1,
+                  "maxItems": 64,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "lines": {
+                  "default": [],
+                  "maxItems": 16,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "question": {
+                  "default": null,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 400
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "guidance": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "knowledge": {
+                  "default": [],
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 80,
+                    "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+                  }
+                },
+                "loudness": {
+                  "type": "string",
+                  "enum": [
+                    "show",
+                    "ask",
+                    "hold"
+                  ]
+                },
+                "starter": {
+                  "default": null,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "key",
+                "label",
+                "why",
+                "globs",
+                "guidance",
+                "loudness"
+              ]
+            }
+          },
+          "required": [
+            "scope",
+            "entry"
+          ],
+          "additionalProperties": false
+        }
       ]
     }
   },

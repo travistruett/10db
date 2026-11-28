@@ -2,6 +2,8 @@ import {
   CARD_RESOLUTION,
   InboxKind,
   InboxState,
+  KnowledgeScope,
+  SourceKind,
   WatchpointChoice,
   WatchpointCardDetail,
   WatchpointLoudness,
@@ -16,8 +18,12 @@ import {
 } from '@10db/contracts';
 import {
   answeredItemsForWorkstream,
+  BUILDER_HANDLE,
+  getTask,
   getWorkstreamRow,
+  insertDecision,
   insertInboxItem,
+  insertSource,
   insertWatchpointFollowUp,
   openItemsForWorkstream,
   updateInboxItem,
@@ -139,19 +145,39 @@ function raiseWatchpointCard(
 }
 
 /**
- * Acts on the answer to a Look card inside the write that closes it. Looks right changes nothing. Send back files
- * one Ready follow-up task for the watchpoints the card named, holding the builder's note.
+ * Acts on the answer to a Look card inside the write that closes it. Looks right records the builder's verdict as a
+ * project decision, with the card as its source and their note as its rationale, so later briefs know the change was
+ * looked at and why it was fine. Send back files one Ready follow-up task for the watchpoints the card named, holding
+ * the builder's note.
  */
 export function applyWatchpointAnswer(
   ctx: WriteContext,
   item: InboxItemDto,
   answer: Pick<InboxAnswer, 'choice' | 'note'>,
 ): void {
-  if (answer.choice !== WatchpointChoice.SendBack) return;
   const target = item.targets[0];
   if (!target) return;
   const detail = WatchpointCardDetail.safeParse(item.detail);
   const labels = detail.success ? detail.data.watchpoints.map((w) => w.label) : [];
   const taskId = getWorkstreamRow(ctx.tx, target.workstreamId).taskId;
-  insertWatchpointFollowUp(ctx, taskId, { watchpoints: labels, note: (answer.note ?? '').trim() });
+  const note = (answer.note ?? '').trim();
+  if (answer.choice === WatchpointChoice.SendBack) {
+    insertWatchpointFollowUp(ctx, taskId, { watchpoints: labels, note });
+    return;
+  }
+  if (answer.choice !== WatchpointChoice.LooksRight) return;
+  const task = getTask(ctx.tx, taskId);
+  insertDecision(ctx, {
+    projectId: item.projectId,
+    scope: KnowledgeScope.Project,
+    area: null,
+    question:
+      labels.length === 0
+        ? `Did the changes in "${task.title}" look right?`
+        : `Did the changes to ${labels.join(', ')} in "${task.title}" look right?`,
+    choice: 'Looks right',
+    rationale: note === '' ? 'Looked at in the Inbox' : note,
+    decidedBy: BUILDER_HANDLE,
+    sourceId: insertSource(ctx, SourceKind.InboxAnswer, { inboxId: item.id }),
+  });
 }

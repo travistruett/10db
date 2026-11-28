@@ -48,6 +48,7 @@ import {
   type WorkstreamId,
   withParkedTasks,
   withParkOption,
+  WatchpointProposal,
 } from '@10db/contracts';
 import {
   findOpenByFoldKey,
@@ -78,6 +79,7 @@ import {
   type Json,
   type WriteContext,
   insertTrustGrant,
+  applyWatchpointProposal,
 } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
@@ -572,6 +574,11 @@ function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: Inb
     status: accepted ? 'accepted' : 'rejected',
     rationale: answer.note ?? null,
   });
+  if (accepted && proposal.kind === ProposalKind.Watchpoint) {
+    const change = WatchpointProposal.safeParse(item.detail?.['watchpoint']);
+    if (!change.success) throw new InvalidError('This card no longer holds the watchpoint change');
+    applyWatchpointProposal(ctx, proposal.projectId, change.data);
+  }
   if (accepted && proposal.kind === ProposalKind.NewTask) {
     // The task is stored with the areas of the lane that raised it, so the placement rule sees those, as it
     // does the kinds the lane declared, which are kept on the card and the task has.
