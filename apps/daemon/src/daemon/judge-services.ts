@@ -88,6 +88,7 @@ function testKind(decision: string): JudgeTestKind {
     case JudgeDecision.Acceptance:
     case JudgeDecision.AcceptanceSecond:
     case JudgeDecision.WatchpointQuestion:
+    case JudgeDecision.OwnershipTest:
       return JudgeTestKind.Nouls;
     default:
       return JudgeTestKind.Choice;

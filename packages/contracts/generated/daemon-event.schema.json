@@ -94,7 +94,8 @@
         "gate.finished",
         "folder_hold.changed",
         "notice.posted",
-        "status.changed"
+        "status.changed",
+        "ownership.shadow"
       ]
     },
     "entityType": {

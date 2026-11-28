@@ -64,6 +64,7 @@ export * from './design-check';
 export * from './sign-in-setup';
 export * from './mockup-document';
 export * from './model-profiles';
+export * from './ownership-shadow';
 export * from './page-areas';
 export * from './page-pick';
 export { globsOverlap } from './glob-overlap';
