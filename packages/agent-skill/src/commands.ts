@@ -84,6 +84,19 @@ async function call<S extends z.ZodType>(
 const projectsOf = (deps: CommandDeps) => get(deps, '/projects', z.array(ProjectView));
 const tasksOf = (deps: CommandDeps, projectId: string) =>
   get(deps, `/projects/${projectId}/tasks`, z.array(TaskView));
+
+/** The project whose task list holds the task, with the task. A task row names no project, so the list it came from does. */
+async function findTask(
+  deps: CommandDeps,
+  id: string,
+): Promise<{ projectId: string; task: TaskView } | null> {
+  for (const p of await projectsOf(deps)) {
+    const task = (await tasksOf(deps, p.id)).find((t) => t.id === id);
+    if (task) return { projectId: p.id, task };
+  }
+  return null;
+}
+
 const kindsOf = (deps: CommandDeps) => get(deps, '/kinds', z.array(KindView));
 const accountsOf = (deps: CommandDeps) => get(deps, '/accounts', z.array(AccountView));
 
@@ -356,14 +369,11 @@ const move: Command = async ([raw, column], deps) => {
   if (!column) throw new TendbError('usage: move <taskId> <column name|state>');
   let to: string | null = null;
   if (column !== 'state') {
-    let projectId: string | null = null;
-    for (const p of await projectsOf(deps)) {
-      if ((await tasksOf(deps, p.id)).some((t) => t.id === id)) projectId = p.id;
-    }
-    if (!projectId) throw new TendbError(`No open task ${id}. Run context to list them.`);
+    const located = await findTask(deps, id);
+    if (!located) throw new TendbError(`No open task ${id}. Run context to list them.`);
     const columns = await get(
       deps,
-      `/projects/${projectId}/board-columns`,
+      `/projects/${located.projectId}/board-columns`,
       z.array(BoardColumnView),
     );
     const found = columns.find((c) => c.name.toLowerCase() === column.toLowerCase());
@@ -425,19 +435,15 @@ const close: Command = async ([raw], deps) => {
 const joinBatch: Command = async ([rawTask, rawBatch], deps) => {
   const id = taskId(rawTask, 'join <taskId> <batchId>');
   const batch = batchId(rawBatch, 'join <taskId> <batchId>');
-  let task: TaskView | undefined;
-  for (const p of await projectsOf(deps)) {
-    task = (await tasksOf(deps, p.id)).find((t) => t.id === id);
-    if (task) break;
-  }
-  if (!task) throw new TendbError(`No project has task ${id}.`);
+  const located = await findTask(deps, id);
+  if (!located) throw new TendbError(`No project has task ${id}.`);
   const batches = await call(
     deps,
     'POST',
-    `/projects/${task.projectId ?? ''}/batches`,
+    `/projects/${located.projectId}/batches`,
     JoinedBatches,
     {
-      title: task.title,
+      title: located.task.title,
       taskIds: [id],
       batchId: batch,
     },
