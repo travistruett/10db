@@ -64,6 +64,12 @@ export interface GeneralValues {
   readonly humanWaitMinutes: number | '';
   /** '' means no ceiling. */
   readonly budgetCeiling: number | '';
+  /** Dollars a day of 10db's own work on a metered account. */
+  readonly autoCeilingUsd: number | '';
+  /** Percent of a plan's limit a day of 10db's own work may use; the project holds it as a share from 0 to 1. */
+  readonly autoCeilingShare: number | '';
+  /** Sessions a day that could not be measured. */
+  readonly autoCeilingSessions: number | '';
   readonly delivery: Delivery;
   readonly baseBranch: string;
   /** What a finished task's pull request does unless the task says otherwise. */
@@ -118,6 +124,9 @@ export type GeneralCheck =
   | { readonly ok: true; readonly patch: ProjectPatch | null }
   | { readonly ok: false; readonly errors: GeneralErrors };
 
+/** A share of a plan's limit from 0 to 1, as the percent the field shows, to one decimal. */
+const percentOf = (share: number): number => Math.round(share * 1000) / 10;
+
 export function generalValues(project: ProjectDto): GeneralValues {
   return {
     name: project.name,
@@ -129,6 +138,9 @@ export function generalValues(project: ProjectDto): GeneralValues {
     nudgePct: project.nudgePct,
     humanWaitMinutes: project.humanWaitMinutes,
     budgetCeiling: project.budgetCeiling ?? '',
+    autoCeilingUsd: project.autoCeilingUsd,
+    autoCeilingShare: percentOf(project.autoCeilingShare),
+    autoCeilingSessions: project.autoCeilingSessions,
     delivery: project.delivery,
     baseBranch: project.baseBranch,
     landing: project.landing,
@@ -222,6 +234,20 @@ export function checkGeneral(
   if (values.humanWaitMinutes === '') errors.humanWaitMinutes = 'Enter the wait in minutes';
   if (values.budgetCeiling !== '' && values.budgetCeiling <= 0)
     errors.budgetCeiling = 'Enter a ceiling above $0, or leave it empty for none';
+  if (values.autoCeilingUsd === '' || values.autoCeilingUsd <= 0)
+    errors.autoCeilingUsd = 'Enter a daily ceiling above $0';
+  if (
+    values.autoCeilingShare === '' ||
+    values.autoCeilingShare <= 0 ||
+    values.autoCeilingShare > 100
+  )
+    errors.autoCeilingShare = "Enter a share of the plan's limit above 0% and up to 100%";
+  if (
+    values.autoCeilingSessions === '' ||
+    !Number.isInteger(values.autoCeilingSessions) ||
+    values.autoCeilingSessions < 1
+  )
+    errors.autoCeilingSessions = 'Enter a whole number of sessions, at least 1';
   const baseBranch = values.baseBranch.trim();
   const prefix = values.prTitlePrefix.trim();
   const landingBranch = values.landingBranch.trim();
@@ -274,6 +300,18 @@ export function checkGeneral(
     patch.humanWaitMinutes = values.humanWaitMinutes;
   const ceiling = values.budgetCeiling === '' ? null : values.budgetCeiling;
   if (ceiling !== project.budgetCeiling) patch.budgetCeiling = ceiling;
+  if (values.autoCeilingUsd !== '' && values.autoCeilingUsd !== project.autoCeilingUsd)
+    patch.autoCeilingUsd = values.autoCeilingUsd;
+  if (
+    values.autoCeilingShare !== '' &&
+    values.autoCeilingShare !== percentOf(project.autoCeilingShare)
+  )
+    patch.autoCeilingShare = values.autoCeilingShare / 100;
+  if (
+    values.autoCeilingSessions !== '' &&
+    values.autoCeilingSessions !== project.autoCeilingSessions
+  )
+    patch.autoCeilingSessions = values.autoCeilingSessions;
   if (values.delivery !== project.delivery) patch.delivery = values.delivery;
   if (baseBranch !== project.baseBranch) patch.baseBranch = baseBranch;
   if (values.landing !== project.landing) patch.landing = values.landing;

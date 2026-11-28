@@ -5,6 +5,14 @@ export {
   raiseDockerOnNote,
 } from './docker-card';
 export { createJudgeOutageCard } from './judge-outage-card';
+export {
+  AutoCeilingChoice,
+  autoCeilingFoldKey,
+  createAutoCeilingAnswers,
+  createAutoCeilingCards,
+  type AutoCeilingCards,
+  type WaitingRun,
+} from './auto-ceiling-card';
 export { createGuardrailAnswers } from './guardrail-revert';
 export {
   guardrailDiffOf,

@@ -769,6 +769,17 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await page.unroute(/\/accounts\/[^/]+\/secret$/);
   await chooseScope(page, 'This Project');
   await page.getByRole('link', { name: /Billing/ }).click();
+  // The daily ceiling of 10db's own work: its three fields at their defaults, and today's counted line.
+  await expect(page.getByRole('textbox', { name: 'Daily Ceiling, Dollars' })).toHaveValue('$10');
+  await expect(
+    page.getByRole('textbox', { name: "Daily Ceiling, Share of the Plan's Limit" }),
+  ).toHaveValue('10%');
+  await expect(
+    page.getByRole('textbox', { name: 'Daily Ceiling, Sessions Not Measured' }),
+  ).toHaveValue('20');
+  await expect(page.getByTestId('auto-ceiling-today')).toContainText(
+    "Today: $0.00 · 0% of the plan's limit · 0 sessions not measured",
+  );
   await page.getByRole('combobox', { name: 'Account', exact: true }).click();
   await expect(page.getByRole('option', { name: /Router C/ })).toBeEnabled();
   await page.keyboard.press('Escape');

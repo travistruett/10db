@@ -212,6 +212,17 @@
         "null"
       ]
     },
+    "autoCeilingUsd": {
+      "type": "number"
+    },
+    "autoCeilingShare": {
+      "type": "number"
+    },
+    "autoCeilingSessions": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
     "delivery": {
       "type": "string",
       "enum": [
@@ -410,6 +421,9 @@
     "humanWaitMinutes",
     "defaultRigor",
     "budgetCeiling",
+    "autoCeilingUsd",
+    "autoCeilingShare",
+    "autoCeilingSessions",
     "delivery",
     "baseBranch",
     "landing",

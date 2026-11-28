@@ -7,10 +7,12 @@ import {
   AccountPauseDto,
   AccountSignInDto,
   AccountUsageDto,
+  AutoCeilingTodayDto,
   type AccountId,
   type AccountLoginEndedData,
   type AccountConfig,
   type AccountPatch,
+  type ProjectId,
 } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
@@ -59,6 +61,23 @@ export function useAccountUsage(id: AccountId) {
       readJson(
         await client.accounts[':accountId'].usage.$get({ param: { accountId: id }, query: {} }),
         AccountUsageDto,
+      ),
+  });
+}
+
+/** How often today's count of 10db's own work is read again: sessions end without any event naming them. */
+const AUTO_CEILING_REFETCH_MS = 15_000;
+
+/** What 10db's own work for the project counted today against its daily ceiling, and the measure in use. */
+export function useAutoCeilingToday(projectId: ProjectId) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: ['auto-ceiling', projectId] as const,
+    refetchInterval: AUTO_CEILING_REFETCH_MS,
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId']['auto-ceiling'].$get({ param: { projectId } }),
+        AutoCeilingTodayDto,
       ),
   });
 }

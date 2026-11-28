@@ -33,6 +33,16 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
         : current.humanWaitMinutes,
     budgetCeiling:
       current.budgetCeiling === seed.budgetCeiling ? next.budgetCeiling : current.budgetCeiling,
+    autoCeilingUsd:
+      current.autoCeilingUsd === seed.autoCeilingUsd ? next.autoCeilingUsd : current.autoCeilingUsd,
+    autoCeilingShare:
+      current.autoCeilingShare === seed.autoCeilingShare
+        ? next.autoCeilingShare
+        : current.autoCeilingShare,
+    autoCeilingSessions:
+      current.autoCeilingSessions === seed.autoCeilingSessions
+        ? next.autoCeilingSessions
+        : current.autoCeilingSessions,
     delivery: current.delivery === seed.delivery ? next.delivery : current.delivery,
     baseBranch: current.baseBranch === seed.baseBranch ? next.baseBranch : current.baseBranch,
     landing: current.landing === seed.landing ? next.landing : current.landing,

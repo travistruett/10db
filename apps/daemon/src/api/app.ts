@@ -1994,6 +1994,9 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .get('/projects/:projectId/auto-ceiling', (c) =>
+      c.json(deps.services.autoCeilingToday(ProjectId.parse(c.req.param('projectId')))),
+    )
     .get('/projects/:projectId/routing-rules', (c) =>
       c.json(deps.services.listRoutingRules(ProjectId.parse(c.req.param('projectId')))),
     )

@@ -4,6 +4,7 @@ import { StoredWatchpointDetail } from './watchpoint-hit';
 import { StoredEvalCoverageDetail } from './eval-coverage';
 import { USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN } from './accounts';
 import { AllowedCommands } from './allowed-commands';
+import { AUTO_CEILING_DEFAULTS } from './auto-ceiling';
 import { ModelSetting } from './catalogue';
 import { BranchName, PrTitlePrefix } from './git-names';
 import { ExternalLink } from './external';
@@ -560,6 +561,12 @@ export const ProjectInput = z
     defaultRigor: z.enum(Rigor).default(Rigor.Standard),
     /** The most a task may cost, in USD, compared with a profile's AA cost per task; null for no ceiling. */
     budgetCeiling: z.number().positive().nullable().default(null),
+    /** Dollars of 10db's own work a day on a metered account before its new sessions wait. */
+    autoCeilingUsd: z.number().positive().default(AUTO_CEILING_DEFAULTS.usd),
+    /** The share of a plan's limit (0 to 1) 10db's own work may use in a day before its new sessions wait. */
+    autoCeilingShare: z.number().positive().max(1).default(AUTO_CEILING_DEFAULTS.share),
+    /** Sessions of 10db's own work a day that could not be measured before its new sessions wait. */
+    autoCeilingSessions: z.int().min(1).default(AUTO_CEILING_DEFAULTS.sessions),
     /** How finished work leaves the machine: on the checked-out branch, or as a batch's pull request. */
     delivery: z.enum(Delivery).default(Delivery.Local),
     /** The branch on `origin` a batch is cut from and its pull request targets. */
@@ -735,6 +742,9 @@ export const ProjectDto = z.object({
   humanWaitMinutes: z.int(),
   defaultRigor: z.enum(Rigor),
   budgetCeiling: z.number().nullable(),
+  autoCeilingUsd: z.number(),
+  autoCeilingShare: z.number(),
+  autoCeilingSessions: z.int(),
   delivery: z.enum(Delivery),
   baseBranch: z.string(),
   landing: z.enum(ProjectLanding),
@@ -819,6 +829,9 @@ export const ProjectPatch = z
     defaultRigor: z.enum(Rigor),
     /** The most a task may cost, in USD, compared with a profile's AA cost per task; null for no ceiling. */
     budgetCeiling: z.number().positive().nullable(),
+    autoCeilingUsd: z.number().positive(),
+    autoCeilingShare: z.number().positive().max(1),
+    autoCeilingSessions: z.int().min(1),
     delivery: z.enum(Delivery),
     baseBranch: BranchName,
     landing: z.enum(ProjectLanding),

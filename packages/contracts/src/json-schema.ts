@@ -132,6 +132,7 @@ import {
   OpenRouterSyncStatusDto,
 } from './benchmarks';
 import { GithubSigninDto, GithubStatusDto } from './github';
+import { AutoCeilingTodayDto } from './auto-ceiling';
 import { DecisionModelListDto } from './decision-models';
 import { DecisionStatsListDto } from './decision-stats';
 import { ActivityPageDto, ActivityPageQuery, ActivityRowRef, NoticePostedData } from './activity';
@@ -451,6 +452,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'batch-start-input': BatchStartInput,
   'batch-start-result': BatchStartResult,
   'project-view-dto': ProjectViewDto,
+  'auto-ceiling-today-dto': AutoCeilingTodayDto,
   'task-start-result': TaskStartResult,
   'project-dto': ProjectDto,
   'task-dto': TaskDto,

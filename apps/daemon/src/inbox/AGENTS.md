@@ -45,6 +45,12 @@
   writes an event closer into `detail.resolvesWhen` on insert and on a refresh, and never throws for a missing tier
   (the contract is the compiler's). A new card builder declares its tier, urgency and `closesWhen`; a notice is
   posted, never flagged.
+- The ceiling card (`auto-ceiling-card.ts`) is a Money card, `decidedByBuilder(BuilderOwns.Money)`, raised by the scheduler
+  for a project whose checked runs it holds at the daily ceiling. It folds on `autoCeilingFoldKey(project, day, carryOns)`: one
+  card per allowance, none once its card was answered (`hasAnsweredByFoldKey`, so Wait Until Tomorrow stays quiet that day),
+  and a Carry On Today moves the project to the next key, so a second ceiling the same day is a second card. Carry On Today
+  writes the day's allowance and wakes the scheduler (`createAutoCeilingAnswers`); a tick on a later day withdraws an open
+  card of an earlier day (`closeEarlierDays`).
 - A notice is `postNotice(ctx, NoticeInput)` (`notice.ts`; `InboxService.notice` for a caller with no write open): a
   `notice.posted` event appended in the caller's write, with the key cut by `fitNoticeKey` (200 characters, a
   readable head and a sha256) and the line and body by `fitNotice`. A task's notice is on entity `task` (it needs a

@@ -150,7 +150,13 @@ import {
   writeProjectWatchpoints,
   writeYourWatchpoints,
 } from '@10db/db';
-import { MoveCause, type AccountMoves, type AccountService, type McpSignIns } from '../accounts';
+import {
+  MoveCause,
+  type AccountMoves,
+  type AccountService,
+  type AutoCeiling,
+  type McpSignIns,
+} from '../accounts';
 import type { Clock } from '../clock';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import type { BenchmarkApiServices } from './benchmark-services';
@@ -416,6 +422,8 @@ export function createServices(deps: {
   readonly cancelSignOff: (passId: PassId, taskId: TaskId) => void;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
+  /** What 10db's own work counted against a project's daily ceiling today. */
+  readonly autoCeiling: Pick<AutoCeiling, 'today'>;
   readonly moves: Pick<AccountMoves, 'move'>;
   /** Where worktrees are made; a project's checkout may not overlap it. */
   readonly worktreeRoot: string;
@@ -1332,6 +1340,7 @@ export function createServices(deps: {
     connectAccount: (id) => deps.accounts.connect(id),
     cancelAccountConnect: (id) => deps.accounts.cancelConnect(id),
     accountUsage: (id, month) => deps.accounts.usage(id, month),
+    autoCeilingToday: (projectId) => deps.autoCeiling.today(projectId),
     listAccountPauses: () => deps.accounts.pauses(),
     resumeAccount: (id) => deps.accounts.resume(id),
     listRoutingRules(projectId) {

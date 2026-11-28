@@ -79,6 +79,20 @@
         }
       ]
     },
+    "autoCeilingUsd": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "autoCeilingShare": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1
+    },
+    "autoCeilingSessions": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
     "delivery": {
       "type": "string",
       "enum": [
