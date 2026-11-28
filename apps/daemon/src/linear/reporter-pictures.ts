@@ -36,14 +36,18 @@ export interface ReporterPicture {
   readonly label: string;
 }
 
-/** The task's before and after pairs, before first, at most `MAX_LINEAR_PICTURES`; and how many did not fit. */
+/**
+ * The task's before and after pairs, before first, at most `MAX_LINEAR_PICTURES`; how many did not fit; and
+ * whether the task has an after at all.
+ */
 export function reporterPictures(
   db: DbReader,
   taskId: TaskId,
-): { readonly pictures: ReporterPicture[]; readonly more: number } {
-  const all = picturePlan([
+): { readonly pictures: ReporterPicture[]; readonly more: number; readonly hasAfter: boolean } {
+  const plan = picturePlan([
     { title: getTask(db, taskId).title, screens: listTaskScreens(db, taskId) },
-  ])
+  ]);
+  const all = plan
     .flatMap((pair) => [
       pair.before === null ? null : { kind: 'Before', route: pair.route, picture: pair.before },
       pair.after === null ? null : { kind: 'After', route: pair.route, picture: pair.after },
@@ -57,6 +61,7 @@ export function reporterPictures(
   return {
     pictures: all.slice(0, MAX_LINEAR_PICTURES),
     more: Math.max(0, all.length - MAX_LINEAR_PICTURES),
+    hasAfter: plan.some((pair) => pair.after !== null),
   };
 }
 
@@ -250,6 +255,8 @@ export function picturesText(input: {
   readonly uploaded: UploadedPictures;
   readonly more: number;
   readonly offered: number;
+  /** What a landing says of the after it has none of, after its pictures. */
+  readonly note?: string;
 }): string {
   const { uploaded, more, offered } = input;
   const lines: string[] = [];
@@ -267,12 +274,20 @@ export function picturesText(input: {
           : `, which did not upload (${uploaded.failed.join('; ')}).`
       }`,
     );
+  if (input.note !== undefined && input.note !== '') lines.push('', input.note);
   return lines.join('\n');
 }
 
 /** The one line that says a task has no pictures, and why. Never names a pull request. */
 export const skippedText = (reason: string): string =>
   `No before and after pictures were taken. ${reason}.`;
+
+/** The line that says a task has pictures but no after, and why. */
+export const noAfterText = (reason: string): string => `No after picture was taken. ${reason}.`;
+
+/** Said when the after was still being taken as a comment that shows the pictures was written. */
+export const STILL_TAKING_AFTER_TEXT =
+  'The after picture was still being taken when this was written; it is in 10db once done.';
 
 /** Said on the `ended` comment of a local copy's task, whose after is taken once its change lands. */
 export const LATER_TEXT =
@@ -291,12 +306,20 @@ export const carriesPictures = (event: LinearEventKind): boolean =>
 /** What an owed update's comment says of the task's pictures: words alone, or the pictures to upload for it. */
 export type PicturesToShow =
   | { readonly text: string }
-  | { readonly pictures: readonly ReporterPicture[]; readonly more: number };
+  | {
+      readonly pictures: readonly ReporterPicture[];
+      readonly more: number;
+      /** What a landing says of the after it has none of; empty otherwise. */
+      readonly note: string;
+    };
 
 /**
  * What an owed update adds to its comment. Pictures go in the `ended` comment, or in the `pr_merged` or `landed`
- * one when none showed before. What there is to say about missing ones is said once: on the first `ended`
- * comment, or, for a local copy (whose `ended` comment says they follow), on its landing comment.
+ * one when none showed before. A local copy's landing is the comment its pictures ride in, since its after is
+ * taken once it has landed: the pictures its `ended` comment showed (its before) do not spare it, and only an
+ * earlier landing that carried pictures does. What there is to say about missing ones is said once: on the first
+ * `ended` comment, or, for a local copy (whose `ended` comment says they follow), on its landing comment, which
+ * says it for the after too when a before is all it can show.
  */
 export function picturesToShow(input: {
   readonly db: DbReader;
@@ -306,16 +329,27 @@ export function picturesToShow(input: {
   const { db, post } = input;
   const none = { text: '' };
   if (!carriesPictures(post.event)) return none;
+  const landing = post.event === LinearEventKind.Landed && post.detail[LOCAL_LANDING] === true;
   const earlier = listLinearPosts(db, post.taskId).filter(
     (p) => p.id !== post.id && p.state === LinearPostState.Recorded,
   );
-  if (earlier.some((p) => p.attachmentUrl !== null)) return none;
-  const { pictures, more } = reporterPictures(db, post.taskId);
-  if (pictures.length > 0) return { pictures, more };
+  const carried = earlier.some(
+    (p) => p.attachmentUrl !== null && (!landing || p.event === LinearEventKind.Landed),
+  );
+  if (carried) return none;
+  const { pictures, more, hasAfter } = reporterPictures(db, post.taskId);
   const speaks =
     post.event === LinearEventKind.Ended
       ? !earlier.some((p) => p.event === LinearEventKind.Ended)
-      : post.detail[LOCAL_LANDING] === true;
+      : landing;
+  if (pictures.length > 0) {
+    const missing = landing && !hasAfter;
+    return {
+      pictures,
+      more,
+      note: missing ? afterWordOf(input.outlook(post.taskId)) : '',
+    };
+  }
   if (!speaks) return none;
   const outlook = input.outlook(post.taskId);
   return {
@@ -326,8 +360,24 @@ export function picturesToShow(input: {
           ? STILL_TAKING_TEXT
           : outlook.kind === 'later' && post.event === LinearEventKind.Ended
             ? LATER_TEXT
-            : '',
+            : outlook.kind === 'none' && landing && outlook.why !== undefined
+              ? skippedText(outlook.why)
+              : '',
   };
+}
+
+/** What a landing that shows a before says of the after it has none of, from what the pictures service expects. */
+function afterWordOf(outlook: PicturesOutlook): string {
+  switch (outlook.kind) {
+    case 'skipped':
+      return noAfterText(outlook.reason);
+    case 'wait':
+      return STILL_TAKING_AFTER_TEXT;
+    case 'none':
+      return outlook.why === undefined ? '' : noAfterText(outlook.why);
+    case 'later':
+      return '';
+  }
 }
 
 /** The address a row records for the pictures its comment shows: the first one's, or null when none reached Linear. */
@@ -349,7 +399,12 @@ export async function picturesFor(input: {
   if ('text' in show) return { text: show.text, attachmentUrl: null };
   const uploaded = await uploadPictures(input.db, show.pictures, input.uploader, input.send);
   return {
-    text: picturesText({ uploaded, more: show.more, offered: show.pictures.length }),
+    text: picturesText({
+      uploaded,
+      more: show.more,
+      offered: show.pictures.length,
+      note: show.note,
+    }),
     attachmentUrl: attachmentOf(uploaded),
   };
 }

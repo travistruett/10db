@@ -41,6 +41,8 @@ export interface AgentUpload {
   readonly queue: ReporterPicture[];
   readonly offered: number;
   readonly more: number;
+  /** What the comment says after its pictures, when a landing has no after to show. */
+  readonly note: string;
   step: UploadStep | null;
   readonly shown: { label: string; markdown: string; assetUrl: string | null }[];
   readonly failed: string[];
@@ -49,10 +51,12 @@ export interface AgentUpload {
 export const beginAgentUpload = (
   pictures: readonly ReporterPicture[],
   more: number,
+  note: string,
 ): AgentUpload => ({
   queue: [...pictures],
   offered: pictures.length,
   more,
+  note,
   step: null,
   shown: [],
   failed: [],

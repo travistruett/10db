@@ -2512,6 +2512,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     inbox,
     waits: queueWaits,
     held: () => admission.held(),
+    dataDir: opts.dataDir,
+    gateTimeoutFloorMs: limits.gateTimeoutMs,
     clock,
     logger: logger.child({ component: 'stalls' }),
   });

@@ -244,13 +244,16 @@ export class PicturesStoppedError extends Error {
 
 /**
  * What a task's after picture can still be expected to do, for the updates that show it:
- * - `none`: the task names no page, already has its pictures, or nothing says they were skipped;
+ * - `none`: nothing is owed: the task already has its after, or no picture of it is expected. When it has no
+ *   after, `why` says why (a sentence with no full stop), for a comment that has to say it; the updates that
+ *   speak only of a recorded failure leave it unsaid;
  * - `wait`: a capture of its after is waiting or running, so its answer is not in yet;
  * - `later`: a local copy whose change has not landed, so its after is taken then;
  * - `skipped`: no picture was or will be taken, and why (a sentence with no full stop).
  */
 export type PicturesOutlook =
-  | { readonly kind: 'none' | 'wait' | 'later' }
+  | { readonly kind: 'none'; readonly why?: string }
+  | { readonly kind: 'wait' | 'later' }
   | { readonly kind: 'skipped'; readonly reason: string };
 
 export interface Pictures {
@@ -1428,9 +1431,11 @@ export function startPictures(deps: PicturesDeps): Pictures {
     outlook(taskId) {
       const task = getTask(db, taskId);
       const project = getProject(db, task.projectId);
-      if (project.appUrl === null) return { kind: 'none' };
+      if (project.appUrl === null)
+        return { kind: 'none', why: 'The project has no app address to take pictures of' };
       const reported = reportedFor(ScreenKind.After, task, null, task.passId != null);
-      if (pictureRoutes(project, task, reported).length === 0) return { kind: 'none' };
+      if (pictureRoutes(project, task, reported).length === 0)
+        return { kind: 'none', why: 'The task names no page to take a picture of' };
       if (hasTaskScreen(db, taskId, ScreenKind.After)) return { kind: 'none' };
       const localCopy = inLocalCopy(task);
       if (!takesPictures(project, task, reported, localCopy))
@@ -1451,7 +1456,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
       const browser = deps.camera.status();
       return browser.state === BrowserState.Refused
         ? { kind: 'skipped', reason: `The pictures browser is not available (${browser.problem})` }
-        : { kind: 'none' };
+        : { kind: 'none', why: 'No capture of its page was asked or recorded' };
     },
     status(projectId) {
       const { appUrl } = getProject(db, projectId);

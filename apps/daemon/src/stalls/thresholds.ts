@@ -2,6 +2,8 @@ import { QueueWaitKind } from '@10db/contracts';
 
 const MINUTE = 60_000;
 
+export const STALL_MINUTE_MS = MINUTE;
+
 /** How often the stall sweep looks, and how long each kind of work may sit still before it is stuck. */
 export const STALL = {
   sweepMs: MINUTE,

@@ -12,7 +12,8 @@ import { cardsResolvedByEvent, flagCard, resolveStaleCards, type InboxService } 
 import type { Logger } from '../log';
 import type { QueueWaits } from '../scheduler';
 import { stallCard, stallCardOf } from './card';
-import { batchStallKey, findStalls, runStallKey, type QueuedRun } from './rules';
+import { liveGateOf } from './live-gate';
+import { batchStallKey, findStalls, runStallKey, type ActiveRun, type QueuedRun } from './rules';
 import { STALL } from './thresholds';
 
 /** The reason 10db writes on a Stuck card it closed because the item moved. */
@@ -43,6 +44,10 @@ export function createStallSweep(deps: {
   readonly waits: Pick<QueueWaits, 'get'>;
   /** Whether 10db's admission holds new work now: the load guard, low disk or an update's drain. */
   readonly held: () => boolean;
+  /** The data dir, whose `logs/gate` holds each gate's log. */
+  readonly dataDir: string;
+  /** The fixed floor of a gate's timeout (`limits.gateTimeoutMs`). */
+  readonly gateTimeoutFloorMs: number;
   readonly clock: Clock;
   readonly logger: Logger;
 }): StallSweep {
@@ -73,7 +78,12 @@ export function createStallSweep(deps: {
     }
     const active = listWorkstreams(db, {
       states: [WorkstreamState.Starting, WorkstreamState.Running, WorkstreamState.Verifying],
-    }).filter(inLive);
+    })
+      .filter(inLive)
+      .map((run): ActiveRun => {
+        const gate = liveGateOf(db, run.id, deps);
+        return gate === null ? run : { ...run, gate };
+      });
     // A copy waiting for its turn is not being cut, however long it waits.
     const waiting = new Set(queuedCopyBatchIds(db));
     const batches = listBatches(db, {
