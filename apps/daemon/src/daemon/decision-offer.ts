@@ -102,9 +102,13 @@ export function settleSecondOpinionModel(ctx: WriteContext, account: AccountRow 
     if (model === null || model === stored) continue;
     patchJudgeConfig(ctx, { decisions: { [decision]: { model } } });
   }
-  // Acceptance's first call and a watchpoint's question default to OpenRouter's System One model like the older
-  // decisions, so a config saved before they existed names a model these accounts don't list either.
-  for (const decision of [JudgeDecision.Acceptance, JudgeDecision.WatchpointQuestion] as const) {
+  // Acceptance's first call, a watchpoint's question and the ownership test default to OpenRouter's System One
+  // model like the older decisions, so a config saved before they existed names a model these accounts don't list.
+  for (const decision of [
+    JudgeDecision.Acceptance,
+    JudgeDecision.WatchpointQuestion,
+    JudgeDecision.OwnershipTest,
+  ] as const) {
     const first = decisions[decision].model;
     if (offered.has(first)) continue;
     const model = defaultDecisionModel(ctx.tx, account);

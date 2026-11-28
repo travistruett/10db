@@ -44,10 +44,14 @@ const SESSION_GRACE_MS = 5_000;
 /** What a failed session call's detail ends with. */
 export const DECISIONS_ACCOUNT_WOULD_SETTLE = 'A Decisions account would have settled it.';
 
-/** The decisions a session on the project's account never answers: limits block a live tool call. */
+/**
+ * The decisions a session on the project's account never answers: limits block a live tool call, and the
+ * ownership test runs for every shipped pull request in shadow, so it would spend the builder's plan unasked.
+ */
 const SESSION_EXCLUDED: ReadonlySet<JudgeDecision> = new Set([
   JudgeDecision.CrossesLimit,
   JudgeDecision.CrossesLimitSecond,
+  JudgeDecision.OwnershipTest,
 ]);
 
 /** What a call is about, so the session judge can find the project whose account it asks on. */

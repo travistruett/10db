@@ -33,7 +33,8 @@
         "test_value",
         "acceptance",
         "acceptance_second",
-        "watchpoint_question"
+        "watchpoint_question",
+        "ownership_test"
       ]
     },
     "outcome": {

@@ -143,6 +143,7 @@ export function serveJudge(initial: {
             acceptance: merged(JudgeDecision.Acceptance),
             acceptance_second: merged(JudgeDecision.AcceptanceSecond),
             watchpoint_question: merged(JudgeDecision.WatchpointQuestion),
+            ownership_test: merged(JudgeDecision.OwnershipTest),
           },
         },
       };

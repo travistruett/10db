@@ -71,6 +71,8 @@ import {
   type PullRequestStatus,
   type RequiredChecks,
 } from '../github';
+import type { Judge } from '../judge';
+import { askOwnershipShadow } from '../ownership';
 import { commitAdaptsMerge, insertPlannedWorkstream, planForStart, revertOfRun } from '../team';
 import { raiseGateHostCards, withdrawCard } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
@@ -130,7 +132,12 @@ import {
   gateFixTitle,
 } from './gate-fix-text';
 import { guardrailHoldCardKey, raiseGuardrailHold } from './guardrail-hold-card';
-import { holdRootOf, readGuardrailHold, type GuardrailReading } from './guardrail-hold';
+import {
+  holdRootOf,
+  pullRequestBase,
+  readGuardrailHold,
+  type GuardrailReading,
+} from './guardrail-hold';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck, type LocalCheck } from './local-check';
 import {
@@ -206,6 +213,11 @@ export interface ShipperDeps extends DeliveryContext {
   readonly baseUpdates: BaseUpdates;
   readonly clock: Clock;
   readonly dataDir: string;
+  /**
+   * Asks the ownership test's questions of each root batch's pull request, in shadow: nothing it answers is
+   * read to arm, hold or move a pull request. Absent, nothing is asked.
+   */
+  readonly judge?: Judge;
   /** The gate runs in the session environment, as a task's gate does. */
   sessionEnv(project: ProjectDto): Readonly<Record<string, string>>;
   identifyProcess?(pid: number): Promise<string | null>;
@@ -1180,6 +1192,31 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
+   * Queues the ownership test's shadow questions for a root batch's pull request, in a job of their own: the ship
+   * never waits for them, and nothing they answer is read to arm, hold or move it. The range is resolved here and
+   * read from the project's repository, since the shipped worktree may be gone when the job runs.
+   */
+  function shadowOwnership(
+    batch: BatchDto,
+    repo: string,
+    head: string | null,
+    guardrailHits: number | null,
+  ): void {
+    const judge = deps.judge;
+    if (judge === undefined || head === null) return;
+    deps.jobs.run(`ownership-shadow:${batch.id}`, async (signal) => {
+      const root = getBatch(db, holdRootOf(batch));
+      const base = await pullRequestBase(deps.git, repo, root, head);
+      if (base === null) return;
+      await askOwnershipShadow(
+        { judge, git: deps.git, state: deps.state, logger: deps.logger },
+        { root, repo, base, head, guardrailHits },
+        signal,
+      );
+    });
+  }
+
+  /**
    * Reads whether the root's pull request is held for the builder at `head`: the path list over the
    * pull request's whole change, never the shipping batch's own range. No judge answer is read.
    */
@@ -1730,7 +1767,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
       const existing = fixPr ?? (await deps.gh.prView({ repo, ref: branch }, ghCall(deps, signal)));
       // Whether the pull request's whole change touches a guardrail path, read for the head about to go.
       step = 'reading the pull request for guardrail changes';
-      const hold = await readHold(batch, checkout, await deps.git.branchTip(checkout, branch));
+      const head = await deps.git.branchTip(checkout, branch);
+      const hold = await readHold(batch, checkout, head);
       if (hold.action === 'hold' && existing?.state === PrState.Open) {
         step = 'gh pr merge --disable-auto';
         await disarmBeforePush(batch, repo, existing.url, signal);
@@ -1779,6 +1817,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
       });
       deps.logger.info({ batchId, branch, prUrl }, 'batch shipped');
       resolveShipCards(db, deps.inbox, getBatch(db, batchId));
+      // A CI fix pushes to a pull request its root already asked about.
+      if (fixPr === null && batch.ciFixOf === null)
+        shadowOwnership(batch, project.repoPath, head, hold.hits?.length ?? null);
       await afterEnd(batchId, worktreePath, signal);
     } catch (error) {
       // Shutdown: leave SHIPPING; recovery re-runs from step 0.
