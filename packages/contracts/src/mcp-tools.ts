@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BuilderCall, MAX_BUILDER_CALLS } from './card-decider';
 import { InboxOption, Title } from './entities';
 import { WatchpointNotes } from './watchpoint-hit';
 import { BriefKey } from './goals';
@@ -277,6 +278,20 @@ export const McpToolInputs = {
     riskTags: z.array(z.enum(['security', 'auth', 'migration', 'dependency'])).optional(),
     /** Set when the work must join a batch that is already running; a person decides that. */
     joinsRunningBatch: z.boolean().optional(),
+    prerequisite: z
+      .boolean()
+      .optional()
+      .describe(
+        "For a new task: true when your task can't meet its acceptance criteria without this work and it adds nothing your task's goal didn't ask for. 10db files it once, whatever its size, unless a kind or risk needs a card.",
+      ),
+    costs: z
+      .string()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe(
+        'What the work costs: its size, the time it adds and any risk. The builder reads it when the proposal reaches them.',
+      ),
     principle: PrincipleDraft.optional().describe(
       'For kind "principle": the rule itself. Without it, the body is used as the statement.',
     ),
@@ -339,6 +354,13 @@ export const McpToolInputs = {
       .default([])
       .describe(
         'Review, plan review and QA steps only: real problems that should not reject the work (on a later round, ones that are new and not caused by the fix). 10db files each as a task in the Icebox column and names it in your result.',
+      ),
+    builderCalls: z
+      .array(BuilderCall)
+      .max(MAX_BUILDER_CALLS)
+      .optional()
+      .describe(
+        "Plan and plan review steps only. The builder alone owns seven things: money (owns money), a move with no undo (one_way_door), the agent's guardrails: the git guard, Codex rules, sandbox profiles, judge policy, trust grants, standing approvals, .mcp.json, hooks and CI workflows (guardrails), what the product does or how it looks and what done means (product_and_taste), a promise in the builder's name such as a release or a first message to someone (promise), a sign-in, credential or host command only a person can give (your_hands), and a spent budget (out_of_moves). A plan step always sends this: one { owns, call } per decision its brief needs from the builder, or [] when it needs nothing, so the build can start without waiting. A plan review sends the calls the plan makes that its brief does not declare, or [] when there are none.",
       ),
   }),
   resize_task: z.object({

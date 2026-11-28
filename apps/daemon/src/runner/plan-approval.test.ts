@@ -3,7 +3,13 @@ import { createDeliveryJobs } from '../delivery';
 import { createGit } from '../git';
 import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from '../recovery';
-import { activeClaims, updateInboxItem, getWorkstreamRow, listInbox } from '@10db/db';
+import {
+  activeClaims,
+  updateInboxItem,
+  getWorkstreamRow,
+  listInbox,
+  pageActivity,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 
@@ -102,6 +108,61 @@ describe('parking a task for the builder to approve its plan', () => {
     // Plan, Plan Review, Build, Review and QA each ran once; the answer started nothing itself.
     expect(engine.adapter.prompts).toHaveLength(5);
     expect(planCards()).toHaveLength(1);
+  });
+});
+
+describe('a plan whose brief needs nothing from the builder', () => {
+  const needsNothing = (opId: string) => ({
+    ...planResult(opId, 'PLAN: edit src/api/a.txt.'),
+    args: { opId, summary: 'PLAN: edit src/api/a.txt.', verdict: null, builderCalls: [] },
+  });
+
+  it('goes ahead after its plan review with no card and one Activity row, and one naming a call of the builder’s still cards', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [needsNothing('op-plan-0101'), turn],
+        [approve('op-plan-0102'), turn],
+        implement('op-plan-0103'),
+        [approve('op-plan-0104'), turn],
+        [approve('op-plan-0105'), turn],
+      ],
+      Beta: [
+        [
+          {
+            ...planResult('op-plan-0111', 'PLAN: buy a plan.'),
+            args: {
+              opId: 'op-plan-0111',
+              summary: 'PLAN: buy a plan.',
+              verdict: null,
+              builderCalls: [{ owns: 'money', call: 'Buy a paid Sentry plan' }],
+            },
+          },
+          turn,
+        ],
+        [approve('op-plan-0112'), turn],
+      ],
+    });
+    const { workstream } = critical(true);
+    await runWhileQueued(workstream.id);
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(planCards()).toHaveLength(0);
+    const ahead = pageActivity(engine.store.db, { pageSize: 50 }).rows.filter(
+      (r) => r.key === `plan-ahead:${workstream.id}`,
+    );
+    expect(ahead).toHaveLength(1);
+    expect(ahead[0]?.decision).toMatchObject({ by: 'rule', rule: 'plan-goes-ahead' });
+
+    const beta = engine.addTask('Beta', ['ui'], [], {
+      flow: 'full',
+      criteria: 4,
+      riskTags: ['security'],
+      approvesPlan: true,
+    });
+    await runWhileQueued(beta.workstream.id);
+    const [card] = openPlanCards();
+    expect(ws(beta.workstream.id).nextAction).toMatchObject({ kind: 'plan_approval' });
+    expect(card?.body).toContain('Buy a paid Sentry plan (Money)');
+    expect(card?.detail).toMatchObject({ decider: 'builder', owns: 'money' });
   });
 });
 

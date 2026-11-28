@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import {
   TrustSurface,
   BuilderOwns,
+  CardDecider,
+  DecisionRule,
   ClaimKind,
   JudgeDecision,
   JudgeOutcome,
@@ -185,6 +187,7 @@ import {
   approvedSkipsForTask,
   listSkipsForWorkstream,
   getTaskStartDirt,
+  isRuleAsking,
   recordTaskStartDirt,
   taskHasRunASession,
   listToolOpResults,
@@ -292,6 +295,7 @@ import {
   createProjectMcpReader,
   flagFailedRun,
   flagMcpFailure,
+  postNotice,
   withdrawFailedCard,
   type InboxService,
   type WaitObserver,
@@ -396,7 +400,7 @@ import {
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
 import { checkCoverage, coverageNote, type CheckCoverage } from './check-coverage';
-import { planOf, raisePlanApproval, waitsForPlanApproval } from './plan-approval';
+import { planGate, planOf, raisePlanApproval, waitsForPlanApproval } from './plan-approval';
 import { outstandingFixEvidence } from './fix-evidence';
 import { shipsAtRetryLimit } from './limit-ship';
 import {
@@ -2136,12 +2140,15 @@ export function createRunner(opts: RunnerOptions): Runner {
     fence: number | null,
     row: WorkstreamRow,
     steps: WorkstreamStep[],
+    why: { readonly reason: string; readonly owns: BuilderOwns },
   ): void {
     const card = raisePlanApproval(ctx, {
       workstreamId: id,
       projectId: row.projectId,
       taskTitle: getTask(ctx.tx, row.taskId).title,
       plan: planOf(row),
+      reason: why.reason,
+      owns: why.owns,
     });
     transitionWorkstream(ctx, id, {
       to: S.WaitingHuman,
@@ -2154,6 +2161,54 @@ export function createRunner(opts: RunnerOptions): Runner {
       reason: 'waiting for the builder to approve the plan',
     });
     clearLease(ctx, id);
+  }
+
+  /**
+   * Inside the write that starts Build without the builder's approval: one Activity row saying the plan went
+   * ahead, by which rule, with the plan, so the builder can read what is being built.
+   */
+  function postPlanAhead(ctx: WriteContext, row: WorkstreamRow): void {
+    const task = getTask(ctx.tx, row.taskId);
+    postNotice(ctx, {
+      tier: CardTier.Notice,
+      projectId: row.projectId,
+      taskId: row.taskId,
+      key: `plan-ahead:${row.id}`,
+      tone: 'info',
+      line: `The plan for "${task.title}" went ahead after its review`,
+      body: `Its brief needs nothing from you, and its plan review found no call of yours it leaves out, so the build started without a card.\n\n${planOf(row)}`,
+      decision: {
+        by: CardDecider.Rule,
+        rule: DecisionRule.PlanGoesAhead,
+        confidence: null,
+        undo: {
+          state: 'final',
+          reason: 'The build has started; send the task back from its drawer to plan it again.',
+        },
+      },
+    });
+  }
+
+  /**
+   * The steps of `row` with a Plan Review added after its current Plan step when the planner asked for one
+   * (`planReviewAsked`, set by a `plan_review` proposal) and none follows. The review is planned for the task's
+   * rigor like any added step, and it is entered at once, so a later replan keeps it.
+   */
+  function withAskedPlanReview(tx: DbReader, leased: AccountId, row: WorkstreamRow): WorkstreamRow {
+    const at = row.stepIndex;
+    const step = row.steps[at];
+    if (step?.role !== StepRole.Plan || step.planReviewAsked !== true) return row;
+    if (row.steps.slice(at + 1).some((s) => s.role === StepRole.PlanReview)) return row;
+    const review = planAddedStep(planInputOf(tx, row, leased), StepRole.PlanReview);
+    if (review === undefined) return row;
+    const added = {
+      ...review,
+      reason: `plan review added: the planner asked for one; ${review.reason}`,
+    };
+    return {
+      ...row,
+      steps: [...row.steps.slice(0, at + 1), added, ...row.steps.slice(at + 1)],
+    };
   }
 
   /**
@@ -2218,14 +2273,31 @@ export function createRunner(opts: RunnerOptions): Runner {
       const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
       const qaAt = current.stepIndex + 1;
       const qaSkipped = ending.skipQa && current.steps[qaAt]?.role === StepRole.Qa;
-      const row = qaSkipped
-        ? { ...current, steps: current.steps.filter((_, i) => i !== qaAt) }
-        : current;
+      const row = withAskedPlanReview(
+        ctx.tx,
+        ctl.accountId,
+        qaSkipped ? { ...current, steps: current.steps.filter((_, i) => i !== qaAt) } : current,
+      );
       const to = row.stepIndex + 1 < row.steps.length ? row.stepIndex + 1 : -1;
       const next = row.steps[to];
       if (next && approvesPlanBefore(ctx.tx, row, to)) {
-        parkForPlanApproval(ctx, id, ctl.fence, row, stepsAdvanced(ctx, row, -1, ending.atLimit));
-        return { outcome: 'stop' as const, qaSkipped };
+        const gate = planGate(
+          row.steps,
+          to,
+          isRuleAsking(ctx.tx, row.projectId, DecisionRule.PlanGoesAhead),
+        );
+        if (gate.kind === 'card') {
+          parkForPlanApproval(
+            ctx,
+            id,
+            ctl.fence,
+            row,
+            stepsAdvanced(ctx, row, -1, ending.atLimit),
+            gate,
+          );
+          return { outcome: 'stop' as const, qaSkipped };
+        }
+        postPlanAhead(ctx, row);
       }
       if (next) {
         patchWorkstream(ctx, id, ctl.fence, {

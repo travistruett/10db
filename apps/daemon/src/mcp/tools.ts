@@ -1308,12 +1308,19 @@ export function createToolHandlers(
             input.watchpointNotes.length > 0
               ? input.watchpointNotes
               : null;
+          // Only a plan and its review say what the plan needs from the builder; the plan card reads them.
+          const builderCalls =
+            (step.role === StepRole.Plan || step.role === StepRole.PlanReview) &&
+            input.builderCalls !== undefined
+              ? input.builderCalls
+              : null;
           const result = {
             summary,
             verdict,
             sessionId,
             at: ctx.now,
             ...(watchpointNotes === null ? {} : { watchpointNotes }),
+            ...(builderCalls === null ? {} : { builderCalls }),
           };
           patchWorkstream(ctx, workstreamId, null, {
             steps: row.steps.map((s, i) => (i === row.stepIndex ? { ...s, result } : s)),
