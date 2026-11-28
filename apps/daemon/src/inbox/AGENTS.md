@@ -125,7 +125,8 @@
 - The out-of-moves card (`out-of-moves-card.ts`) asks Spend More Attempts, Change the Task or Drop It, and has no
   `detail.actions`. Its detail is `detail.outOfMoves` (`OutOfMovesDetail`: `kind`, `more`, `batchId`, `workstreamId`,
   and `outside` on a gate card). The shipper raises the gate's (`shipCards.outOfMoves`, for `gateFailureAction`'s
-  `out_of_moves`); the runner raises a run's when its retries are used up (`flagFailed(..., outOfMoves)`), and
+  `out_of_moves`); the stall sweep raises a stalled run's (`OutOfMovesKind.Stall`, `stalls/card.ts`: More and Change
+  restart the run through `Runner.restartStalled`, Drop cancels it); the runner raises a run's when its retries are used up (`flagFailed(..., outOfMoves)`), and
   recovery when its attempts are. A run's card keeps `BATCH_CARD_DETAIL` beside it, so `left-out-settle.ts` and the
   shipper's withdrawals still find it; `createBatchCardAnswers` ignores its labels. `createOutOfMovesAnswers` acts in
   `onFlagAnswer`: Change the Task without a note throws `InboxAnswerRefused`, so the card stays. The CI kind's

@@ -22,8 +22,17 @@ export const OutOfMovesChoice = {
 } as const;
 export type OutOfMovesChoice = (typeof OutOfMovesChoice)[keyof typeof OutOfMovesChoice];
 
-/** What ran out of moves: a batch's ship gate, a run's retries, a run's recovery, or a pull request's CI fixes. */
-export const OutOfMovesKind = { Gate: 'gate', Run: 'run', Recovery: 'recovery', Ci: 'ci' } as const;
+/**
+ * What ran out of moves: a batch's ship gate, a run's retries, a run's recovery, a pull request's CI fixes,
+ * or a run that stalled again after its one restart.
+ */
+export const OutOfMovesKind = {
+  Gate: 'gate',
+  Run: 'run',
+  Recovery: 'recovery',
+  Ci: 'ci',
+  Stall: 'stall',
+} as const;
 export type OutOfMovesKind = (typeof OutOfMovesKind)[keyof typeof OutOfMovesKind];
 
 /** `outside` is set on a gate card raised because the gate failed twice outside the batch. */
@@ -66,6 +75,15 @@ function options(input: {
           description: 'The same, and the next fix carries your note',
         },
         { label: OutOfMovesChoice.Drop, description: 'Closes the pull request' },
+      ];
+    case OutOfMovesKind.Stall:
+      return [
+        {
+          label: OutOfMovesChoice.More,
+          description: 'Stops it and starts it once more from its handoff',
+        },
+        { label: OutOfMovesChoice.Change, description: 'The same, with your note in its brief' },
+        { label: OutOfMovesChoice.Drop, description: 'Cancels the run' },
       ];
     case OutOfMovesKind.Run:
     case OutOfMovesKind.Recovery:
@@ -116,6 +134,16 @@ export interface OutOfMovesMoves {
   shipWithout(batchId: BatchId, workstreamId: WorkstreamId): void;
   retry(id: WorkstreamId, note?: string): void;
   cancel(id: WorkstreamId): Promise<void>;
+  /**
+   * Stops a stalled run and queues it again (`Runner.restartStalled`). Its write replaces the run's
+   * restart record, so an answer never clears the record itself.
+   */
+  restartStalled(
+    id: WorkstreamId,
+    opts?: { note?: string },
+  ): Promise<'restarted' | 'stop_hung' | 'not_active'>;
+  /** A stop that did not finish: the run keeps its record and the card comes back. */
+  stopHung(id: WorkstreamId): void;
   readonly log: Logger;
 }
 
@@ -131,6 +159,21 @@ export function createOutOfMovesAnswers(
     deps.cancel(id).catch((error: unknown) => {
       deps.log.error({ err: error, workstreamId: id }, 'could not cancel a run out of moves');
     });
+  };
+  /**
+   * More and Change on a stalled run's card. The hook is synchronous, so the card closes with the
+   * answer; a stop that hangs again marks the record and the card is raised again.
+   */
+  const restart = (id: WorkstreamId, note?: string): void => {
+    deps
+      .restartStalled(id, note === undefined ? undefined : { note })
+      .then((result) => {
+        if (result === 'stop_hung') deps.stopHung(id);
+      })
+      .catch((error: unknown) => {
+        deps.log.error({ err: error, workstreamId: id }, 'could not restart a stalled run');
+        deps.stopHung(id);
+      });
   };
   /** Drop It on a run's card: leave it out of its batch, or end the batch when nothing else finished. */
   const dropRun = (batchId: BatchId | null, id: WorkstreamId): void => {
@@ -178,6 +221,13 @@ export function createOutOfMovesAnswers(
         if (choice === OutOfMovesChoice.More) deps.retry(card.workstreamId);
         else if (choice === OutOfMovesChoice.Change) deps.retry(card.workstreamId, note);
         else dropRun(card.batchId, card.workstreamId);
+        return;
+      }
+      case OutOfMovesKind.Stall: {
+        if (card.workstreamId === null) return;
+        if (choice === OutOfMovesChoice.More) restart(card.workstreamId);
+        else if (choice === OutOfMovesChoice.Change) restart(card.workstreamId, note);
+        else cancel(card.workstreamId);
         return;
       }
       case OutOfMovesKind.Ci:

@@ -473,7 +473,12 @@ import {
 import { createFolderHold } from '../folder-hold';
 import { createStatusService } from '../status';
 import { createAdmission, createQueueWaits, createScheduler, type Scheduler } from '../scheduler';
-import { createStallCardAnswers, createStallSweep, forgetEndedRestarts } from '../stalls';
+import {
+  createStallCardAnswers,
+  createStallSweep,
+  forgetEndedRestarts,
+  type StallSweep,
+} from '../stalls';
 import {
   createDrain,
   createScriptInstaller,
@@ -1074,6 +1079,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let runner: Runner | null = null;
   let chatWorkRef: ChatWorkService | null = null;
   let scheduler: Scheduler | null = null;
+  let stallWatch: StallSweep | null = null;
   // A waiting update drains the factory: no lane, session, task gate or ship starts until it installs.
   const updateDrain = createDrain();
   // Up from the moment an install takes over until the app quits or the install fails. An install at
@@ -1884,6 +1890,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       if (!runner) throw new RunnerNotStartedError();
       return runner.cancel(id);
     },
+    restartStalled: (id, restartOpts) => {
+      if (!runner) throw new RunnerNotStartedError();
+      return runner.restartStalled(id, restartOpts);
+    },
+    stopHung: (id) => {
+      stallWatch?.stopHung(id);
+    },
     log: logger,
   });
   const watcher =
@@ -2572,6 +2585,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     isRunning: (id) => createdRunner.isRunning(id),
     maxRecoveryAttempts: limits.maxRecoveryAttempts,
   });
+  stallWatch = stallSweep;
 
   // The changed-files check after a page's turn (Workbench spec §8.1): advice, through the shared
   // slots at advice priority. Started before recovery, which settles turns a stopped daemon

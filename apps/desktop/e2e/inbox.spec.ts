@@ -393,6 +393,42 @@ test('a ship gate out of moves asks Spend More Attempts, Change the Task or Drop
     .toBe(true);
 });
 
+test('a run that stalled again asks Spend More Attempts, Change the Task or Drop It, and Drop It closes the card', async ({
+  page,
+}) => {
+  const title = 'Greet in the e2e again';
+  execFileSync(
+    'pnpm',
+    [
+      'exec',
+      'tsx',
+      'scripts/seed-stall-card.ts',
+      resolve(E2E_DATA, '10db.sqlite'),
+      JSON.stringify({ projectId, title }),
+    ],
+    { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
+  );
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(inboxUrl(''));
+  const row = rowsOf(page).filter({ hasText: `Out of moves: ${title} stalled again` });
+  await row.click();
+  await expect(
+    page.getByText('10db restarted it once from its handoff, and it stalled again.', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText('This looks like a 10db defect; the report could not be filed here.', {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(page.getByRole('radio', { name: /Spend More Attempts/ })).toBeVisible();
+  await expect(page.getByRole('radio', { name: /Change the Task/ })).toBeVisible();
+  await page.getByRole('radio', { name: /Drop It/ }).click();
+  await page.getByRole('button', { name: /^Send Answer/ }).click();
+  await expect(row).toHaveCount(0);
+});
+
 const Shared = z.looseObject({ state: z.string() });
 
 /** Writes one open question card into the project, as a lane's `ask_human` would. */
