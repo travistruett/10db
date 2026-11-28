@@ -63,7 +63,13 @@
 - `handMadeWorktreeChanges`, `handMadeWorktreeIgnoredFiles` and `removeHandMadeWorktree` run the 10db-worktree checks of
   `lockedWorktree` and `removeWorktree` through a `WorktreeScope`: the one of `handMadeWorktreeFolders(repo)` (`<repo>-worktrees.noindex`, then the draining `<repo>-worktrees`) that holds the path, for 10db's
   root, an unlocked entry for a 10db lock, and a single `--force`. A scope is chosen inside `git.ts` and never passed
-  in, so no caller can widen what the 10db calls touch.
+  in, so no caller can widen what the 10db calls touch. `handMadeWorktreeIdleSince` reads the newest mtime of the git
+  dir's `HEAD`, `index` and `logs/HEAD`, the worktree root and the entries directly in it (`lstat`, nothing deeper: a walk of
+  each `node_modules` is the load the removal is there to end); "clean" is checked first because a deep edit moves none of these.
+  `restoreHandMadeWorktree` is the Undo of a removal: `path_exists` when anything is at the path, `branch_gone` when
+  `refs/heads/<branch>` is missing, else `worktree add --no-checkout` (no `-b`, no force, an absolute gitfile) and
+  `read-tree -m -u HEAD`, so no hook or filter runs; a failure after the add removes what it made. The path must lie in a
+  hand-made folder, which may itself be gone.
 - `promoteFastForward`, `classifyFolder` and `finishPromotion` are the only code that writes the builder's own folder for a local copy's landing, and each takes the folder's repo lock once and calls nothing else that takes it (`withRepoLock` is not re-entrant). `promoteFastForward` is a fast forward only (`read-tree -m -u T C`, then the compare-and-swap of the branch; nothing is merged there) and stops before writing at any edit or untracked file in a path T..C writes. When only the swap fails and the branch is still T, HEAD is on it and the index is C's tree, it puts the files back; any other failure after the files are written is `unclear`, never undone. `classifyFolder` reads HEAD, the base ref and each written path's index entry and file hash (`hash-object`, a missing file is absent) and writes nothing; its rows A to G are the recovery table of the local copy spec. `finishPromotion` is row D's compare-and-swap alone and writes no file. A save between `read-tree`'s check and its write is overwritten, as with `git pull`.
 - `grepAt` (evals' call sites) reads a commit as `surveyTexts` does: unpinned, objects only, nothing written. It
   refuses a partial clone (`partialClone`, shared with `surveyTexts`), since a missing blob would be fetched, and

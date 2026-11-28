@@ -169,6 +169,7 @@ import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted 
 import {
   createFailedRestarts,
   runSkippedCalls,
+  undoHandMadeRemoval,
   workstreamChanges,
   type BatchStarter,
   type PassOpened,
@@ -573,9 +574,9 @@ export function createServices(deps: {
         const found = deps.state.write((ctx) => dropPair(ctx, a, b));
         if (!found) throw new ConflictError('This claim deadlock has no record any more');
       },
-      restoreWorktree: () => {
-        throw new ConflictError('This worktree can’t be put back yet');
-      },
+      // Undo makes a removed hand-made worktree again from its branch and copies its saved files back.
+      restoreWorktree: (action) =>
+        undoHandMadeRemoval({ state: deps.state, git: deps.git }, action),
     },
   });
   /** What was found of a project's evals, with where 10db's own assessment of them stands. */
@@ -1013,9 +1014,7 @@ export function createServices(deps: {
         connectedTeams: deps.slackConnections.connectedTeams(),
       }),
     pageActivity: (query) => pageActivity(db, query),
-    undoActivity: (seq) => {
-      activityActions.undo(seq);
-    },
+    undoActivity: (seq) => activityActions.undo(seq),
     askNextTime: (seq, asking) => {
       activityActions.askNextTime(seq, asking);
     },

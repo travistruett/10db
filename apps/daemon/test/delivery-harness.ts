@@ -323,6 +323,8 @@ export function createDeliveryHarness(
     readonly wrapGit?: (git: Git) => Git;
     /** The store's clock, so each write's `now` follows a watch's manual clock; the system's when not given. */
     readonly clock?: Pick<Clock, 'now'>;
+    /** How many processes work inside a directory, in place of `lsof`; no process anywhere when not given. */
+    readonly processesIn?: (path: string) => Promise<number | null>;
   } = {},
 ): DeliveryHarness {
   const remote = createTempRepoWithOrigin();
@@ -410,6 +412,8 @@ export function createDeliveryHarness(
       putBackKeptWork({ state, git, inbox, jobs, logger: logs.logger, clock: installClock }, input),
     worktreeRoot,
     keptRoot,
+    // The real `lsof` would see this machine's processes, so the harness has none unless a test says.
+    processesIn: opts.processesIn ?? (() => Promise.resolve(0)),
     dependencies: createWorktreeDependencies(worktreeTools),
     generators: createWorktreeGenerators(worktreeTools),
     copyTeardown: createCopyTeardown({

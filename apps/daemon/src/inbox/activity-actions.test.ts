@@ -24,7 +24,7 @@ afterEach(() => {
   close();
 });
 
-function setup() {
+function setup(restoreWorktree: () => Promise<void> = () => Promise.resolve()) {
   const project = seedProject(store);
   const state = createStateStore(store, createEventBus());
   const moves: { projectId: ProjectId; accountId: AccountId }[] = [];
@@ -33,7 +33,7 @@ function setup() {
     moves: {
       moveProject: (projectId, accountId) => moves.push({ projectId, accountId }),
       forgetClaimDeadlock: () => undefined,
-      restoreWorktree: () => undefined,
+      restoreWorktree,
     },
   });
   /** Posts a rule-decided notice and returns its row's seq. */
@@ -60,7 +60,7 @@ function setup() {
 }
 
 describe('Activity actions', () => {
-  it('undoes a move once, marks the row undone and posts a notice saying so', () => {
+  it('undoes a move once, marks the row undone and posts a notice saying so', async () => {
     const { project, actions, moves, decide, rows } = setup();
     const accountId = mintId('Account');
     const seq = decide('moved', {
@@ -73,19 +73,42 @@ describe('Activity actions', () => {
       },
     });
 
-    actions.undo(seq);
+    await actions.undo(seq);
 
     expect(moves).toEqual([{ projectId: project.id, accountId }]);
     const page = rows();
     expect(page.rows.find((row) => row.seq === seq)?.undone).toBe(true);
     expect(page.rows.some((row) => row.line === 'Undone: Line moved')).toBe(true);
-    expect(() => {
-      actions.undo(seq);
-    }).toThrow(ConflictError);
+    await expect(actions.undo(seq)).rejects.toThrow(ConflictError);
     expect(moves).toHaveLength(1);
   });
 
-  it("refuses to undo a decision that can't be undone, and a row that is no decision", () => {
+  it('leaves a worktree row undoable when putting the worktree back fails', async () => {
+    const { project, actions, decide, rows } = setup(() =>
+      Promise.reject(new ConflictError('Something is already at the path')),
+    );
+    const seq = decide('removed', {
+      by: CardDecider.Rule,
+      rule: DecisionRule.MergedWorktree,
+      confidence: null,
+      undo: {
+        state: 'undoable',
+        action: {
+          kind: 'restore_worktree',
+          projectId: project.id,
+          path: '/tmp/work',
+          branch: 'hand/work',
+          keptDir: null,
+        },
+      },
+    });
+
+    await expect(actions.undo(seq)).rejects.toThrow(ConflictError);
+
+    expect(rows().rows.find((row) => row.seq === seq)?.undone).toBe(false);
+  });
+
+  it("refuses to undo a decision that can't be undone, and a row that is no decision", async () => {
     const { actions, moves, decide } = setup();
     const seq = decide('stray', {
       by: CardDecider.Rule,
@@ -94,12 +117,8 @@ describe('Activity actions', () => {
       undo: { state: 'final', reason: '10db changed nothing' },
     });
 
-    expect(() => {
-      actions.undo(seq);
-    }).toThrow(ConflictError);
-    expect(() => {
-      actions.undo(seq + 1000);
-    }).toThrow(NotFoundError);
+    await expect(actions.undo(seq)).rejects.toThrow(ConflictError);
+    await expect(actions.undo(seq + 1000)).rejects.toThrow(NotFoundError);
     expect(moves).toEqual([]);
   });
 

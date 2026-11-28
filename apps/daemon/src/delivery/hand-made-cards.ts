@@ -1,4 +1,5 @@
-import { BuilderOwns, Urgency } from '@10db/contracts';
+import { basename } from 'node:path';
+import { BuilderOwns, CardDecider, DecisionRule, Urgency, type ProjectId } from '@10db/contracts';
 import { BY_ANSWER, CardTier, decidedByBuilder } from '../inbox';
 import { detailOf, listPaths, worktreeOffer, type Card, type DeliveryNotice } from './cards';
 
@@ -34,6 +35,44 @@ export const handMadeNotices = {
         ? 'Nothing was removed: each worktree changed since the offer (a new change, a lock, or a pull request no longer merged).'
         : `Removed:\n${listPaths(removed)}\n\nThe branches are still in your repository. Any worktree that changed since the offer was left.`,
     key: `hand-made-removed:${folder}`,
+  }),
+  /**
+   * One worktree removed by the rule: merged, clean, idle and unused. Undo makes it again from its
+   * branch and copies back what was saved (`keptDir`, null when nothing was).
+   */
+  removedByRule: (input: {
+    readonly projectId: ProjectId;
+    readonly path: string;
+    readonly branch: string;
+    readonly keptDir: string | null;
+  }): DeliveryNotice => ({
+    tier: CardTier.Notice,
+    taskId: null,
+    tone: 'info',
+    line: `Removed the merged worktree ${basename(input.path)}; its branch is kept`,
+    body: [
+      `Worktree: ${input.path}`,
+      `Branch: ${input.branch}`,
+      'Its pull request merged, it had no uncommitted change, nothing in it was touched for a day and no process was running in it, so 10db removed it. The branch is still in your repository.',
+      ...(input.keptDir === null ? [] : [`Files only it held are saved in ${input.keptDir}.`]),
+      'Undo makes the worktree again from its branch.',
+    ].join('\n\n'),
+    key: `hand-made-removed:${input.path}`,
+    decision: {
+      by: CardDecider.Rule,
+      rule: DecisionRule.MergedWorktree,
+      confidence: null,
+      undo: {
+        state: 'undoable',
+        action: {
+          kind: 'restore_worktree',
+          projectId: input.projectId,
+          path: input.path,
+          branch: input.branch,
+          keptDir: input.keptDir,
+        },
+      },
+    },
   }),
 } as const;
 
