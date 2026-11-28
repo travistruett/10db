@@ -29,6 +29,7 @@ import {
 import { useProjectFolder } from '../../daemon/project-folder-queries';
 import { useInbox, useTasks } from '../../daemon/queries';
 import { PageIntro } from '../../shell/page-intro';
+import { ScopeBadge } from '../../shell/scope-badge';
 import { TitleRow } from '../../shell/title-row';
 import { SettingsSectionKey } from '../settings/sections';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
@@ -63,11 +64,13 @@ function StartPageHeader({
     <>
       <TitleRow
         title="UI Workbench"
-        {...(project === undefined ? {} : { meta: project })}
+        {...(project === undefined ? {} : { meta: <ScopeBadge name={project} /> })}
+      />
+      <PageIntro
+        description="Work through pages with the agents, live."
         actions={
           <Button
-            variant="subtle"
-            color="gray"
+            variant="default"
             renderRoot={(props) => (
               <Link
                 {...props}
@@ -80,7 +83,6 @@ function StartPageHeader({
           </Button>
         }
       />
-      <PageIntro description="Work through pages with the agents, live." />
     </>
   );
 }

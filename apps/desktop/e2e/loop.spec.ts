@@ -300,14 +300,20 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // card, and the e2e daemon runs with the judge off, so nothing is checking and the panel says why.
   await expect(page.getByText(/last 7 days/)).toHaveCount(0);
   await open(page, 'Factory');
-  await page.getByRole('radiogroup', { name: 'Factory view' }).getByText('Metrics').click();
+  await page
+    .getByRole('tablist', { name: 'Factory view' })
+    .getByRole('tab', { name: 'Metrics' })
+    .click();
   await expect(
     page.getByRole('table', { name: 'Completed runs' }).getByRole('button', { name: TASK }),
   ).toBeVisible();
   await expect(
     page.getByText("Acceptance isn't checking: no account can answer decisions"),
   ).toBeVisible();
-  await page.getByRole('radiogroup', { name: 'Factory view' }).getByText('Live').click();
+  await page
+    .getByRole('tablist', { name: 'Factory view' })
+    .getByRole('tab', { name: 'Live' })
+    .click();
   // Factory shows each project as a row with its bar, whose verdict is the row's name; the finished task is
   // under the project's merged today, and with no goals anywhere the project holds no goal list.
   await open(page, 'Factory');

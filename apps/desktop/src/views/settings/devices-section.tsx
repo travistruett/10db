@@ -1,6 +1,6 @@
 import { DevicePlatform, SharingState, type DeviceDto } from '@10db/contracts';
 import { Alert, Button, Stack, Table, Text } from '@mantine/core';
-import { IconDeviceMobile } from '@tabler/icons-react';
+import { IconDevices } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { useState } from 'react';
 import { useDevices, useRevokeDevice } from '../../daemon/device-queries';
@@ -79,7 +79,7 @@ export function DevicesSection() {
         </Alert>
       ) : null}
       {devices.isSuccess && rows.length === 0 ? (
-        <EmptyState icon={IconDeviceMobile} title="No devices paired">
+        <EmptyState icon={IconDevices} title="No devices paired">
           A phone or another Mac you pair shows here.
         </EmptyState>
       ) : null}

@@ -85,7 +85,8 @@ is mounted:
   sentence) ending in an optional `GuideLink`, and the view's `actions` at its right; with `PageTabs` the actions
   move to the tabs' row, which draws one hairline under the whole row for the tabs' underline to sit on. A view
   that lays its own row out passes `toolbar`. A page has one header, the title row; the content never repeats
-  it. Nothing is drawn when every part is absent.
+  it. The title row holds the title, `ScopeBadge` (`scope-badge.tsx`, the project a page shows) and status, never
+  a page's controls (DESIGN.md, Page header). Nothing is drawn when every part is absent.
 - `PageGuide` (`page-guide.tsx`): the modal that teaches how a page works, opened only by the builder through the
   `GuideOpener` of `usePageGuide(title)` (a byline link, an empty state's button, a hover card's last line): a lead
   sentence, up to three numbered steps with inert stills, an optional example, one scope line and Got It.

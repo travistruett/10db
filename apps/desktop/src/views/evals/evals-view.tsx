@@ -13,7 +13,6 @@ import {
   Container,
   Group,
   Paper,
-  SegmentedControl,
   SimpleGrid,
   Skeleton,
   Stack,
@@ -26,7 +25,8 @@ import { useEvals } from '../../daemon/evals-queries';
 import { ContentWidth } from '../../shell/content-width';
 import { EmptyState } from '../../shell/empty-state';
 import { absoluteTime, fromNow, useNow } from '../../shell/relative';
-import { PageIntro } from '../../shell/page-intro';
+import { PageIntro, PageTabs, type PageTab } from '../../shell/page-intro';
+import { ScopeBadge } from '../../shell/scope-badge';
 import { useLoadingDelayElapsed } from '../../shell/page-loading';
 import { StatTile } from '../../shell/stat-tile';
 import { TitleRow } from '../../shell/title-row';
@@ -40,8 +40,10 @@ import { SuiteDrawer } from './suite-drawer';
 
 const EvalsPage = { Evals: 'evals', Models: 'models' } as const;
 type EvalsPage = (typeof EvalsPage)[keyof typeof EvalsPage];
-const isEvalsPage = (value: string): value is EvalsPage =>
-  value === EvalsPage.Evals || value === EvalsPage.Models;
+const EVALS_TABS: readonly PageTab<EvalsPage>[] = [
+  { value: EvalsPage.Evals, label: 'Evals' },
+  { value: EvalsPage.Models, label: 'Models' },
+];
 
 /** How many unlinked eval files show before the rest fold away. */
 const UNLINKED_SHOWN = 6;
@@ -324,36 +326,21 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
   const [newEval, setNewEval] = useState<NewEvalPrefill | null>(null);
   const header = (description?: ReactNode) => (
     <>
-      <TitleRow
-        title="Evals"
-        meta={project.name}
+      <TitleRow title="Evals" meta={<ScopeBadge name={project.name} />} />
+      <PageIntro
+        {...(description === undefined ? {} : { description })}
+        tabs={<PageTabs label="Evals view" tabs={EVALS_TABS} value={page} onChange={setPage} />}
         actions={
-          <>
-            <SegmentedControl
-              size="xs"
-              aria-label="Evals view"
-              value={page}
-              data={[
-                { value: EvalsPage.Evals, label: 'Evals' },
-                { value: EvalsPage.Models, label: 'Models' },
-              ]}
-              onChange={(next) => {
-                if (isEvalsPage(next)) setPage(next);
-              }}
-            />
-            <Button
-              size="xs"
-              leftSection={<IconPlus size={14} stroke={1.5} />}
-              onClick={() => {
-                setNewEval({ origin: NewEvalOrigin.Page });
-              }}
-            >
-              New Eval
-            </Button>
-          </>
+          <Button
+            leftSection={<IconPlus size={14} stroke={1.5} />}
+            onClick={() => {
+              setNewEval({ origin: NewEvalOrigin.Page });
+            }}
+          >
+            New Eval
+          </Button>
         }
       />
-      <PageIntro {...(description === undefined ? {} : { description })} />
     </>
   );
   const newEvalModal = (
