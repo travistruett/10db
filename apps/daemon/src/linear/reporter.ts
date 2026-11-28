@@ -1000,7 +1000,7 @@ export function createLinearReporter(
     const text = commentText(
       uploading.body,
       post,
-      picturesText({ uploaded, more: upload.more, offered: upload.offered }),
+      picturesText({ uploaded, more: upload.more, offered: upload.offered, note: upload.note }),
     );
     guard.comments.set(post.id, { text, written: false });
     return comment(text);
@@ -1221,7 +1221,7 @@ export function createLinearReporter(
           const show = picturesToShow({ db: state.db, post, outlook });
           if ('pictures' in show) {
             const uploading = {
-              upload: beginAgentUpload(show.pictures, show.more),
+              upload: beginAgentUpload(show.pictures, show.more, show.note),
               body,
               setStatus,
             };
