@@ -3,6 +3,8 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -13,6 +15,8 @@ import { dirname, join } from 'node:path';
 import {
   BuilderOwns,
   ConflictError,
+  GUARDRAIL_DIFF_DETAIL,
+  GuardrailDiffDetail,
   SkipKind,
   SkipSource,
   TaskStatus,
@@ -47,6 +51,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { noticesPosted } from '../../test/notices-posted';
 import {
   createTempRepo,
+  homeOutsideTemp,
   isolatedGitEnv,
   seedWorkstream,
   tempDir,
@@ -59,6 +64,7 @@ import { createGit } from '../git';
 import {
   BY_ANSWER,
   CardTier,
+  createGuardrailAnswers,
   createInboxService,
   decidedByBuilder,
   stampFile,
@@ -97,6 +103,7 @@ let base: ReturnType<typeof createTestStore>['store'];
 let state: StateStore;
 let inbox: InboxService;
 let repo: { path: string; cleanup(): void };
+let home: { path: string; cleanup(): void };
 let project: ProjectDto;
 let clock: ManualClock;
 let logged: { obj: Record<string, unknown>; msg: string | undefined }[];
@@ -107,7 +114,19 @@ beforeEach(() => {
   ({ store: base, close } = createTestStore());
   const bus = createEventBus();
   state = createStateStore(base, bus);
-  inbox = createInboxService({ state, onParkedAnswer: () => undefined });
+  home = homeOutsideTemp('watcher-home');
+  const guardrailAnswers = createGuardrailAnswers({
+    state,
+    git: createGit(),
+    clock: systemClock,
+    home: home.path,
+    logger: silentLogger,
+  });
+  inbox = createInboxService({
+    state,
+    onParkedAnswer: () => undefined,
+    onFlagAnswerInWrite: (ctx, item, answer) => guardrailAnswers.onAnswer(ctx, item, answer),
+  });
   repo = createTempRepo();
   project = seedProject(base, { repoPath: repo.path });
   clock = new ManualClock();
@@ -134,6 +153,7 @@ afterEach(() => {
   watcher.stop();
   close();
   repo.cleanup();
+  home.cleanup();
 });
 
 /** Claims the task's areas and moves the workstream to RUNNING, as the scheduler and runner would. */
@@ -181,10 +201,12 @@ describe('watcher', () => {
     touch('src/api/fine.ts');
     touch('docs/stray.md');
     touch('docs/AGENTS.md');
+    touch('.github/workflows/x.yml');
     emit('src/api/fine.ts');
     emit('docs/stray.md');
     emit('docs/stray.md');
     emit('docs/AGENTS.md');
+    emit('.github/workflows/x.yml');
     clock.advance(500);
     await watcher.flush();
     emit('docs/stray.md');
@@ -196,13 +218,82 @@ describe('watcher', () => {
       projectId: project.id,
     });
     const open = flags();
-    expect(open).toHaveLength(1);
-    expect(open[0]).toMatchObject({
+    expect(open).toHaveLength(2);
+    // Agent instructions keep the card they had: the builder's, with Trust This Version and no diff.
+    const instructions = open.find((card) => card.body === 'docs/AGENTS.md');
+    expect(instructions).toMatchObject({
       title: 'Write outside every claim',
-      body: 'docs/AGENTS.md',
       targets: [{ workstreamId: workstream.id, sessionId: null }],
     });
-    expect(open[0]?.detail).toMatchObject({ path: 'docs/AGENTS.md', candidates: [workstream.id] });
+    expect(instructions?.detail).toMatchObject({
+      path: 'docs/AGENTS.md',
+      candidates: [workstream.id],
+    });
+    expect(instructions?.detail).not.toHaveProperty('guardrailDiff');
+    expect(instructions?.options.map((o) => o.label)).toEqual(['Trust This Version', 'Dismiss']);
+    // A path on the guardrail list is a card with the file's text, and Keep or Revert.
+    const guarded = open.find((card) => card.body === '.github/workflows/x.yml');
+    expect(guarded).toMatchObject({
+      title: 'A lane edited your CI workflows',
+      targets: [{ workstreamId: workstream.id, sessionId: null }],
+    });
+    expect(guarded?.detail).toMatchObject({ path: '.github/workflows/x.yml' });
+    const written = GuardrailDiffDetail.parse(guarded?.detail?.[GUARDRAIL_DIFF_DETAIL]);
+    expect(written).toMatchObject({ shown: 'text', isNew: true, cut: false });
+    expect(written.shown === 'text' ? written.text : '').toContain('+x');
+    expect(guarded?.options.map((o) => o.label)).toEqual(['Keep', 'Revert']);
+  });
+
+  const commitAll = (rel: string, text: string): void => {
+    mkdirSync(dirname(join(repo.path, rel)), { recursive: true });
+    writeFileSync(join(repo.path, rel), text);
+    execFileSync('git', ['add', rel], { cwd: repo.path, env: isolatedGitEnv() });
+    execFileSync('git', ['commit', '-q', '-m', `Add ${rel}`], {
+      cwd: repo.path,
+      env: isolatedGitEnv(),
+    });
+  };
+
+  // Value: protects=a stray write onto a guardrail path is a builder card with its diff, and Revert puts the
+  // committed file back or keeps a verified copy before removing an untracked one; fails_when=the card loses
+  // its diff, Revert leaves the lane's edit in place, or removes an untracked file with no copy kept;
+  // why_new=permissions and data loss (the watcher's guardrail card, a removal); no_claim=the held pull
+  // request, or paths outside the list
+  it('shows a tracked guardrail file as a diff, and Revert restores it from HEAD or keeps a copy of an untracked one first', async () => {
+    commitAll('.github/workflows/ci.yml', 'on: push\n');
+    running();
+    watcher.sync();
+    writeFileSync(join(repo.path, '.github/workflows/ci.yml'), 'on: pull_request\n');
+    touch('.github/workflows/new.yml');
+    emit('.github/workflows/ci.yml');
+    emit('.github/workflows/new.yml');
+    clock.advance(500);
+    await watcher.flush();
+
+    const tracked = flags().find((card) => card.body === '.github/workflows/ci.yml');
+    const shown = GuardrailDiffDetail.parse(tracked?.detail?.[GUARDRAIL_DIFF_DETAIL]);
+    expect(shown).toMatchObject({ shown: 'text', isNew: false });
+    expect(shown.shown === 'text' ? shown.text : '').toMatch(/-on: push\n\+on: pull_request/);
+    const untracked = flags().find((card) => card.body === '.github/workflows/new.yml');
+    if (tracked === undefined || untracked === undefined) throw new Error('both cards raise');
+
+    inbox.answer(tracked.id, { choice: 'Revert' });
+    inbox.answer(untracked.id, { choice: 'Revert' });
+    await waitFor(() => !existsSync(join(repo.path, '.github/workflows/new.yml')));
+    await waitFor(
+      () => readFileSync(join(repo.path, '.github/workflows/ci.yml'), 'utf8') === 'on: push\n',
+    );
+    // The removed file's bytes are kept under the home, in a folder named for when and what they were.
+    const kept = join(home.path, '.10db', 'kept', project.id);
+    const [stamped = ''] = readdirSync(kept);
+    expect(stamped).toMatch(/^\d{8}T\d{6}Z-[0-9a-f]{12}$/);
+    expect(readFileSync(join(kept, stamped, '.github/workflows/new.yml'), 'utf8')).toBe('x');
+    // The card's answer says what was done, and names the kept path.
+    const answered = await waitFor(() => {
+      const card = listInbox(base.db, { states: ['RESOLVED'] }).find((c) => c.id === untracked.id);
+      return card?.answer?.note?.includes(kept) === true ? card : undefined;
+    });
+    expect(answered.answer?.note).toContain('.github/workflows/new.yml');
   });
 
   // Value: protects=an ordinary write outside every claim is told only once it has outlasted the wait, and a
@@ -770,7 +861,8 @@ describe('stray writes in .git', () => {
     writeFileSync(join(repo.path, HOOK), text);
     emit(HOOK);
   };
-  const trust = (id: InboxItemDto['id']) => inbox.answer(id, { choice: 'Trust This Version' });
+  // A hook is on the guardrail list, so its card offers Keep, which trusts the version as Trust This Version does.
+  const trust = (id: InboxItemDto['id']) => inbox.answer(id, { choice: 'Keep' });
 
   it('trusts a hook version once, and raises a card again for any other', async () => {
     running();
@@ -782,7 +874,7 @@ describe('stray writes in .git', () => {
     expect(openFlags()[0]?.body).toMatch(
       new RegExp(`\\nVersion ${String(stampFile(repo.path, HOOK)).slice(0, 12)}$`),
     );
-    expect(card?.options.map((o) => o.label)).toEqual(['Trust This Version', 'Dismiss']);
+    expect(card?.options.map((o) => o.label)).toEqual(['Keep', 'Revert']);
 
     trust(card?.id ?? ('' as InboxItemDto['id']));
     expect(flags()).toEqual([]);

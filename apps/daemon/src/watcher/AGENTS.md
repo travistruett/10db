@@ -10,6 +10,19 @@
   the builder answers (it still closes an older card of an ordinary path once nothing is left to do). The list is
   for now the paths the spec `2026-11-27-what-reaches-the-builder-design.md` §1 point 3 names that a project holds
   in its own checkout; the full list is a later stage.
+- **A stray write onto a path of the guardrail list is a card with its diff** (`guardrailOf`, `guardrails/paths.ts`): a
+  single stamped file, outside a bulk card, gets "A lane edited your `<label>`" (`inbox/guardrail-card.ts`) in place of
+  "Write outside every claim". The body and fold key are today's; `detail.guardrailDiff` (`GUARDRAIL_DIFF_DETAIL`,
+  `GuardrailDiffDetail` in contracts) holds the file's diff against `HEAD` (`inbox/guardrail-diff.ts`), or its whole
+  text as new when git does not hold it, cut at `GUARDRAIL_DIFF_MAX_LINES` lines with `cut` saying so, or a reason
+  when it is not text. `raise` is async for it: the diff is read before the cards are flagged. The options are Keep
+  (trusts the stamped content, as Keep It does: `applyTrustChoice`) and Revert (`inbox/guardrail-revert.ts`, a job
+  after the answer commits). Revert stamps the file again and does nothing but raise the card afresh when it changed;
+  a tracked file is restored from `HEAD` through `Git.restoreFiles`; an untracked one is copied by `keepCopy`
+  (`kept-copy.ts`: `<home>/.10db/kept/<projectId>/<UTC stamp>-<sha12>/<rel>`, folders 0700, file 0600), the copy is read
+  back and compared byte for byte, and only then is the file removed. The answer's note names what was done and the
+  kept path; a failure leaves the file and brings the card back with the reason. A path the list lacks (`AGENTS.md`,
+  `CLAUDE.md`, `.env`, `.git/config`, `.git/info`), a bulk card and a file with no stamp keep the Trust card above.
 - A stray names the run that left it (`watcher/left-by.ts`). A path is left by a failed run when the run is still
   its open task's current run (Retry can pick it up), in the same checkout, named the path as it failed (its failure
   reason, its last handoff's progress, code state or continuity, or a skipped call's summary; relative to the

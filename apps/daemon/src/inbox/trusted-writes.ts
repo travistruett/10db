@@ -3,6 +3,7 @@ import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BuilderOwns,
+  GUARDRAIL_DIFF_DETAIL,
   InboxKind,
   type InboxAnswer,
   type InboxItemDto,
@@ -19,6 +20,7 @@ import {
 import { z } from 'zod';
 import { existsAsEntry } from '../git';
 import { BY_ANSWER, CardTier, decidedByBuilder } from './card-tier';
+import { GuardrailStrayChoice } from './guardrail-card';
 import type { FlagInput } from './service';
 
 /** The answers a single stray-write card offers, shown as written. Dismiss closes only that card. */
@@ -111,6 +113,30 @@ export function isSensitiveStray(item: InboxItemDto): boolean {
   return item.kind === InboxKind.Flag && item.detail?.[SENSITIVE_DETAIL] === true;
 }
 
+/** What a stamped stray-write card names: the file, its checkout, the card's fold key and the stamp it showed. */
+export interface StampedStray {
+  readonly path: string;
+  readonly root: string;
+  readonly foldKey: string;
+  readonly stamped: string;
+}
+
+/** The file a stamped stray-write card is about, or null for any other card. */
+export function stampedStray(item: InboxItemDto): StampedStray | null {
+  const path = item.detail?.[PATH_DETAIL];
+  const root = item.detail?.[ROOT_DETAIL];
+  const foldKey = item.detail?.[FOLD_DETAIL];
+  const stamped = stampOf(item.detail);
+  if (
+    typeof path !== 'string' ||
+    typeof root !== 'string' ||
+    typeof foldKey !== 'string' ||
+    stamped === null
+  )
+    return null;
+  return { path, root, foldKey, stamped };
+}
+
 /** The sha256 a card was raised with, or null when it carries none. */
 export function stampOf(detail: InboxItemDto['detail']): string | null {
   const sha = detail?.[SHA_DETAIL];
@@ -143,6 +169,44 @@ export function isTrusted(trusted: readonly TrustedWrite[], rel: string, sha256:
 }
 
 /**
+ * The card to raise afresh when its file changed after the card was raised and the answer therefore acted on
+ * nothing: stamped with the version the file holds now (`now`), or, for one that can no longer be stamped, with
+ * no choice but Dismiss. A diff the old card showed is not carried over, since it is no longer the file's.
+ */
+export function changedSinceCard(
+  item: InboxItemDto,
+  root: string,
+  foldKey: string,
+  now: string | null,
+): FlagInput {
+  const named = item.detail?.[PATH_DETAIL];
+  const path = typeof named === 'string' ? named : '';
+  const rest = Object.fromEntries(
+    Object.entries(item.detail ?? {}).filter(
+      ([key]) => key !== SHA_DETAIL && key !== GUARDRAIL_DIFF_DETAIL,
+    ),
+  );
+  // The old body named what the old version changed, so it is not reused: the first line is the path.
+  const body = `${item.body.split('\n')[0] ?? path}\nChanged after this card was raised`;
+  return {
+    projectId: item.projectId,
+    tier: CardTier.Ask,
+    urgency: item.urgency,
+    closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.Guardrails),
+    workstreamId: item.targets[0]?.workstreamId ?? null,
+    title: item.title,
+    body: now === null ? body : `${body}\nVersion ${shortSha(now)}`,
+    detail: now === null ? rest : { ...rest, ...stampDetail(root, now, foldKey) },
+    options:
+      now === null
+        ? [{ label: TrustChoice.Dismiss, description: 'Close this card only' }]
+        : item.options,
+    foldKey,
+  };
+}
+
+/**
  * Trust This Version, or Keep It, on a single stray-write card stamps the file again in the answer's own
  * transaction. A file still holding the card's stamp is stored as trusted. A file that changed since
  * trusts nothing and returns the card to raise afresh with the new stamp; a file gone returns none.
@@ -154,7 +218,12 @@ export function applyTrustChoice(
   answer: InboxAnswer,
 ): FlagInput | null {
   if (item.kind !== InboxKind.Flag) return null;
-  if (answer.choice !== TrustChoice.Trust && answer.choice !== TrustChoice.Keep) return null;
+  if (
+    answer.choice !== TrustChoice.Trust &&
+    answer.choice !== TrustChoice.Keep &&
+    answer.choice !== GuardrailStrayChoice.Keep
+  )
+    return null;
   const path = item.detail?.[PATH_DETAIL];
   const root = item.detail?.[ROOT_DETAIL];
   const foldKey = item.detail?.[FOLD_DETAIL];
@@ -170,29 +239,7 @@ export function applyTrustChoice(
   // A file gone has nothing to trust. One that is still there but can't be stamped (swapped for a link, grown
   // huge) is never closed silently: its card comes back with no trust choice.
   if (now === null && !existsAsEntry(join(root, path))) return null;
-  if (now !== stamped) {
-    const rest = Object.fromEntries(
-      Object.entries(item.detail ?? {}).filter(([key]) => key !== SHA_DETAIL),
-    );
-    // The old body named what the old version changed, so it is not reused: the first line is the path.
-    const body = `${item.body.split('\n')[0] ?? path}\nChanged after this card was raised`;
-    return {
-      projectId: item.projectId,
-      tier: CardTier.Ask,
-      urgency: item.urgency,
-      closesWhen: BY_ANSWER,
-      decision: decidedByBuilder(BuilderOwns.Guardrails),
-      workstreamId: item.targets[0]?.workstreamId ?? null,
-      title: item.title,
-      body: now === null ? body : `${body}\nVersion ${shortSha(now)}`,
-      detail: now === null ? rest : { ...rest, ...stampDetail(root, now, foldKey) },
-      options:
-        now === null
-          ? [{ label: TrustChoice.Dismiss, description: 'Close this card only' }]
-          : item.options,
-      foldKey,
-    };
-  }
+  if (now !== stamped) return changedSinceCard(item, root, foldKey, now);
   const kept = trustedWrites(ctx.tx, item.projectId).filter(
     (t) => !(t.path === path && t.sha256 === now),
   );

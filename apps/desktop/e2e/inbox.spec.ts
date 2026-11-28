@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
   chromium,
@@ -35,6 +35,8 @@ test.describe.configure({ mode: 'serial' });
 
 let projectId = '';
 let oomProjectId = '';
+/** A guardrail file the project's repository commits, which a lane's write changes in the stray-write check. */
+const WORKFLOW = '.github/workflows/ci.yml';
 
 /** Answers every card this spec left open, so later specs read no stray cards. */
 async function resolveOwnCards(request: APIRequestContext): Promise<void> {
@@ -87,9 +89,12 @@ const rowsOf = (page: Page) => page.locator('[data-inbox-row]');
 const inboxUrl = (search: string) => `/inbox?project=${projectId}${search}`;
 
 test.beforeAll(async ({ request }) => {
-  projectId = await createProject(request, PROJECT_NAME, [
-    { name: 'greeting', globs: ['src/greeting/**'] },
-  ]);
+  projectId = await createProject(
+    request,
+    PROJECT_NAME,
+    [{ name: 'greeting', globs: ['src/greeting/**'] }],
+    { [WORKFLOW]: 'on: push\n' },
+  );
 });
 
 test.afterAll(async ({ request }) => {
@@ -209,6 +214,53 @@ test('an acceptance card shows what it could not confirm and what Accept Without
   ).toBeVisible();
   await page.getByRole('button', { name: /^Accept Without Proof/ }).click();
   await expect(rowsOf(page).filter({ hasText: title })).toHaveCount(0);
+});
+
+test('a lane edit to a guardrail file shows its diff, and Revert puts the committed file back', async ({
+  page,
+}) => {
+  const root = join(E2E_DIR, `${PROJECT_NAME}-repo`);
+  const file = join(root, WORKFLOW);
+  writeFileSync(file, 'on: pull_request\n');
+  const title = 'A lane edited your CI workflows';
+  execFileSync(
+    'pnpm',
+    [
+      'exec',
+      'tsx',
+      'scripts/seed-question-card.ts',
+      resolve(E2E_DATA, '10db.sqlite'),
+      JSON.stringify({
+        projectId,
+        title,
+        body: WORKFLOW,
+        options: [
+          { label: 'Keep', description: 'Stop flagging this exact content at this path' },
+          { label: 'Revert', description: 'Put back the committed file' },
+        ],
+        stray: {
+          root,
+          path: WORKFLOW,
+          diff: {
+            shown: 'text',
+            text: `--- a/${WORKFLOW}\n+++ b/${WORKFLOW}\n@@ -1 +1 @@\n-on: push\n+on: pull_request`,
+            cut: false,
+            lines: 5,
+            isNew: false,
+          },
+        },
+      }),
+    ],
+    { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
+  );
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(inboxUrl('&kind=flag'));
+  await rowsOf(page).filter({ hasText: title }).click();
+  await expect(page.getByLabel('Diff')).toContainText('+on: pull_request');
+  await page.getByRole('radio', { name: /^Revert/ }).click();
+  await page.getByRole('button', { name: /^Send Answer/ }).click();
+  await expect(rowsOf(page).filter({ hasText: title })).toHaveCount(0);
+  await expect.poll(() => readFileSync(file, 'utf8')).toBe('on: push\n');
 });
 
 const OOM_PROJECT = 'e2e-out-of-moves';

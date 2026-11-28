@@ -81,6 +81,26 @@ export const CardResolution = z.object({
 export type CardResolution = z.infer<typeof CardResolution>;
 
 /**
+ * The `detail` key of a card that shows a guardrail file's change: the text of its diff, cut to a line cap
+ * (`cut` says it was), or why there is none to show.
+ */
+export const GUARDRAIL_DIFF_DETAIL = 'guardrailDiff';
+
+export const GuardrailDiffDetail = z.discriminatedUnion('shown', [
+  /** A diff against the committed file, or the whole text of a file that is not committed. */
+  z.object({
+    shown: z.literal('text'),
+    text: z.string(),
+    cut: z.boolean(),
+    lines: z.number().int().nonnegative(),
+    isNew: z.boolean(),
+  }),
+  /** A file git or 10db can't show as text (binary, a link, too big). */
+  z.object({ shown: z.literal('none'), reason: z.string() }),
+]);
+export type GuardrailDiffDetail = z.infer<typeof GuardrailDiffDetail>;
+
+/**
  * The `detail` key of a question card whose answer's note stated a standing rule (it said "always" or
  * "never"): the principle proposals that answer made, so the resolved card can say so and link to them.
  */

@@ -1,13 +1,23 @@
 import {
   AcceptanceDetail,
+  GUARDRAIL_DIFF_DETAIL,
+  GuardrailDiffDetail,
   InboxKind,
   PersonInput,
   ProjectId,
   QuestionCategory,
   Urgency,
 } from '@10db/contracts';
-import { createStore, insertInboxItem, insertPerson, openDatabase, setAppSetting } from '@10db/db';
+import {
+  createStore,
+  insertInboxItem,
+  insertPerson,
+  openDatabase,
+  setAppSetting,
+  type Json,
+} from '@10db/db';
 import { z } from 'zod';
+import { stampFile } from '../src/inbox';
 
 /**
  * Seeds one open question card for the stakeholder-questions end-to-end check. A lane would raise it
@@ -24,23 +34,40 @@ const Seed = z.object({
   workspaces: z.array(z.object({ teamId: z.string().min(1), teamName: z.string() })).default([]),
   people: z.array(PersonInput).default([]),
   acceptance: AcceptanceDetail.nullable().default(null),
+  /** A lane's write to a guardrail file, as the watcher raises its card: the file's stamp is read from disk here. */
+  stray: z
+    .object({ root: z.string().min(1), path: z.string().min(1), diff: GuardrailDiffDetail })
+    .nullable()
+    .default(null),
 });
 
 const [databasePath, json] = process.argv.slice(2);
 if (!databasePath || !json) throw new Error('usage: seed-question-card.ts <database> <json>');
 const seed = Seed.parse(JSON.parse(json));
 const store = createStore(openDatabase(databasePath));
+const strayDetail = (stray: NonNullable<typeof seed.stray>): Record<string, Json> => ({
+  path: stray.path,
+  root: stray.root,
+  sha256: String(stampFile(stray.root, stray.path)),
+  foldKey: `stray-write:${seed.projectId}:${stray.path}`,
+  [GUARDRAIL_DIFF_DETAIL]: stray.diff,
+});
 store.write((ctx) =>
   insertInboxItem(ctx, {
     projectId: seed.projectId,
-    kind: seed.acceptance === null ? InboxKind.Question : InboxKind.Acceptance,
+    kind:
+      seed.stray !== null
+        ? InboxKind.Flag
+        : seed.acceptance === null
+          ? InboxKind.Question
+          : InboxKind.Acceptance,
     title: seed.title,
     body: seed.body,
     options: seed.options,
     recommendation: null,
     category: QuestionCategory.Product,
     urgency: Urgency.Normal,
-    detail: seed.acceptance,
+    detail: seed.stray === null ? seed.acceptance : strayDetail(seed.stray),
     foldKey: null,
     targets: [],
   }),
