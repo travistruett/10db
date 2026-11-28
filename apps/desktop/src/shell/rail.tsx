@@ -7,6 +7,7 @@ import {
   IconLayoutKanban,
   IconMessages,
   IconSettings,
+  IconTarget,
   IconTools,
   type Icon,
 } from '@tabler/icons-react';
@@ -33,6 +34,7 @@ const ICONS: Readonly<Record<RailSection, Icon>> = {
   inbox: IconInbox,
   factory: IconBuildingFactory2,
   sessions: IconMessages,
+  goals: IconTarget,
   board: IconLayoutKanban,
   workbench: IconTools,
   knowledge: IconBulb,

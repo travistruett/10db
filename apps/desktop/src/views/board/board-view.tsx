@@ -563,8 +563,8 @@ export function BoardView() {
                   onStartReady={() => {
                     setSheetGoalId(filterGoal.goal.id);
                   }}
-                  onOpenFactory={() => {
-                    void navigate({ to: '/factory', search: { goal: filterGoal.goal.id } });
+                  onOpenGoal={() => {
+                    void navigate({ to: '/goals', search: { goal: filterGoal.goal.id } });
                   }}
                 />
               ) : (

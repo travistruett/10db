@@ -5,6 +5,7 @@ import {
   type WorkstreamDto,
 } from '@10db/contracts';
 import { Button, Divider, Group, Stack, Text } from '@mantine/core';
+import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useGoalPassPages, useLivePass } from '../../daemon/pass-queries';
 import { useBatches, useTasks, useWorkstreams } from '../../daemon/queries';
@@ -81,6 +82,13 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
       <Group justify="space-between" wrap="nowrap" align="center">
         <GoalBar digest={digest} rows={rows} />
         <Group gap="xs" wrap="nowrap">
+          <Button
+            variant="subtle"
+            size="xs"
+            renderRoot={(props) => <Link {...props} to="/goals" search={{ goal: goal.id }} />}
+          >
+            Open Goal
+          </Button>
           <WorkOnThis
             goalId={goal.id}
             passPages={passReady ? passPages.data : undefined}

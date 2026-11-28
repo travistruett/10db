@@ -37,7 +37,7 @@ export function GoalList({
 }: {
   readonly project: ProjectViewDto;
   readonly list: GoalListDto;
-  /** A link's goal (the Board's "Open in Factory"): its row starts open, with the Done group open if it is in it. */
+  /** A link's goal (a goal page's "Show in Factory"): its row starts open, with the Done group open if it is in it. */
   readonly linkedGoalId?: GoalId | undefined;
 }) {
   const now = useNow();

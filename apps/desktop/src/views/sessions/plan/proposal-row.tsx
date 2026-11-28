@@ -125,15 +125,11 @@ export function ProposalRow({
   );
   const dot = rowDot(row);
   const mark = markText(row);
+  // A converted task opens on the Board; a converted goal opens its own page.
   const openTask =
-    live === null || row.converted === null
+    live === null || row.converted === null || row.kind !== 'task'
       ? null
-      : row.kind === 'task'
-        ? (row.converted.taskIds[0] ?? null)
-        : (row.converted.taskIds.find((_, i) => {
-            const task = live.tasks[i];
-            return task !== undefined && task.status !== 'cancelled' && task.boardStatus !== 'done';
-          }) ?? null);
+      : (row.converted.taskIds[0] ?? null);
   const openGoal = row.kind === 'goal' ? (row.converted?.goalId ?? null) : null;
   const regionId = `shape-row-${row.id}`;
   const pinned = row.pinned.length > 0;
@@ -239,24 +235,29 @@ export function ProposalRow({
         {converted}
       </Text>,
     );
-  if (openTask !== null || openGoal !== null)
+  if (openTask !== null)
     subs.push(
       <Anchor
         key="board"
         fz={12}
         className={classes['lift']}
-        renderRoot={(props) =>
-          openTask === null ? (
-            <Link {...props} to="/factory" search={{ goal: openGoal ?? undefined }} />
-          ) : (
-            <Link {...props} to="/board" search={{ task: openTask }} />
-          )
-        }
+        renderRoot={(props) => <Link {...props} to="/board" search={{ task: openTask }} />}
         onClick={() => {
           select(projectId);
         }}
       >
         Open on Board
+      </Anchor>,
+    );
+  if (openGoal !== null)
+    subs.push(
+      <Anchor
+        key="goal"
+        fz={12}
+        className={classes['lift']}
+        renderRoot={(props) => <Link {...props} to="/goals" search={{ goal: openGoal }} />}
+      >
+        Open Goal
       </Anchor>,
     );
 

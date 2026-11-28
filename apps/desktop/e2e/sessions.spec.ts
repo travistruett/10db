@@ -797,6 +797,12 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   // The mock-up's sandboxed frame runs no script, so a scan can't reach into it.
   await expectAccessible(page, 'accept', ['iframe']);
   await dialog.getByRole('button', { name: 'Accept', exact: true }).click();
+  // An Accept that makes a goal says so and offers its page, rather than closing with no word.
+  await expect(
+    dialog.getByText('Board polish is a goal now, with 2 tasks.', { exact: false }),
+  ).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Open Goal' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Done' }).click();
   await expect(dialog).toBeHidden();
   await expect(panel.getByText('On the Board · 2 ready', { exact: true })).toHaveCount(1);
   await expect(panel.getByText('On the Board · Ready', { exact: true })).toHaveCount(2);
@@ -823,6 +829,20 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(taskPage.getByText('Approved mock-up · density')).toBeVisible();
   await expect(
     taskPage.frameLocator('iframe[title^="Mockup"]').getByText('Cards sit closer together.'),
+  ).toBeVisible();
+
+  // The goal is under Goals in the sidebar, saying how to begin; its page offers the start, and a task
+  // opened from it names its goal.
+  await taskPage.getByRole('link', { name: 'Goals', exact: true }).click();
+  await expect(taskPage.getByText('2 of 2 ready to start')).toBeVisible();
+  await taskPage.getByRole('link', { name: 'Board polish' }).click();
+  const nextStep = taskPage.getByRole('region', { name: 'Next step' });
+  await expect(nextStep).toContainText('Nothing has run yet. All 2 tasks are ready.');
+  await expect(nextStep.getByRole('button', { name: 'Start 2 Ready Tasks' })).toBeVisible();
+  await expectAccessible(taskPage, 'a goal page');
+  await taskPage.getByRole('link', { name: 'Thin scrollbars' }).click();
+  await expect(
+    taskPage.getByRole('dialog').getByRole('link', { name: 'Board polish' }),
   ).toBeVisible();
   await taskPage.close();
 
@@ -856,6 +876,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
     dialog.getByRole('status').filter({ hasText: /start now|wait for a lane/ }),
   ).toBeVisible();
   await dialog.getByRole('button', { name: 'Accept', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Done' }).click();
   await expect(dialog).toBeHidden();
   await expect(goalRow.getByText('On the Board · 2 ready', { exact: true })).toBeVisible();
   expect(await goalTitles()).toContain('Board polish');
@@ -866,7 +887,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await undo.getByRole('button', { name: 'Undo Accept' }).click();
   await expect(undo).toBeHidden();
   await expect(goalRow.getByText(/On the Board/)).toHaveCount(0);
-  await expect(goalRow.getByRole('link', { name: 'Open on Board' })).toHaveCount(0);
+  await expect(goalRow.getByRole('link', { name: 'Open Goal' })).toHaveCount(0);
   await expect(panel.getByText('On the Board · Ready', { exact: true })).toHaveCount(2);
   expect(await goalTitles()).not.toContain('Board polish');
   expect(await titles()).toHaveLength(before + 2);
@@ -879,6 +900,10 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   ).toBeVisible();
   await expect(startDialog.getByRole('button', { name: 'Accept and Start' })).toBeVisible();
   await startDialog.getByRole('button', { name: 'Accept and Start' }).click();
+  await expect(
+    startDialog.getByText(/is a goal now, with 2 tasks\. \d+ tasks? started/),
+  ).toBeVisible();
+  await startDialog.getByRole('button', { name: 'Done' }).click();
   await expect(startDialog).toBeHidden();
   await expect(goalRow.getByText(/On the Board/)).toHaveText(
     /queued|running|needs you|in review|done/i,

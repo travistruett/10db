@@ -3,6 +3,7 @@ export const RailSection = {
   Inbox: 'inbox',
   Factory: 'factory',
   Sessions: 'sessions',
+  Goals: 'goals',
   Board: 'board',
   Workbench: 'workbench',
   Knowledge: 'knowledge',
@@ -23,6 +24,7 @@ export const RAIL_ITEMS: Readonly<Record<RailSection, RailItem>> = {
   inbox: { section: 'inbox', label: 'Inbox', route: '/inbox' },
   factory: { section: 'factory', label: 'Factory', route: '/factory' },
   sessions: { section: 'sessions', label: 'Sessions', route: '/sessions' },
+  goals: { section: 'goals', label: 'Goals', route: '/goals' },
   board: { section: 'board', label: 'Board', route: '/board' },
   workbench: {
     section: 'workbench',
@@ -55,6 +57,7 @@ export const RAIL_ORDER: readonly RailEntry[] = [
   item(RailSection.Sessions),
   { kind: 'divider' },
   { kind: 'project-tile' },
+  item(RailSection.Goals),
   item(RailSection.Board),
   item(RailSection.Workbench),
   item(RailSection.Knowledge),

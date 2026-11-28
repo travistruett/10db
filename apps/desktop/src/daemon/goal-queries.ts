@@ -1,11 +1,12 @@
-import { GoalDigestDto, GoalListDto, type GoalId, type ProjectId } from '@10db/contracts';
+import { GoalDigestDto, GoalDto, GoalListDto, type GoalId, type ProjectId } from '@10db/contracts';
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { readJson, type DaemonClient } from './client';
+import { DaemonRequestError, readJson, type DaemonClient } from './client';
 import { useDaemon } from './provider';
 
 export const goalKeys = {
   all: ['goals'],
   list: (projectId: ProjectId) => ['goals', projectId] as const,
+  one: (goalId: GoalId | null) => ['goals', 'one', goalId] as const,
 } as const;
 
 /**
@@ -37,6 +38,22 @@ export function useGoals(projectId: ProjectId | null) {
           )
         : { goals: [], ungrouped: null },
     enabled: projectId !== null,
+  });
+}
+
+/** One goal on its own, for a page that knows only the goal's id; its project's list holds the rest. */
+export function useGoal(goalId: GoalId | null) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: goalKeys.one(goalId),
+    // A goal that is gone stays gone; only other failures are worth asking again.
+    retry: (count, error) =>
+      !(error instanceof DaemonRequestError && error.status === 404) && count < 3,
+    queryFn: async () =>
+      goalId === null
+        ? null
+        : readJson(await client.goals[':goalId'].$get({ param: { goalId } }), GoalDto),
+    enabled: goalId !== null,
   });
 }
 
