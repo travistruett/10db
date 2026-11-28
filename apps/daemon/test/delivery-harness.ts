@@ -36,7 +36,7 @@ import {
   type Store,
 } from '@10db/db';
 import { readDefaultPersonas } from '@10db/harness';
-import { ManualClock } from '../src/clock';
+import { ManualClock, type Clock } from '../src/clock';
 import {
   createBaseUpdates,
   createBatchStarter,
@@ -314,13 +314,18 @@ export function createDeliveryHarness(
     readonly shipBaseUpdates?: (updates: BaseUpdates) => BaseUpdates;
     /** Wraps the real git, as a test that needs a push GitHub's server fails. */
     readonly wrapGit?: (git: Git) => Git;
+    /** The store's clock, so each write's `now` follows a watch's manual clock; the system's when not given. */
+    readonly clock?: Pick<Clock, 'now'>;
   } = {},
 ): DeliveryHarness {
   const remote = createTempRepoWithOrigin();
   // origin is github.com, as the daemon pins it and gh is told it; network calls and the test's
   // own pushes go to the local bare repository instead.
   const network = githubOrigin(remote.repo.path, remote.origin.path);
-  const { store, close } = createTestStore();
+  const storeClock = opts.clock;
+  const { store, close } = createTestStore(
+    storeClock === undefined ? undefined : () => storeClock.now(),
+  );
   const bus = createEventBus();
   const state = createStateStore(store, bus);
   seedTeam(state, readDefaultPersonas());

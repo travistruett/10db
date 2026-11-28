@@ -33,7 +33,7 @@ import {
   type CiFixOther,
 } from './ci-fix-text';
 import { ghCall, type DeliveryContext } from './context';
-import { fixesOf, stopCiFixing } from './ci-stop';
+import { fixesOf, patchCiOutOfMoves, readCiOutOfMoves, stopCiFixing } from './ci-stop';
 import { jobKey, JobQueue } from './jobs';
 import { cutWorktree } from './worktree-cut';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
@@ -55,8 +55,10 @@ const other = (job: RequiredCheckJobDto): CiFixOther => ({ name: job.name, link:
  *
  * Nothing starts while any failing job's run is still in progress (its log is not ready), and a job
  * whose log GitHub no longer has is skipped. When `ciFailureAction` stops, or no failing job's log can
- * be read, fixing stops: one write sets `ci_stopped` on the root and raises its card. Any other failure of gh is thrown, for the watch to
- * treat as gh being down.
+ * be read, fixing stops: one write sets `ci_stopped` on the root with its card or its pending notice
+ * (`stopCiFixing`). Any other failure of gh is thrown, for the watch to treat as gh being down. Fixes
+ * made before the builder's Spend More Attempts don't count, and a Change the Task note leads the
+ * next fix task's description.
  */
 export async function startCiFix(input: {
   readonly ctx: DeliveryContext;
@@ -72,7 +74,13 @@ export async function startCiFix(input: {
   const root = getBatch(db, input.root.id);
   const { branch, prUrl, repo } = root;
   if (head === null || branch === null || prUrl === null || repo === null) return false;
-  const action = ciFailureAction(root, required, fixesOf(db, root), head);
+  const action = ciFailureAction(
+    root,
+    required,
+    fixesOf(db, root),
+    head,
+    readCiOutOfMoves(db, root.id).ignoreFixesBefore,
+  );
   if (action.kind === 'stop') {
     ctx.state.write((w) => {
       stopCiFixing(w, root.id, action.reason);
@@ -139,7 +147,12 @@ export async function startCiFix(input: {
   const made = ctx.state.write((w) => {
     // Decided again on the rows the write sees, so a repeat of this round makes nothing twice.
     const now = getBatch(w.tx, root.id);
-    if (ciFailureAction(now, required, fixesOf(w.tx, now), head).kind !== 'fix') return null;
+    const stored = readCiOutOfMoves(w.tx, now.id);
+    if (
+      ciFailureAction(now, required, fixesOf(w.tx, now), head, stored.ignoreFixesBefore).kind !==
+      'fix'
+    )
+      return null;
     const project = getProject(w.tx, now.projectId);
     const rootTasks = listWorkstreams(w.tx, { batchId: now.id }).map((ws) =>
       getTask(w.tx, ws.taskId),
@@ -147,7 +160,8 @@ export async function startCiFix(input: {
     const landing: TaskLanding | undefined = rootTasks[0]?.landing;
     const task = insertTask(w, project.id, {
       title: ciFixTitle(names.join(', '), now.title),
-      description,
+      // The builder's note from Change the Task leads the task; this fix is the one that carries it.
+      description: stored.note === null ? description : `${stored.note}\n\n${description}`,
       acceptanceCriteria: names.map(ciFixCriterion),
       areas: [...new Set(rootTasks.flatMap((t) => t.areas))],
       workspaceMode: 'worktree',
@@ -164,6 +178,7 @@ export async function startCiFix(input: {
       ciFix: { of: now.id, head },
     });
     patchBatch(w, id, { branch });
+    if (stored.note !== null) patchCiOutOfMoves(w, now.id, { note: null });
     const plans = new Map<TaskId, StepPlanDto>([[task.id, planForStart(w.tx, task.id)]]);
     for (const [taskId, plan] of plans) insertPlannedWorkstream(w, taskId, plan, id);
     return { batch, plans, project };

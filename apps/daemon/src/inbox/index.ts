@@ -59,7 +59,14 @@ export {
   TrustChoice,
 } from './trusted-writes';
 export { flagFailedRun, noteOnFailedCard, withdrawFailedCard } from './failed-card';
-export { createOutOfMovesAnswers, OutOfMovesKind, outOfMovesFields } from './out-of-moves-card';
+export {
+  createOutOfMovesAnswers,
+  OUT_OF_MOVES_DETAIL,
+  OutOfMovesChoice,
+  OutOfMovesDetail,
+  OutOfMovesKind,
+  outOfMovesFields,
+} from './out-of-moves-card';
 export { raiseStartHoldCard, withdrawStartHoldCard } from './start-hold-card';
 export {
   BY_ANSWER,
