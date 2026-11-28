@@ -58,9 +58,9 @@ export type ShapeJudgeDecision = (typeof SHAPE_JUDGE_DECISIONS)[number];
 export const SHADOW_MIN_SCORED = 20;
 export const SHADOW_MIN_AGREEMENT = 0.75;
 
-/** One Shape decision's shadow answers and how many agreed with what happened. */
+/** One shadow decision's answers and how many agreed with what happened: Shape's two, and the watchpoint read. */
 export const ShadowAgreementDto = z.object({
-  decision: z.enum(SHAPE_JUDGE_DECISIONS),
+  decision: z.enum([...SHAPE_JUDGE_DECISIONS, JudgeDecision.WatchpointRead]),
   /** Answers the model gave, at or above the decision's floor. */
   answered: z.int().min(0),
   /** Of them, those whose outcome is known. */

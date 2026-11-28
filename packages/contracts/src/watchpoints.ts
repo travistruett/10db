@@ -87,11 +87,6 @@ export const WatchpointProposalScope = { Project: 'project', You: 'you' } as con
 export type WatchpointProposalScope =
   (typeof WatchpointProposalScope)[keyof typeof WatchpointProposalScope];
 
-/** Hold is not built, so it is never proposed: until it is, a watchpoint set to hold would do less than ask. */
-const notHold = (entry: ProjectWatchpointEntry): boolean =>
-  isWatchpointOff(entry) || entry.loudness !== WatchpointLoudness.Hold;
-const NOT_HOLD = { message: 'Hold is not available yet; propose show or ask' };
-
 /**
  * A change an agent proposes to a watchpoint list: the entry is added, or replaces the one with its key. A project
  * entry may be `off`, which turns one of the builder's watchpoints off there. Nothing changes until the builder
@@ -100,11 +95,11 @@ const NOT_HOLD = { message: 'Hold is not available yet; propose show or ask' };
 export const WatchpointProposal = z.union([
   z.strictObject({
     scope: z.literal(WatchpointProposalScope.Project),
-    entry: ProjectWatchpointEntry.refine(notHold, NOT_HOLD),
+    entry: ProjectWatchpointEntry,
   }),
   z.strictObject({
     scope: z.literal(WatchpointProposalScope.You),
-    entry: Watchpoint.refine(notHold, NOT_HOLD),
+    entry: Watchpoint,
   }),
 ]);
 export type WatchpointProposal = z.infer<typeof WatchpointProposal>;

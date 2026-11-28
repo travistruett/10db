@@ -330,7 +330,7 @@ export function WatchpointDrawer({
         />
         <Input.Wrapper
           label="When It Matches"
-          description="Show puts it in the task's For You and the pull request. Ask also leaves one Inbox card per task."
+          description="Show puts it in the task's For You and the pull request. Ask also leaves one Inbox card per task. Hold holds the pull request until you answer Merge."
         >
           <LoudnessControl
             mt={6}

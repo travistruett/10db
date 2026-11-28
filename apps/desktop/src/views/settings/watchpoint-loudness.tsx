@@ -8,18 +8,17 @@ import {
 } from '@mantine/core';
 import { ProjectChoice } from './watchpoint-lists';
 
-/** The loudness words. Hold is not offered until the app can act on it, but a saved one still reads as Hold. */
 const LOUDNESS_LABEL: Readonly<Record<WatchpointLoudness, string>> = {
   [WatchpointLoudness.Show]: 'Show',
   [WatchpointLoudness.Ask]: 'Ask',
   [WatchpointLoudness.Hold]: 'Hold',
 };
 
-/** What Show and Ask do, in the words the pages' info button uses. */
+/** What Show, Ask and Hold do, in the words the pages' info button uses. */
 export const LOUDNESS_WORDS =
-  "Show puts the changes in the task's For You and the pull request; nothing waits on you. Ask also leaves one Inbox card per task, for you to look at.";
+  "Show puts the changes in the task's For You and the pull request; nothing waits on you. Ask also leaves one Inbox card per task, for you to look at. Hold holds the pull request until you answer Merge.";
 
-/** Says what Show and Ask do when the pointer rests on a When It Matches control. */
+/** Says what Show, Ask and Hold do when the pointer rests on a When It Matches control. */
 function WithLoudnessWords({ children }: { readonly children: React.ReactNode }) {
   return (
     <Tooltip label={LOUDNESS_WORDS} multiline w={280} openDelay={400} withinPortal>
@@ -28,7 +27,11 @@ function WithLoudnessWords({ children }: { readonly children: React.ReactNode })
   );
 }
 
-/** When It Matches for a watchpoint in its own list: Show or Ask. */
+function isLoudness(value: string): value is WatchpointLoudness {
+  return Object.values<string>(WatchpointLoudness).includes(value);
+}
+
+/** When It Matches for a watchpoint in its own list: Show, Ask or Hold. */
 export function LoudnessControl({
   value,
   onChange,
@@ -55,10 +58,11 @@ export function LoudnessControl({
         data={[
           { value: WatchpointLoudness.Show, label: LOUDNESS_LABEL[WatchpointLoudness.Show] },
           { value: WatchpointLoudness.Ask, label: LOUDNESS_LABEL[WatchpointLoudness.Ask] },
+          { value: WatchpointLoudness.Hold, label: LOUDNESS_LABEL[WatchpointLoudness.Hold] },
         ]}
         value={value}
         onChange={(next) => {
-          if (next === WatchpointLoudness.Show || next === WatchpointLoudness.Ask) onChange(next);
+          if (isLoudness(next)) onChange(next);
         }}
       />
     </WithLoudnessWords>
@@ -96,6 +100,7 @@ export function ProjectChoiceControl({
           { value: ProjectChoice.Default, label: `Default · ${LOUDNESS_LABEL[defaultLoudness]}` },
           { value: ProjectChoice.Show, label: LOUDNESS_LABEL[WatchpointLoudness.Show] },
           { value: ProjectChoice.Ask, label: LOUDNESS_LABEL[WatchpointLoudness.Ask] },
+          { value: ProjectChoice.Hold, label: LOUDNESS_LABEL[WatchpointLoudness.Hold] },
           { value: ProjectChoice.Off, label: 'Off' },
         ]}
         value={value}

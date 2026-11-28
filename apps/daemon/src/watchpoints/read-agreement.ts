@@ -1,9 +1,11 @@
 import {
+  JudgeDecision,
   StoredWatchpointDetail,
   WatchpointCardDetail,
   WatchpointChoice,
   WatchpointReadVerdict,
   type ProjectId,
+  type ShadowAgreementDto,
   type WatchpointRead,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -28,21 +30,29 @@ function wasAsked(read: WatchpointRead): boolean {
  * A `clean` read agrees with Looks Right, and a read that holds a merge (`holdsMerge`) agrees with Send Back.
  * Only a read of a watchpoint the answered card named is scored, against the newest reading taken before the
  * answer. `cleanButSentBack` counts the clean reads the builder sent back. `firstAskedAt` is when the oldest read the
- * judge was asked for was taken, whether or not its card is answered yet. `projectId` null counts every project.
- * @public The Decisions measures are its caller; while reads stay in shadow none is wired.
+ * judge was asked for was taken, whether or not its card is answered yet. `answered` counts the reads asked in shadow
+ * that got an answer, whether or not their card is answered. `projectId` null counts every project.
  */
 export function watchpointReadAgreement(
   db: DbReader,
   projectId: ProjectId | null,
-): { firstAskedAt: Date | null; scored: number; agreed: number; cleanButSentBack: number } {
+): {
+  firstAskedAt: Date | null;
+  answered: number;
+  scored: number;
+  agreed: number;
+  cleanButSentBack: number;
+} {
   const byWorkstream = new Map<WorkstreamId, ShadowReading[]>();
   let firstAsked: string | null = null;
+  let answered = 0;
   for (const row of shadowReadingRows(db, projectId)) {
     const reads = (StoredWatchpointDetail.parse(row.detail).reads ?? []).filter((r) => !r.acted);
     if (reads.length === 0) continue;
     const readings = byWorkstream.get(row.workstreamId) ?? [];
     readings.push({ at: row.createdAt, reads });
     byWorkstream.set(row.workstreamId, readings);
+    answered += reads.filter((r) => wasAsked(r) && r.meets !== null).length;
     if (reads.some(wasAsked) && (firstAsked === null || row.createdAt < firstAsked))
       firstAsked = row.createdAt;
   }
@@ -74,8 +84,34 @@ export function watchpointReadAgreement(
   }
   return {
     firstAskedAt: firstAsked === null ? null : new Date(firstAsked),
+    answered,
     scored,
     agreed,
     cleanButSentBack,
+  };
+}
+
+/** How long the read stays in shadow before it may act: a week after its first read. */
+const SHADOW_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Settings › Decisions' row for the watchpoint read: its shadow answers and how many agreed with what the builder
+ * answered. `canShow` is whether the read may act, which is not the 20-scored rule of Shape's decisions: it is a week
+ * since its first read with no clean read sent back.
+ */
+export function watchpointReadRow(db: DbReader, now: Date): ShadowAgreementDto {
+  const { firstAskedAt, answered, scored, agreed, cleanButSentBack } = watchpointReadAgreement(
+    db,
+    null,
+  );
+  return {
+    decision: JudgeDecision.WatchpointRead,
+    answered,
+    scored,
+    agreed,
+    canShow:
+      firstAskedAt !== null &&
+      now.getTime() - firstAskedAt.getTime() >= SHADOW_WEEK_MS &&
+      cleanButSentBack === 0,
   };
 }

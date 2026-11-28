@@ -479,6 +479,86 @@ test('a run that stalled again asks Spend More Attempts, Change the Task or Drop
   await expect(row).toHaveCount(0);
 });
 
+const YourWatchpoints = z.array(z.looseObject({ key: z.string(), loudness: z.string() }));
+const HELD_TASK = 'Greet in the held e2e';
+const HELD_PR = 'https://github.com/e2e/held/pull/1';
+
+test('a watchpoint set to Hold in Settings raises a held Look card that offers Merge, and Merge closes it', async ({
+  page,
+  request,
+}) => {
+  const readYours = async () =>
+    YourWatchpoints.parse(
+      await (
+        await request.get(`${daemonUrl}/settings/watchpoints`, { headers: auth, maxRetries: 2 })
+      ).json(),
+    );
+  const yoursBefore = await readYours();
+  const loudnessOf = async (): Promise<string | undefined> =>
+    (await readYours()).find((w) => w.key === 'migrations')?.loudness;
+  try {
+    // Settings offers Hold, and the list keeps it.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/settings/all-watchpoints');
+    await page
+      .getByRole('radiogroup', { name: 'When Migrations matches' })
+      .getByText('Hold', { exact: true })
+      .click();
+    await expect.poll(loudnessOf).toBe('hold');
+
+    // The card a run's reading raises for a held pull request, written for a task of this project.
+    const task = await request.post(`${daemonUrl}/projects/${projectId}/tasks`, {
+      headers: auth,
+      data: { title: HELD_TASK, acceptanceCriteria: ['it greets'], areas: ['greeting'] },
+    });
+    expect(task.ok()).toBe(true);
+    execFileSync(
+      'pnpm',
+      [
+        'exec',
+        'tsx',
+        'scripts/seed-held-look-card.ts',
+        resolve(E2E_DATA, '10db.sqlite'),
+        JSON.stringify({
+          projectId,
+          taskId: z.looseObject({ id: z.string() }).parse(await task.json()).id,
+          batchTitle: 'Greet in the held e2e batch',
+          prUrl: HELD_PR,
+          watchpoint: { key: 'migrations', label: 'Migrations' },
+        }),
+      ],
+      { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
+    );
+    await page.goto(inboxUrl(''));
+    const row = rowsOf(page).filter({ hasText: `Look at these changes: ${HELD_TASK}` });
+    await row.click();
+    // A held card names the pull request and the watchpoint's verdict, and answers Merge or Send Back.
+    await expect(page.getByRole('link', { name: 'Open the Pull Request' })).toHaveAttribute(
+      'href',
+      HELD_PR,
+    );
+    await expect(page.getByLabel('Verdicts')).toContainText('Migrations');
+    await expect(page.getByLabel('Verdicts')).toContainText('Set to Hold');
+    await expect(page.getByRole('button', { name: 'Looks Right' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Send Back' })).toBeVisible();
+    await page.getByRole('button', { name: /^Merge/ }).click();
+    await expect(row).toHaveCount(0);
+
+    // Settings › Decisions lists the watchpoint read, and says it is not running where no judge can answer it.
+    await page.goto('/settings/decisions');
+    await expect(
+      page.getByRole('row', { name: /Watchpoint Read/ }).getByText('Not running on this account'),
+    ).toBeVisible();
+  } finally {
+    // Later specs run under the builder's list, so it goes back to how it was.
+    const restored = await request.put(`${daemonUrl}/settings/watchpoints`, {
+      headers: auth,
+      data: yoursBefore,
+    });
+    expect(restored.ok()).toBe(true);
+  }
+});
+
 const Shared = z.looseObject({ state: z.string() });
 
 /** Writes one open question card into the project, as a lane's `ask_human` would. */

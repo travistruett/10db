@@ -1,9 +1,10 @@
-import type {
-  DecisionModelDto,
-  DecisionStatsDto,
-  AskedDecision,
-  JudgeStatusDto,
-  ShadowAgreementDto,
+import {
+  JudgeDecision,
+  type DecisionModelDto,
+  type DecisionStatsDto,
+  type AskedDecision,
+  type JudgeStatusDto,
+  type ShadowAgreementDto,
 } from '@10db/contracts';
 import { Badge, Drawer, Stack, Switch, Text, Title } from '@mantine/core';
 import type { ReactNode } from 'react';
@@ -11,7 +12,12 @@ import { DaemonRequestError } from '../../daemon/client';
 import { usePatchJudge } from '../../daemon/judge-queries';
 import { DECISIONS, DecisionMode } from './decision-catalogue';
 import { DecisionModelPicker } from './decision-model-picker';
-import { decisionStatus, formatDecisionUsd } from './decision-numbers';
+import {
+  decisionIsRunning,
+  decisionStatus,
+  formatDecisionUsd,
+  watchpointReadOutcome,
+} from './decision-numbers';
 import { StatusMark } from './decisions-table';
 import { RecentDecisions } from './recent-decisions';
 import { SureEnough } from './sure-enough';
@@ -100,11 +106,13 @@ function DrawerBody({
             </Text>
           )}
           <Text size="xs" c="dimmed">
-            {agreementText(shadow)}
+            {decision === JudgeDecision.WatchpointRead
+              ? `${watchpointReadOutcome(decisionIsRunning(status, decision), shadow)}${shadow === undefined ? '' : `; ${String(shadow.answered)} answered in shadow`}`
+              : agreementText(shadow)}
           </Text>
           {shadow?.canShow ? (
             <Badge size="xs" variant="light" w="fit-content">
-              Ready to Show
+              {decision === JudgeDecision.WatchpointRead ? 'Ready to Act' : 'Ready to Show'}
             </Badge>
           ) : null}
         </Stack>

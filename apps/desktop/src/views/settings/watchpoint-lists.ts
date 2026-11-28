@@ -39,6 +39,7 @@ export const ProjectChoice = {
   Default: 'default',
   Show: WatchpointLoudness.Show,
   Ask: WatchpointLoudness.Ask,
+  Hold: WatchpointLoudness.Hold,
   Off: 'off',
 } as const;
 export type ProjectChoice = (typeof ProjectChoice)[keyof typeof ProjectChoice];
@@ -107,7 +108,7 @@ export function choiceOf(row: ProjectRow): ProjectChoice | WatchpointLoudness {
 
 /**
  * The project's entries after a When It Matches choice on one of the builder's: Default drops the project's
- * entry, Off writes an `off`, and Show or Ask keeps a copy at that loudness (the project's own copy, if it has one).
+ * entry, Off writes an `off`, and Show, Ask or Hold keeps a copy at that loudness (the project's own copy, if it has one).
  */
 export function withChoice(
   entries: readonly ProjectWatchpointEntry[],

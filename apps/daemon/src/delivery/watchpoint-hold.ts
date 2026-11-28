@@ -1,5 +1,6 @@
 import {
   CARD_RESOLUTION,
+  ConflictError,
   EvidenceKind,
   InboxKind,
   InboxState,
@@ -195,6 +196,21 @@ export function withdrawHeldCards(w: WriteContext, root: BatchDto): void {
       const card = heldCardOf(w.tx, workstream.id);
       if (card !== null) withdrawHeldCard(w, card.item, 'The pull request is merged or closed.');
     }
+}
+
+/**
+ * Answers a Look card before the shipper exists. A card that holds a pull request needs the shipper to arm or close
+ * it, so it is refused until then; any other card applies as it always did and has nothing to run after the commit.
+ */
+export function answerWatchpointCardBeforeShipper(
+  w: WriteContext,
+  item: InboxItemDto,
+  answer: Pick<InboxAnswer, 'choice' | 'note'>,
+): (() => void) | undefined {
+  if (WatchpointCardDetail.safeParse(item.detail).data?.held !== undefined)
+    throw new ConflictError('The shipper has not started, so the card cannot be answered yet');
+  applyWatchpointAnswer(w, item, answer);
+  return undefined;
 }
 
 /**
