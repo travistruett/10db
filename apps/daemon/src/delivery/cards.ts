@@ -34,10 +34,14 @@ import { batchCardFields } from './batch-card';
 import { maxCiFixes } from './ci-failure-action';
 import type { BlockedTask, UnmergedDependency } from './deps';
 import { gateTailLines, type GateStepFailure } from './gate-failures';
+import { OutOfMovesReason } from './gate-failure-action';
+import type { GateFix } from './gate-fix';
 import {
   BY_ANSWER,
   CardTier,
   decidedByBuilder,
+  OutOfMovesKind,
+  outOfMovesFields,
   type CardClosesWhen,
   type NoticeInput,
   type StoredTier,
@@ -905,9 +909,57 @@ export const shipCards = {
     }),
   }),
   /**
-   * `note` says why the gate ran without the batch's base as origin has it, when it did. `steps` are
-   * the failing steps the gate named, each with its failing tests and log; with none, the card quotes
-   * the gate's last output. `reran` says 10db already ran this gate a second time by itself.
+   * 10db stopped working the batch's failing gate (`reason`): its fix tasks are used up, the same tests
+   * failed again after a fix, or the gate failed twice outside the batch. The card asks Spend More
+   * Attempts (up to `more` fix tasks), Change the Task or Drop It, and offers no Retry or Abandon.
+   */
+  outOfMoves: (
+    batch: BatchDto,
+    reason: OutOfMovesReason,
+    steps: readonly GateStepFailure[],
+    fix: GateFix,
+    note: string | null,
+    check: ShipCheckName,
+    more: number,
+  ): ShipFailure => {
+    const why = ((): string => {
+      switch (reason) {
+        case OutOfMovesReason.Budget:
+          return `${String(fix.count)} fix task${fix.count === 1 ? '' : 's'} did not get the ${check} green.`;
+        case OutOfMovesReason.SameFailure:
+          return 'The same tests failed again after the fix.';
+        case OutOfMovesReason.OutsideTwice:
+          return `The ${check} fails in files the batch did not change, and 10db ran it twice. Spend More Attempts starts a fix task in this batch anyway.`;
+      }
+    })();
+    const logPath = steps.find((s) => s.logPath !== null)?.logPath;
+    const fields = outOfMovesFields({
+      kind: OutOfMovesKind.Gate,
+      more,
+      batchId: batch.id,
+      workstreamId: null,
+      outside: reason === OutOfMovesReason.OutsideTwice,
+    });
+    return {
+      failure: BatchFailure.GateFailed,
+      card: shipCard(batch, {
+        title: `Out of moves: ${gateFailureWords(check, steps)} · ${batch.title}`,
+        body: [
+          why,
+          ...(note === null ? [] : [note]),
+          ...(steps.length > 0 ? [stepsText(steps)] : []),
+        ].join('\n\n'),
+        options: fields.options,
+        // No `actions`: the card's answers are its options, not the batch's Retry and Abandon.
+        detail: { ...fields.detail, ...(logPath ? { logPath } : {}) },
+      }),
+    };
+  },
+  /**
+   * The gate's card where 10db files no fix (`legacy_card`: a Workbench pass's batch, or one in a separate
+   * local copy), or where the fix task could not be filed. `note` says why the gate ran without the batch's base as origin has it, when it did.
+   * `steps` are the failing steps the gate named, each with its failing tests and log; with none, the
+   * card quotes the gate's last output. `reran` says 10db already ran this gate a second time by itself.
    */
   gateFailed: (
     batch: BatchDto,
@@ -945,7 +997,8 @@ export const shipCards = {
   }),
   /**
    * The second run 10db made by itself failed in tests the batch didn't change too: the failure looks
-   * like the batch's surroundings, so the card offers Retry and Abandon and no fix task.
+   * like the batch's surroundings, so the card offers Retry and Abandon and no fix task. Raised only for a
+   * batch 10db files no fix for (`legacy_card`); any other batch gets `outOfMoves`.
    */
   gateFailedUnrelated: (
     batch: BatchDto,

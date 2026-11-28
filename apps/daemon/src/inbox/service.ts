@@ -901,7 +901,8 @@ export function createInboxService(deps: {
     answer(id, raw, answerer = Answerer.Builder) {
       const answer = InboxAnswer.parse(raw);
       const current = getInboxItem(deps.state.db, id);
-      if (current.kind === InboxKind.Flag && current.state === InboxState.Open) {
+      const flagActed = current.kind === InboxKind.Flag && current.state === InboxState.Open;
+      if (flagActed) {
         if (
           current.detail?.[CARD_CLOSES_ITSELF] === true &&
           !current.options.some((option) => option.label === answer.choice)
@@ -957,7 +958,9 @@ export function createInboxService(deps: {
       let afterCommit: (() => void) | undefined;
       const answered = deps.state.write((ctx) => {
         const item = getInboxItem(ctx.tx, id);
-        if (item.state !== InboxState.Open) {
+        // A flag's answer may close the card itself (a retry cancels its run's cards, an abandon its
+        // batch's): the answer is still the builder's, so it is recorded on the card it closed.
+        if (item.state !== InboxState.Open && !(flagActed && item.kind === InboxKind.Flag)) {
           throw new ConflictError(`Inbox item ${id} is already ${item.state}`);
         }
         assertKnownChoice(item, answer);
