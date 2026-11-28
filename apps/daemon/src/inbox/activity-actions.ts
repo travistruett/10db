@@ -7,6 +7,7 @@ import {
   type NoticePostedData,
   type ProjectId,
   type UndoAction,
+  type WorkstreamId,
 } from '@10db/contracts';
 import { getPostedNotice, isRuleAsking, markRowUndone, setRuleAsking, undoneRows } from '@10db/db';
 import type { StateStore } from '../events';
@@ -37,6 +38,8 @@ interface DecidedRow {
 /** Performs each kind of undoable move; the daemon wires the ones it owns. */
 export interface UndoMoves {
   moveProject(projectId: ProjectId, accountId: AccountId): void;
+  /** Forgets the deadlock record of the pair, leaving every claim where it is. */
+  forgetClaimDeadlock(a: WorkstreamId, b: WorkstreamId): void;
 }
 
 export function createActivityActions(deps: {
@@ -53,9 +56,16 @@ export function createActivityActions(deps: {
     return { data: notice.data, decision: notice.data.decision };
   }
 
-  /** Each kind of `UndoAction` is one move; a second kind makes this a switch over `action.kind`. */
+  /** Each kind of `UndoAction` is one move. */
   function perform(action: UndoAction): void {
-    deps.moves.moveProject(action.projectId, action.accountId);
+    switch (action.kind) {
+      case 'move_project':
+        deps.moves.moveProject(action.projectId, action.accountId);
+        return;
+      case 'forget_claim_deadlock':
+        deps.moves.forgetClaimDeadlock(action.a, action.b);
+        return;
+    }
   }
 
   return {
