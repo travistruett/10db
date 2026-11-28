@@ -684,7 +684,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
         reason: 'works in its batch',
       },
     );
-    insertPlannedWorkstream(w, task.id, planForStart(w.tx, task.id), batch.id);
+    // 10db filed this task and starts it itself: every session of it counts against the daily ceiling.
+    insertPlannedWorkstream(w, task.id, planForStart(w.tx, task.id), batch.id, {
+      selfStarted: true,
+    });
     return task.id;
   }
 

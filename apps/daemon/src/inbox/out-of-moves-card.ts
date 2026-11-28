@@ -140,7 +140,7 @@ export interface OutOfMovesMoves {
    */
   restartStalled(
     id: WorkstreamId,
-    opts?: { note?: string },
+    opts?: { note?: string; byBuilder?: boolean },
   ): Promise<'restarted' | 'stop_hung' | 'not_active'>;
   /** A stop that did not finish: the run keeps its record and the card comes back. */
   stopHung(id: WorkstreamId): void;
@@ -166,7 +166,8 @@ export function createOutOfMovesAnswers(
    */
   const restart = (id: WorkstreamId, note?: string): void => {
     deps
-      .restartStalled(id, note === undefined ? undefined : { note })
+      // The builder's answer, so the restart is theirs and its session is not 10db's own work.
+      .restartStalled(id, { byBuilder: true, ...(note === undefined ? {} : { note }) })
       .then((result) => {
         if (result === 'stop_hung') deps.stopHung(id);
       })

@@ -1,4 +1,10 @@
-import { isMetered, type AccountId, type AccountUsageDto, type UsageTotals } from '@10db/contracts';
+import {
+  isMetered,
+  type AccountId,
+  type AccountUsageDto,
+  type ProjectId,
+  type UsageTotals,
+} from '@10db/contracts';
 import { and, asc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getAccountRow } from './accounts';
@@ -47,6 +53,49 @@ function decisionSpendUsd(db: DbReader, id: AccountId, window: UsageWindow): num
     )
     .get();
   return row?.total ?? 0;
+}
+
+/**
+ * What the project's own work (sessions 10db started by itself, or re-ran) used in a day, which starts
+ * at `day.start` and ends before `day.end`. A session on a metered account counts its dollars; one on
+ * a plan counts the share of the plan's limit it used, and counts as `unmeasured` when the plan
+ * reported too little to say. A plan's dollars are never summed: they are not real money.
+ */
+export function selfStartedToday(
+  db: DbReader,
+  projectId: ProjectId,
+  day: { readonly start: string; readonly end: string },
+): { usd: number; share: number; unmeasured: number } {
+  const rows = db
+    .select({
+      kind: schema.accounts.kind,
+      usd: sql<number>`coalesce(sum(${schema.sessions.costUsd}), 0)`,
+      share: sql<number>`coalesce(sum(${schema.sessions.limitShare}), 0)`,
+      sessions: sql<number>`count(*)`,
+      measured: sql<number>`count(${schema.sessions.limitShare})`,
+    })
+    .from(schema.sessions)
+    .innerJoin(schema.workstreams, eq(schema.workstreams.id, schema.sessions.workstreamId))
+    .innerJoin(schema.accounts, eq(schema.accounts.id, schema.sessions.accountId))
+    .where(
+      and(
+        eq(schema.workstreams.projectId, projectId),
+        eq(schema.sessions.selfStarted, true),
+        gte(schema.sessions.startedAt, day.start),
+        lt(schema.sessions.startedAt, day.end),
+      ),
+    )
+    .groupBy(schema.accounts.kind)
+    .all();
+  const total = { usd: 0, share: 0, unmeasured: 0 };
+  for (const row of rows) {
+    if (isMetered(row.kind)) total.usd += row.usd;
+    else {
+      total.share += row.share;
+      total.unmeasured += row.sessions - row.measured;
+    }
+  }
+  return total;
 }
 
 export function accountUsage(db: DbReader, id: AccountId, window: UsageWindow): AccountUsageDto {
