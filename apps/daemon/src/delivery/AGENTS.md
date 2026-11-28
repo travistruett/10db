@@ -23,4 +23,11 @@
 - `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`), else `autoTestBudgetLine` (`test-budget-reason.ts`) writes one from value cards (`decisions/2026-11-25-a-pull-request-over-its-test-budget-says-why-from-its-value-cards.md`).
 - A check red on the base too waits, not fixes (`ci-failure-class.ts`, `decisions/2026-11-24-a-red-base-is-one-fix-not-a-fix-per-pull-request.md`); one the change failed reruns once first (`ci-rerun.ts`, `decisions/2026-11-25-a-failed-required-check-is-rerun-once-before-a-fix.md`).
 - Work rejected at its last review round is reviewed again before Ship Anyway is offered (`second-review.ts`).
+- A separate copy's landing that brings `migrations` hazard paths runs the project's `migrateCommand`
+  (`migrateAfterLanding` in `copy-landing-cards.ts`, `dev-migrate.ts`;
+  `decisions/2026-11-27-a-landing-that-brings-migrations-runs-the-declared-migrate-command.md`): always in
+  `project.repoPath` with no copy id, localhost allowed, under the unslotted gate runner. Exit 0 is a
+  `migrate-after-landing` notice; a failure is one `copy-migrations:<batch>` card with the output's tail; no command is
+  one ask per project (`migrate-command-asked:<project>`). Recovery runs it in the queued retirement job of a copy found
+  at `landed`, never inline at startup.
 - Failed ship gate (`decisions/2026-11-27-a-failing-ship-gate-is-fixed-by-10db-until-it-is-out-of-moves.md`): `gate-failure-action.ts` decides; `sendToFix` reopens the batch with one counted fix task (`gate-fix.ts`) and withdraws the card in one write; pass, copy and out-of-moves batches keep the card; SHIPPED and abandon run `clearGateFix`.

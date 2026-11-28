@@ -124,3 +124,7 @@
 - The card names the agent that asks (`sandbox.unsandboxed.agent`: "Claude says", "Codex says", and the `allow_chat` option's text). A Codex chat's sandbox escalation reaches the same `chatOnce` ask as a flagged `Bash` call (`sessions/codex-escalation.ts`).
 - The CI cap card replaces "Pull request checks failed": `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's
   `prCardKey.checks` card in the stop card's write, and `pr-watch` raises none while `ciStopped` is set.
+- A lane's proposal is routed in `proposal-task.ts` (`decisions/2026-11-27-a-lanes-proposal-is-routed-by-rule.md`):
+  `planReviewRoute` turns `plan_review` on Core work into a step, `proposalFiling` lets a `prerequisite` past the size
+  rule only, and `fileProposalByItself` files a prerequisite once, matched by its first description line. Each move
+  posts a rule notice; a proposal that still cards says what it costs (`proposalCardBody`).
