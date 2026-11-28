@@ -42,6 +42,10 @@ export const TakenClaims = z.object({
 });
 export type TakenClaims = z.infer<typeof TakenClaims>;
 
+/** The key of every yield notice between the pair, posted on the yielder's task. */
+export const deadlockNoticeKey = (a: WorkstreamId, b: WorkstreamId): string =>
+  `claim-deadlock:${a}:${b}`;
+
 /** Unset or unreadable reads as no pairs. */
 function readPairs(db: DbReader): DeadlockPair[] {
   const parsed = z.array(DeadlockPair).safeParse(getAppSetting(db, CLAIM_DEADLOCKS_KEY));
