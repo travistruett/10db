@@ -910,6 +910,11 @@ export const TaskDto = z.object({
   why: z.string(),
   description: z.string(),
   acceptanceCriteria: z.array(z.string()),
+  /**
+   * How many criteria the task has, set on a task read from the project's list (`TaskRowDto`), where
+   * `acceptanceCriteria` is left out; absent on the task's own read, where it is `acceptanceCriteria.length`.
+   */
+  criteriaCount: z.number().optional(),
   areas: z.array(z.string()),
   /** The rigor set on the task; null follows the project's default and the task's kinds. */
   rigor: z.enum(Rigor).nullable(),

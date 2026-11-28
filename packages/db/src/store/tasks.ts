@@ -47,7 +47,8 @@ import {
   type TaskKind,
   type TaskLanding,
 } from '@10db/contracts';
-import { and, asc, desc, eq, inArray, isNull, max, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, max, ne, notExists, or, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
 import * as schema from '../schema';
 import { getBoardColumn, listBoardColumns } from './board-columns';
 import { checkTaskKinds, listKinds } from './kinds';
@@ -243,7 +244,7 @@ export function getTaskByExternal(
       ),
     )
     .get();
-  return row === undefined ? null : toTaskDto(db, row);
+  return row === undefined ? null : readTask(db, row);
 }
 
 /** Refuses an issue a task of the project already carries, naming that task. */
@@ -898,10 +899,60 @@ function rigorInputs(db: DbReader, projectId: ProjectId): RigorInputs {
   return { kinds: listKinds(db), projectDefault: row?.defaultRigor ?? Rigor.Standard };
 }
 
+/** A task's latest run with the state of its batch and that batch's pull request. */
+interface LatestRunFacts {
+  readonly id: WorkstreamId;
+  readonly state: WorkstreamState;
+  readonly batchState: BatchState | null;
+  readonly prUrl: string | null;
+  readonly prState: PullRequestState | null;
+  readonly ciStopped: CiStopped | null;
+}
+
+/** What a task's DTO reads besides its own row: its dependencies, its latest run and its pass. */
+interface TaskFacts {
+  readonly dependsOn: readonly TaskId[];
+  readonly depsDone: boolean;
+  readonly latest: LatestRunFacts | undefined;
+  readonly inPass: boolean;
+}
+
+const latestRunColumns = {
+  id: schema.workstreams.id,
+  state: schema.workstreams.state,
+  batchState: schema.batches.state,
+  prUrl: schema.batches.prUrl,
+  prState: schema.batches.prState,
+  ciStopped: schema.batches.ciStopped,
+};
+
+/** The facts of one task, read with a few queries of its own. */
+function taskFacts(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskFacts {
+  const deps = db
+    .select({ id: schema.taskDeps.dependsOnId })
+    .from(schema.taskDeps)
+    .where(eq(schema.taskDeps.taskId, row.id))
+    .all();
+  const latest = db
+    .select(latestRunColumns)
+    .from(schema.workstreams)
+    .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
+    .where(eq(schema.workstreams.taskId, row.id))
+    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+    .limit(1)
+    .get();
+  return {
+    dependsOn: deps.map((d) => d.id),
+    depsDone: dependenciesDone(db, row.id),
+    latest,
+    inPass: passHolds(db, row.passId),
+  };
+}
+
 function toTaskDto(
-  db: DbReader,
   row: typeof schema.tasks.$inferSelect,
-  inputs: RigorInputs = rigorInputs(db, row.projectId),
+  inputs: RigorInputs,
+  { dependsOn, depsDone, latest, inPass }: TaskFacts,
 ): TaskDto {
   const rigorInput = {
     rigor: row.rigor,
@@ -914,26 +965,6 @@ function toTaskDto(
     rigorSource: row.rigorSource,
     rigorReason: row.rigorReason,
   });
-  const deps = db
-    .select({ id: schema.taskDeps.dependsOnId })
-    .from(schema.taskDeps)
-    .where(eq(schema.taskDeps.taskId, row.id))
-    .all();
-  const latest = db
-    .select({
-      id: schema.workstreams.id,
-      state: schema.workstreams.state,
-      batchState: schema.batches.state,
-      prUrl: schema.batches.prUrl,
-      prState: schema.batches.prState,
-      ciStopped: schema.batches.ciStopped,
-    })
-    .from(schema.workstreams)
-    .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
-    .where(eq(schema.workstreams.taskId, row.id))
-    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
-    .limit(1)
-    .get();
   return {
     id: row.id,
     projectId: row.projectId,
@@ -958,16 +989,16 @@ function toTaskDto(
     status: row.status,
     boardOrder: row.boardOrder,
     boardColumnId: row.boardColumnId,
-    dependsOn: deps.map((d) => d.id),
+    dependsOn: [...dependsOn],
     boardStatus: deriveBoardStatus({
       taskStatus: row.status,
-      depsDone: dependenciesDone(db, row.id),
+      depsDone,
       workstreamState: latest?.state ?? null,
       batchState: latest?.batchState ?? null,
       pullRequest: latest
         ? { url: latest.prUrl, state: latest.prState, ciStopped: latest.ciStopped }
         : null,
-      inPass: passHolds(db, row.passId),
+      inPass,
     }),
     workstreamId: latest?.id ?? null,
     goalId: row.goalId,
@@ -992,10 +1023,18 @@ function toTaskDto(
   };
 }
 
+function readTask(
+  db: DbReader,
+  row: typeof schema.tasks.$inferSelect,
+  inputs: RigorInputs = rigorInputs(db, row.projectId),
+): TaskDto {
+  return toTaskDto(row, inputs, taskFacts(db, row));
+}
+
 export function getTask(db: DbReader, id: TaskId): TaskDto {
   const row = db.select().from(schema.tasks).where(eq(schema.tasks.id, id)).get();
   if (!row) throw new NotFoundError('task', id);
-  return toTaskDto(db, row);
+  return readTask(db, row);
 }
 
 /**
@@ -1009,22 +1048,138 @@ export function getTasks(db: DbReader, ids: readonly TaskId[]): TaskDto[] {
     if (!row) throw new NotFoundError('task', id);
     const known = inputs.get(row.projectId) ?? rigorInputs(db, row.projectId);
     inputs.set(row.projectId, known);
-    return toTaskDto(db, row, known);
+    return readTask(db, row, known);
   });
 }
 
-/** The project's tasks in board order. A removed (cancelled) task keeps its row but is not listed. */
+/**
+ * The project's tasks in board order. A removed (cancelled) task keeps its row but is not listed.
+ * However many tasks there are, it reads in the same few queries: the tasks, the project and kinds, the
+ * dependency edges, every task's latest run with its batch, and the project's passes.
+ */
 export function listTasks(db: DbReader, projectId: ProjectId): TaskDto[] {
   const inputs = rigorInputs(db, projectId);
-  return db
+  const rows = db
     .select()
     .from(schema.tasks)
     .where(
       and(eq(schema.tasks.projectId, projectId), ne(schema.tasks.status, TaskStatus.Cancelled)),
     )
     .orderBy(asc(schema.tasks.boardOrder), asc(schema.tasks.id))
-    .all()
-    .map((row) => toTaskDto(db, row, inputs));
+    .all();
+  const facts = projectTaskFacts(db, projectId);
+  return rows.map((row) => toTaskDto(row, inputs, facts(row)));
+}
+
+/**
+ * `taskFacts` for every task of a project at once. A dependency is read whatever its status, since a
+ * removed task still holds up the one that waits on it.
+ */
+function projectTaskFacts(
+  db: DbReader,
+  projectId: ProjectId,
+): (row: typeof schema.tasks.$inferSelect) => TaskFacts {
+  const projectTasks = db
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.projectId, projectId));
+  const edges = db
+    .select({
+      taskId: schema.taskDeps.taskId,
+      dependsOnId: schema.taskDeps.dependsOnId,
+    })
+    .from(schema.taskDeps)
+    .where(inArray(schema.taskDeps.taskId, projectTasks))
+    .orderBy(asc(schema.taskDeps.taskId), asc(schema.taskDeps.dependsOnId))
+    .all();
+  const dependsOnOf = new Map<TaskId, TaskId[]>();
+  for (const edge of edges) {
+    const list = dependsOnOf.get(edge.taskId) ?? [];
+    list.push(edge.dependsOnId);
+    dependsOnOf.set(edge.taskId, list);
+  }
+
+  // The latest run of every task of the project, the removed ones too, as the newest by creation and id.
+  const newer = alias(schema.workstreams, 'newer_workstreams');
+  const runs = db
+    .select({
+      ...latestRunColumns,
+      taskId: schema.workstreams.taskId,
+      batchId: schema.workstreams.batchId,
+      copy: schema.localCopies.batchId,
+    })
+    .from(schema.workstreams)
+    .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
+    .leftJoin(schema.localCopies, eq(schema.localCopies.batchId, schema.workstreams.batchId))
+    .where(
+      and(
+        inArray(schema.workstreams.taskId, projectTasks),
+        notExists(
+          db
+            .select({ id: newer.id })
+            .from(newer)
+            .where(
+              and(
+                eq(newer.taskId, schema.workstreams.taskId),
+                or(
+                  gt(newer.createdAt, schema.workstreams.createdAt),
+                  and(
+                    eq(newer.createdAt, schema.workstreams.createdAt),
+                    gt(newer.id, schema.workstreams.id),
+                  ),
+                ),
+              ),
+            ),
+        ),
+      ),
+    )
+    .all();
+  const latestOf = new Map(runs.map((run) => [run.taskId, run]));
+
+  const passStates = new Map(
+    db
+      .select({ id: schema.passes.id, state: schema.passes.state })
+      .from(schema.passes)
+      .where(eq(schema.passes.projectId, projectId))
+      .all()
+      .map((pass) => [pass.id, pass.state]),
+  );
+  const statusOf = new Map(
+    db
+      .select({ id: schema.tasks.id, status: schema.tasks.status })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.projectId, projectId))
+      .all()
+      .map((task) => [task.id, task.status]),
+  );
+
+  const dependencyDone = (dependencyId: TaskId, dependentBatch: BatchId | null): boolean => {
+    const latest = latestOf.get(dependencyId);
+    if (statusOf.get(dependencyId) === TaskStatus.Done)
+      return !(
+        latest?.batchId != null &&
+        latest.batchId !== dependentBatch &&
+        latest.batchState !== BatchState.Shipped &&
+        latest.copy !== null
+      );
+    return (
+      latest?.state === WorkstreamState.Failed &&
+      latest.batchState === BatchState.Shipped &&
+      latest.prState === PullRequestState.Merged
+    );
+  };
+
+  return (row) => {
+    const dependsOn = dependsOnOf.get(row.id) ?? [];
+    const latest = latestOf.get(row.id);
+    const passState = row.passId === null ? undefined : passStates.get(row.passId);
+    return {
+      dependsOn,
+      depsDone: dependsOn.every((id) => dependencyDone(id, latest?.batchId ?? null)),
+      latest,
+      inPass: passState !== undefined && passHoldsTasks(passState),
+    };
+  };
 }
 
 /**

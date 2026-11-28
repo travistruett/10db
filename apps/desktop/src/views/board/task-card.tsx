@@ -75,7 +75,7 @@ export function cardSummary(
   sharedWith = 1,
 ): string {
   const waits = waitsOn(task, peers);
-  const criteria = task.acceptanceCriteria.length;
+  const criteria = task.criteriaCount ?? task.acceptanceCriteria.length;
   const state = startNote
     ? noteState(startNote)
     : taskState(workstream, batch, gateCommand, place, batches, task);
