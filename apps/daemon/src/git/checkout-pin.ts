@@ -1,4 +1,4 @@
-import type { BatchId, ChatId } from '@10db/contracts';
+import type { BatchId, ChatId, ProjectId } from '@10db/contracts';
 import { z } from 'zod';
 
 /**
@@ -31,6 +31,9 @@ export function identityInodes(id: string): string {
 export function sameCheckoutIdentity(a: string, b: string): boolean {
   return identityInodes(a) === identityInodes(b);
 }
+
+/** The app setting a project checkout's pin is kept under. */
+export const projectPinKey = (projectId: ProjectId): string => `checkout_pin.${projectId}`;
 
 /** The app setting a batch's worktree pin is kept under. */
 export const worktreePinKey = (batchId: BatchId): string => `checkout_pin.${batchId}`;

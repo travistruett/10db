@@ -9,6 +9,7 @@ export {
   takenFrom,
   turnOver,
 } from './claim-deadlock-pairs';
+export { reportClaimDeadlock } from './claim-deadlock-report';
 export { ClaimWaits, forgetEndedYields, withdrawStaleClaimWaits } from './claim-wait';
 export { createMcpHandler } from './server';
 export { mintSessionToken } from './tokens';

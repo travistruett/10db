@@ -2,6 +2,7 @@ export {
   chatWorktreePinKey,
   CheckoutPin,
   memoryPinStore,
+  projectPinKey,
   worktreePinKey,
   type PinStore,
 } from './checkout-pin';

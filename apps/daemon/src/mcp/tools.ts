@@ -131,6 +131,7 @@ import {
   type SharedGrant,
 } from './claim-wait';
 import { queuedBehind } from './claim-deadlock-pairs';
+import { reportClaimDeadlock } from './claim-deadlock-report';
 import { createPlanToolHandlers, PLAN_TOOL_DESCRIPTIONS } from './plan-tools';
 import { judgeReportedRoutes } from './report-pages';
 import type { LinearReporter } from '../linear';
@@ -844,7 +845,7 @@ export function createToolHandlers(
         ...(shared ? { shared } : {}),
         handOver: (from) =>
           deps.handOverClaim({ grantee: workstreamId, from, claim: { kind, name: input.name } }),
-        reportRepeat: () => undefined,
+        reportRepeat: reportClaimDeadlock,
       });
       let timer: NodeJS.Timeout | undefined;
       // The slice listens to no signal: a session that stops ends the wait itself, with its error. It
