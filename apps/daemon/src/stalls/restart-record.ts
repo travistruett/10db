@@ -87,15 +87,6 @@ export function markHung(
   replace(w, { ...(before ?? fresh(input.id, input.state)), stopHungAt: input.at });
 }
 
-/** Sets `defectTaskId`, and makes the record (`restartedAt` null) when the run has none. */
-export function markDefect(
-  w: WriteContext,
-  input: { id: WorkstreamId; state: WorkstreamState; taskId: TaskId },
-): void {
-  const before = readAll(w.tx).find((r) => r.workstreamId === input.id);
-  replace(w, { ...(before ?? fresh(input.id, input.state)), defectTaskId: input.taskId });
-}
-
 /** The restarted step finished: its record goes, so a later step's stall restarts once again. */
 export function clearRestart(w: WriteContext, id: WorkstreamId): void {
   const records = readAll(w.tx);
