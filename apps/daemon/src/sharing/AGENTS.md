@@ -43,7 +43,8 @@ Shares this Mac's daemon on the builder's tailnet through `tailscale serve`.
   unserve: the port's mapping may be another daemon's (`notSharing` in `sharing-service.ts`). An unserve an earlier Stop
   owed is still retried by the monitor and at start.
 - `share-listener.ts` is the second `serve()` on `127.0.0.1:<port>` with its own `WebSocketServer({ noServer: true })`
-  and the same app. Its fetch wrapper (and the main listener's in `start.ts`) marks the **env object in place**
+  and the same app. `start.ts` hands it `keepAlive` (`daemon/socket-keepalive.ts`), as it does its own: a 30 s ping, and a
+  socket that missed one or holds more than 8 MiB unsent is terminated. Its fetch wrapper (and the main listener's in `start.ts`) marks the **env object in place**
   (`Object.assign(env, { listener })`): `@hono/node-server` reads back a symbol the upgrade helper writes on that very
   object, so a spread copy silently breaks every WebSocket upgrade. `EADDRINUSE` answers `{ ok: false, holder }`,
   `holder` from `lsofHolderOf` in `lsof-holder.ts` (`"<command> (pid <n>)"`). That reader checks lsof's `-Fpc`

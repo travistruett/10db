@@ -479,6 +479,7 @@ describe('the request path through both listeners', () => {
       fetch: (req, env) => realApp.fetch(req, env),
       port: 0,
       sockets,
+      keepAlive: () => undefined,
       holderOf: () => Promise.resolve(null),
     });
     if (!started.ok) throw new Error('the share listener did not start');

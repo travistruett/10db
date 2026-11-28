@@ -126,6 +126,7 @@ import {
 } from '../judge';
 import { createBenchmarkServices } from './benchmark-services';
 import { checkoutState } from './checkout-state';
+import { keepSocketsAlive } from './socket-keepalive';
 import { createSizingService } from '../sizing';
 import { settleSecondOpinionModel } from './decision-offer';
 import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
@@ -3598,6 +3599,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     listen: (sharePort) =>
       startShareListener({
         fetch: (req, env) => app.fetch(req, env),
+        keepAlive: (wss) => {
+          keepSocketsAlive(wss, clock, logger.child({ component: 'events' }));
+        },
         port: sharePort,
         sockets: deviceSockets,
         // An unreadable holder is logged and shown as "another process": the port is still held, so the share
@@ -3767,6 +3771,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'do-it' }),
   });
   const wss = new WebSocketServer({ noServer: true });
+  keepSocketsAlive(wss, clock, logger.child({ component: 'events' }));
   const server = serve({
     // The env is marked in place: the server reads back what the upgrade helper writes on this very object.
     fetch: (req, env) => app.fetch(req, Object.assign(env, { listener: Listener.Main })),
