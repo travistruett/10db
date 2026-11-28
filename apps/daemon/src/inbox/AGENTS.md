@@ -134,6 +134,13 @@
   close raises the out-of-moves card again beside a card saying why.
 - A flag answer whose own move closes the card (a retry cancels its run's cards, an abandon its batch's) is still
   recorded on it: `InboxService.answer` writes the answer to a flag `onFlagAnswer` closed instead of refusing it.
+- A lane's stray write onto a guardrail path is a flag card with `detail.guardrailDiff` and the options Keep and Revert
+  (`guardrail-card.ts`: the title, `GuardrailStrayChoice`, the options; `guardrail-diff.ts`: the capped diff).
+  `applyTrustChoice` takes Keep as it takes Keep It. Revert is `createGuardrailAnswers(...).onAnswer`, called from
+  `onFlagAnswerInWrite` in `daemon/start.ts`: it returns a job that runs once the answer commits, never inside the
+  transaction, and records what it did in the answered card's note (`updateInboxItem`) or raises the card again
+  (`changedSinceCard`, `trusted-writes.ts`) when the file changed or could not be put back. `home` is injected, the
+  builder's home by default.
 - A CI stop has its card or its pending notice, never neither, and replaces "Pull request checks failed":
   `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's `prCardKey.checks` card in the stop's write, and
   `pr-watch` raises none while `ciStopped` is set. A stop at the limit or on an unchanged head shows the
