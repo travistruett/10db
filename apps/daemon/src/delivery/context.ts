@@ -1,4 +1,4 @@
-import type { BatchId, Notice, ProjectId } from '@10db/contracts';
+import { FIX_ATTEMPT_LIMIT, type BatchId, type Notice, type ProjectId } from '@10db/contracts';
 import { clearBatchNotice, findOpenByFoldKey, setBatchNotice, type WriteContext } from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
@@ -26,6 +26,8 @@ export interface DeliveryLimits {
   readonly pushRetryWaitMs: number;
   /** The shipping gate; the daemon passes the runner's gate timeout. */
   readonly gateTimeoutMs: number;
+  /** The most fix tasks 10db files for one batch's failing ship gate before it asks. */
+  readonly maxFixAttempts: number;
 }
 
 export const DEFAULT_DELIVERY_LIMITS: DeliveryLimits = {
@@ -33,6 +35,7 @@ export const DEFAULT_DELIVERY_LIMITS: DeliveryLimits = {
   pushTimeoutMs: 30 * 60_000,
   pushRetryWaitMs: 5_000,
   gateTimeoutMs: 30 * 60_000,
+  maxFixAttempts: FIX_ATTEMPT_LIMIT,
 };
 
 /** What every delivery step needs. */
