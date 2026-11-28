@@ -9,10 +9,21 @@ import {
   type UndoAction,
   type WorkstreamId,
 } from '@10db/contracts';
-import { getPostedNotice, isRuleAsking, markRowUndone, setRuleAsking, undoneRows } from '@10db/db';
+import {
+  getPostedNotice,
+  isRuleAsking,
+  markRowUndone,
+  recordRuleMark,
+  RULE_UNDOS_TO_ASK,
+  RuleMark,
+  setRuleAsking,
+  undoneRows,
+  type WriteContext,
+} from '@10db/db';
 import type { StateStore } from '../events';
 import { CardTier } from './card-tier';
 import { postNotice } from './notice';
+import { raiseRuleAsksCard, type UndoneLine } from './rule-asks-card';
 
 /** What the builder does to an Activity row that reports a decision 10db made for them. */
 export interface ActivityActions {
@@ -58,6 +69,29 @@ export function createActivityActions(deps: {
     return { data: notice.data, decision: notice.data.decision };
   }
 
+  /** The rule's newest undone decisions in the project, oldest first: what its card lists. */
+  function lastUndone(ctx: WriteContext, projectId: ProjectId, rule: DecisionRule): UndoneLine[] {
+    const found: UndoneLine[] = [];
+    for (const seq of [...undoneRows(ctx.tx)].reverse()) {
+      const notice = getPostedNotice(ctx.tx, seq);
+      if (notice?.data.projectId !== projectId || notice.data.decision?.rule !== rule) continue;
+      found.unshift({ line: notice.data.line, at: notice.at });
+      if (found.length === RULE_UNDOS_TO_ASK) break;
+    }
+    return found;
+  }
+
+  /**
+   * Records an undo of the rule in the project. The undo that reaches `RULE_UNDOS_TO_ASK` inside the window
+   * sets the rule to ask there and raises its card, in the undo's own write; a rule already asking raises none.
+   */
+  function countUndo(ctx: WriteContext, projectId: ProjectId, rule: DecisionRule): void {
+    const undone = recordRuleMark(ctx, projectId, rule, RuleMark.Undone);
+    if (undone < RULE_UNDOS_TO_ASK || isRuleAsking(ctx.tx, projectId, rule)) return;
+    setRuleAsking(ctx, projectId, rule, true);
+    raiseRuleAsksCard(ctx, { projectId, rule, undone: lastUndone(ctx, projectId, rule) });
+  }
+
   /** Each kind of `UndoAction` is one move; a move that fails throws and the row stays as it was. */
   async function perform(action: UndoAction): Promise<void> {
     switch (action.kind) {
@@ -92,6 +126,8 @@ export function createActivityActions(deps: {
           line: `Undone: ${data.line}`,
           body: `You undid this decision from Activity.\n\n${data.body}`,
         });
+        // A rule asks per project: an app's row has none, so it counts toward nothing.
+        if (data.projectId !== null) countUndo(ctx, data.projectId, decision.rule);
       });
     },
     askNextTime(seq, asking) {

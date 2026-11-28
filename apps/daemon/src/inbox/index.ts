@@ -30,6 +30,7 @@ export {
   guardrailStrayTitle,
 } from './guardrail-card';
 export { createActivityActions } from './activity-actions';
+export { applyRuleAsksAnswer } from './rule-asks-card';
 export { leftWithBuilder } from './builder-card';
 export { clearAppStartCard, raiseAppStartCard } from './app-start-card';
 export { clearGateHoldCard, raiseGateHoldCard } from './gate-hold-card';

@@ -4,6 +4,7 @@ export * from './accounts';
 export * from './activity';
 export * from './activity-group';
 export * from './rule-asking';
+export * from './rule-record';
 export * from './batches';
 export * from './board-columns';
 export * from './claims';

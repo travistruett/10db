@@ -120,6 +120,14 @@
   (`POST /activity/:seq/undo`, once per row) and Ask Me Next Time (`PUT` and `DELETE /activity/:seq/ask-next-time`):
   a project's asking rules sit in `app_settings` (`rules.asking`, read through `isRuleAsking`), and a raiser of a
   rule-decided notice checks it and raises a card instead when its rule is asking.
+- Two undos of one rule in one project inside 30 days set that rule to ask there (`RULE_UNDOS_TO_ASK`, `RULE_WINDOW_DAYS`,
+  `recordRuleMark` over the app setting `rules.record`, `packages/db/src/store/rule-record.ts`: project to rule to mark to
+  ISO times, 200 kept). `undo` records the mark in the write that marks the row undone, and the second undo switches the
+  rule and raises one card in that same write (`rule-asks-card.ts`: fold key `rule-asks:<project>:<rule>`, Keep Asking and
+  Let 10db Decide Again, `decidedByBuilder(BuilderOwns.Guardrails)`, since the rule deciding alone was a standing yes). A rule
+  already asking raises no card, and a row with no project records nothing. Let 10db Decide Again is `applyRuleAsksAnswer`,
+  called from `onFlagAnswerInWrite`: the rule decides again and its undone marks are cleared. Ask Me Next Time stays one
+  click, with no card.
 - A failed run's card in a batch carries `resolvesWhen: { event: 'batch_over', batchId }` (`flagFailedRun`, from the
   run's `batchId`), and `resolveOverBatchCards` (`delivery/stale-cards.ts`, at start and on every `batch.updated`)
   closes it once the batch's pull request merged, or the batch is closed or abandoned.
