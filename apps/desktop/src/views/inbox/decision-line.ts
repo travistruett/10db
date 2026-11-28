@@ -1,4 +1,5 @@
 import {
+  AcceptanceChoice,
   AcceptanceDetail,
   AcceptanceVerdict,
   InboxKind,
@@ -31,7 +32,10 @@ export function acceptanceCounts(item: InboxItemDto): { unmet: number; extra: bo
 function acceptanceLine(item: InboxItemDto): string {
   const shipped =
     item.detail?.['reviewFollows'] === true ? 'The work went on to review.' : 'Already shipped.';
-  return `${shipped} Keep As Is changes nothing; Send Back files a fix task.`;
+  const drop = item.options.some((o) => o.label === AcceptanceChoice.Drop)
+    ? ' Drop It takes the criteria off the task.'
+    : '';
+  return `${shipped} Accept Without Proof changes nothing.${drop} Send Back files a fix task.`;
 }
 
 /** The card's body already names the areas the change touched, so the line says only what the answers do. */

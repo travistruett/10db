@@ -914,6 +914,14 @@ export function createInboxService(deps: {
         if (answer.choice === AcceptanceChoice.SendBack && (answer.note ?? '').trim() === '') {
           throw new InboxAnswerRefused('Send back needs a note saying what to change');
         }
+        // Accepting a criterion without proof, or dropping it, lowers the bar: only the builder does either.
+        if (
+          (answer.choice === AcceptanceChoice.Accept || answer.choice === AcceptanceChoice.Drop) &&
+          answerer !== Answerer.Builder
+        )
+          throw new InboxAnswerRefused(
+            'Only the builder can accept a criterion without proof or drop it',
+          );
       }
       if (current.kind === InboxKind.Watchpoint && current.state === InboxState.Open) {
         assertKnownChoice(current, answer);

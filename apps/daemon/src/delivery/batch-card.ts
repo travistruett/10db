@@ -97,11 +97,17 @@ export function batchCardFields(
   row: { readonly id: WorkstreamId; readonly batchId: BatchId | null },
   revert?: string | null,
   covers?: readonly WorkstreamId[],
+  /**
+   * Whether Ship anyway is offered. Work a reviewer rejected is not offered it until 10db's second review has
+   * rejected it too (`shipAnywayOffered`), so the card says only what the builder can do meanwhile.
+   */
+  shipAnyway = true,
 ): { options: InboxOption[]; detail: Record<string, Json> } | null {
   if (row.batchId === null) return null;
   const card = { batchId: row.batchId, workstreamId: row.id };
+  const offered = revert ? REVERTED_OPTIONS : OPTIONS;
   return {
-    options: [...(revert ? REVERTED_OPTIONS : OPTIONS)],
+    options: offered.filter((o) => shipAnyway || o.label !== BatchCardChoice.ShipAnyway),
     detail: {
       [BATCH_CARD_DETAIL]: revert
         ? { ...card, revert, ...(covers ? { covers: [...covers] } : {}) }

@@ -80,6 +80,7 @@ import { jobKey, JobQueue } from './jobs';
 import { landingHold, planLandings, shippedLandingNotice } from './landing-join';
 import { keptRevertOf } from './left-out-settle';
 import { batchPlacement, placementWords, refuseCrossPlacementDependency } from './placement';
+import { forgetSecondReview } from './second-review';
 import { resolveStartCards } from './stale-cards';
 import { forgetStartSiblings, recordStartSiblings, startSiblings } from './start-siblings';
 import {
@@ -141,8 +142,14 @@ export interface BatchStarter {
    * its batch reopens (`reopen`). Refused while a join of its task is pending, since the join writes
    * a new run for the task and one-active-workstream would then refuse the join. Refused too when the
    * task moved to a placement its batch doesn't work in, saying why: a retry stays in the batch.
+   * `reviewOnly` is 10db's second review of work a reviewer rejected: only the rejecting step runs again
+   * (`retryWorkstream`). A builder's own Retry starts the rounds over, so it forgets that review was asked.
    */
-  retry(id: WorkstreamId, note?: string): WorkstreamDto;
+  retry(
+    id: WorkstreamId,
+    note?: string,
+    options?: { readonly reviewOnly?: boolean },
+  ): WorkstreamDto;
   /**
    * After a workstream Retry: a FAILED worktree batch reopens in the cut queue once its worktree is
    * whole. Any other batch is left as it is.
@@ -1189,7 +1196,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     },
     recut,
     advanceCopyQueue,
-    retry(id, note) {
+    retry(id, note, options) {
       refuseIfJoining(getWorkstreamRow(db, id).taskId);
       refuseMovedRetry(id);
       // A revert a stopped Ship without it left on the branch is known only to the batch's left-out
@@ -1207,7 +1214,12 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         id,
         note,
         kept?.covers.includes(id) ? kept.revert : null,
+        { reviewOnly: options?.reviewOnly === true },
       );
+      if (options?.reviewOnly !== true)
+        ctx.state.write((w) => {
+          forgetSecondReview(w, id);
+        });
       if (waitingBatch !== null) withdrawWaitCards(ctx, waitingBatch.projectId, waitingBatch.id);
       // The run's failed card, and any other card it left open, closes: the retried run raises its own.
       ctx.inbox.cancelForWorkstream(id);
