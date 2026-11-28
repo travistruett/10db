@@ -1,7 +1,8 @@
 import type { ProjectId, ProjectViewDto } from '@10db/contracts';
-import { Alert, Group, SegmentedControl, Stack, Text } from '@mantine/core';
+import { Alert, Stack, Text } from '@mantine/core';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useRef } from 'react';
+import { PageIntro, PageTabs, type PageTab } from '../../shell/page-intro';
 import { ProjectFilter } from '../../shell/project-filter';
 import { useSelectedProject } from '../../shell/selected-project';
 import { TitleRow } from '../../shell/title-row';
@@ -18,6 +19,11 @@ import { UpdateDrainNote } from './update-drain-note';
 /** What Factory shows: what runs now across projects, or how one project's work has gone. */
 export const FactoryMode = { Live: 'live', Metrics: 'metrics' } as const;
 export type FactoryMode = (typeof FactoryMode)[keyof typeof FactoryMode];
+
+const FACTORY_TABS: readonly PageTab<FactoryMode>[] = [
+  { value: FactoryMode.Live, label: 'Live' },
+  { value: FactoryMode.Metrics, label: 'Metrics' },
+];
 
 /**
  * Factory: where work stands across projects (what needs the builder, then each project's bar, goals and
@@ -54,33 +60,36 @@ export function FactoryView() {
         title="Factory"
         meta={<BenchmarkSyncNote />}
         actions={
-          <Group gap="xs" wrap="nowrap">
+          <>
             <AdmissionNote />
             <UpdateDrainNote />
-            <ActivityButton project={filter ?? null} />
-            <SegmentedControl
-              size="xs"
-              aria-label="Factory view"
-              value={mode}
-              onChange={(value) => {
-                // Metrics is one project's: with every project shown, it opens on the rail's.
-                if (value === FactoryMode.Metrics) {
-                  metricsChose.current = filter === undefined ? (railProject?.id ?? null) : null;
-                  go({ view: FactoryMode.Metrics, project: filter ?? railProject?.id ?? null });
-                } else {
-                  const chosen = metricsChose.current;
-                  metricsChose.current = null;
-                  go({
-                    view: FactoryMode.Live,
-                    ...(chosen !== null && chosen === filter ? { project: null } : {}),
-                  });
-                }
-              }}
-              data={[
-                { value: FactoryMode.Live, label: 'Live' },
-                { value: FactoryMode.Metrics, label: 'Metrics' },
-              ]}
-            />
+          </>
+        }
+      />
+      <PageIntro
+        tabs={
+          <PageTabs
+            label="Factory view"
+            tabs={FACTORY_TABS}
+            value={mode}
+            onChange={(value) => {
+              // Metrics is one project's: with every project shown, it opens on the rail's.
+              if (value === FactoryMode.Metrics) {
+                metricsChose.current = filter === undefined ? (railProject?.id ?? null) : null;
+                go({ view: FactoryMode.Metrics, project: filter ?? railProject?.id ?? null });
+              } else {
+                const chosen = metricsChose.current;
+                metricsChose.current = null;
+                go({
+                  view: FactoryMode.Live,
+                  ...(chosen !== null && chosen === filter ? { project: null } : {}),
+                });
+              }
+            }}
+          />
+        }
+        actions={
+          <>
             <ProjectFilter
               projects={all}
               value={filter ?? null}
@@ -88,7 +97,8 @@ export function FactoryView() {
                 go({ project });
               }}
             />
-          </Group>
+            <ActivityButton project={filter ?? null} />
+          </>
         }
       />
       {projects.isError ? (

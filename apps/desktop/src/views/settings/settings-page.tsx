@@ -1,34 +1,12 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Badge, Box } from '@mantine/core';
+import { Box } from '@mantine/core';
 import type { ReactNode } from 'react';
 import type { GuideOpener } from '../../shell/page-guide';
 import { GuideLink, PageIntro } from '../../shell/page-intro';
-import { ProjectTile } from '../../shell/project-tile';
+import { ScopeBadge } from '../../shell/scope-badge';
 import { TitleRow } from '../../shell/title-row';
 import { SECTION_BYLINES } from './section-bylines';
 import { sectionByKey, SettingsScope, type SettingsSectionKey } from './sections';
-
-/** The project a This Project page applies to, beside its title; an All Projects page shows none. */
-export function ScopeBadge({
-  tile,
-  children,
-}: {
-  readonly tile: string;
-  readonly children: string;
-}) {
-  return (
-    <Badge
-      variant="light"
-      color="gray"
-      tt="none"
-      fw={500}
-      size="md"
-      leftSection={<ProjectTile name={tile} size={14} />}
-    >
-      {children}
-    </Badge>
-  );
-}
 
 /**
  * One Settings page's header: the title row holds only the section's name and, on a This Project page, the project's
@@ -65,7 +43,7 @@ export function SettingsPageHeader({
           section.scope === SettingsScope.App ||
           project === undefined ||
           project === null ? undefined : (
-            <ScopeBadge tile={project.name}>{project.name}</ScopeBadge>
+            <ScopeBadge name={project.name} />
           )
         }
       />

@@ -33,6 +33,7 @@ import {
 } from '../../daemon/queries';
 import { CreateButton } from '../../shell/create-button';
 import { PageIntro } from '../../shell/page-intro';
+import { ScopeBadge } from '../../shell/scope-badge';
 import { TitleRow } from '../../shell/title-row';
 import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -550,84 +551,82 @@ export function BoardView() {
 
   return (
     <Stack flex="1 1 0px">
-      <TitleRow
-        title="Board"
-        meta={project?.name}
-        actions={
-          project ? (
+      <TitleRow title="Board" {...(project ? { meta: <ScopeBadge name={project.name} /> } : {})} />
+      {project ? (
+        <PageIntro
+          toolbar={
             <>
-              {goalList.length === 0 ? null : (
-                <Select
-                  aria-label="Goal"
-                  size="xs"
-                  // 220 px where there is room, narrower in a narrow window so it never pushes the split button out.
-                  w="clamp(96px, 20vw, 220px)"
-                  allowDeselect={false}
-                  data={[
-                    { value: ALL_GOALS, label: 'All Goals' },
-                    ...goalList.map((g) => ({ value: g.goal.id, label: g.goal.title })),
-                  ]}
-                  value={filterGoal?.goal.id ?? ALL_GOALS}
-                  onChange={(id) => {
-                    setFilterGoalId(goalList.find((g) => g.goal.id === id)?.goal.id ?? null);
+              {filterGoal ? (
+                <GoalLine
+                  summary={filterGoal}
+                  ready={readyCountOf(filterGoal.goal.id, taskList)}
+                  onStartReady={() => {
+                    setSheetGoalId(filterGoal.goal.id);
+                  }}
+                  onOpenFactory={() => {
+                    void navigate({ to: '/factory', search: { goal: filterGoal.goal.id } });
                   }}
                 />
+              ) : (
+                <span />
               )}
-              <SplitButton
-                leftSection={<IconPlus size={16} stroke={1.5} />}
-                onClick={taskModal.open}
-                menuLabel="More board actions"
-                menu={
-                  <>
-                    <Menu.Item
-                      leftSection={<IconPlayerPlay size={16} stroke={1.5} />}
-                      disabled={readyCount === 0}
-                      onClick={sheet.open}
-                    >
-                      {/* The count shares the label's baseline; as a right section it centers on a different box. */}
-                      <Group justify="space-between" align="baseline" wrap="nowrap" gap="md">
-                        <span>Start Ready Tasks</span>
-                        <Text span size="xs" c="dimmed">
-                          {readyCount === 0 ? 'Nothing in Ready' : `${String(readyCount)} ready`}
-                        </Text>
-                      </Group>
-                    </Menu.Item>
-                    <Menu.Item
-                      leftSection={<IconColumns size={16} stroke={1.5} />}
-                      onClick={() => {
-                        void navigate({
-                          to: '/settings/$section',
-                          params: { section: SettingsSectionKey.BoardColumns },
-                        });
-                      }}
-                    >
-                      Add Column
-                    </Menu.Item>
-                  </>
-                }
-              >
-                New Task
-              </SplitButton>
+              <Group gap="xs" wrap="nowrap">
+                {goalList.length === 0 ? null : (
+                  <Select
+                    aria-label="Goal"
+                    // 220 px where there is room, narrower in a narrow window so it never pushes the split button out.
+                    w="clamp(96px, 20vw, 220px)"
+                    allowDeselect={false}
+                    data={[
+                      { value: ALL_GOALS, label: 'All Goals' },
+                      ...goalList.map((g) => ({ value: g.goal.id, label: g.goal.title })),
+                    ]}
+                    value={filterGoal?.goal.id ?? ALL_GOALS}
+                    onChange={(id) => {
+                      setFilterGoalId(goalList.find((g) => g.goal.id === id)?.goal.id ?? null);
+                    }}
+                  />
+                )}
+                <SplitButton
+                  leftSection={<IconPlus size={16} stroke={1.5} />}
+                  onClick={taskModal.open}
+                  menuLabel="More board actions"
+                  menu={
+                    <>
+                      <Menu.Item
+                        leftSection={<IconPlayerPlay size={16} stroke={1.5} />}
+                        disabled={readyCount === 0}
+                        onClick={sheet.open}
+                      >
+                        {/* The count shares the label's baseline; as a right section it centers on a different box. */}
+                        <Group justify="space-between" align="baseline" wrap="nowrap" gap="md">
+                          <span>Start Ready Tasks</span>
+                          <Text span size="xs" c="dimmed">
+                            {readyCount === 0 ? 'Nothing in Ready' : `${String(readyCount)} ready`}
+                          </Text>
+                        </Group>
+                      </Menu.Item>
+                      <Menu.Item
+                        leftSection={<IconColumns size={16} stroke={1.5} />}
+                        onClick={() => {
+                          void navigate({
+                            to: '/settings/$section',
+                            params: { section: SettingsSectionKey.BoardColumns },
+                          });
+                        }}
+                      >
+                        Add Column
+                      </Menu.Item>
+                    </>
+                  }
+                >
+                  New Task
+                </SplitButton>
+              </Group>
             </>
-          ) : undefined
-        }
-      />
-      <PageIntro
-        toolbar={
-          filterGoal ? (
-            <GoalLine
-              summary={filterGoal}
-              ready={readyCountOf(filterGoal.goal.id, taskList)}
-              onStartReady={() => {
-                setSheetGoalId(filterGoal.goal.id);
-              }}
-              onOpenFactory={() => {
-                void navigate({ to: '/factory', search: { goal: filterGoal.goal.id } });
-              }}
-            />
-          ) : undefined
-        }
-      />
+          }
+        />
+      ) : null}
 
       {projects.isError ? (
         <Alert color="red" title="Couldn't load the projects">
