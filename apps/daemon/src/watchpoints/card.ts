@@ -30,6 +30,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { CardTier, postNotice } from '../inbox';
+import { quotedWords } from '../knowledge';
 
 const hitsAt = (detail: WatchpointDetail | null, loudness: WatchpointLoudness): WatchpointHit[] =>
   detail?.hits.filter((h) => h.watchpoint.loudness === loudness) ?? [];
@@ -166,15 +167,16 @@ export function applyWatchpointAnswer(
     return;
   }
   if (answer.choice !== WatchpointChoice.LooksRight) return;
-  const task = getTask(ctx.tx, taskId);
+  // A task's title can be an agent's words, so the decision, which is the builder's, quotes it.
+  const task = quotedWords(getTask(ctx.tx, taskId).title, 120);
   insertDecision(ctx, {
     projectId: item.projectId,
     scope: KnowledgeScope.Project,
     area: null,
     question:
       labels.length === 0
-        ? `Did the changes in "${task.title}" look right?`
-        : `Did the changes to ${labels.join(', ')} in "${task.title}" look right?`,
+        ? `Did the changes in ${task} look right?`
+        : `Did the changes to ${labels.join(', ')} in ${task} look right?`,
     choice: 'Looks right',
     rationale: note === '' ? 'Looked at in the Inbox' : note,
     decidedBy: BUILDER_HANDLE,

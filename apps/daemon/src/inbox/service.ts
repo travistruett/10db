@@ -48,6 +48,7 @@ import {
   type WorkstreamId,
   withParkedTasks,
   withParkOption,
+  ProjectWatchpointEntry,
   WatchpointProposal,
 } from '@10db/contracts';
 import {
@@ -576,8 +577,10 @@ function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: Inb
   });
   if (accepted && proposal.kind === ProposalKind.Watchpoint) {
     const change = WatchpointProposal.safeParse(item.detail?.['watchpoint']);
-    if (!change.success) throw new InvalidError('This card no longer holds the watchpoint change');
-    applyWatchpointProposal(ctx, proposal.projectId, change.data);
+    const shown = ProjectWatchpointEntry.nullable().safeParse(item.detail?.['watchpointBefore']);
+    if (!change.success || !shown.success)
+      throw new InvalidError('This card no longer holds the watchpoint change');
+    applyWatchpointProposal(ctx, proposal.projectId, change.data, shown.data);
   }
   if (accepted && proposal.kind === ProposalKind.NewTask) {
     // The task is stored with the areas of the lane that raised it, so the placement rule sees those, as it

@@ -593,7 +593,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     .object({ items: z.array(z.looseObject({ question: z.string(), choice: z.string() })) })
     .parse(await looked.json())
     .items.map((item) => `${item.question} ${item.choice}`);
-  expect(lookedAt).toContain(`Did the changes to Greetings in "${TASK}" look right? Looks right`);
+  expect(lookedAt).toContain(`Did the changes to Greetings in «${TASK}» look right? Looks right`);
 
   // A locked card's reason is reachable from the keyboard, not only on hover.
   await open(page, 'Board');
