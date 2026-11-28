@@ -691,6 +691,9 @@ describe('scheduler', () => {
       inbox,
       waits,
       held: () => held,
+      // No run here has a gate process, so the sweep never reads a gate log.
+      dataDir: '/nonexistent',
+      gateTimeoutFloorMs: 30 * 60_000,
       clock,
       logger: silentLogger,
     });
@@ -742,6 +745,9 @@ describe('scheduler', () => {
       inbox,
       waits,
       held: () => held,
+      // No run here has a gate process, so the sweep never reads a gate log.
+      dataDir: '/nonexistent',
+      gateTimeoutFloorMs: 30 * 60_000,
       clock,
       logger: silentLogger,
     });

@@ -10,7 +10,7 @@ import {
   type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { STALL, UNCOUNTED_WAITS } from './thresholds';
+import { STALL, STALL_MINUTE_MS, UNCOUNTED_WAITS } from './thresholds';
 
 /** The ways out a Stuck card offers, as its option labels. */
 export const StallAction = {
@@ -27,10 +27,23 @@ export interface QueuedRun {
   readonly wait: QueueWait;
 }
 
+/** A run's gate process that is running now, as the sweep saw it. */
+export interface LiveGate {
+  /** When the gate's process started. */
+  readonly startedAt: string;
+  /** When its log last grew. */
+  readonly lastOutputAt: string;
+  /** How long the gate may run before 10db stops it. */
+  readonly timeoutMs: number;
+}
+
 export type ActiveRun = Pick<
   WorkstreamDto,
   'id' | 'projectId' | 'taskTitle' | 'state' | 'lastActivityAt' | 'updatedAt'
->;
+> & {
+  /** Set while the run has a gate process running: its output counts as the run's activity. */
+  readonly gate?: LiveGate;
+};
 
 export interface BatchMembers {
   readonly batch: Pick<BatchDto, 'id' | 'projectId' | 'title' | 'state' | 'updatedAt'> & {
@@ -81,6 +94,25 @@ const ACTIVE: ReadonlySet<string> = new Set([
   WorkstreamState.Verifying,
 ]);
 const MOVING_BATCH: ReadonlySet<string> = new Set([BatchState.Shipping, BatchState.Cutting]);
+
+/** `ms` as whole minutes: "1 minute", "25 minutes". */
+function minutes(ms: number): string {
+  const n = Math.round(ms / STALL_MINUTE_MS);
+  return `${String(n)} ${n === 1 ? 'minute' : 'minutes'}`;
+}
+
+/**
+ * What a Stuck card says of a run's live gate. Both sentences hold whenever the card is read: they name
+ * the span the gate wrote for, or its fixed limit, never the time since.
+ */
+function gateNote(gate: LiveGate | undefined, counts: boolean): string {
+  if (gate === undefined) return '';
+  if (!counts) return ` Its gate has run past its limit of ${minutes(gate.timeoutMs)}.`;
+  const wrote = Date.parse(gate.lastOutputAt) - Date.parse(gate.startedAt);
+  return wrote < STALL_MINUTE_MS
+    ? ' Its gate has printed nothing since it started.'
+    : ` Its gate ran for ${minutes(wrote)} and then printed nothing.`;
+}
 
 /** Every stall in `input`, one per stuck run or batch. Pure: it reads nothing and writes nothing. */
 export function findStalls(input: StallInput): Stall[] {
@@ -187,7 +219,14 @@ export function findStalls(input: StallInput): Stall[] {
 
   for (const run of input.active) {
     if (!ACTIVE.has(run.state)) continue;
-    const at = counted(run.lastActivityAt ?? run.updatedAt);
+    const { gate } = run;
+    // A gate still inside its own limit is the run's activity: the gate's output moves the clock.
+    const gateCounts = gate !== undefined && now - Date.parse(gate.startedAt) <= gate.timeoutMs;
+    const own = counted(run.lastActivityAt ?? run.updatedAt);
+    const at =
+      gate !== undefined && gateCounts && Date.parse(gate.lastOutputAt) > Date.parse(own)
+        ? counted(gate.lastOutputAt)
+        : own;
     if (!older(at, STALL.activeIdleMs)) continue;
     stalls.push(
       stall({
@@ -196,7 +235,7 @@ export function findStalls(input: StallInput): Stall[] {
         workstreamId: run.id,
         batchId: null,
         title: run.taskTitle,
-        reason: `It is ${run.state.toLowerCase()} but has shown no activity.`,
+        reason: `It is ${run.state.toLowerCase()} but has shown no activity.${gateNote(gate, gateCounts)}`,
         since: at,
         actions: [StallAction.CancelRun],
         dependencyRunId: null,
