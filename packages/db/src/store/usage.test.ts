@@ -32,7 +32,13 @@ const DAY = { start: '2026-11-28T00:00:00.000Z', end: '2026-11-29T00:00:00.000Z'
 function session(
   projectId: ProjectId,
   at: string,
-  opts: { selfStarted: boolean; accountId?: AccountId; costUsd?: number; share?: number },
+  opts: {
+    selfStarted: boolean;
+    accountId?: AccountId;
+    costUsd?: number;
+    share?: number;
+    tokens?: number;
+  },
 ): SessionId {
   now = new Date(at);
   const task = store.write((ctx) =>
@@ -63,6 +69,14 @@ function session(
         .where(eq(schema.sessions.id, row.id))
         .run();
     });
+  if (opts.tokens !== undefined)
+    store.write((ctx) => {
+      ctx.tx
+        .update(schema.sessions)
+        .set({ outputTokens: opts.tokens })
+        .where(eq(schema.sessions.id, row.id))
+        .run();
+    });
   if (opts.share !== undefined)
     store.write((ctx) => {
       setSessionLimitShare(ctx, row.id, opts.share ?? null);
@@ -84,6 +98,11 @@ describe('selfStartedToday', () => {
     // Yesterday's counted session is left out, and so is the day's end boundary.
     session(project.id, '2026-11-27T23:59:00.000Z', { selfStarted: true, costUsd: 4 });
     session(project.id, '2026-11-29T00:00:00.000Z', { selfStarted: true, costUsd: 4 });
+    // A metered session that used tokens but has no cost (an unpriced model, or a Codex report of
+    // $0) is unmeasured; one that used no tokens adds nothing.
+    session(project.id, '2026-11-28T09:10:00.000Z', { selfStarted: true, tokens: 1200 });
+    session(project.id, '2026-11-28T09:20:00.000Z', { selfStarted: true, costUsd: 0, tokens: 50 });
+    session(project.id, '2026-11-28T09:25:00.000Z', { selfStarted: true });
 
     session(planProject.id, '2026-11-28T08:00:00.000Z', {
       selfStarted: true,
@@ -97,7 +116,7 @@ describe('selfStartedToday', () => {
     expect(selfStartedToday(store.db, project.id, DAY)).toEqual({
       usd: 2,
       share: 0,
-      unmeasured: 0,
+      unmeasured: 2,
     });
     const planned = selfStartedToday(store.db, planProject.id, DAY);
     expect(planned.usd).toBe(0);

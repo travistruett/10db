@@ -57,9 +57,11 @@ function decisionSpendUsd(db: DbReader, id: AccountId, window: UsageWindow): num
 
 /**
  * What the project's own work (sessions 10db started by itself, or re-ran) used in a day, which starts
- * at `day.start` and ends before `day.end`. A session on a metered account counts its dollars; one on
- * a plan counts the share of the plan's limit it used, and counts as `unmeasured` when the plan
- * reported too little to say. A plan's dollars are never summed: they are not real money.
+ * at `day.start` and ends before `day.end`. A session on a metered account counts its dollars, and
+ * counts as `unmeasured` when it used tokens but has no cost (a model its list gives no price, or a
+ * Codex report of $0); one on a plan counts the share of the plan's limit it used, and counts as
+ * `unmeasured` when the plan reported too little to say. A plan's dollars are never summed: they are
+ * not real money.
  */
 export function selfStartedToday(
   db: DbReader,
@@ -73,6 +75,7 @@ export function selfStartedToday(
       share: sql<number>`coalesce(sum(${schema.sessions.limitShare}), 0)`,
       sessions: sql<number>`count(*)`,
       measured: sql<number>`count(${schema.sessions.limitShare})`,
+      unpriced: sql<number>`coalesce(sum(case when coalesce(${schema.sessions.costUsd}, 0) = 0 and (${schema.sessions.inputTokens} + ${schema.sessions.outputTokens} + ${schema.sessions.cachedTokens}) > 0 then 1 else 0 end), 0)`,
     })
     .from(schema.sessions)
     .innerJoin(schema.workstreams, eq(schema.workstreams.id, schema.sessions.workstreamId))
@@ -89,8 +92,10 @@ export function selfStartedToday(
     .all();
   const total = { usd: 0, share: 0, unmeasured: 0 };
   for (const row of rows) {
-    if (isMetered(row.kind)) total.usd += row.usd;
-    else {
+    if (isMetered(row.kind)) {
+      total.usd += row.usd;
+      total.unmeasured += row.unpriced;
+    } else {
       total.share += row.share;
       total.unmeasured += row.sessions - row.measured;
     }
