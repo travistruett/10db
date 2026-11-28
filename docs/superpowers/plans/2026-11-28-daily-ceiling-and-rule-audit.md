@@ -24,7 +24,8 @@ run at the ceiling. A Claude plan that never reports its use trips only on the s
 
 **Calls the builder might disagree with.**
 
-1. Defaults: $10, 10% of the plan's limit, and 20 plan sessions that reported no share. Three numbers, not one.
+1. Defaults: $10, 10% of the plan's limit, and 20 sessions that could not be measured (a plan session that
+   reported no share, or a metered one that used tokens and has no price). Three numbers, not one.
 2. The share is of the weekly limit, not the five-hour one.
 3. A fix task 10db filed stays counted after you answer its card or retry it. One 10db re-run of your own run is
    counted and can wait. Second reviews and send-backs inside your run, and judge calls, are not counted.
@@ -45,11 +46,14 @@ then (other sessions, your own, use outside 10db) counts as 10db's: it stops ear
 - The ceiling never stops a running session and never looks at a run that is not checked.
 - Each card declares its decider and has `options`, no `detail.actions`. Labels are Title Case.
 - The day is the local day of a session's start on the injected clock, as `accounts/month.ts` computes a month.
-- Decision file, written by task 2 in `docs/architecture/decisions/`: `2026-11-28-10dbs-own-work-has-a-daily-ceiling.md`.
+- Decision file in `docs/architecture/decisions/`: `2026-11-28-10dbs-own-work-has-a-daily-ceiling.md`. It starts
+  with how an unpriced metered session is counted; task 2 completes it.
 
 ## Provider parity
 
-Bedrock, an API key and OpenRouter count dollars (`isMetered`), priced at every `turn_complete`. A ChatGPT/Codex
+Bedrock, an API key and OpenRouter count dollars (`isMetered`), priced at every `turn_complete`; a session there
+that used tokens but has no cost (an OpenRouter model its list gives no price, a Codex report of $0) counts as
+unmeasured, so it reaches the sessions ceiling instead of counting nowhere. A ChatGPT/Codex
 plan counts the share: each snapshot carries a utilization per window. A Claude plan counts the share when a
 `rate_limit_event` carries one, else the session count; how often a Max plan reports is not verified (follow-up).
 Rules, cards, the table and the dot are 10db's own and the same everywhere. Lacks: the Known limit above.

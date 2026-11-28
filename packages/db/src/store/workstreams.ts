@@ -70,6 +70,8 @@ export interface WorkstreamPatch {
   readonly nextAction?: NextAction;
   readonly attempt?: number;
   readonly recoveryAttempts?: number;
+  /** True when 10db re-runs the builder's run (crash retry, stall restart, recovery); the builder's own start or Retry writes false. */
+  readonly autoRerun?: boolean;
   readonly currentSessionId?: SessionId | null;
   readonly contextPct?: number | null;
   readonly pausedUntil?: string | null;
@@ -198,13 +200,17 @@ export function listWorkstreams(
     .map((r) => toDto(db, r));
 }
 
-/** `first` is the model and effort of the plan's first step, which the workstream shows until routing sets the next. */
+/**
+ * `first` is the model and effort of the plan's first step, which the workstream shows until routing sets the next.
+ * `selfStarted` marks a run 10db filed and started itself, for life: false for every start the builder asked for.
+ */
 export function insertWorkstream(
   ctx: WriteContext,
   taskId: TaskId,
   opts: {
     readonly batchId?: BatchId | null;
     readonly first: { readonly model: string; readonly effort: Effort };
+    readonly selfStarted?: boolean;
   },
 ): WorkstreamDto {
   const task = getTask(ctx.tx, taskId);
@@ -274,6 +280,8 @@ export function insertWorkstream(
     lastActivityAt: null,
     runNextAt: null,
     notice: null,
+    selfStarted: opts.selfStarted ?? false,
+    autoRerun: false,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };

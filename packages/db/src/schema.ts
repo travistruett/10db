@@ -296,6 +296,12 @@ export const projects = sqliteTable('projects', {
   /** The rigor a task gets when nothing else sets one. */
   defaultRigor: text('default_rigor').$type<Rigor>().notNull().default('standard'),
   budgetCeiling: real('budget_ceiling'),
+  /** Dollars of 10db's own work a day on a metered account before new sessions of it wait. */
+  autoCeilingUsd: real('auto_ceiling_usd').notNull().default(10),
+  /** Share of a plan's limit 10db's own work may use in a day before new sessions of it wait. */
+  autoCeilingShare: real('auto_ceiling_share').notNull().default(0.1),
+  /** Sessions of 10db's own work a day, on a plan that reported no share, before new ones wait. */
+  autoCeilingSessions: integer('auto_ceiling_sessions').notNull().default(20),
   delivery: text('delivery').$type<Delivery>().notNull().default('local'),
   baseBranch: text('base_branch').notNull().default('main'),
   /** What a finished task's pull request does unless its task says otherwise. */
@@ -724,6 +730,10 @@ export const workstreams = sqliteTable(
     runNextAt: text('run_next_at'),
     /** What the run waits for besides the builder (another task's claim); cleared when the wait ends. */
     notice: text('notice', { mode: 'json' }).$type<Notice>(),
+    /** 10db filed and started the run's task by itself (a fix task, a CI fix); every session of it counts against the daily ceiling. */
+    selfStarted: integer('self_started', { mode: 'boolean' }).notNull().default(false),
+    /** 10db is re-running a builder's run (a crash retry, a stall restart, a recovery); the next session counts, and its insert clears this. */
+    autoRerun: integer('auto_rerun', { mode: 'boolean' }).notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -783,6 +793,13 @@ export const sessions = sqliteTable(
      * session resumed before the briefed session's first reading still knows to take one.
      */
     briefed: integer('briefed', { mode: 'boolean' }).notNull().default(false),
+    /** 10db started the session's work by itself, so it counts against the project's daily ceiling. */
+    selfStarted: integer('self_started', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * The rise of the plan's limit while the session ran, as a share of it (0 to 1); null when the
+     * plan reported too little to measure, and always null on a metered account, which counts dollars.
+     */
+    limitShare: real('limit_share'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

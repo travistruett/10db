@@ -55,6 +55,11 @@ interface NewSessionFields {
   readonly accountId?: AccountId;
   /** The row's id, when the caller minted it to prepare the session before the row is written. */
   readonly id?: SessionId;
+  /**
+   * The session counts against the project's daily ceiling: its run is one 10db started itself, or
+   * 10db is re-running it. The insert then ends the re-run mark, so only this one session counts for it.
+   */
+  readonly selfStarted?: boolean;
 }
 
 /** The account of the project the session works for: through its workstream, or its conversation. */
@@ -128,6 +133,8 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
     accountId: owner.accountId,
     briefed: input.briefed ?? false,
     briefingBaselinePct: input.briefingBaselinePct ?? null,
+    selfStarted: input.selfStarted ?? false,
+    limitShare: null,
     sequence: (prior?.n ?? 0) + 1,
     providerSessionId: null,
     pid: null,
@@ -145,7 +152,27 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
     updatedAt: ctx.now,
   };
   ctx.tx.insert(schema.sessions).values(row).run();
+  // A re-run counts one session: the counted insert is what ends the mark.
+  if (row.selfStarted && workstreamId !== undefined)
+    ctx.tx
+      .update(schema.workstreams)
+      .set({ autoRerun: false })
+      .where(and(eq(schema.workstreams.id, workstreamId), eq(schema.workstreams.autoRerun, true)))
+      .run();
   return row;
+}
+
+/** Records the share of the plan's limit the session has used so far; null when it has too little to say. */
+export function setSessionLimitShare(
+  ctx: WriteContext,
+  id: SessionId,
+  limitShare: number | null,
+): void {
+  ctx.tx
+    .update(schema.sessions)
+    .set({ limitShare, updatedAt: ctx.now })
+    .where(eq(schema.sessions.id, id))
+    .run();
 }
 
 /** `pidStart` is the OS start time of `pid`; recovery signals the pid only while it still matches. */

@@ -47,6 +47,7 @@ export function resumeTask(ctx: WriteContext, taskId: TaskId): WorkstreamDto {
   return transitionWorkstream(ctx, run.id, {
     to: WorkstreamState.Queued,
     fence: null,
+    patch: { autoRerun: false },
     reason: 'started again by the builder',
   });
 }
