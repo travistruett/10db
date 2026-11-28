@@ -160,6 +160,7 @@ import {
   TASK_MESSAGE_PICTURES_MAX_BYTES,
   TaskMove,
   TaskPatch,
+  toTaskRow,
   WorkstreamId,
   type AccountConfig,
   type GoalAdoptError,
@@ -614,7 +615,10 @@ export function createApp(deps: ApiDeps) {
       async (c) => c.json(await deps.services.createProject(c.req.valid('json')), 201),
     )
     .get('/projects/:projectId/tasks', (c) =>
-      c.json(deps.services.listTasks(ProjectId.parse(c.req.param('projectId')))),
+      c.json(deps.services.listTasks(ProjectId.parse(c.req.param('projectId'))).map(toTaskRow)),
+    )
+    .get('/tasks/:taskId', (c) =>
+      c.json(deps.services.getTask(TaskId.parse(c.req.param('taskId')))),
     )
     .post(
       '/projects/:projectId/tasks',

@@ -1,4 +1,4 @@
-import type { GoalId, TaskDto } from '@10db/contracts';
+import { toTaskRow, type GoalId, type TaskDto } from '@10db/contracts';
 import { screen } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -60,7 +60,9 @@ describe('the Board with goals', () => {
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
       http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([])),
-      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+        HttpResponse.json(tasks.map(toTaskRow)),
+      ),
       http.get(daemonUrl('/projects/:projectId/goals'), () =>
         HttpResponse.json(goalListDto(greetings, farewells, cleanup)),
       ),

@@ -1,4 +1,4 @@
-import { PickerProposalDto } from '@10db/contracts';
+import { PickerProposalDto, toTaskRow } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -16,7 +16,9 @@ describe('BatchSheet', () => {
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([local])),
       http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([])),
-      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([one, two])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+        HttpResponse.json([one, two].map(toTaskRow)),
+      ),
       http.get(daemonUrl('/projects/:projectId/candidates'), ({ request }) => {
         const size = Number(new URL(request.url).searchParams.get('size'));
         sizes.push(size);

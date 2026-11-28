@@ -1,5 +1,11 @@
 import { Delivery, type ProjectViewDto, type TaskId, type WorkstreamDto } from '@10db/contracts';
-import { useBatches, useBoardColumns, useTasks, useWorkstreams } from '../../daemon/queries';
+import {
+  useBatches,
+  useBoardColumns,
+  useTask,
+  useTasks,
+  useWorkstreams,
+} from '../../daemon/queries';
 import { withFixTaskTitles } from './ci-line';
 import { boardRun } from './pass-page';
 import { queuePlaces } from './queue-place';
@@ -21,7 +27,7 @@ export interface ProjectTaskDrawerProps {
 /**
  * A task's drawer from its project's reads alone, so the Board and Factory open the same drawer: the task,
  * its latest run and batch, its column's name, its place in line and the project's settings. Shows nothing
- * until the task is in the project's list.
+ * until the task is in the project's list and read whole.
  */
 export function ProjectTaskDrawer({
   project,
@@ -36,8 +42,9 @@ export function ProjectTaskDrawer({
   const columns = useBoardColumns(project.id).data ?? [];
   const workstreams = useWorkstreams({ active: false }).data ?? [];
   const batchList = useBatches(project.id).data ?? [];
-  const task = tasks.find((t) => t.id === taskId);
-  if (task === undefined) return null;
+  // The list's task has no description or criteria; the drawer shows and edits the task read whole.
+  const task = useTask(taskId).data;
+  if (task === undefined || !tasks.some((t) => t.id === taskId)) return null;
   const workstreamById = new Map(workstreams.map((ws) => [ws.id, ws]));
   const batchById = new Map(batchList.map((b) => [b.id, b]));
   const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;

@@ -55,14 +55,14 @@ describe('CheckCard', () => {
       http.get(daemonUrl('/workstreams'), () =>
         HttpResponse.json([workstreamDto({ id: workstreamId, taskId, projectId })]),
       ),
-      http.get(daemonUrl(`/projects/${projectId}/tasks`), () =>
-        HttpResponse.json([
+      http.get(daemonUrl(`/tasks/${taskId}`), () =>
+        HttpResponse.json(
           taskDto({
             id: taskId,
             projectId,
             acceptanceCriteria: ['hello.txt says hello', 'The tests pass'],
           }),
-        ]),
+        ),
       ),
       ...baseHandlers(),
       eventStream.addEventListener('connection', () => undefined),

@@ -178,6 +178,7 @@ import {
   WorkstreamDto,
 } from './entities';
 import { DaemonEvent } from './events';
+import { TaskRowDto } from './task-row';
 import {
   KindDto,
   KindInput,
@@ -453,6 +454,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'task-start-result': TaskStartResult,
   'project-dto': ProjectDto,
   'task-dto': TaskDto,
+  'task-row-dto': TaskRowDto,
   'project-patch': ProjectPatch,
   'task-patch': TaskPatch,
   'workstream-dto': WorkstreamDto,

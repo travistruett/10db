@@ -102,6 +102,7 @@ export * from './slack';
 export * from './rigor';
 export * from './rigor-figures';
 export * from './states';
+export * from './task-row';
 export * from './queue-wait';
 export * from './agent-capabilities';
 export * from './agent-skill';
