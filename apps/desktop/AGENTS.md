@@ -63,7 +63,8 @@ tokens; the app still uses the main listener.
   `data-tauri-drag-region` move the window. The native window's theme follows the app's color scheme
   (`setWindowTheme`), not the system's.
 - The supervisor (`src-tauri/src/supervisor.rs`, `decisions/2026-11-25-a-silent-daemon-is-killed-and-replaced.md`)
-  stops only on a clean exit, a schema mismatch (3) or a refused setting (4). On exit 2 it watches the daemon that
+  stops only when the shell is quitting, on a schema mismatch (3) or on a refused setting (4); a clean exit (0)
+  while the window stays open came from a signal from outside and is restarted like a crash. On exit 2 it watches the daemon that
   holds `daemon.lock` and starts its own once that one is gone or silent on `/health` for 30 s; it never signals
   the holder, the new daemon's instance lock does. Its own daemon is asked for `/health` every 5 s once
   `daemon.json` names it, and one silent for 30 s is killed and replaced. Each freeze kill within 10 minutes of
