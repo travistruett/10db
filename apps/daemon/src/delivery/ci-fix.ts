@@ -180,7 +180,9 @@ export async function startCiFix(input: {
     patchBatch(w, id, { branch });
     if (stored.note !== null) patchCiOutOfMoves(w, now.id, { note: null });
     const plans = new Map<TaskId, StepPlanDto>([[task.id, planForStart(w.tx, task.id)]]);
-    for (const [taskId, plan] of plans) insertPlannedWorkstream(w, taskId, plan, id);
+    // 10db filed this task and starts it itself: every session of it counts against the daily ceiling.
+    for (const [taskId, plan] of plans)
+      insertPlannedWorkstream(w, taskId, plan, id, { selfStarted: true });
     return { batch, plans, project };
   });
   if (made === null) return false;

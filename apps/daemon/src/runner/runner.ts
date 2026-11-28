@@ -138,6 +138,7 @@ import {
   retryLimitSourceOf,
   insertPassTurn,
   insertSession,
+  setSessionLimitShare,
   insertSource,
   ensureTaskConversation,
   insertSystemNotice,
@@ -225,10 +226,13 @@ import {
 } from '../linear';
 import { handoffStands, nextUnaskedRun, workLeftIn, type UnaskedRun } from './handoff-rule';
 import {
+  ceilingLimit,
+  limitShare,
   unready,
   type AccountLimits,
   type AccountPreparer,
   type AccountRuntime,
+  type LimitShareState,
   type ModelListWait,
   type StartGate,
 } from '../accounts';
@@ -657,10 +661,11 @@ export interface Runner {
    * time: a call while one is in flight answers that one's promise and stops nothing. `stop_hung`: the
    * stop outlasted `deadlineMs` (two minutes by default) and nothing was written; `not_active`: the run
    * is no longer starting, running or verifying, so nothing was written. `note` reaches the next brief.
+   * `byBuilder` says the builder asked for the restart, so the run is not marked as one 10db re-ran.
    */
   restartStalled(
     id: WorkstreamId,
-    opts?: { note?: string; deadlineMs?: number },
+    opts?: { note?: string; deadlineMs?: number; byBuilder?: boolean },
   ): Promise<StallRestartResult>;
   /** Whether a `restartStalled` call for the run has not returned. */
   isRestarting(id: WorkstreamId): boolean;
@@ -1104,6 +1109,10 @@ interface SessionState {
   wrote: string;
   /** The share of its context window the session last reported using. */
   contextPct: number | null;
+  /** What the session has heard of each limit of its plan, which `sessions.limit_share` is read from. */
+  limits: LimitShareState;
+  /** The share last written to `sessions.limit_share`, so an unchanged one is not written again. */
+  limitShareWritten: number | null;
   parkedFor: InboxItemId | null;
   /**
    * The cards the session is waiting on, oldest first, with how many waits each has: a folded card can
@@ -2795,7 +2804,8 @@ export function createRunner(opts: RunnerOptions): Runner {
           transitionWorkstream(ctx, id, {
             to: S.Queued,
             fence: ctl.fence,
-            patch: { nextAction, recoveryAttempts: attempts },
+            // 10db re-runs the run itself: the one session it starts counts against the daily ceiling.
+            patch: { nextAction, recoveryAttempts: attempts, autoRerun: true },
             reason: 'retrying after a crash',
           });
           clearLease(ctx, id);
@@ -3902,6 +3912,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     let session: ReturnType<typeof insertSession>;
     try {
       session = opts.state.write((ctx) => {
+        // Read in the write, so a re-run mark set a moment ago is seen and this insert ends it.
+        const checked = getWorkstreamRow(ctx.tx, id);
         const s = insertSession(ctx, {
           workstreamId: id,
           provider: agent.harness,
@@ -3912,6 +3924,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           mcpTokenHash: hash,
           briefed,
           briefingBaselinePct: inheritedBaselinePct,
+          selfStarted: checked.selfStarted || checked.autoRerun,
         });
         patchWorkstream(ctx, id, ctl.fence, {
           currentSessionId: s.id,
@@ -3967,6 +3980,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       modelProven: false,
       wrote: '',
       contextPct: null,
+      limits: new Map(),
+      limitShareWritten: null,
       parkedFor: null,
       waitingOn: new Map(),
       waitTimer: null,
@@ -3978,6 +3993,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       outcome: null,
     };
     const log = opts.logger.child({ workstreamId: id, sessionId: session.id });
+    /** Folds a usage report into the session's limits and writes the rise of the ceiling limit when it moved. */
+    const recordLimitShare = (report: {
+      readonly limitType: string | null;
+      readonly utilization: number | null;
+    }): void => {
+      st.limits = limitShare(st.limits, report);
+      const heard = ceilingLimit([...st.limits.keys()]);
+      const rise = heard === null ? null : (st.limits.get(heard)?.rise ?? null);
+      if (rise === st.limitShareWritten) return;
+      st.limitShareWritten = rise;
+      opts.state.write((ctx) => {
+        setSessionLimitShare(ctx, session.id, rise);
+      });
+    };
     let handle: SessionHandle | null = null;
     let sawEnded = false;
     /** The oldest card still open: a stop or the wait timer parks on it, never on one already answered. */
@@ -4784,6 +4813,8 @@ export function createRunner(opts: RunnerOptions): Runner {
               { status: event.status, utilization: event.utilization, limitType: event.limitType },
               'usage reported',
             );
+            // The rise of the plan's limit while this session ran, for the daily ceiling of 10db's own work.
+            recordLimitShare(event);
             // First, so a project that moves to its fallback is off the account before the pause raises cards.
             opts.accounts.usageReported(ctl.accountId, {
               status: event.status,
@@ -6295,6 +6326,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     fence: number | null,
     stalled: WorkstreamRow,
     note: string | undefined,
+    restartedByBuilder: boolean,
   ): 'restarted' | 'not_active' {
     try {
       return opts.state.write((ctx) => {
@@ -6332,7 +6364,12 @@ export function createRunner(opts: RunnerOptions): Runner {
         transitionWorkstream(ctx, id, {
           to: S.Queued,
           fence,
-          patch: { nextAction, recoveryAttempts: row.recoveryAttempts + 1 },
+          // A restart the builder asked for is the builder's; one 10db made on a stall is its own.
+          patch: {
+            nextAction,
+            recoveryAttempts: row.recoveryAttempts + 1,
+            autoRerun: !restartedByBuilder,
+          },
           reason: 'restarted after it showed no activity',
         });
         clearLease(ctx, id);
@@ -6357,7 +6394,7 @@ export function createRunner(opts: RunnerOptions): Runner {
 
   async function restartNow(
     id: WorkstreamId,
-    opt: { note?: string; deadlineMs?: number },
+    opt: { note?: string; deadlineMs?: number; byBuilder?: boolean },
   ): Promise<StallRestartResult> {
     const stalled = getWorkstreamRow(db, id);
     if (
@@ -6369,7 +6406,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const ctl = active.get(id);
     if (ctl && (await stopForStall(ctl, opt.deadlineMs ?? STALL_STOP_DEADLINE_MS)) === 'hung')
       return 'stop_hung';
-    return requeueStalled(id, ctl?.fence ?? null, stalled, opt.note);
+    return requeueStalled(id, ctl?.fence ?? null, stalled, opt.note, opt.byBuilder === true);
   }
 
   const runner: Runner = {

@@ -30,6 +30,7 @@ import {
   getTask,
   getWorkstream,
   getWorkstreamRow,
+  skipFollowUpSourceTask,
   insertEvidence,
   insertWorkstream,
   latestHandoffForStep,
@@ -112,18 +113,25 @@ export function planForStart(db: DbReader, taskId: TaskId): StepPlanDto {
   return plan;
 }
 
-/** Inserts the task's workstream on its plan; `batchId` is the batch it runs in, null in local delivery. */
+/**
+ * Inserts the task's workstream on its plan; `batchId` is the batch it runs in, null in local delivery.
+ * `selfStarted` says 10db filed and started the run itself (a gate fix task, a CI fix). The start of a
+ * skip follow-up, which 10db also starts by itself, is read from its record, so every way it starts
+ * (a base start, a join, a restart) carries the mark.
+ */
 export function insertPlannedWorkstream(
   ctx: WriteContext,
   taskId: TaskId,
   plan: StepPlanDto,
   batchId: BatchId | null,
+  opts: { readonly selfStarted?: boolean } = {},
 ): WorkstreamDto {
   const [first] = plan.steps;
   if (!first) throw new InvalidError('The plan resolved to no steps');
   const ws = insertWorkstream(ctx, taskId, {
     batchId,
     first: { model: first.model, effort: first.effort },
+    selfStarted: opts.selfStarted ?? skipFollowUpSourceTask(ctx.tx, taskId) !== null,
   });
   patchWorkstream(ctx, ws.id, null, {
     steps: plan.steps.map((s, i) => {
@@ -375,6 +383,8 @@ export function retryWorkstream(
         patch: {
           attempt: 0,
           recoveryAttempts: 0,
+          // A retry is the builder's start, or a second review inside their run: neither is counted.
+          autoRerun: false,
           failureReason: null,
           failureKind: null,
           steps: clearSendBacks(
@@ -415,6 +425,7 @@ export function retryWorkstream(
       patch: {
         attempt: 0,
         recoveryAttempts: 0,
+        autoRerun: false,
         failureReason: null,
         failureKind: null,
         steps,

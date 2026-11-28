@@ -337,7 +337,13 @@ export async function recoverOnStartup(opts: {
           to: S.Queued,
           fence: null,
           // Back at the front of the line, ahead of work that never started; see `queueOrder`.
-          patch: { nextAction, recoveryAttempts: attempts, runNextAt: recoveredAt },
+          // 10db re-runs the run itself: the one session it starts counts against the daily ceiling.
+          patch: {
+            nextAction,
+            recoveryAttempts: attempts,
+            runNextAt: recoveredAt,
+            autoRerun: true,
+          },
           reason: 'recovered after restart',
         });
         if (held) {
