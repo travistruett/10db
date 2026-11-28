@@ -47,10 +47,13 @@ const approved = (calls?: BuilderCall[]) =>
 describe('planGate', () => {
   it.each([
     {
-      name: 'a plan that needs nothing, approved by a review that found nothing, goes ahead',
+      name: 'a review that approved without saying whether it found calls cards it',
       steps: [step(StepRole.Plan, { builderCalls: [] }), approved(), build],
       asking: false,
-      want: { kind: 'ahead' },
+      want: {
+        kind: 'card',
+        reason: "its plan review didn't say whether the plan makes calls of yours",
+      },
     },
     {
       name: 'a review that found nothing and said so in an empty list goes ahead',
@@ -60,7 +63,7 @@ describe('planGate', () => {
     },
     {
       name: 'the builder asking to see plans cards it',
-      steps: [step(StepRole.Plan, { builderCalls: [] }), approved(), build],
+      steps: [step(StepRole.Plan, { builderCalls: [] }), approved([]), build],
       asking: true,
       want: { kind: 'card', owns: BuilderOwns.ProductAndTaste },
     },

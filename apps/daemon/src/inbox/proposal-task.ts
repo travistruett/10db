@@ -1,11 +1,16 @@
 import { z } from 'zod';
 import {
+  ConflictError,
   InvalidError,
   ProposalKind,
   Rigor,
   StepRole,
+  StepStatus,
+  WorkstreamId,
+  isTerminal,
   kindsOfTask,
   withKindsNamed,
+  type InboxItemDto,
   type KindDto,
   type ProposalId,
   type TaskDto,
@@ -17,10 +22,13 @@ import {
   getProject,
   getProposal,
   getTask,
+  getWorkstreamRow,
   listKinds,
+  patchWorkstream,
   insertTaskFromProposal,
   proposalSourceTask,
   resolveProposal,
+  type WorkstreamRow,
   type WriteContext,
 } from '@10db/db';
 import { proposePlacement } from '../placement';
@@ -220,6 +228,39 @@ export function planReviewRoute(input: {
       reason: 'it came from outside the Plan step, so no review step can follow the plan',
     };
   return input.reviewAhead ? { kind: 'already' } : { kind: 'step' };
+}
+
+/** The detail key of a `plan_review` card that names the workstream whose planner asked. */
+export const PLAN_REVIEW_WORKSTREAM_DETAIL = 'planReviewWorkstreamId';
+
+/** Marks the workstream's current Plan step so the runner adds a Plan Review after it when it ends. */
+export function askPlanReview(ctx: WriteContext, ws: WorkstreamRow): void {
+  patchWorkstream(ctx, ws.id, null, {
+    steps: ws.steps.map((s, i) =>
+      i === ws.stepIndex ? { ...s, planReviewAsked: true as const } : s,
+    ),
+  });
+}
+
+/**
+ * The builder accepted a `plan_review` card: the Plan Review is added as the automatic route adds it, which
+ * works only while the lane is still on the Plan step that asked. After that the plan is written and its
+ * next step chosen, so the answer is refused and says so, rather than recording a yes that does nothing.
+ */
+export function acceptPlanReview(ctx: WriteContext, detail: InboxItemDto['detail']): void {
+  const id = WorkstreamId.safeParse(detail?.[PLAN_REVIEW_WORKSTREAM_DETAIL]);
+  const ws = id.success ? getWorkstreamRow(ctx.tx, id.data) : undefined;
+  const step = ws?.steps[ws.stepIndex];
+  if (
+    ws === undefined ||
+    isTerminal(ws.state) ||
+    step?.role !== StepRole.Plan ||
+    step.status === StepStatus.Done
+  )
+    throw new ConflictError(
+      "The plan step has ended, so a Plan Review can't be added to it now. Reject this card instead.",
+    );
+  askPlanReview(ctx, ws);
 }
 
 const STEP_CAP_REASON =

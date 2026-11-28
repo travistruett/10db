@@ -34,6 +34,6 @@
 - A plan that would wait for approval passes through `planGate` (`plan-approval.ts`;
   `decisions/2026-11-27-a-core-plan-goes-ahead-after-its-review-when-its-brief-needs-nothing.md`): it cards when the rule
   asks, when the plan left `builderCalls` out or names calls, when no approving Plan Review follows it, or when the review
-  found calls; otherwise the build starts with a `plan-goes-ahead` notice in the same write. A Plan step whose planner
+  left `builderCalls` out or found calls; otherwise the build starts with a `plan-goes-ahead` notice in the same write. A Plan step whose planner
   proposed `plan_review` carries `planReviewAsked`, and the end of that step puts the Plan Review after it
   (`withAskedPlanReview`), entered at once so a replan keeps it.

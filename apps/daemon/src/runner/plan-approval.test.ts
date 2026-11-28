@@ -31,6 +31,12 @@ const needsNothing = (opId: string) => ({
   ...planResult(opId, 'PLAN: edit src/api/a.txt.'),
   args: { opId, summary: 'PLAN: edit src/api/a.txt.', verdict: null, builderCalls: [] },
 });
+/** A plan review that approves and says it found no call of the builder's the brief leaves out. */
+const foundNothing = (opId: string) => ({
+  do: 'mcp' as const,
+  tool: 'complete_step',
+  args: { opId, summary: 'Looks right.', verdict: 'approve', builderCalls: [] },
+});
 const implement = (opId: string) => [
   { do: 'tool' as const, toolName: 'Write', input: { file_path: 'src/api/a.txt', content: opId } },
   { do: 'mcp' as const, tool: 'commit', args: { opId, paths: ['src/api/a.txt'], message: opId } },
@@ -115,7 +121,7 @@ describe('a plan whose brief needs nothing from the builder', () => {
     engine = await createTestEngine({
       Alpha: [
         [needsNothing('op-plan-0101'), turn],
-        [approve('op-plan-0102'), turn],
+        [foundNothing('op-plan-0102'), turn],
         implement('op-plan-0103'),
         [approve('op-plan-0104'), turn],
         [approve('op-plan-0105'), turn],
@@ -208,7 +214,7 @@ describe('a row with Plan and no Plan Review', () => {
           needsNothing('op-plan-0142'),
           turn,
         ],
-        [approve('op-plan-0143'), turn],
+        [foundNothing('op-plan-0143'), turn],
         implement('op-plan-0144'),
         [approve('op-plan-0145'), turn],
         [approve('op-plan-0146'), turn],

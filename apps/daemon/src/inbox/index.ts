@@ -25,6 +25,8 @@ export { applyPrecedentConflictAnswer } from './precedent-card';
 export { createPrecedentService, type PrecedentService } from './precedent-service';
 export { createProjectMcpReader, flagMcpFailure } from './project-mcp-reader';
 export {
+  PLAN_REVIEW_WORKSTREAM_DETAIL,
+  askPlanReview,
   carriesKinds,
   fileProposalByItself,
   planReviewRoute,

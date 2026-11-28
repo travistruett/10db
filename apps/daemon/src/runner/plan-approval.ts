@@ -115,8 +115,8 @@ const cardFor = (reason: string, owns: BuilderOwns = BuilderOwns.ProductAndTaste
 /**
  * Decides, before step `to` (Build) starts, whether a plan whose rigor asks for the builder's approval goes
  * ahead without a card (spec 2026-11-27 §3, "Plan ready"). It goes ahead only when the latest plan said its
- * brief needs nothing from the builder, a Plan Review after it approved, and that review found no call of the
- * builder's the brief left out. Anything unsaid is doubt, and doubt is the builder's. `asking` is the builder's
+ * brief needs nothing from the builder, a Plan Review after it approved, and that review said it found no call of
+ * the builder's the brief left out. Anything unsaid is doubt, and doubt is the builder's. `asking` is the builder's
  * Ask Me Next Time for this rule.
  */
 export function planGate(steps: readonly WorkstreamStep[], to: number, asking: boolean): PlanGate {
@@ -134,7 +134,9 @@ export function planGate(steps: readonly WorkstreamStep[], to: number, asking: b
     .slice(planAt + 1)
     .findLast((s) => s.role === StepRole.PlanReview && s.result !== null)?.result;
   if (review?.verdict !== Verdict.Approve) return cardFor('no plan review approved it');
-  const found = review.builderCalls ?? [];
+  const found = review.builderCalls;
+  if (found === undefined)
+    return cardFor("its plan review didn't say whether the plan makes calls of yours");
   const [firstFound] = found;
   if (firstFound !== undefined)
     return cardFor(

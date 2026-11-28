@@ -16,8 +16,9 @@ Where a plan used to wait for approval, the pure `planGate` in `runner/plan-appr
 2. No Plan result, or a plan that left `builderCalls` out: card.
 3. The plan names calls: card, naming them, owned by the first call's owner.
 4. No approving Plan Review after that plan: card.
-5. The review found calls: card, naming them.
-6. Otherwise the build starts in the same write, with a `plan-goes-ahead` Activity row whose body is the plan
+5. The review left `builderCalls` out: card. An approval that doesn't say it looked is doubt, like the plan's.
+6. The review found calls: card, naming them.
+7. Otherwise the build starts in the same write, with a `plan-goes-ahead` Activity row whose body is the plan
    (undo `final`: send the task back from its drawer).
 
 A card names its reason ("Raised as a card because …") and declares the builder's area.
@@ -26,6 +27,6 @@ A card names its reason ("Raised as a card because …") and declares the builde
 
 A Core plan's card asked the builder to approve work whose only open question was technical, after a reviewer
 had already checked it. The builder's calls are what the brief names, so the plan says them and the review
-checks for any it left out. A plan from a lane on the old tool text leaves the field out and still cards, so
+checks for any it left out. A plan or a review from a lane on the old tool text leaves the field out and still cards, so
 doubt goes up, never down. A guardrail change is caught only as a declared or found call until a deterministic
 path check of plans exists.

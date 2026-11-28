@@ -13,7 +13,9 @@ The `propose` MCP tool routes three kinds of proposal without an Inbox card, eac
   Review step (planned for the task's rigor, like any added step) right after it, unless one already follows.
   The step is entered at once, so a later replan keeps it. A Plan Review already ahead accepts the proposal
   with no change. Work that isn't Core, a step that isn't Plan, or a rule set to ask raises the card as before,
-  with a clause saying why.
+  with a clause saying why. Accepting that card marks the Plan step the same way (`acceptPlanReview`) while the
+  lane is still on it; once the step has ended the answer is refused with a message to reject the card, because
+  a yes could no longer add the review.
 - **A prerequisite** (`prerequisite: true` on a new task; rule `proposal-filed`) skips the size limit of
   `proposalFiling`. Kinds and risk words that ask for a card (data-loss surfaces), filing switched off, a batch
   join and the step's cap still raise the card. A prerequisite is filed to the Icebox once: its first

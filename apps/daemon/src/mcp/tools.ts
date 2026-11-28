@@ -107,6 +107,8 @@ import {
   carriesKinds,
   fileProposalByItself,
   leftWithBuilder,
+  PLAN_REVIEW_WORKSTREAM_DETAIL,
+  askPlanReview,
   planReviewRoute,
   postNotice,
   proposalCardBody,
@@ -732,6 +734,10 @@ export function createToolHandlers(
                 proposalId,
                 proposalKind: input.kind,
                 kinds: taskKinds.map((k) => k.key),
+                // Accepting a plan review marks this lane's Plan step, so the card names the lane.
+                ...(input.kind === ProposalKind.PlanReview
+                  ? { [PLAN_REVIEW_WORKSTREAM_DETAIL]: workstreamId }
+                  : {}),
                 ...decisionDetail({
                   decider: CardDecider.Builder,
                   owns: BuilderOwns.ProductAndTaste,
@@ -759,11 +765,7 @@ export function createToolHandlers(
             if (route.kind === 'card') return raiseCard(route.reason);
             if (route.kind === 'step') {
               // The runner adds the Plan Review after this Plan step when the step ends.
-              patchWorkstream(ctx, workstreamId, null, {
-                steps: ws.steps.map((s, i) =>
-                  i === ws.stepIndex ? { ...s, planReviewAsked: true as const } : s,
-                ),
-              });
+              askPlanReview(ctx, ws);
               decided(
                 DecisionRule.PlanReviewStep,
                 `The plan for "${getTask(ctx.tx, ws.taskId).title}" gets a Plan Review step, as its planner asked`,
