@@ -76,13 +76,15 @@ export function SurfaceDrawer({
   }, [opened, showing]);
 
   // A pick that saves at once can redraw the control under the focus, which then falls to the page: Esc there
-  // still belongs to the open drawer. Focus anywhere else (a field, a menu, a dialog) keeps its own Esc.
+  // still belongs to the open drawer. Focus anywhere else (a field, a menu) keeps its own Esc, and a modal open
+  // over the drawer (a run window it opened) takes Esc for itself whatever holds the focus.
   useEffect(() => {
     if (!opened) return;
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
       const focused = document.activeElement;
       if (focused !== null && focused !== document.body) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]') !== null) return;
       onClose();
     };
     document.addEventListener('keydown', onKeyDown);
