@@ -582,6 +582,8 @@ export async function createTestEngine(
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
       awayFor: (id) => live.get(id)?.away,
       handOverClaim: (handover) => handOverEdits({ state, git }, handover),
+      // A claim deadlock's age is read from the engine's clock, as the daemon reads it from its own.
+      now: () => clock.now().getTime(),
       // As the daemon does: a builder message the MCP side writes goes to the page's session.
       deliverMessage: (taskId, messageId) =>
         created.deliverMessage(taskId, messageId, { redo: false }),
