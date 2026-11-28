@@ -5,7 +5,8 @@ rule yet, so nothing changes for the builder.
 
 **Files:**
 
-- New `apps/daemon/src/stalls/restart-rule.ts`: `STALL_STOP_DEADLINE_MS`, `StallFault`, `StallMove`, `stallMove`.
+- New `apps/daemon/src/stalls/restart-rule.ts`: `StallFault`, `StallMove`, `stallMove`. `STALL_STOP_DEADLINE_MS`
+  waits for task 2, its first caller, since knip rejects an unused export.
 - `apps/daemon/src/stalls/rules.ts`: `StallKind`, and `kind` on `Stall` (`queued` for a queued run's stall,
   `batch` for both batch stalls, `active` for the last loop's). `kind` is not part of `fingerprint`.
 - New `apps/daemon/src/stalls/restart-rule.test.ts`.

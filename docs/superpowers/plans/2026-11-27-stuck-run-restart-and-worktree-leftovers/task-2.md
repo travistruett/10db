@@ -5,6 +5,7 @@ it a first stall of an active run restarts it with no card; until task 3 a secon
 
 **Files:**
 
+- `apps/daemon/src/stalls/restart-rule.ts`: add `STALL_STOP_DEADLINE_MS` as the index's Interfaces gives it.
 - New `apps/daemon/src/stalls/restart-record.ts`: the `STALL_RESTARTS_KEY` setting and its six functions.
 - New `apps/daemon/src/stalls/notices.ts`: the restart's notice.
 - `apps/daemon/src/runner/runner.ts`: `'stalled'` in `StopReason`; `Runner.restartStalled` and
@@ -21,7 +22,7 @@ it a first stall of an active run restarts it with no card; until task 3 a secon
   sweep now writes a restart as well as cards; `apps/daemon/src/runner/AGENTS.md`: `stalled`.
 
 **Implements:** the `restart-record.ts` block, `StopReason`, `Runner.restartStalled`, `Runner.isRestarting`.
-**Calls:** `stallMove`, `STALL_STOP_DEADLINE_MS`, `StallFault` (task 1); `isRuleAsking`, `postNotice`,
+**Calls:** `stallMove`, `StallFault` (task 1); `isRuleAsking`, `postNotice`,
 `freshAction`, `Runner.isRunning`.
 
 **`restartStalled(id, opts)`.**
