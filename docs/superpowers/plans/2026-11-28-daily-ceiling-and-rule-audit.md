@@ -45,7 +45,7 @@ then (other sessions, your own, use outside 10db) counts as 10db's: it stops ear
 - The ceiling never stops a running session and never looks at a run that is not checked.
 - Each card declares its decider and has `options`, no `detail.actions`. Labels are Title Case.
 - The day is the local day of a session's start on the injected clock, as `accounts/month.ts` computes a month.
-- Decision file: `docs/architecture/decisions/2026-11-28-10dbs-own-work-has-a-daily-ceiling.md` (task 2).
+- Decision file, written by task 2 in `docs/architecture/decisions/`: `2026-11-28-10dbs-own-work-has-a-daily-ceiling.md`.
 
 ## Provider parity
 
