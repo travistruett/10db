@@ -101,6 +101,7 @@ function flagOf(projectId: ProjectId, card: Card) {
     body: card.body,
     ...(card.foldKey ? { foldKey: card.foldKey } : {}),
     ...(card.refresh ? { refresh: true } : {}),
+    ...(card.sentUp ? { sentUp: card.sentUp } : {}),
     tier: card.tier,
     urgency: card.urgency,
     closesWhen: card.closesWhen,

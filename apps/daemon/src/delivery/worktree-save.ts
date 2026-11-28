@@ -20,8 +20,8 @@ export interface SaveDeps {
 
 /** What `saveLeftovers` found: ask the builder as before, or the worktree may go. */
 export type Leftovers =
-  /** The rule asks, or a copy failed: nothing was removed and today's card stands. */
-  | { readonly kind: 'ask' }
+  /** The rule asks (`byRule`), or a copy failed: nothing was removed and today's card stands. */
+  | { readonly kind: 'ask'; readonly byRule: boolean }
   /** What only the worktree held is saved and verified (`dir` null when there was none). */
   | { readonly kind: 'saved'; readonly dir: string | null; readonly saved: readonly string[] };
 
@@ -61,7 +61,7 @@ export async function saveLeftovers(
   },
 ): Promise<Leftovers> {
   if (isRuleAsking(deps.state.db, project.id, DecisionRule.WorktreeLeftovers))
-    return { kind: 'ask' };
+    return { kind: 'ask', byRule: true };
   try {
     const candidates = [
       ...new Set([...input.ignored, ...(await existing(input.path, input.changed))]),
@@ -90,8 +90,15 @@ export async function saveLeftovers(
       },
       'finished worktree not saved, so kept',
     );
-    return { kind: 'ask' };
+    return { kind: 'ask', byRule: false };
   }
+}
+
+/** The mark a card carries when the rule's asking, not a failed copy, left the worktree to the builder. */
+export function sentUpBy(outcome: Leftovers | null): { readonly sentUp?: DecisionRule } {
+  return outcome?.kind === 'ask' && outcome.byRule
+    ? { sentUp: DecisionRule.WorktreeLeftovers }
+    : {};
 }
 
 /** Posts the one notice that tells the builder what a removed worktree's saved files are and where. */

@@ -185,7 +185,11 @@ export async function offerHandMadeFolders(
       withdrawOtherMergedCards(ctx, project.id);
       if (merged.length === 0) withdraw(ctx.state, ctx.inbox, project.id, [handMadeKey.merged]);
       else if (!allKept(ctx, project.id, merged))
-        raise(ctx.inbox, project.id, handMadeCards.merged(mergedFolder(folders, merged), merged));
+        raise(ctx.inbox, project.id, {
+          ...handMadeCards.merged(mergedFolder(folders, merged), merged),
+          // Only a rule set to ask leaves the merged worktrees to the builder.
+          sentUp: DecisionRule.MergedWorktree,
+        });
     } catch (error) {
       if (signal.aborted) return;
       if (ghDown(error)) throw error;

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "since": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "rule": {
+            "type": "string",
+            "enum": [
+              "stray-write",
+              "flaky-check",
+              "move-back-after-limit",
+              "claim-deadlock",
+              "stuck-run",
+              "merged-worktree",
+              "worktree-leftovers",
+              "plan-review-step",
+              "proposal-filed",
+              "plan-goes-ahead",
+              "migrate-after-landing"
+            ]
+          },
+          "decided": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "undone": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "sentUp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "lastWeek": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "weekBefore": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "asking": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rule",
+          "decided",
+          "undone",
+          "sentUp",
+          "lastWeek",
+          "weekBefore",
+          "asking"
+        ]
+      }
+    }
+  },
+  "required": [
+    "since",
+    "rules"
+  ]
+}

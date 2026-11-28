@@ -128,6 +128,12 @@
   already asking raises no card, and a row with no project records nothing. Let 10db Decide Again is `applyRuleAsksAnswer`,
   called from `onFlagAnswerInWrite`: the rule decides again and its undone marks are cleared. Ask Me Next Time stays one
   click, with no card.
+- A card a rule raised only because it asks is the rule's sent-up mark: the site sets `sentUp` on its `FlagInput`
+  (delivery cards: `Card.sentUp`), and `flagCard` records `RuleMark.SentUp` when the card is new, so a repeat that folds
+  counts once. A site that raises no card through `flagCard` records it itself (`recordRuleMark`), where asking made
+  the move the builder's: the plan gate, the plan-review route and a proposal's filing. Each site tests asking against
+  what the rule would have done (`planGate`, `planReviewRoute` with `asking: false`), so a card raised for another
+  reason is not counted. Settings › Decisions › Rules reads the marks (`ruleStats`, `GET /rules/stats`).
 - A failed run's card in a batch carries `resolvesWhen: { event: 'batch_over', batchId }` (`flagFailedRun`, from the
   run's `batchId`), and `resolveOverBatchCards` (`delivery/stale-cards.ts`, at start and on every `batch.updated`)
   closes it once the batch's pull request merged, or the batch is closed or abandoned.

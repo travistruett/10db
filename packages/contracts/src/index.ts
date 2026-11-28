@@ -22,6 +22,7 @@ export * from './conversation';
 export * from './conversation-dto';
 export * from './decision-models';
 export * from './decision-stats';
+export * from './rule-stats';
 export * from './model-measures';
 export * from './entities';
 export * from './errors';

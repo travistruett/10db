@@ -672,6 +672,8 @@ function deadlock(a: Asking, heldBy: WorkstreamId, waits: ClaimWaits): InboxItem
     detail: { heldBy, ...detail },
     foldKey: deadlockKey(a),
     refresh: true,
+    // Only the rule's ask move raises this card; otherwise the later asker yields.
+    sentUp: DecisionRule.ClaimDeadlock,
   });
   return card.id;
 }

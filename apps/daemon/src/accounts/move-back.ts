@@ -144,6 +144,8 @@ export function createMoveBack(opts: {
       body: card.body,
       detail: card.detail,
       foldKey: card.foldKey,
+      // A project that moves back by itself is asked about only because the rule asks.
+      ...(asking && project.moveBackAutomatic ? { sentUp: DecisionRule.MoveBack } : {}),
       ...(card.options ? { options: card.options } : {}),
     });
   }

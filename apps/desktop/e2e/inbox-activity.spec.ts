@@ -241,3 +241,56 @@ test('a deleted empty branch shows in the Factory Activity drawer, and Open and 
   expect(await openCardIds(request)).toEqual(cardsBefore);
   expect(await badgeText()).toBe(settled);
 });
+
+const DECISION_LINE = 'The later task yielded its claim on docs';
+const DECIDED_ROWS = z.object({
+  rows: z.array(z.looseObject({ seq: z.number(), line: z.string() })),
+});
+
+test('a decision and its undo show in Settings › Decisions › Rules, in the project they were made in', async ({
+  page,
+  request,
+}) => {
+  execFileSync(
+    'pnpm',
+    [
+      'exec',
+      'tsx',
+      'scripts/seed-claim-deadlock-decision.ts',
+      join(E2E_DATA, '10db.sqlite'),
+      JSON.stringify({ projectId, line: DECISION_LINE }),
+    ],
+    { cwd: resolve(DESKTOP_DIR, '../daemon'), stdio: 'inherit' },
+  );
+  const decided = DECIDED_ROWS.parse(
+    await (
+      await request.get(`${daemonUrl}/activity/page?project=${projectId}&decided=true`, {
+        headers: auth,
+        maxRetries: 2,
+      })
+    ).json(),
+  );
+  const seq = decided.rows.find((row) => row.line === DECISION_LINE)?.seq;
+  expect(seq).toBeDefined();
+  const undone = await request.post(`${daemonUrl}/activity/${String(seq)}/undo`, {
+    headers: auth,
+  });
+  expect(undone.ok()).toBe(true);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/settings/decisions?tab=rules');
+  await page.getByLabel('Project').click();
+  await page.getByRole('option', { name: PROJECT_NAME }).click();
+  // One decided and one undone: the row's two counts, then nothing sent up and nothing in either week
+  // but this one.
+  const row = page.getByRole('row', { name: /A claim deadlock, ended by the later task yielding/ });
+  await expect(row.getByRole('cell')).toHaveText([
+    'A claim deadlock, ended by the later task yielding',
+    '1',
+    '1',
+    '0',
+    '1',
+    '0',
+  ]);
+  await expectAccessible(page, 'settings, decisions, rules');
+});

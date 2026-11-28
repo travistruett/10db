@@ -21,6 +21,7 @@ import { DecisionsTable } from './decisions-table';
 import { PlanMeasures } from './plan-measures';
 import { PaidBy } from './paid-by';
 import { RecentDecisions } from './recent-decisions';
+import { RuleStatsTable } from './rule-stats-table';
 import { ModelClass, useSettingsTab } from './focus-target';
 import { SettingsSectionKey } from './sections';
 import { SectionHeading } from './section-heading';
@@ -37,12 +38,13 @@ const EVERY_DECISION: readonly AskedDecision[] = Object.values(JudgeDecision)
   .filter(isAskedDecision)
   .filter((d) => d !== JudgeDecision.CrossesLimitSecond && d !== JudgeDecision.AcceptanceSecond);
 
-const DecisionsTab = { Setup: 'setup', Recent: 'recent' } as const;
+const DecisionsTab = { Setup: 'setup', Recent: 'recent', Rules: 'rules' } as const;
 type DecisionsTab = (typeof DecisionsTab)[keyof typeof DecisionsTab];
 
 const DECISIONS_TABS: readonly PageTab<DecisionsTab>[] = [
   { value: DecisionsTab.Setup, label: 'Setup' },
   { value: DecisionsTab.Recent, label: 'Recent' },
+  { value: DecisionsTab.Rules, label: 'Rules' },
 ];
 
 const UNREACHABLE = "Couldn't reach the daemon.";
@@ -52,8 +54,8 @@ function failureText(error: unknown): string {
 }
 
 /**
- * Settings › Decisions: who decides. Setup holds the master switch, who pays and every decision; Recent the calls.
- * The tab is kept in the address.
+ * Settings › Decisions: who decides. Setup holds the master switch, who pays and every decision; Recent the calls;
+ * Rules what each rule decided, had undone and sent up. The tab is kept in the address.
  */
 export function DecisionsSection() {
   const status = useJudgeStatus();
@@ -177,6 +179,8 @@ export function DecisionsSection() {
           </Stack>
           <PlanMeasures />
         </Stack>
+      ) : tab === DecisionsTab.Rules ? (
+        <RuleStatsTable />
       ) : (
         <RecentDecisions {...(modelList === undefined ? {} : { models: modelList })} />
       )}

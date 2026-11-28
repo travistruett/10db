@@ -615,6 +615,10 @@ export function createWatcher(deps: {
           urgency: Urgency.High,
           closesWhen: BY_ANSWER,
           decision: decidedByBuilder(BuilderOwns.Guardrails),
+          // A path the rule would have left to a notice is a card only because the rule asks.
+          ...(asking && !isGuardrailPath(rel) && !sensitive.includes(rel)
+            ? { sentUp: DecisionRule.StrayWrite }
+            : {}),
           title: shown === undefined ? STRAY_TITLE : guardrailStrayTitle(shown.label),
           body: `${labelled(site, rel)}${leavers.length === 0 ? during : leftNote(leavers)}${note === undefined ? '' : `\n${note}`}`,
           detail: {
@@ -643,6 +647,9 @@ export function createWatcher(deps: {
         urgency: Urgency.High,
         closesWhen: BY_ANSWER,
         decision: decidedByBuilder(BuilderOwns.Guardrails),
+        ...(asking && unnamed.some((rel) => !isGuardrailPath(rel))
+          ? { sentUp: DecisionRule.StrayWrite }
+          : {}),
         title: `${String(unnamed.length)} writes outside every claim`,
         body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(unnamed.length - listed.length)} more${during}`,
         detail: { count: unnamed.length, paths: listed, candidates: [...candidates] },

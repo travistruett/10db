@@ -64,6 +64,8 @@ import {
   insertTaskPageReports,
   insertToolOp,
   isRuleAsking,
+  recordRuleMark,
+  RuleMark,
   leaveTaskPaths,
   listEvidence,
   listKinds,
@@ -715,7 +717,9 @@ export function createToolHandlers(
               },
             });
           };
-          const raiseCard = (reason: string) => {
+          // `sentUp` names the rule that would have decided this itself had it not been set to ask.
+          const raiseCard = (reason: string, sentUp?: DecisionRule) => {
+            if (sentUp !== undefined) recordRuleMark(ctx, project.id, sentUp, RuleMark.SentUp);
             insertInboxItem(ctx, {
               projectId: project.id,
               kind: 'proposal',
@@ -754,15 +758,22 @@ export function createToolHandlers(
             );
           };
           if (input.kind === ProposalKind.PlanReview) {
-            const route = planReviewRoute({
+            const routeInput = {
               rigor: getTask(ctx.tx, ws.taskId).effectiveRigor,
               current: currentStep(ws).role,
               reviewAhead: ws.steps
                 .slice(ws.stepIndex + 1)
                 .some((s) => s.role === StepRole.PlanReview),
-              asking: isRuleAsking(ctx.tx, project.id, DecisionRule.PlanReviewStep),
-            });
-            if (route.kind === 'card') return raiseCard(route.reason);
+            };
+            const asking = isRuleAsking(ctx.tx, project.id, DecisionRule.PlanReviewStep);
+            const route = planReviewRoute({ ...routeInput, asking });
+            if (route.kind === 'card')
+              return raiseCard(
+                route.reason,
+                asking && planReviewRoute({ ...routeInput, asking: false }).kind !== 'card'
+                  ? DecisionRule.PlanReviewStep
+                  : undefined,
+              );
             if (route.kind === 'step') {
               // The runner adds the Plan Review after this Plan step when the step ends.
               askPlanReview(ctx, ws);
@@ -800,7 +811,7 @@ export function createToolHandlers(
           });
           if (!filing.file) return raiseCard(filing.reason);
           if (isRuleAsking(ctx.tx, project.id, DecisionRule.ProposalFiled))
-            return raiseCard('you asked to decide these yourself');
+            return raiseCard('you asked to decide these yourself', DecisionRule.ProposalFiled);
           // A small proposal, or a prerequisite of the lane's task, with no kind that asks for a card
           // would guard nothing the Icebox does not.
           const prerequisite = input.prerequisite === true;
