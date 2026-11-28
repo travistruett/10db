@@ -2,12 +2,13 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runCommand, httpApi, type CommandDeps } from '@10db/agent-skill';
-import { ProjectDto, TaskDto } from '@10db/contracts';
+import { ProjectDto } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
+import { taskListOf } from './task-list';
 import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
@@ -98,10 +99,10 @@ const draft = (title: string, extra: Record<string, unknown> = {}) => ({
 async function createTwoTasks() {
   const s = skill();
   await s.run('create', project.id, file('a.json', draft('First')));
-  const [first] = await api.get(`/projects/${project.id}/tasks`, z.array(TaskDto));
+  const [first] = await api.get(`/projects/${project.id}/tasks`, taskListOf(project.id));
   if (!first) throw new Error('no first task');
   await s.run('create', project.id, file('b.json', draft('Second', { dependsOn: [first.id] })));
-  const tasks = await api.get(`/projects/${project.id}/tasks`, z.array(TaskDto));
+  const tasks = await api.get(`/projects/${project.id}/tasks`, taskListOf(project.id));
   const second = tasks.find((t) => t.title === 'Second');
   if (!second) throw new Error('no second task');
   return { first, second };

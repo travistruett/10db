@@ -13,6 +13,7 @@ import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
+import { taskListOf } from './task-list';
 import { createTempRepo, tempDir } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
@@ -71,7 +72,7 @@ async function startedTask() {
 }
 
 const taskOf = async (projectId: string, id: string) =>
-  (await api().get(`/projects/${projectId}/tasks`, z.array(TaskDto))).find((t) => t.id === id);
+  (await api().get(`/projects/${projectId}/tasks`, taskListOf(projectId))).find((t) => t.id === id);
 
 const runState = (id: string) =>
   daemon.state.db.$client.prepare('select state from workstreams where id = ?').get(id);

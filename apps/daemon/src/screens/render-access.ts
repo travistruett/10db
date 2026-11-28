@@ -15,6 +15,9 @@
 export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/projects' },
   { route: '/projects/:projectId/tasks' },
+  // A task's drawer draws it whole: its description and criteria, which the project's list leaves out.
+  // A database read.
+  { route: '/tasks/:taskId' },
   { route: '/projects/:projectId/batches' },
   { route: '/projects/:projectId/goals' },
   { route: '/projects/:projectId/shapes' },

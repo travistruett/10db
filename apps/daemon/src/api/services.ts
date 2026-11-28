@@ -415,7 +415,10 @@ export interface ApiServices extends PlanRecordServices {
   restoreProject(projectId: ProjectId): void;
   /** Registers the project and allows the registries its package files name. */
   createProject(input: ProjectInput): Promise<ProjectDto>;
+  /** Every task of the project, whole; the project's list route sends each as the row `toTaskRow` makes. */
   listTasks(projectId: ProjectId): TaskDto[];
+  /** One task, whole: its description, criteria and the reasons for its rigor. NotFoundError for an unknown task. */
+  getTask(taskId: TaskId): TaskDto;
   /**
    * Throws InvalidError when the task's landing names a branch origin does not have, so the
    * answer may come after asking origin. A rigor in `input` is pinned as `rigorSource` says: the builder's

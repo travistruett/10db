@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
+import { taskListOf } from './task-list';
 import { FakeGh } from './fake-gh';
 import {
   createTempRepoWithOrigin,
@@ -181,7 +182,10 @@ describe('where a task lands, through the API', () => {
     const api = await boot();
 
     const moved = await waitForAsync(async () => {
-      const tasks = await api.get(`/projects/${first.project.id}/tasks`, z.array(TaskDto));
+      const tasks = await api.get(
+        `/projects/${first.project.id}/tasks`,
+        taskListOf(first.project.id),
+      );
       return tasks.find((t) => t.id === task.id && t.landing.kind === 'base');
     });
     expect(moved.landing).toEqual({ kind: 'base' });

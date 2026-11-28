@@ -8,7 +8,7 @@ import { Alert, Box, Code, Group, List, Stack, Text } from '@mantine/core';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { z } from 'zod';
-import { useTasks, useWorkstreamChanges, useWorkstreams } from '../../daemon/queries';
+import { useTask, useWorkstreamChanges, useWorkstreams } from '../../daemon/queries';
 import { CardActions } from './card-actions';
 import { CardSurface } from './card-surface';
 import { decisionLine } from './decision-line';
@@ -44,17 +44,10 @@ export interface CheckCardProps {
 }
 
 /** The criteria the task set, so the builder checks the work against them. */
-function Criteria({
-  item,
-  workstreamId,
-}: {
-  readonly item: InboxItemDto;
-  readonly workstreamId: WorkstreamId;
-}) {
+function Criteria({ workstreamId }: { readonly workstreamId: WorkstreamId }) {
   const workstreams = useWorkstreams({ active: true });
-  const tasks = useTasks(item.projectId);
-  const taskId = workstreams.data?.find((w) => w.id === workstreamId)?.taskId;
-  const criteria = tasks.data?.find((t) => t.id === taskId)?.acceptanceCriteria ?? [];
+  const taskId = workstreams.data?.find((w) => w.id === workstreamId)?.taskId ?? null;
+  const criteria = useTask(taskId).data?.acceptanceCriteria ?? [];
   if (criteria.length === 0) return null;
   return (
     <Stack gap={4}>
@@ -178,7 +171,7 @@ export function CheckCard({
         {item.body === '' ? null : <Text size="sm">{item.body}</Text>}
         {workstreamId === undefined ? null : (
           <>
-            <Criteria item={item} workstreamId={workstreamId} />
+            <Criteria workstreamId={workstreamId} />
             <Changes changes={changes} />
           </>
         )}
