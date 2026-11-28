@@ -8,8 +8,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
   acquireClaims,
+  activeClaims,
   createTestStore,
   endSession,
+  getPostedNotice,
   getWorkstreamRow,
   insertBatch,
   insertKind,
@@ -17,13 +19,22 @@ import {
   insertTask,
   insertWorkstream,
   listInbox,
+  pageActivity,
   patchWorkstream,
   releaseClaims,
   seedProject,
+  setRuleAsking,
   transitionBatch,
   type Store,
 } from '@10db/db';
-import { InboxState, type BatchId, type ProjectDto, type WorkstreamId } from '@10db/contracts';
+import {
+  ConflictError,
+  DecisionRule,
+  InboxState,
+  type BatchId,
+  type ProjectDto,
+  type WorkstreamId,
+} from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createTempRepo, isolatedGitEnv, seedWorkstream, waitFor } from '../../test/fixtures';
@@ -32,13 +43,16 @@ import type { DependencyChanges, MigrationsBase } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { protectedPaths } from '../guard';
-import { createInboxService, type InboxService } from '../inbox';
+import { createActivityActions, createInboxService, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { AwayLane } from '../trust';
+import { readPair } from './claim-deadlock-pairs';
+import { DEADLOCK_YIELD_AFTER_MS } from './claim-deadlock-rule';
 import {
   ClaimWaits,
   createClaimDeadlockAnswers,
   createMcpHandler,
+  dropPair,
   forgetEndedYields,
   mintSessionToken,
 } from './index';
@@ -85,6 +99,8 @@ let installDependencies: DependencyChanges['install'];
 let dependencyInstalls: BatchId[] = [];
 /** Holders the update drain has parked, as far as the claim waits are told. */
 let parkedHolders = new Set<WorkstreamId>();
+/** The clock a claim wait reads for a deadlock's age; a test moves it on. */
+let nowMs = 0;
 
 interface LogEntry {
   readonly obj: object;
@@ -109,6 +125,7 @@ beforeEach(async () => {
   sessionAbort = new AbortController();
   sessionStops.clear();
   claimWaitSliceMs = 60_000;
+  nowMs = 0;
   workstreamBranch = 'main';
   repo = createTempRepo();
   const test = createTestStore();
@@ -168,6 +185,7 @@ beforeEach(async () => {
     claimWaits,
     handOverClaim: (handover) => handOverEdits({ state, git }, handover),
     claimPollMs: 5,
+    now: () => nowMs,
     get claimWaitSliceMs() {
       return claimWaitSliceMs;
     },
@@ -325,6 +343,9 @@ describe('edits left behind in a shared checkout', () => {
     });
     mkdirSync(join(repo.path, 'src/api'), { recursive: true });
     writeFileSync(join(repo.path, 'src/api/half.ts'), 'half done\n');
+    state.write((ctx) => {
+      setRuleAsking(ctx, yielder.project.id, DecisionRule.ClaimDeadlock, true);
+    });
     const yielderAsks = yielder.call('request_claim', {
       opId: 'yielder-ui',
       kind: 'area',
@@ -356,6 +377,72 @@ describe('edits left behind in a shared checkout', () => {
     expect(await claimedChanges(state.db, git, takerRow)).toEqual([]);
     writeFileSync(join(repo.path, 'src/api/half.ts'), 'finished by the taker\n');
     expect(await claimedChanges(state.db, git, takerRow)).toEqual(['src/api/half.ts']);
+  });
+
+  it('the later asker yields after 2 minutes, keeping its uncommitted edits', async () => {
+    const alpha = await seedSession(['api']);
+    const beta = await seedSession(['ui'], undefined, { project: alpha.project, title: 'Beta' });
+    mkdirSync(join(repo.path, 'src/api'), { recursive: true });
+    writeFileSync(join(repo.path, 'src/api/half.ts'), 'half done\n');
+    const betaAsks = beta.call('request_claim', {
+      opId: 'beta-api',
+      kind: 'area',
+      name: 'api',
+      reason: 'needs api',
+    });
+    await waitFor(() => claimWaits.holdersAwaitedBy(beta.workstream.id).length > 0);
+    const alphaAsks = alpha.call('request_claim', {
+      opId: 'alpha-ui',
+      kind: 'area',
+      name: 'ui',
+      reason: 'needs ui',
+    });
+    await waitFor(() =>
+      getWorkstreamRow(state.db, alpha.workstream.id).notice?.line.includes(
+        'waits for a claim this one holds',
+      ),
+    );
+    const deadlockCards = () =>
+      listInbox(state.db, { states: [InboxState.Open] }).filter((i) =>
+        i.title.startsWith('Claim deadlock:'),
+      );
+    expect(deadlockCards()).toEqual([]);
+    expect(activeClaims(state.db, alpha.workstream.id).map((c) => c.name)).toContain('api');
+
+    nowMs = DEADLOCK_YIELD_AFTER_MS;
+    const refused = (await alphaAsks).json;
+    expect(refused).toMatchObject({ granted: false });
+    expect(String(refused?.['instruction'])).toContain('each waited for a claim the other holds');
+    expect(String(refused?.['instruction'])).toContain('"Beta"');
+    const granted = (await betaAsks).json;
+    expect(granted).toMatchObject({ granted: true });
+    expect(String(granted?.['instruction'])).toContain('src/api/half.ts');
+    const betaRow = getWorkstreamRow(state.db, beta.workstream.id);
+    expect(await claimedChanges(state.db, git, betaRow)).toEqual([]);
+    expect(deadlockCards()).toEqual([]);
+    const rows = pageActivity(state.db, { project: alpha.project.id, pageSize: 50 }).rows.filter(
+      (r) => r.key.startsWith('claim-deadlock:'),
+    );
+    expect(rows).toHaveLength(1);
+    const seq = rows[0]?.seq ?? 0;
+    expect(getPostedNotice(state.db, seq)?.data.decision?.undo.state).toBe('undoable');
+    expect(readPair(state.db, alpha.workstream.id, beta.workstream.id)?.breaks).toBe(1);
+
+    const actions = createActivityActions({
+      state,
+      moves: {
+        moveProject: () => undefined,
+        forgetClaimDeadlock: (a, b) => {
+          const found = state.write((ctx) => dropPair(ctx, a, b));
+          if (!found) throw new ConflictError('This claim deadlock has no record any more');
+        },
+      },
+    });
+    actions.undo(seq);
+    expect(readPair(state.db, alpha.workstream.id, beta.workstream.id)).toBeNull();
+    expect(() => {
+      actions.undo(seq);
+    }).toThrow(ConflictError);
   });
 
   it('leaves named paths in a copy another task shares, and says why it leaves none alone', async () => {
