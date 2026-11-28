@@ -34,6 +34,8 @@ export const ChatToolInputs = {
   [ChatToolName.ListProjects]: BuilderToolInputs.list_projects,
   [ChatToolName.ListKinds]: BuilderToolInputs.list_kinds,
   [ChatToolName.ListTasks]: z.object({}),
+  [ChatToolName.ListGoals]: z.object({}),
+  [ChatToolName.GetGoal]: BuilderToolInputs.get_goal,
   [ChatToolName.CreateTask]: BuilderToolInputs.create_task.omit({ projectId: true }),
   [ChatToolName.EditTask]: BuilderToolInputs.edit_task,
   [ChatToolName.RemoveTask]: BuilderToolInputs.remove_task,
