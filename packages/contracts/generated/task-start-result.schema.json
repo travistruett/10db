@@ -940,7 +940,8 @@
                     "dependency",
                     "claim",
                     "parked",
-                    "kept_work"
+                    "kept_work",
+                    "turn"
                   ]
                 },
                 "line": {
