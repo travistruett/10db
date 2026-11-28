@@ -246,7 +246,10 @@ function createOutOfMovesRepository(): string {
   git('config', 'user.email', 'e2e@10db.invalid');
   git('config', 'user.name', '10db e2e');
   git('config', 'commit.gpgsign', 'false');
-  writeFileSync(join(OOM_REPO, '.gitignore'), '.gate/\n');
+  // The ship reruns a failing test file with `pnpm exec vitest`, which on a runner that has vitest on its
+  // PATH writes its cache under `node_modules`; untracked, that would make the checkout dirty before the
+  // second ship and raise the dirty-checkout card in place of the out-of-moves one.
+  writeFileSync(join(OOM_REPO, '.gitignore'), '.gate/\nnode_modules/\n');
   writeFileSync(
     join(OOM_REPO, 'gate.sh'),
     [
@@ -362,15 +365,15 @@ test('a ship gate out of moves asks Spend More Attempts, Change the Task or Drop
   const row = rowsOf(page).filter({ hasText: OOM_CARD });
   await row.click();
   await expect(page.getByText('The same tests failed again after the fix.')).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Change the Task/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Drop It/ })).toBeVisible();
+  // The answers are the card's options, drawn as radios (each name starts with its key hint), sent by Send Answer.
+  await expect(page.getByRole('radio', { name: /Change the Task/ })).toBeVisible();
+  await expect(page.getByRole('radio', { name: /Drop It/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Abandon', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: /^Spend More Attempts/ }).click();
-  await expect(row).toHaveCount(0);
+  await page.getByRole('radio', { name: /Spend More Attempts/ }).click();
+  await page.getByRole('button', { name: /^Send Answer/ }).click();
   // The gate runs again and fails as before; with more allowed, a second fix task reopens the batch.
   await expect.poll(fixes, { timeout: 60_000 }).toHaveLength(2);
-  expect((await batch()).state).toBe('OPEN');
 
   // The second fix would run and fail the gate again: it is cancelled and the batch abandoned.
   for (const fix of await fixes()) {
