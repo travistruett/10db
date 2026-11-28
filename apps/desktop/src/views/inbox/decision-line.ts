@@ -64,6 +64,8 @@ function proposalLine(item: InboxItemDto): string | null {
   const kind = item.detail?.['proposalKind'];
   if (kind === ProposalKind.NewTask) return 'Accepting creates a task.';
   if (kind === ProposalKind.Watchpoint) return 'Accepting changes your watchpoints.';
+  if (kind === ProposalKind.PlanReview)
+    return 'Accepting adds a Plan Review step after the plan, while the plan is still being written.';
   return null;
 }
 

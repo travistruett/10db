@@ -141,3 +141,9 @@
   builder's home by default.
 - The CI cap card replaces "Pull request checks failed": `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's
   `prCardKey.checks` card in the stop card's write, and `pr-watch` raises none while `ciStopped` is set.
+- A lane's proposal is routed in `proposal-task.ts` (`decisions/2026-11-27-a-lanes-proposal-is-routed-by-rule.md`):
+  `planReviewRoute` turns `plan_review` on Core work into a step, `proposalFiling` lets a `prerequisite` past the size
+  rule only, and `fileProposalByItself` files a prerequisite once, matched by its first description line. Each move
+  posts a rule notice; a proposal that still cards says what it costs (`proposalCardBody`). Accepting a `plan_review`
+  card marks the lane's Plan step as the automatic route does (`acceptPlanReview`); once that step has ended the answer
+  is refused, since a yes could add nothing.

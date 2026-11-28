@@ -1,7 +1,11 @@
 import {
   AreaRole,
+  BuilderOwns,
+  CardDecider,
   ClaimKind,
   currentStep,
+  DecisionRule,
+  decisionDetail,
   EventType,
   filedFollowUpLines,
   FOLLOW_UPS_HEADING,
@@ -59,6 +63,7 @@ import {
   insertSystemNotice,
   insertTaskPageReports,
   insertToolOp,
+  isRuleAsking,
   leaveTaskPaths,
   listEvidence,
   listKinds,
@@ -74,6 +79,7 @@ import {
   patchWorkstream,
   listSkipsForWorkstream,
   releaseClaim,
+  resolveProposal,
   setAgentRigor,
   searchDecisions,
   searchPrinciples,
@@ -101,6 +107,9 @@ import {
   carriesKinds,
   fileProposalByItself,
   leftWithBuilder,
+  PLAN_REVIEW_WORKSTREAM_DETAIL,
+  askPlanReview,
+  planReviewRoute,
   postNotice,
   proposalCardBody,
   proposalFiling,
@@ -298,7 +307,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   record_decision:
     'Record a routine engineering decision you made within your authority, with its rationale.',
   propose:
-    'Propose a new task, a task change, a principle (with the principle field: statement, kind, topicKey, scope), or a watchpoint change (with the watchpoint field: scope and the entry to add, replace by key, or turn off; you never edit a watchpoint yourself). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal whose kinds ask for no card is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set kinds (the keys of what the work touches: security, auth, migration, dependency, schema, infra, ui, docs, or another the builder made) when the work has them, and joinsRunningBatch when it must join a batch that is running; a kind that asks for a card (security, auth, migration and dependency do) or a batch request raises the card. A step can have at most 10 tasks filed without a person, between this and file_follow_up; past that, a proposal raises the card. The followUps of complete_step (review roles) are a separate allowance: they do not count toward the 10 and the 10 does not block them.',
+    'Propose a new task, a task change, a principle (with the principle field: statement, kind, topicKey, scope), or a watchpoint change (with the watchpoint field: scope and the entry to add, replace by key, or turn off; you never edit a watchpoint yourself). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal whose kinds ask for no card is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set kinds (the keys of what the work touches: security, auth, migration, dependency, schema, infra, ui, docs, or another the builder made) when the work has them, and joinsRunningBatch when it must join a batch that is running; a kind that asks for a card (security, auth, migration and dependency do) or a batch request raises the card. A step can have at most 10 tasks filed without a person, between this and file_follow_up; past that, a proposal raises the card. The followUps of complete_step (review roles) are a separate allowance: they do not count toward the 10 and the 10 does not block them. Set prerequisite on a new task your task cannot meet its criteria without, inside its goal: 10db files it once, whatever its size, with no card. New scope outside the goal reaches the builder: say what it adds in the body and what it costs in costs. A planner on Core work (Careful or Critical) that wants its plan reviewed before Build proposes kind plan_review from its Plan step: 10db adds a Plan Review step after the plan, with no card.',
   report_deviation:
     "Report a departure from the plan or a principle, with your signed reason. When 10db asks you to commit uncommitted paths that are not this task's work (another writer's edits in a shared checkout), name them in leaveUncommitted instead of committing them: 10db leaves them and stops sending your step back for them; it does so only in a checkout another writer shares (the builder's own, or a copy other tasks work in too), outside a Workbench pass. leftUncommitted says which it left, and when it left none of them, instruction says why.",
   file_follow_up:
@@ -683,6 +692,101 @@ export function createToolHandlers(
             body: input.body,
             sourceId,
           });
+          const ws = getWorkstreamRow(ctx.tx, workstreamId);
+          const decided = (
+            rule: DecisionRule,
+            line: string,
+            body: string,
+            reason: string,
+          ): void => {
+            postNotice(ctx, {
+              tier: CardTier.Notice,
+              projectId: project.id,
+              taskId: ws.taskId,
+              key: `${rule}:${proposalId}`,
+              tone: 'info',
+              line,
+              body,
+              decision: {
+                by: CardDecider.Rule,
+                rule,
+                confidence: null,
+                undo: { state: 'final', reason },
+              },
+            });
+          };
+          const raiseCard = (reason: string) => {
+            insertInboxItem(ctx, {
+              projectId: project.id,
+              kind: 'proposal',
+              title: input.title,
+              body: proposalCardBody(input.body, reason, input.costs),
+              options: [
+                { label: 'accept', description: 'Accept the proposal' },
+                { label: 'reject', description: 'Reject it' },
+              ],
+              recommendation: null,
+              category: QuestionCategory.Product,
+              urgency: Urgency.Low,
+              // The declared kinds ride on the card, so accepting it files a task that has them.
+              // Its proposal kind too, so the card can say what accepting does.
+              detail: {
+                proposalId,
+                proposalKind: input.kind,
+                kinds: taskKinds.map((k) => k.key),
+                // Accepting a plan review marks this lane's Plan step, so the card names the lane.
+                ...(input.kind === ProposalKind.PlanReview
+                  ? { [PLAN_REVIEW_WORKSTREAM_DETAIL]: workstreamId }
+                  : {}),
+                ...decisionDetail({
+                  decider: CardDecider.Builder,
+                  owns: BuilderOwns.ProductAndTaste,
+                }),
+              },
+              foldKey: null,
+              targets: [],
+            });
+            return record(
+              'propose',
+              input.opId,
+              { proposalId, taskId: null, principleId: null },
+              ctx,
+            );
+          };
+          if (input.kind === ProposalKind.PlanReview) {
+            const route = planReviewRoute({
+              rigor: getTask(ctx.tx, ws.taskId).effectiveRigor,
+              current: currentStep(ws).role,
+              reviewAhead: ws.steps
+                .slice(ws.stepIndex + 1)
+                .some((s) => s.role === StepRole.PlanReview),
+              asking: isRuleAsking(ctx.tx, project.id, DecisionRule.PlanReviewStep),
+            });
+            if (route.kind === 'card') return raiseCard(route.reason);
+            if (route.kind === 'step') {
+              // The runner adds the Plan Review after this Plan step when the step ends.
+              askPlanReview(ctx, ws);
+              decided(
+                DecisionRule.PlanReviewStep,
+                `The plan for "${getTask(ctx.tx, ws.taskId).title}" gets a Plan Review step, as its planner asked`,
+                `Core work's planner asked for its plan to be reviewed, so a Plan Review runs after the plan, before Build.\n\n${input.title}\n\n${input.body}`,
+                'The plan review runs once and changes no code.',
+              );
+            }
+            resolveProposal(ctx, proposalId, {
+              status: 'accepted',
+              rationale:
+                route.kind === 'step'
+                  ? 'Core work: its plan review runs as a step after the plan'
+                  : 'Its plan review is already a step',
+            });
+            return record(
+              'propose',
+              input.opId,
+              { proposalId, taskId: null, principleId: null },
+              ctx,
+            );
+          }
           const filing = proposalFiling({
             kind: input.kind,
             title: input.title,
@@ -691,41 +795,29 @@ export function createToolHandlers(
             known,
             joinsRunningBatch: input.joinsRunningBatch,
             limit: getSmallProposalLimit(ctx.tx, project.id),
-            stepCapReached:
-              stepFilings(ctx.tx, getWorkstreamRow(ctx.tx, workstreamId)) >= MAX_FOLLOW_UPS,
+            stepCapReached: stepFilings(ctx.tx, ws) >= MAX_FOLLOW_UPS,
+            prerequisite: input.prerequisite,
           });
-          if (filing.file) {
-            // A small proposal with no kind that asks for a card would guard nothing the Icebox does not.
-            const task = fileProposalByItself(ctx, proposalId, taskKinds);
-            return record(
-              'propose',
-              input.opId,
-              { proposalId, taskId: task.id, principleId: null },
-              ctx,
+          if (!filing.file) return raiseCard(filing.reason);
+          if (isRuleAsking(ctx.tx, project.id, DecisionRule.ProposalFiled))
+            return raiseCard('you asked to decide these yourself');
+          // A small proposal, or a prerequisite of the lane's task, with no kind that asks for a card
+          // would guard nothing the Icebox does not.
+          const prerequisite = input.prerequisite === true;
+          const { task, again } = fileProposalByItself(ctx, proposalId, taskKinds, prerequisite);
+          if (!again)
+            decided(
+              DecisionRule.ProposalFiled,
+              `Filed "${task.title}" to the Icebox without a card`,
+              prerequisite
+                ? `A lane said its task can't meet its criteria without this work, and nothing in it needs a card, so 10db filed it.\n\n${input.body}`
+                : `A lane proposed it; it is small and none of its kinds needs a card, so 10db filed it.\n\n${input.body}`,
+              'Remove the task from the Board to take it back.',
             );
-          }
-          insertInboxItem(ctx, {
-            projectId: project.id,
-            kind: 'proposal',
-            title: input.title,
-            body: proposalCardBody(input.body, filing.reason),
-            options: [
-              { label: 'accept', description: 'Accept the proposal' },
-              { label: 'reject', description: 'Reject it' },
-            ],
-            recommendation: null,
-            category: QuestionCategory.Product,
-            urgency: Urgency.Low,
-            // The declared kinds ride on the card, so accepting it files a task that has them.
-            // Its proposal kind too, so the card can say what accepting does.
-            detail: { proposalId, proposalKind: input.kind, kinds: taskKinds.map((k) => k.key) },
-            foldKey: null,
-            targets: [],
-          });
           return record(
             'propose',
             input.opId,
-            { proposalId, taskId: null, principleId: null },
+            { proposalId, taskId: task.id, principleId: null },
             ctx,
           );
         }),
@@ -1329,12 +1421,19 @@ export function createToolHandlers(
             input.watchpointNotes.length > 0
               ? input.watchpointNotes
               : null;
+          // Only a plan and its review say what the plan needs from the builder; the plan card reads them.
+          const builderCalls =
+            (step.role === StepRole.Plan || step.role === StepRole.PlanReview) &&
+            input.builderCalls !== undefined
+              ? input.builderCalls
+              : null;
           const result = {
             summary,
             verdict,
             sessionId,
             at: ctx.now,
             ...(watchpointNotes === null ? {} : { watchpointNotes }),
+            ...(builderCalls === null ? {} : { builderCalls }),
           };
           patchWorkstream(ctx, workstreamId, null, {
             steps: row.steps.map((s, i) => (i === row.stepIndex ? { ...s, result } : s)),
