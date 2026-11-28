@@ -257,7 +257,8 @@ test('a lane edit to a guardrail file shows its diff, and Revert puts the commit
   await page.goto(inboxUrl('&kind=flag'));
   await rowsOf(page).filter({ hasText: title }).click();
   await expect(page.getByLabel('Diff')).toContainText('+on: pull_request');
-  await page.getByRole('radio', { name: /^Revert/ }).click();
+  // The option's shortcut digit leads its accessible name, so the label is matched anywhere in it.
+  await page.getByRole('radio', { name: /Revert/ }).click();
   await page.getByRole('button', { name: /^Send Answer/ }).click();
   await expect(rowsOf(page).filter({ hasText: title })).toHaveCount(0);
   await expect.poll(() => readFileSync(file, 'utf8')).toBe('on: push\n');
