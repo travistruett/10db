@@ -31,10 +31,10 @@ import { NextAction, nextStep } from './goal-next-step';
 import classes from './goals-list.module.css';
 
 /** The list's groups: what needs the builder, what moves, what hasn't begun. Done folds away. */
-const GROUPS = [
+const GROUPS: readonly { readonly title: string; readonly statuses: readonly GoalStatus[] }[] = [
   {
     title: 'Needs you',
-    statuses: [GoalStatus.Failed, GoalStatus.WaitingOnYou] as readonly GoalStatus[],
+    statuses: [GoalStatus.Failed, GoalStatus.WaitingOnYou],
   },
   {
     title: 'In progress',
@@ -45,10 +45,10 @@ const GROUPS = [
       GoalStatus.Queued,
       GoalStatus.Shipping,
       GoalStatus.Idle,
-    ] as readonly GoalStatus[],
+    ],
   },
-  { title: 'Not started', statuses: [GoalStatus.NotStarted] as readonly GoalStatus[] },
-] as const;
+  { title: 'Not started', statuses: [GoalStatus.NotStarted] },
+];
 
 const ACTION_LABEL: Readonly<Record<NextAction, string>> = {
   start: 'Start Ready Tasks',
@@ -61,7 +61,7 @@ export interface GoalsListProps {
   readonly project: ProjectViewDto;
   readonly goals: readonly GoalSummaryDto[];
   /** Each goal's tasks that are ready to start, by goal id. */
-  readonly ready: ReadonlyMap<string, number>;
+  readonly ready: ReadonlyMap<GoalId, number>;
   readonly onStart: (goal: GoalSummaryDto) => void;
 }
 

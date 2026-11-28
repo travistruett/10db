@@ -61,7 +61,7 @@ function madeGoals(
 ): { readonly goalId: GoalId; readonly title: string; readonly tasks: number }[] {
   if (result.createdNow === 0) return [];
   return result.results.flatMap((r) => {
-    const row = rows.find((p) => p.key === r.key);
+    const row = rows.find((p) => p.key === r.key && p.kind === r.kind);
     return r.kind === 'goal' && r.goalId !== undefined && row !== undefined
       ? [{ goalId: r.goalId, title: proposalTitle(row), tasks: r.taskIds.length }]
       : [];

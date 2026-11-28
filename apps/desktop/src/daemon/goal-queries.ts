@@ -6,6 +6,7 @@ import { useDaemon } from './provider';
 export const goalKeys = {
   all: ['goals'],
   list: (projectId: ProjectId) => ['goals', projectId] as const,
+  one: (goalId: GoalId | null) => ['goals', 'one', goalId] as const,
 } as const;
 
 /**
@@ -44,7 +45,7 @@ export function useGoals(projectId: ProjectId | null) {
 export function useGoal(goalId: GoalId | null) {
   const { client } = useDaemon();
   return useQuery({
-    queryKey: ['goals', 'one', goalId],
+    queryKey: goalKeys.one(goalId),
     queryFn: async () =>
       goalId === null
         ? null

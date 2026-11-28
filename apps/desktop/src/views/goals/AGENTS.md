@@ -3,9 +3,10 @@
 Goals (`/goals`, the rail's first project item, above Board): the chosen project's goals, and one goal's page.
 
 - `goals-view.tsx` is the route's view. With no `goal` it shows the chosen project's list; with `?goal=<id>` it
-  reads the goal (`useGoal`, `GET /goals/:goalId`) to learn its project, so a link from any project's page opens
-  it, then that project's `useGoals` for its summary. `?task=<id>` mounts the Board's `ProjectTaskDrawer` over
-  either, as Factory does; closing drops `task` with `replace`. Opening a goal's page reads its digest once
+  reads the goal (`useGoal`, `GET /goals/:goalId`) to learn its project and makes that project the chosen one,
+  so a link from any project's page opens it and its Board and All Goals links stay in its project, then that project's `useGoals` for its summary. `?task=<id>` mounts the Board's `ProjectTaskDrawer` over
+  either, as Factory does; closing drops `task` with `replace`. A goal that is gone (removed, or its project
+  removed) shows "This goal is gone" with All Goals, not an error. Opening a goal's page reads its digest once
   (`useOpenGoal`), which moves its "since you last looked" mark, as opening it in Factory does.
 - `goals-list.tsx` is one raised table, a line per goal on `goals-list.module.css`'s shared columns (dot, title,
   bar and merged/total, status word, the next step's short words, one action, last change) under Needs you
@@ -16,8 +17,8 @@ Goals (`/goals`, the rail's first project item, above Board): the chosen project
 - `goal-next-step.ts` (`nextStep`) is the one rule for what a goal's next step is, by status and ready count:
   a sentence for the page, a few words for the list, and the action. A draft says how many of its tasks are
   ready and what the rest wait on.
-- `goal-page.tsx`: the title row holds only the title and the project (`ScopeBadge`); All Goals, the title,
-  the status badge and the ⋯ menu (Show on Board, Show in Factory, Remove Draft Goal) open the content. The
+- `goal-page.tsx`: the title row holds only the title and the project (`ScopeBadge`), and the content never
+  repeats the title (DESIGN.md); All Goals, the status badge and the ⋯ menu (Show on Board, Show in Factory, Remove Draft Goal) open the content. The
   left column is the Next step panel (its button), then Factory's open-goal parts reused whole (`GoalBar`,
   `NeedsYou`, `WaitingOnOthers`, `GoalTasks`, `SinceYouLooked`, `GoalFooter`); the right is About This Goal
   (objective, what matters most, the notes as Markdown, folded until Show All), Done When (each criterion,

@@ -55,6 +55,8 @@ export interface GoalPageProps {
   readonly rows: readonly TaskRow[];
   /** The task rows' runs or batches are still loading. */
   readonly loading: boolean;
+  /** Why the task rows could not be read, when they could not. */
+  readonly error: string | null;
   readonly opened: OpenedDigest;
   readonly onStart: () => void;
 }
@@ -72,7 +74,15 @@ const CHECK_LABEL: Readonly<Record<CriterionCheck, string>> = {
  * builder, its tasks and what changed; the right says what it is for: the objective, the notes, the
  * criteria and the session it was planned in. Its actions sit with its title, not in the title row.
  */
-export function GoalPage({ project, summary, rows, loading, opened, onStart }: GoalPageProps) {
+export function GoalPage({
+  project,
+  summary,
+  rows,
+  loading,
+  error,
+  opened,
+  onStart,
+}: GoalPageProps) {
   const { goal, digest } = summary;
   const look = GOAL_STATUS_LOOK[digest.status];
   const ready = rows.filter((r) => r.bucket === 'ready').length;
@@ -93,23 +103,15 @@ export function GoalPage({ project, summary, rows, loading, opened, onStart }: G
             All Goals
           </Group>
         </Anchor>
-        <Group justify="space-between" wrap="nowrap" align="flex-start" gap="xl">
-          <Stack gap={6} style={{ minWidth: 0 }}>
-            <Text component="h2" fz={22} fw={650} c="bright" lh={1.25} m={0}>
-              {goal.title}
-            </Text>
-            <Group gap="xs">
-              <Badge color={look.color} variant="light" size="md" tt="none">
-                {goalStatusWord(digest)}
-              </Badge>
-              {summary.newItems > 0 ? (
-                <Text
-                  size="sm"
-                  c="dimmed"
-                >{`${String(summary.newItems)} new since you looked`}</Text>
-              ) : null}
-            </Group>
-          </Stack>
+        <Group justify="space-between" wrap="nowrap" align="center" gap="xl">
+          <Group gap="xs">
+            <Badge color={look.color} variant="light" size="md" tt="none">
+              {goalStatusWord(digest)}
+            </Badge>
+            {summary.newItems > 0 ? (
+              <Text size="sm" c="dimmed">{`${String(summary.newItems)} new since you looked`}</Text>
+            ) : null}
+          </Group>
           <Menu position="bottom-end">
             <Menu.Target>
               <ActionIcon variant="default" size={30} aria-label="More goal actions">
@@ -158,7 +160,7 @@ export function GoalPage({ project, summary, rows, loading, opened, onStart }: G
             <GoalBar digest={digest} rows={rows} />
             <NeedsYou digest={digest} rows={rows} />
             <WaitingOnOthers digest={digest} />
-            <GoalTasks rows={rows} loading={loading} error={null} />
+            <GoalTasks rows={rows} loading={loading} error={error} />
             <SinceYouLooked opened={opened} />
             <GoalFooter digest={digest} />
           </Stack>
@@ -388,9 +390,18 @@ function DoneWhen({ summary }: { readonly summary: GoalSummaryDto }) {
 function PlanCard({ summary }: { readonly summary: GoalSummaryDto }) {
   const of = useShapeOf({ goalId: summary.goal.id });
   if (of.isPending) return null;
+  if (of.isError)
+    return (
+      <SideCard title="Plan">
+        <Text
+          size="sm"
+          c="dimmed"
+        >{`Couldn't read where it was planned: ${of.error.message}`}</Text>
+      </SideCard>
+    );
   return (
     <SideCard title="Plan">
-      {of.data?.chatId == null ? (
+      {of.data.chatId === null ? (
         <Text size="sm" c="dimmed">
           Adopted from a brief, with no session of its own.
         </Text>
