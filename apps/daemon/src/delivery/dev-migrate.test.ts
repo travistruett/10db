@@ -13,8 +13,12 @@ afterEach(() => {
 });
 
 /** A landing of one migration file into the base: the commit before it and the commit it made. */
-function landing(title: string, file: string): { batch: BatchDto; from: string; to: string } {
+async function landing(
+  title: string,
+  file: string,
+): Promise<{ batch: BatchDto; from: string; to: string }> {
   const batch = h.starter.startTask(h.addTask(title).id);
+  await h.jobs.idle();
   const from = h.git$('rev-parse', 'HEAD');
   const to = h.commit(file, 'create table notes (id integer);\n');
   return { batch, from, to };
@@ -30,7 +34,7 @@ const land = (l: { batch: BatchDto; from: string; to: string }) =>
 describe('a landing that brings migrations', () => {
   it("runs the project's migrate command in its folder and posts an Activity row, with no card", async () => {
     setMigrate('echo "applied from $(pwd)"');
-    await land(landing('Notes', 'db/migrations/0042_notes.sql'));
+    await land(await landing('Notes', 'db/migrations/0042_notes.sql'));
 
     expect(h.cards()).toEqual([]);
     const notice = h.only(h.notices().filter((n) => n.key.startsWith('migrate-after-landing:')));
@@ -45,7 +49,7 @@ describe('a landing that brings migrations', () => {
 
   it('raises one card with the output when the command fails, however often the landing is seen', async () => {
     setMigrate('echo "relation notes already exists"; exit 3');
-    const l = landing('Notes', 'db/migrations/0042_notes.sql');
+    const l = await landing('Notes', 'db/migrations/0042_notes.sql');
     await land(l);
     await land(l);
 
@@ -57,18 +61,18 @@ describe('a landing that brings migrations', () => {
   });
 
   it('asks once per project how it migrates when no command is declared', async () => {
-    await land(landing('Notes', 'db/migrations/0042_notes.sql'));
+    await land(await landing('Notes', 'db/migrations/0042_notes.sql'));
     const asked = h.only(h.cards());
     expect(asked.title).toBe(`Tell 10db how ${h.project.name} migrates`);
     h.inbox.resolve(asked.id, 'answered');
 
-    await land(landing('Tags', 'db/migrations/0043_tags.sql'));
+    await land(await landing('Tags', 'db/migrations/0043_tags.sql'));
     expect(h.cards()).toEqual([]);
   });
 
   it('runs nothing for a landing that brings no migrations', async () => {
     setMigrate('exit 1');
-    await land(landing('Copy', 'src/ui/copy.ts'));
+    await land(await landing('Copy', 'src/ui/copy.ts'));
     expect(h.cards()).toEqual([]);
   });
 });

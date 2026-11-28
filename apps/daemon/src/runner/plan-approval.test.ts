@@ -3,13 +3,7 @@ import { createDeliveryJobs } from '../delivery';
 import { createGit } from '../git';
 import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from '../recovery';
-import {
-  activeClaims,
-  updateInboxItem,
-  getWorkstreamRow,
-  listInbox,
-  pageActivity,
-} from '@10db/db';
+import { activeClaims, updateInboxItem, getWorkstreamRow, listInbox, pageActivity } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 

@@ -119,11 +119,7 @@ const cardFor = (reason: string, owns: BuilderOwns = BuilderOwns.ProductAndTaste
  * builder's the brief left out. Anything unsaid is doubt, and doubt is the builder's. `asking` is the builder's
  * Ask Me Next Time for this rule.
  */
-export function planGate(
-  steps: readonly WorkstreamStep[],
-  to: number,
-  asking: boolean,
-): PlanGate {
+export function planGate(steps: readonly WorkstreamStep[], to: number, asking: boolean): PlanGate {
   if (asking) return cardFor('you asked to see plans before they are built');
   const before = steps.slice(0, to);
   const planAt = before.findLastIndex((s) => s.role === StepRole.Plan && s.result !== null);
