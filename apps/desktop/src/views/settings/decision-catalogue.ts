@@ -95,6 +95,18 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
     mode: DecisionMode.Shadow,
     note: 'Each question goes to the model with its watchpoint’s files and up to 60 000 characters of their changes. A watchpoint with a question but no lines makes no match of its own.',
   },
+  [JudgeDecision.OwnershipTest]: {
+    group: DecisionGroup.Delivery,
+    label: 'Whether a Change Is Yours to Decide',
+    asks: 'After a pull request is opened: does the change do something that can’t be taken back, change what the product does or looks like beyond what the task asked, or publish or message anyone in your name? One yes/no question for each, asked together once when a batch ships its pull request.',
+    onAnswer:
+      'Logged with its three answers; nothing is shown, and it never raises a card, holds a pull request or changes what merges yet.',
+    whenUnsure:
+      'The answer is logged as it came; with no Decisions account the questions are not asked.',
+    fellBack: 'nothing was asked',
+    mode: DecisionMode.Shadow,
+    note: 'The model reads the tasks’ titles and criteria and up to 60 000 characters of the pull request’s changes. Whether a pull request touches a guardrail path is decided by 10db’s list of paths alone, never by this.',
+  },
   [JudgeDecision.TestValue]: {
     group: DecisionGroup.Delivery,
     label: 'Tests a Step Added',

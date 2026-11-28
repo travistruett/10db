@@ -55,6 +55,11 @@ export const JudgeDecision = {
   AcceptanceSecond: 'acceptance_second',
   /** Watchpoints: does a run's change do what a watchpoint's question asks about, in the files its rules left open? */
   WatchpointQuestion: 'watchpoint_question',
+  /**
+   * Ownership: which of the builder's three judgment questions (a move that can't be taken back, a change to what
+   * the product does or looks like, a promise in the builder's name) a shipped change raises, in shadow.
+   */
+  OwnershipTest: 'ownership_test',
 } as const;
 export type JudgeDecision = (typeof JudgeDecision)[keyof typeof JudgeDecision];
 
@@ -151,6 +156,7 @@ export const JudgeConfig = z.object({
     [JudgeDecision.WatchpointQuestion]: JudgeDecisionConfig.default({
       ...WATCHPOINT_QUESTION_DECISION,
     }),
+    [JudgeDecision.OwnershipTest]: shapeDecision(),
   }),
 });
 export type JudgeConfig = z.infer<typeof JudgeConfig>;
@@ -177,6 +183,7 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
     [JudgeDecision.Acceptance]: { ...ACCEPTANCE_DECISION },
     [JudgeDecision.AcceptanceSecond]: { ...ACCEPTANCE_SECOND_DECISION },
     [JudgeDecision.WatchpointQuestion]: { ...WATCHPOINT_QUESTION_DECISION },
+    [JudgeDecision.OwnershipTest]: { ...DEFAULT_DECISION },
   },
 };
 
@@ -231,6 +238,7 @@ export const JudgeConfigPatch = z
         [JudgeDecision.Acceptance]: JudgeDecisionConfigPatch,
         [JudgeDecision.AcceptanceSecond]: JudgeDecisionConfigPatch,
         [JudgeDecision.WatchpointQuestion]: JudgeDecisionConfigPatch,
+        [JudgeDecision.OwnershipTest]: JudgeDecisionConfigPatch,
       })
       .partial()
       .strict(),

@@ -132,6 +132,8 @@ export const EventType = {
   NoticePosted: 'notice.posted',
   /** The holds the status line shows changed (`StatusDto`); `entityType: 'app'`. */
   StatusChanged: 'status.changed',
+  /** The judge's answers to the ownership test for a root batch's pull request, logged in shadow (`OwnershipShadowData`); `entityType: 'batch'`. */
+  OwnershipShadow: 'ownership.shadow',
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

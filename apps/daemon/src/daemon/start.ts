@@ -1803,6 +1803,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     baseUpdates,
     clock,
     dataDir: opts.dataDir,
+    judge,
     sessionEnv: () => launcher.projectEnv(),
     identifyProcess: (pid) => processes.identify(pid),
     isRunning: (id) => runner?.isRunning(id) ?? false,
