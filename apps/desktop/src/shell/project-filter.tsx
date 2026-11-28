@@ -19,7 +19,7 @@ export function ProjectFilter({
   return (
     <Select
       aria-label="Project"
-      size="sm"
+      size="xs"
       w={200}
       allowDeselect={false}
       data={[

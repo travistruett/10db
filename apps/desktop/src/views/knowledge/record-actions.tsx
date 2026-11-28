@@ -70,7 +70,7 @@ export function NewDecisionButton({ project }: { readonly project: ProjectViewDt
   return (
     <>
       <Button
-        size="sm"
+        size="xs"
         onClick={() => {
           setOpen(true);
         }}
@@ -105,7 +105,7 @@ export function NewPrincipleButton({ project }: { readonly project: ProjectViewD
   return (
     <>
       <Button
-        size="sm"
+        size="xs"
         onClick={() => {
           setOpen(true);
         }}

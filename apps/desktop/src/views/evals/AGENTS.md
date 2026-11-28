@@ -23,19 +23,19 @@
     and its `where` path). With the No Eval filter on, a line above the table says how many sites each call
     pattern found, so a pattern that is too broad shows.
   - An unlinked file row (found by file name, no suite uses it): the path and a dim line; no button of its own,
-    since the notice above the table carries Assess Now and assessing links it. Before an assessment the No Eval
+    since the notice above the table carries Assess and assessing links it. Before an assessment the No Eval
     tile counts files alone, says "not assessed" (a dash when there are none), and its filter opens with a line
     saying so; an assessed project with nothing there reads "Every LLM task has an eval."
 - The byline under the title is only when the evals were last assessed ("Assessed 2 hours ago", the exact time and
-  commit in a tooltip; "Assessing…"; "Not assessed yet"). It never names a commit or says no model ran. The
+  commit in a tooltip; "Assessing…"). Before the first assessment there is none: the notice or empty state says so. It never names a commit or says no model ran. The
   first read shows `EvalsSkeleton` (`evals-skeleton.tsx`): tile placeholders over the table's real headings and five
   rows shaped like the data, after `page-loading.tsx`'s delay.
-- `assess-action.tsx` is the one **Assess Now** button (busy while an assessment runs, whoever started it). Where the
+- `assess-action.tsx` is the one **Assess** button (busy while an assessment runs, whoever started it). Where the
   daemon says it has no model to ask (`unavailable`: a Codex-only builder with no other account), the same place
   offers "Copy a Prompt for Your Own Session", the sentence to paste in a session that runs the `10db-task` skill's
   "Assess a project's evals", and says why. `AssessmentNotice` heads the Evals page with the state: assessing, unavailable,
-  failed (the reason) or "Not assessed yet" with Assess Now. A project with no eval file and no result is the
-  `NoEvals` empty state: New Eval (primary) and Assess Now.
+  failed (the reason) or "Not assessed yet" with Assess. A project with no eval file and no result is the
+  `NoEvals` empty state: New Eval (primary) and Assess, both at the empty state's button size.
 - A suite row opens `SuiteDrawer` (`suite-drawer.tsx`, `GET /projects/:id/evals/:suiteKey?run=`). From the top: the title and
   meta, the bar, and a verdict in plain words for the shown run (`runVerdict` in `eval-figures.ts`: which models pass
   every gate and how many each misses, counts instead of names past three models, "Cheapest that passes" when a
@@ -53,7 +53,7 @@
   runs mark "new eval" where the fingerprint changed.
 - When HEAD has moved past the assessed commit and the manifest misses something (`drift`), the Evals page opens with a
   bordered "Changed since the last assessment" line: new eval files no suite links, new LLM calls with no eval and
-  paths the manifest names that are gone, each listed, with Assess Now. It is information on the page only.
+  paths the manifest names that are gone, each listed, with Assess. It is information on the page only.
 - Models (`by-model.tsx`, `GET /projects/:id/eval-models`, fetched when the page opens; paged at 25 only past 25 models): one row per model, its
   suites passed of those it ran, the ones it failed, the cost of one run of each and p50. A row click picks the
   model, and "Compare with" (a `Select`) puts a second model beside it per suite (`model-compare.ts`: the suites
@@ -90,7 +90,7 @@
   the exit code and the output's tail; an interrupted run whose stop command didn't run says the work in the
   containers may still be running. The window can close while a run goes: the drawer lists the last five runs, and
   a running one keeps its Stop. A suite whose manifest entry has no `live` says 10db doesn't know how the
-  command runs yet and offers Assess Now (or the prompt to paste where 10db can't assess), no Run. `eval.live_run_changed` refetches the evals queries and the covered
+  command runs yet and offers Assess (or the prompt to paste where 10db can't assess), no Run. `eval.live_run_changed` refetches the evals queries and the covered
   tasks' markers.
 - Model sweeps (`sweep-actions.tsx`, `try-models-modal.tsx`): beside Run, a suite whose live settings take models
   (`preview.models`) offers **Try Other Models** and **Find Cheapest Passing**; one that doesn't says "This suite's command
