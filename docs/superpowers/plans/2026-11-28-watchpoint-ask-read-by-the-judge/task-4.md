@@ -15,7 +15,7 @@ task 3 has merged, and can merge any day: the wait is in the daemon.
   `apps/desktop/e2e/loop.spec.ts`: extended.
 - `apps/daemon/src/watchpoints/AGENTS.md`: as built.
 
-**Implements** (index, Interfaces): `readActs`. **Calls:** `watchpointReadAgreement`, `readVerdict`, `holdsMerge`,
+**Implements** (index, Interfaces): `readActs`. **Calls:** `watchpointReadAgreement`, `readVerdict`, `holdsMerge` (both task 1's, in `read.ts`),
 `watchpointHoldOf` (unchanged: it already reads `acted` reads).
 
 **When it acts.** `readActs`'s five rows, with the clock injected. Zero scored reads still act after 7 days: a

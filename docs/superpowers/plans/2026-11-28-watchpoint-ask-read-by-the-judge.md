@@ -33,7 +33,8 @@ the plan only, and no task changes a guardrail file.
 2. Send Back on a held card closes the pull request, the goal's other tasks in it included, and files a task with
    the note. Fixing into the same pull request is a follow-up.
 3. One card per task, as today. A goal's tasks share a pull request, so each card names the tasks waiting.
-4. Merge approves the diff it showed, by hash. A later change to those files holds again.
+4. Merge approves the diff it showed, by hash. A later change to those files holds again. A diff 10db could not
+   read in full can't be approved in 10db: its card says to merge on GitHub or send it back.
 5. "Is this destructive" is asked of every Ask hit, not only of migrations.
 6. A Workbench pass's pull request and a landing into a local copy are not held; the card says so. A follow-up.
 7. The read acts after 7 days if no clean read was sent back; otherwise one card asks whether to let it.
@@ -96,8 +97,9 @@ export function readVerdict(input: {
   readonly partial: boolean; // the judge was not shown every hunk
   readonly floor: number;
 }): WatchpointReadVerdict | null; // null: not read (Show)
+export function holdsMerge(verdict: WatchpointReadVerdict): boolean; // finding, doubt, destructive, hold
 export function readWatchpointHits(
-  deps: { judge: Judge; read: QuestionDiffReader }, // the shapes question.ts uses
+  deps: { judge: Judge; read: WatchpointChangeReader }, // hits-after.ts's type, as askWatchpointQuestions takes
   hits: readonly WatchpointHit[],
   ids: { projectId: ProjectId; workstreamId: WorkstreamId },
 ): Promise<WatchpointRead[]>;
@@ -114,8 +116,7 @@ export function readActs(input: {
   readonly now: Date;
 }): { readonly acts: boolean; readonly ask: boolean };
 
-// apps/daemon/src/delivery/watchpoint-hold.ts
-export function holdsMerge(verdict: WatchpointReadVerdict): boolean; // finding, doubt, destructive, hold
+// apps/daemon/src/delivery/watchpoint-hold.ts (imports holdsMerge from '../watchpoints', the entry point)
 export function watchpointHoldOf(
   db: DbReader,
   root: BatchDto,
@@ -169,7 +170,10 @@ it as `unread`.
   hold; a later unreadable or skipped reading never releases an earlier one.
 - A hit holds when its loudness is Hold, or its `reads` entry has `acted: true` and `holdsMerge(verdict)`.
 - A holding hit is released by an answered Look card of that workstream with Merge whose entry for the watchpoint
-  carries the hit's `hash`. A hit with no hash is never released by an earlier Merge.
+  carries the hit's `hash`.
+- A holding hit with no hash (10db could not read its whole diff) is released by nothing in 10db: no Merge matches
+  it, and Merge on its card is refused, as the guardrail hold refuses a diff it could not read. The builder merges
+  the pull request on GitHub or answers Send Back; either ends the hold.
 
 | Moment                                               | What happens                                                                                  |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -180,6 +184,8 @@ it as `unread`.
 | Held, a waiting workstream with no open card         | `ensureHeldCard` raises it again, with the pull request's URL                                 |
 | Merge                                                | The answer is the release; after the write, `armApproved` reads the seam and arms if nothing else holds |
 | Merge before the pull request exists                 | Recorded; the ship finds the hit released and arms as it does today                           |
+| Merge, a holding hit on the card has no hash         | Refused (`InboxAnswerRefused`): "10db could not read this diff, so it can't approve it. Merge the pull request on GitHub yourself, or send it back". Nothing is written, the card stays open and held, so `ensureHeldCard` raises nothing. The card's body says so up front |
+| The builder merges a held pull request on GitHub     | The merged row below: the held cards are withdrawn, a hashless one included                   |
 | A later run changes a held file                      | A new hash: held again, the card raised afresh                                                |
 | Send Back, held, pull request open                   | Follow-up filed with the note, the URL and the branch; `dropped: true`; then the pull request is closed |
 | GitHub refuses the close                             | `dropped: false`; still held; the could-not-close card is open                                |
@@ -193,7 +199,7 @@ it as `unread`.
 
 One track; each task is one pull request and a fresh implementer.
 
-1. `task-1.md`: contracts, `readVerdict`, the hit hash, the read in shadow, the agreement count.
+1. `task-1.md`: contracts, `readVerdict`, `holdsMerge`, the hit hash, the read in shadow, the agreement count.
 2. `task-2.md`: the hold for loudness Hold: `watchpoint-hold.ts`, the seam in `ship.ts`, Merge and Send Back.
 3. `task-3.md` (Feature): the card's Merge in the app, Hold offered in Settings, the Decisions row.
 4. `task-4.md`: the read acts: `readActs`, clean reads without a card, findings held, the disagreement card.

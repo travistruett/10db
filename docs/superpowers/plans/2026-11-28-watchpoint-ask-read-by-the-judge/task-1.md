@@ -15,8 +15,10 @@ notice or pull request changes.
 - `apps/daemon/src/runner/runner.ts` (`watchpointReadingAfter`): calls the read and stores `reads`.
 - `apps/daemon/src/watchpoints/AGENTS.md`: as built.
 
-**Implements** (index, Interfaces): everything under `judge.ts`, `watchpoint-hit.ts`, `read.ts`, and
-`watchpointReadAgreement`. **Calls:** `questionDiff` and the judge as `watchpoints/question.ts` does.
+**Implements** (index, Interfaces): everything under `judge.ts`, `watchpoint-hit.ts`, `read.ts` (`readVerdict`,
+`holdsMerge`, `readWatchpointHits`), and `watchpointReadAgreement`. `holdsMerge` is exported from the watchpoints
+entry point (`watchpoints/index.ts`) for task 2. **Calls:** `questionDiff` and the judge as `watchpoints/question.ts`
+does; `read` is `WatchpointChangeReader` (`hits-after.ts`), the type `askWatchpointQuestions` takes.
 
 **The hash.** In `hits-after.ts`, before the 24 KB clip: `hash` is the sha256 of the unclipped diff of the hit's
 files over the run's own range. A hit whose diff could not be read in full gets no hash.
@@ -31,7 +33,7 @@ has `acted: false`, the judge row is logged with `JudgeOutcome.Shadow`, and with
 
 **The agreement.** `watchpointReadAgreement` follows `shadowAgreement` in `shape/jev.ts`. Over readings whose
 `reads` have `acted: false` and whose workstream's Look card was answered: a `clean` read agrees with Looks Right, a
-verdict `holdsMerge` would hold agrees with Send Back. `cleanButSentBack` counts clean reads the builder sent back;
+verdict `holdsMerge` (this task's, in `read.ts`) is true for agrees with Send Back. `cleanButSentBack` counts clean reads the builder sent back;
 `firstAskedAt` is the oldest shadow read. `unread` and `hold` entries are not scored.
 
 **Provider parity.** With no account decisions run on, nothing is asked and `reads` holds `unread`; nothing depends
@@ -39,7 +41,8 @@ on it.
 
 **State-table rows:** `readVerdict`'s nine rows.
 
-**Test (`read.test.ts`, pure).** One table test over `readVerdict`'s rows. Show it red first.
+**Test (`read.test.ts`, pure).** One table test over `readVerdict`'s rows, each row also naming what `holdsMerge`
+answers for its verdict. Show it red first.
 
 `Value: protects=which judge readings of a hit hold a pull request; fails_when=a doubt, a fallback, a partial read or
 a destructive answer reads as clean; why_new=merge rule table; no_claim=the judge's accuracy`.

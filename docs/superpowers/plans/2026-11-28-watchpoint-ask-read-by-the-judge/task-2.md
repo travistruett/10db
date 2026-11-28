@@ -5,7 +5,7 @@ task 1 has merged. Only loudness Hold holds here; task 4 adds the judge's verdic
 
 **Files:**
 
-- New `apps/daemon/src/delivery/watchpoint-hold.ts`: `holdsMerge`, `watchpointHoldOf`, and the one function that
+- New `apps/daemon/src/delivery/watchpoint-hold.ts`: `watchpointHoldOf`, and the one function that
   says whether a workstream's landing can be held (its batch delivers by pull request) and names its root.
 - `apps/daemon/src/delivery/ship.ts`: `heldForBuilder` and `ensureHeldCard`.
 - `apps/daemon/src/delivery/pr-watch.ts`: beside `clearGuardrailHold`, withdraw the root's held Look cards.
@@ -19,7 +19,7 @@ task 1 has merged. Only loudness Hold holds here; task 4 adds the judge's verdic
 - `AGENTS.md` in `delivery`, `watchpoints` and `inbox`: as built.
 
 **Implements** (index, Interfaces): `watchpoint-hold.ts`, `heldForBuilder`, `closeHeldPullRequest`.
-**Calls:** `holdRootOf`, `readGuardrailHold`, `disarmBeforePush`, `armApproved`, `patchCiOutOfMoves`
+**Calls:** `holdsMerge` (task 1's, imported from `../watchpoints`), `holdRootOf`, `readGuardrailHold`, `disarmBeforePush`, `armApproved`, `patchCiOutOfMoves`
 (`ci-stop.ts`), `WatchpointCardDetail`, `WatchpointChoice.Merge`.
 
 **The seam.** `heldForBuilder` reads `readHold` (unchanged) and `watchpointHoldOf(db, root)`;
@@ -40,18 +40,23 @@ note", and the body names the other tasks the close drops.
 
 - Merge: the answered card is the release, so nothing else is written. After the commit, with a pull request,
   `shipper.armApproved(rootId, prUrl)`; without one, the ship arms.
+- Merge when a holding entry on the card has no `hash`: throw `InboxAnswerRefused`, as `guardrail-hold-card.ts`
+  does for a null hash, with the index's sentence. Nothing is written and the card stays open, so the hold never
+  loops through `ensureHeldCard`. Such a card's body says before the builder answers: "10db could not read this
+  whole diff, so it can't approve it. Merge the pull request on GitHub, or send it back." A merge on GitHub ends
+  the hold through `pr-watch.ts`, which withdraws the card.
 - Send Back with `held` and a pull request: the follow-up as today plus the URL and branch;
   `patchCiOutOfMoves(w, rootId, { dropped: true })`; after the commit, `closeHeldPullRequest`.
 - The other Send Back rows are in the index's moment table.
 
 **Provider parity.** Identical on every account kind; nothing here asks a model.
 
-**State-table rows:** `watchpointHoldOf`'s four rules and the moment table.
+**State-table rows:** `watchpointHoldOf`'s five rules and the moment table.
 
 **Test (extend `ship.test.ts`: real shipper, real git, fake gh).**
 
 - (a) a run whose reading has a Hold hit ships: the pull request exists, no `prAutoMerge`, one card with Merge;
-- (b) Merge: one `prAutoMerge`;
+- (b) Merge: one `prAutoMerge`; the same hit stored without a hash refuses Merge, and nothing is armed;
 - (c) a catch-up that merges main's change to a watched file holds nothing;
 - (d) a reading with `reads` or `shadow` and no hit does not hold;
 - (e) a new shipper on the same database refuses `retryMerge`, and the card is open;
