@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  DecisionRule,
   InboxKind,
   WORKSTREAM_TRANSITIONS,
   type BatchId,
@@ -31,6 +32,7 @@ import {
   insertTask,
   listInbox,
   seedProject,
+  setRuleAsking,
   setTaskStatus,
   transitionWorkstream,
   type Store,
@@ -246,12 +248,16 @@ export interface DeliveryHarness {
    * The ship trigger, when on, still calls the first one.
    */
   restartShipper(): Shipper;
+  /** Sets the project's worktree-leftovers rule to ask, so a finished worktree's files raise today's card. */
+  askBeforeSaving(): void;
   /** The current shipper's clock: advancing it lets a throttled catch-up run again. */
   readonly shipClock: ManualClock;
   /** Where the shipper writes PR bodies and gate logs. */
   readonly dataDir: string;
   /** The daemon's worktree root (its hashed level), a real path not made until the first cut. */
   readonly worktreeRoot: string;
+  /** Where a finished worktree's only-here files are saved: a folder of the test's own, not made until a save. */
+  readonly keptRoot: string;
   /** Workstreams whose runner is live, as the shipper's `isRunning` sees them. */
   readonly running: Set<WorkstreamId>;
   readonly project: ProjectDto;
@@ -336,6 +342,7 @@ export function createDeliveryHarness(
   const gitRefusals: GitTrustError[] = [];
   const worktrees = tempDir('worktrees');
   const worktreeRoot = join(realpathSync(worktrees.path), 'level');
+  const keptRoot = join(tempDir('kept').path, 'kept');
   const realGit = createGit({ onRefused: (error) => gitRefusals.push(error), worktreeRoot });
   const git = opts.wrapGit?.(realGit) ?? realGit;
   const gh = new FakeGh();
@@ -402,6 +409,7 @@ export function createDeliveryHarness(
     putBack: (input) =>
       putBackKeptWork({ state, git, inbox, jobs, logger: logs.logger, clock: installClock }, input),
     worktreeRoot,
+    keptRoot,
     dependencies: createWorktreeDependencies(worktreeTools),
     generators: createWorktreeGenerators(worktreeTools),
     copyTeardown: createCopyTeardown({
@@ -455,6 +463,11 @@ export function createDeliveryHarness(
     get shipper() {
       return shipper;
     },
+    askBeforeSaving() {
+      state.write((c) => {
+        setRuleAsking(c, seeded.id, DecisionRule.WorktreeLeftovers, true);
+      });
+    },
     restartShipper() {
       shipper = makeShipper();
       return shipper;
@@ -464,6 +477,7 @@ export function createDeliveryHarness(
     },
     dataDir: data.path,
     worktreeRoot,
+    keptRoot,
     running,
     project: seeded,
     repo: remote.repo.path,

@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import {
   BatchId,
   ChatId,
@@ -40,6 +40,7 @@ import type { ChatMergedCheck } from './chat-worktree-merged';
 import { raise, withdraw } from './context';
 import { dropOrphanStarts } from './start-refs';
 import { unseededIgnoredFiles } from './worktree-cleanup';
+import { announceSaved, saveLeftovers, type Leftovers } from './worktree-save';
 
 export interface SweepDeps {
   readonly state: StateStore;
@@ -48,6 +49,8 @@ export interface SweepDeps {
   /** This daemon's hashed level of the worktree root: the sweep never looks outside it. */
   readonly root: string;
   readonly logger: Logger;
+  /** Where a worktree's only-here files are saved before it is removed; `~/.10db/kept` when absent. */
+  readonly keptRoot?: string | undefined;
   /** Whether a closed chat's branch has landed; absent, a closed chat's worktree is never removed as merged. */
   readonly merged?: ChatMergedCheck;
 }
@@ -125,6 +128,44 @@ async function changesIn(deps: SweepDeps, main: string, path: string): Promise<s
     deps.logger.warn({ path, err: message(error) }, 'orphaned worktree unreadable');
     return null;
   }
+}
+
+/**
+ * Whether the worktree at `path` may go now: it holds nothing of its own, or what it alone holds is
+ * saved and verified (the answer says which). Null when it must stay, with the card that says why
+ * raised: its changes or git-ignored files could not be read, or could not all be saved, or the
+ * rule that saves them asks.
+ */
+async function readyToRemove(
+  deps: SweepDeps,
+  project: ProjectDto,
+  path: string,
+): Promise<Extract<Leftovers, { kind: 'saved' }> | null> {
+  const main = project.repoPath;
+  const save = (changed: readonly string[], ignored: readonly string[]): Promise<Leftovers> =>
+    saveLeftovers(deps, project, { name: basename(path), path, changed, ignored, at: new Date() });
+  const changed = await changesIn(deps, main, path);
+  if (changed === null) {
+    raise(deps.inbox, project.id, worktreeCards.orphanKept(main, path, null, []));
+    return null;
+  }
+  const ignored = await unseededIgnoredFiles(deps.git, main, path, project.worktreeSeed);
+  if (changed.length > 0 || ignored === null) {
+    const outcome = ignored === null ? null : await save(changed, ignored);
+    if (outcome?.kind === 'saved') return outcome;
+    raise(
+      deps.inbox,
+      project.id,
+      worktreeCards.orphanKept(main, path, ignored === null ? null : changed, ignored ?? []),
+    );
+    return null;
+  }
+  const loose = looseWork(ignored);
+  if (loose.length === 0) return { kind: 'saved', dir: null, saved: [] };
+  const outcome = await save([], ignored);
+  if (outcome.kind === 'saved') return outcome;
+  raise(deps.inbox, project.id, worktreeCards.orphanIgnored(main, path, loose));
+  return null;
 }
 
 /**
@@ -225,31 +266,15 @@ async function sweepChatEntry(
   const verdict = chatOrphanVerdict(deps.state, entry, deps.root);
   if ('keep' in verdict) return false;
   if ('check' in verdict && !(await chatFinished(deps, project, entry, verdict.chat))) return false;
-  const changed = await changesIn(deps, main, entry.path);
-  if (changed === null) {
-    raise(deps.inbox, project.id, worktreeCards.orphanKept(main, entry.path, null, []));
-    return false;
-  }
-  const ignored = await unseededIgnoredFiles(deps.git, main, entry.path, project.worktreeSeed);
-  if (changed.length > 0 || ignored === null) {
-    raise(
-      deps.inbox,
-      project.id,
-      worktreeCards.orphanKept(main, entry.path, ignored === null ? null : changed, ignored ?? []),
-    );
-    return false;
-  }
-  const loose = looseWork(ignored);
-  if (loose.length > 0) {
-    raise(deps.inbox, project.id, worktreeCards.orphanIgnored(main, entry.path, loose));
-    return false;
-  }
+  const saved = await readyToRemove(deps, project, entry.path);
+  if (saved === null) return false;
   const outcome = await deps.git.removeWorktree(main, entry.path);
   withdraw(deps.state, deps.inbox, project.id, [
     keptWorktreeKey.orphanChanges(entry.path),
     keptWorktreeKey.orphanIgnored(entry.path),
   ]);
   if (outcome !== 'removed') return false;
+  announceSaved(deps, project, entry.path, saved);
   // The pin and the row's path go together, so a restart never finds one without the other. They are the chat's
   // only when this entry is the worktree the row names (or the chat is gone or archived): a stale entry of a chat
   // that lives elsewhere leaves them alone.
@@ -304,30 +329,8 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
     const orphan = orphanOf(deps.state, entry, deps.root);
     if (orphan === null) continue;
     try {
-      const changed = await changesIn(deps, main, entry.path);
-      if (changed === null) {
-        raise(deps.inbox, project.id, worktreeCards.orphanKept(main, entry.path, null, []));
-        continue;
-      }
-      const ignored = await unseededIgnoredFiles(deps.git, main, entry.path, project.worktreeSeed);
-      if (changed.length > 0 || ignored === null) {
-        raise(
-          deps.inbox,
-          project.id,
-          worktreeCards.orphanKept(
-            main,
-            entry.path,
-            ignored === null ? null : changed,
-            ignored ?? [],
-          ),
-        );
-        continue;
-      }
-      const loose = looseWork(ignored);
-      if (loose.length > 0) {
-        raise(deps.inbox, project.id, worktreeCards.orphanIgnored(main, entry.path, loose));
-        continue;
-      }
+      const saved = await readyToRemove(deps, project, entry.path);
+      if (saved === null) continue;
       const outcome = await deps.git.removeWorktree(main, entry.path);
       withdraw(deps.state, deps.inbox, project.id, [
         keptWorktreeKey.orphanChanges(entry.path),
@@ -339,6 +342,7 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
           deleteAppSetting(w, worktreePinKey(orphan.batchId));
         });
       if (outcome !== 'removed') continue;
+      announceSaved(deps, project, entry.path, saved);
       swept.push(entry.path);
       deps.logger.info(
         { projectId: project.id, batchId: orphan.batchId, path: entry.path },

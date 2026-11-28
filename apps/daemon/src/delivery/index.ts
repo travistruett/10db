@@ -18,6 +18,7 @@ export {
 export { uncarriedSaid } from './notices';
 export { createDependencyChanges, type DependencyChanges } from './dependency-change';
 export { retireWorktree } from './worktree-cleanup';
+export { keptRoot } from './kept-files';
 export { chatWorktreeLosses } from './chat-worktree-losses';
 export { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 export { cutChatWorktree } from './chat-worktree-cut';

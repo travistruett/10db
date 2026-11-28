@@ -54,6 +54,8 @@ export interface DeliveryContext {
   readonly limits: DeliveryLimits;
   /** Where this daemon makes worktrees: the data dir's hashed level, made at the first worktree cut. */
   readonly worktreeRoot: string;
+  /** Where a finished worktree's only-here files are saved before it is removed; `~/.10db/kept` when absent. */
+  readonly keptRoot?: string | undefined;
   /** Brings a new worktree's seeded packages in line with its lockfile. */
   readonly dependencies: WorktreeDependencies;
   /** Regenerates the generated files of a worktree after a merge with its base took the base's. */
