@@ -1,6 +1,6 @@
 import { GoalDigestDto, GoalDto, GoalListDto, type GoalId, type ProjectId } from '@10db/contracts';
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { readJson, type DaemonClient } from './client';
+import { DaemonRequestError, readJson, type DaemonClient } from './client';
 import { useDaemon } from './provider';
 
 export const goalKeys = {
@@ -46,6 +46,9 @@ export function useGoal(goalId: GoalId | null) {
   const { client } = useDaemon();
   return useQuery({
     queryKey: goalKeys.one(goalId),
+    // A goal that is gone stays gone; only other failures are worth asking again.
+    retry: (count, error) =>
+      !(error instanceof DaemonRequestError && error.status === 404) && count < 3,
     queryFn: async () =>
       goalId === null
         ? null

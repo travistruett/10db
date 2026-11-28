@@ -9,6 +9,7 @@ import { Alert, Container } from '@mantine/core';
 import { IconTarget } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
+import { DaemonRequestError } from '../../daemon/client';
 import { useGoal, useGoals, useOpenGoal } from '../../daemon/goal-queries';
 import { useBatches, useTasks, useWorkstreams } from '../../daemon/queries';
 import { ContentWidth } from '../../shell/content-width';
@@ -35,21 +36,44 @@ export function GoalsView({ goal, task }: GoalsViewProps) {
   const { project, projects, select } = useSelectedProject();
   const one = useGoal(goal ?? null);
   const owner = (projects.data ?? []).find((p) => p.id === one.data?.projectId);
-  // A goal's page makes its project the chosen one, so All Goals, the Board and the rail follow it there.
+  const navigate = useNavigate();
+  // A goal's page makes its project the chosen one once, so All Goals, the Board and the rail follow it
+  // there. Choosing another project while the page is open leaves for that project's list.
   const ownerId = goal === undefined ? undefined : owner?.id;
+  const chosenFor = useRef<GoalId | null>(null);
   useEffect(() => {
-    if (ownerId !== undefined && ownerId !== project?.id) select(ownerId);
-  }, [ownerId, project?.id, select]);
+    if (goal === undefined || ownerId === undefined) return;
+    if (chosenFor.current !== goal) {
+      chosenFor.current = goal;
+      if (project?.id !== ownerId) select(ownerId);
+      return;
+    }
+    if (project !== null && project.id !== ownerId) void navigate({ to: '/goals' });
+  }, [goal, ownerId, project, select, navigate]);
   if (goal !== undefined) {
     if (one.isPending || projects.isPending) return <Loading />;
     // A removed goal, or one whose project is gone, is no failure: say so and offer the list.
-    if (one.isError || owner === undefined) return <GoalGone />;
-    return <ProjectGoals key={goal} project={owner} goalId={goal} taskId={task} />;
+    if (one.isError)
+      return one.error instanceof DaemonRequestError && one.error.status === 404 ? (
+        <GoalGone />
+      ) : (
+        <Failed message={one.error.message} />
+      );
+    if (owner === undefined) return <GoalGone />;
+    return (
+      <ProjectGoals
+        key={goal}
+        project={owner}
+        goalId={goal}
+        taskId={task}
+        goalReadAt={one.dataUpdatedAt}
+      />
+    );
   }
   if (projects.isPending) return <Loading />;
   if (projects.isError) return <Failed message={projects.error.message} />;
   if (project === null) return null;
-  return <ProjectGoals project={project} goalId={undefined} taskId={task} />;
+  return <ProjectGoals project={project} goalId={undefined} taskId={task} goalReadAt={0} />;
 }
 
 function Loading() {
@@ -118,10 +142,13 @@ function ProjectGoals({
   project,
   goalId,
   taskId,
+  goalReadAt,
 }: {
   readonly project: ProjectViewDto;
   readonly goalId: GoalId | undefined;
   readonly taskId: TaskId | undefined;
+  /** When the page's goal was read on its own; a list read before it may not have it yet. */
+  readonly goalReadAt: number;
 }) {
   const goals = useGoals(project.id);
   const tasks = useTasks(project.id);
@@ -150,6 +177,18 @@ function ProjectGoals({
     openedFor.current = goalId;
     mutate(goalId);
   }, [goalId, shown, mutate]);
+
+  // A goal just made can be missing from a list read before the goal was: read the list again, and say
+  // the goal is gone only when a list read after it still lacks it.
+  const { refetch } = goals;
+  const stale =
+    goalId !== undefined &&
+    goals.isSuccess &&
+    shown === undefined &&
+    goals.dataUpdatedAt < goalReadAt;
+  useEffect(() => {
+    if (stale) void refetch();
+  }, [stale, refetch]);
 
   if (goals.isPending || tasks.isPending) return <Loading />;
   if (goals.isError) return <Failed message={goals.error.message} />;
@@ -204,7 +243,7 @@ function ProjectGoals({
 
   if (goalId !== undefined) {
     // A goal just made can be missing from a list read before it; the refetch brings it.
-    if (shown === undefined) return goals.isFetching ? <Loading /> : <GoalGone />;
+    if (shown === undefined) return goals.isFetching || stale ? <Loading /> : <GoalGone />;
     return (
       <>
         <GoalPage
