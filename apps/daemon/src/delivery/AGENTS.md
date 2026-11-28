@@ -27,5 +27,19 @@
   `holdAction` reads the whole pull request's diff at ship step 4b, `catchUpSteps` and `retryMerge`; `turnOnAutoMerge`
   and `mergeNow` stay the only callers of `gh.prAutoMerge` and `gh.prMerge`; while held, `gh.prDisableAutoMerge` runs
   before every push.
+- Watchpoint hold (`watchpoint-hold.ts`, `batch-members.ts`, `decisions/2026-11-28-a-watchpoint-hold-is-derived-from-readings-and-answers-not-stored.md`;
+  plan `docs/superpowers/plans/2026-11-28-watchpoint-ask-read-by-the-judge.md`, task 2; built for a watchpoint set to
+  Hold, the judge's verdicts reach it through task 4): a pull request is held while a task of it hits a watchpoint set to Hold
+  and no answered Merge covers that hit's hash. Nothing is stored: `watchpointHoldOf(db, root)` reads each member's (`members`, not
+  cancelled or left out; the root's and its CI-fix batches') newest reading with `skipped === null` and the answered Look cards, so a restart,
+  catch-up or retry derives the same answer, and a later skipped reading never releases an earlier one. The shipper reads it only
+  through `heldForBuilder` (`ship.ts`: the guardrail reading, the watchpoint hold, and `held` for both), which `shipSteps` (before the push,
+  and again at step 4b), `catchUpSteps`, `retryMerge` and `armApproved` all use; `showHold` still shows the guardrail reading alone.
+  After each read `ensureHeldCard` (`ensureHeldCards`) raises the Look card for every waiting task whose card is not open, writes the
+  pull request's URL into one that lacks it, and withdraws the held card of a task that no longer holds, so held always means a card is open.
+  The card is raised at run time by `announceWatchpointReading` (`landing` from `heldLandingOf`: null for a pass's pull request and a local
+  copy, whose card is today's with a sentence saying so). `pr-watch` withdraws the root's held cards beside `clearGuardrailHold`.
+  `createWatchpointHoldAnswers(...).onAnswerInWrite` runs `applyWatchpointAnswer` and returns what follows the commit: Merge arms through
+  `armApproved`, Send Back marks `dropped` in the write and closes the pull request (`closeHeldPullRequest`).
 - `kept-files.ts` saves a worktree's only copies, verified, removing nothing; `worktree-save.ts` saves before removal.
 - Failed ship gate (`decisions/2026-11-27-a-failing-ship-gate-is-fixed-by-10db-until-it-is-out-of-moves.md`): `gate-failure-action.ts` decides; `sendToFix` reopens the batch with one counted fix task (`gate-fix.ts`) and withdraws the card in one write; pass, copy and out-of-moves batches keep the card; SHIPPED and abandon run `clearGateFix`.

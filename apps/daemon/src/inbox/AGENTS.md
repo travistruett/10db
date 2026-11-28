@@ -148,6 +148,10 @@
   `detail.guardrailDiff` (`guardrailPatchDetail`). It is raised and answered from `delivery/guardrail-hold-card.ts`;
   `createGuardrailHoldAnswers(...).onAnswerInWrite` is called from `onFlagAnswerInWrite` in `daemon/start.ts`. A diff
   that could not be read offers only Close, since no hash can be approved.
+- A Look card (`InboxKind.Watchpoint`) that holds a pull request carries `detail.held` and offers Merge and Send Back.
+  `onWatchpointAnswer` returns what runs after the answering write commits (`createWatchpointHoldAnswers` in
+  `daemon/start.ts`): Merge arms the pull request, Send Back closes it. Merge on a card with a holding entry that has
+  no `hash` is refused (`InboxAnswerRefused`) and the card stays open.
 - A CI stop has its card or its pending notice, never neither, and replaces "Pull request checks failed":
   `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's `prCardKey.checks` card in the stop's write, and
   `pr-watch` raises none while `ciStopped` is set. A stop at the limit or on an unchanged head shows the

@@ -53,6 +53,7 @@ import {
 } from './ci-stop';
 import { ghCall, postIn, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
 import { clearGuardrailHold } from './guardrail-hold-card';
+import { withdrawHeldCards } from './watchpoint-hold';
 import {
   baseNotices,
   cancelledNoticeHead,
@@ -1581,6 +1582,7 @@ export function createPrWatch(input: {
           deleteCiOutOfMoves(write, root.id);
           // A merged or closed pull request has nothing left to hold: its card and approval go with it.
           clearGuardrailHold(write, root);
+          withdrawHeldCards(write, root);
         }
         // The catch-up card closes when the pull request merges cleanly or is gone. Not while it is
         // behind: the merge below is asked only of a clean one, and the card is what says it is due.

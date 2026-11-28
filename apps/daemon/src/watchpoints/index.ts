@@ -1,4 +1,12 @@
-export { announceWatchpointReading, applyWatchpointAnswer, watchpointReviewReason } from './card';
+export {
+  announceWatchpointReading,
+  applyWatchpointAnswer,
+  mergeApproval,
+  raiseLookCard,
+  watchpointReviewReason,
+  WatchpointHoldAction,
+  type HeldLanding,
+} from './card';
 export {
   touchedPrincipleWatchpoints,
   watchpointBuildBrief,
@@ -13,7 +21,7 @@ export {
 } from './hits-after';
 export { agentNotesOf, newestWatchpointRow, reviewerNotesOf, withNotes } from './notes';
 export { askWatchpointQuestions, questionDiff } from './question';
-export { readWatchpointHits } from './read';
+export { holdingHits, readWatchpointHits } from './read';
 /** @public The Decisions measures are its caller; while reads stay in shadow none is wired. */
 export { watchpointReadAgreement } from './read-agreement';
 export type { QuestionCandidates } from './covers';

@@ -10,7 +10,6 @@ import {
   isTerminal,
   LANE_STATES,
   latestPerTask,
-  LEFT_OUT_NOTICE_KEY,
   McpToolName,
   McpToolOutputs,
   EventType,
@@ -42,7 +41,6 @@ import {
   getTask,
   insertTask,
   getWorkstream,
-  hasToolOp,
   listBatches,
   listEvidence,
   listPermissionRules,
@@ -57,7 +55,6 @@ import {
   setWorkstreamNotice,
   transitionBatch,
   transitionWorkstream,
-  type DbReader,
   type WriteContext,
 } from '@10db/db';
 import type { Clock } from '../clock';
@@ -79,6 +76,7 @@ import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, gateTimeoutFor, type GateResult, type GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 import { BATCH_CARD_DETAIL, type KeptRevert } from './batch-card';
+import { committed, leftOut, members, replacementRefused, superseded } from './batch-members';
 import { settleBranch } from './branch-cleanup';
 import { copyIdForBatch } from './copy-id';
 import { createCopyLanding } from './copy-landing';
@@ -164,6 +162,7 @@ import {
 } from './pr-text';
 import { readPrTemplate } from './pr-template';
 import { autoTestBudgetLine, TEST_BUDGET_SCRIPT } from './test-budget-reason';
+import { ensureHeldCards, watchpointHoldOf } from './watchpoint-hold';
 import { retireWorktree } from './worktree-cleanup';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 import { ensureWorktreeWhole, reopenWorktreeBatch } from './worktree-repair';
@@ -311,67 +310,6 @@ export interface Shipper {
 }
 
 type ConflictedUpdate = Extract<BaseUpdate, { readonly kind: 'conflicted' }>;
-
-/**
- * A failed member its task started over from: the task's current workstream is another, so nothing
- * can retry this one.
- */
-function superseded(db: DbReader, member: WorkstreamDto): boolean {
-  if (member.state !== WorkstreamState.Failed) return false;
-  const current = getTask(db, member.taskId).workstreamId;
-  return current !== null && current !== member.id;
-}
-
-/** Whether the attempt committed through the commit tool, so its commits may be on the batch's branch. */
-function committed(db: DbReader, member: WorkstreamDto): boolean {
-  return hasToolOp(db, member.id, McpToolName.Commit);
-}
-
-/**
- * Whether Ship without it left this run out of the batch's pull request. Only a failed run is: one
- * that ran again carries its work to the pull request whatever its notice says.
- */
-function leftOut(member: WorkstreamDto): boolean {
-  return member.state === WorkstreamState.Failed && member.notice?.key === LEFT_OUT_NOTICE_KEY;
-}
-
-/**
- * Whether the run that replaced a superseded member has not got going yet, so the attempt may still
- * be the task's only one: the replacement's batch is still being cut (the cut may be refused), or
- * its cut was refused and detached it from any batch, leaving it cancelled before it ran. In both
- * cases the builder could still want the old batch to keep the attempt.
- */
-function replacementUnsettled(db: DbReader, member: WorkstreamDto): boolean {
-  const task = getTask(db, member.taskId);
-  // A closed task will not start again, so nothing is left to wait for.
-  if (task.status === TaskStatus.Cancelled || task.workstreamId === null) return false;
-  const next = getWorkstream(db, task.workstreamId);
-  if (next.batchId === null) return next.state === WorkstreamState.Cancelled;
-  return getBatch(db, next.batchId).state === BatchState.Cutting;
-}
-/**
- * Whether a superseded member is held only because its replacement's cut was refused: the task's
- * latest run is cancelled and detached from any batch, and the task is still open to start again.
- */
-function replacementRefused(db: DbReader, member: WorkstreamDto): boolean {
-  const task = getTask(db, member.taskId);
-  if (task.status === TaskStatus.Cancelled || task.workstreamId === null) return false;
-  const next = getWorkstream(db, task.workstreamId);
-  return next.batchId === null && next.state === WorkstreamState.Cancelled;
-}
-
-/**
- * A batch's members: each task's latest workstream in it, except a superseded one that committed
- * nothing. It holds nothing the batch should wait for, so the batch ships the work of the rest. One
- * that committed stays a member: its commits are on the branch and passed no gate or review, so the
- * batch ships them only through Ship anyway, and its tasks' notice says so (`supersededNotices`).
- * One whose replacement is not yet cut stays too, until the cut has ended (`replacementUnsettled`).
- */
-function members(db: DbReader, batchId: BatchId): WorkstreamDto[] {
-  return latestPerTask(listWorkstreams(db, { batchId })).filter(
-    (m) => !superseded(db, m) || committed(db, m) || replacementUnsettled(db, m),
-  );
-}
 
 /** How many times 10db pushes again by itself after GitHub's server fails a push, before a card. */
 const PUSH_SERVER_RETRIES = 2;
@@ -1242,6 +1180,38 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
+   * Whether anything keeps the root's pull request from being armed or merged until the builder answers: the
+   * guardrail list over its whole change, or a watchpoint set to Hold that a task of it hit and no Merge released.
+   * The one place the two meet; every site that arms, merges or pushes to a pull request reads it, and none
+   * reads either hold alone to decide. The watchpoint hold is derived from stored readings and answered cards, so
+   * a ship, a catch-up, a retry or a restart reads the same answer.
+   */
+  async function heldForBuilder(
+    batch: BatchDto,
+    checkout: string,
+    head: string | null,
+  ): Promise<{
+    guardrail: GuardrailReading;
+    watchpoints: ReturnType<typeof watchpointHoldOf>;
+    held: boolean;
+  }> {
+    const guardrail = await readHold(batch, checkout, head);
+    const watchpoints = watchpointHoldOf(db, getBatch(db, holdRootOf(batch)));
+    return { guardrail, watchpoints, held: guardrail.action === 'hold' || watchpoints.held };
+  }
+
+  /**
+   * Gives every task waiting on a watchpoint hold its open Look card with the pull request's URL, and takes the
+   * card from a task that no longer waits: held always means a card is open, a restart included.
+   */
+  function ensureHeldCard(batch: BatchDto, prUrl: string | null): void {
+    const root = getBatch(db, holdRootOf(batch));
+    deps.state.write((w) => {
+      ensureHeldCards(w, root, prUrl);
+    });
+  }
+
+  /**
    * Turns auto-merge off before a push to a pull request that is held, every time and whatever this run
    * remembers of arming it: a restart forgets that, and a push onto an armed pull request could merge a
    * diff the builder has not seen. GitHub refusing stops the push.
@@ -1294,11 +1264,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
       try {
         const { head, open } = await pullRequestHeadOf(now, repo, prUrl, project.repoPath, signal);
         if (!open) return;
-        const reading = await readHold(now, project.repoPath, head);
-        if (reading.action === 'hold') {
-          showHold(now, prUrl, reading);
-          return;
-        }
+        const { guardrail, held } = await heldForBuilder(now, project.repoPath, head);
+        showHold(now, prUrl, guardrail);
+        ensureHeldCard(now, prUrl);
+        if (held) return;
         await turnOnAutoMerge(now, repo, prUrl, signal, shipCheck(project)?.kind === 'precheck');
       } catch (error) {
         if (stopped()) return;
@@ -1768,8 +1737,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
       // Whether the pull request's whole change touches a guardrail path, read for the head about to go.
       step = 'reading the pull request for guardrail changes';
       const head = await deps.git.branchTip(checkout, branch);
-      const hold = await readHold(batch, checkout, head);
-      if (hold.action === 'hold' && existing?.state === PrState.Open) {
+      const { guardrail: hold, held } = await heldForBuilder(batch, checkout, head);
+      if (held && existing?.state === PrState.Open) {
         step = 'gh pr merge --disable-auto';
         await disarmBeforePush(batch, repo, existing.url, signal);
       }
@@ -1794,7 +1763,13 @@ export function createShipper(deps: ShipperDeps): Shipper {
         // A pull request that touches a guardrail path is armed and merged only by the builder's answer.
         step = 'raising the guardrail card';
         showHold(batch, prUrl, hold);
-        if (batch.autoMerge && hold.action !== 'hold') {
+        ensureHeldCard(batch, prUrl);
+        // The watchpoints' hold read again: a Merge answered while this ship ran releases the pull request.
+        if (
+          batch.autoMerge &&
+          hold.action !== 'hold' &&
+          !watchpointHoldOf(db, getBatch(db, holdRootOf(batch))).held
+        ) {
           step = 'gh pr merge --auto';
           await turnOnAutoMerge(
             batch,
@@ -2734,15 +2709,19 @@ export function createShipper(deps: ShipperDeps): Shipper {
       }
       // A pull request that touches a guardrail path is never left armed under a push: auto-merge goes off
       // first, whatever this run remembers, and a refusal from GitHub stops the push.
-      const hold = await readHold(batch, main, await deps.git.branchTip(main, branch));
-      if (hold.action === 'hold') {
+      const { guardrail: hold, held } = await heldForBuilder(
+        batch,
+        main,
+        await deps.git.branchTip(main, branch),
+      );
+      if (held) {
         try {
           await disarmBeforePush(batch, repo, prUrl, signal);
         } catch (error) {
           if (stopped()) return;
           stop({
             kind: 'other',
-            why: `10db could not turn auto-merge off for this pull request, which changes a guardrail, so it pushed nothing: ${detailOf(error)}`,
+            why: `10db could not turn auto-merge off for this pull request, which is held for you, so it pushed nothing: ${detailOf(error)}`,
           });
           return;
         }
@@ -2750,6 +2729,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       await pushBranch(deps, getBatch(db, batchId), project, branch, signal);
       pushed = true;
       showHold(batch, prUrl, hold);
+      ensureHeldCard(batch, prUrl);
       const resolved = brought.kind === 'merged' ? (brought.resolved ?? []) : [];
       // The base update left this to the push: a merge put back renumbered nothing the batch holds.
       const renumbered = brought.kind === 'merged' ? (brought.renumbered ?? []) : [];
@@ -2774,7 +2754,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       hideNotices(deps.state, batchId, [NOTICE_KEY.baseConflict]);
       withdraw(deps.state, deps.inbox, batch.projectId, [prCardKey.catchUp(batchId)]);
       // A held pull request is not armed again: only the builder's Merge does that.
-      if (hold.action !== 'hold') mergeAgain.add(batchId);
+      if (!held) mergeAgain.add(batchId);
       deps.logger.info(
         { batchId, prUrl, files: resolved.map((r) => r.path) },
         'base merged into the pull request',
@@ -2890,7 +2870,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         if (stopped() || !landsItself(now) || repo === null || prUrl === null) return;
         mergeAgain.delete(batchId);
         // Never armed or merged here while the pull request touches a guardrail the builder has not merged.
-        let hold: GuardrailReading;
+        let hold: Awaited<ReturnType<typeof heldForBuilder>>;
         try {
           const { head, open } = await pullRequestHeadOf(
             now,
@@ -2900,7 +2880,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
             signal,
           );
           if (!open) return;
-          hold = await readHold(now, project.repoPath, head);
+          hold = await heldForBuilder(now, project.repoPath, head);
         } catch (error) {
           if (stopped()) return;
           // Nothing says the pull request is clear of guardrails, so it is asked again once GitHub answers.
@@ -2911,12 +2891,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
           );
           return;
         }
-        if (hold.action === 'hold') {
-          showHold(now, prUrl, hold);
-          deps.logger.info(
-            { batchId, prUrl },
-            'pull request held for a guardrail change: merge not retried',
-          );
+        showHold(now, prUrl, hold.guardrail);
+        ensureHeldCard(now, prUrl);
+        if (hold.held) {
+          deps.logger.info({ batchId, prUrl }, 'pull request held for you: merge not retried');
           return;
         }
         await turnOnAutoMerge(

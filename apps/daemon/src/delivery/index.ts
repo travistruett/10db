@@ -62,6 +62,7 @@ export { finalCheck, stepCheck } from './local-check';
 export { fileFlakyTests, flakeNote, rerunFlaky, type FlakyTest } from './flaky-tests';
 export { prBody } from './pr-text';
 export { watchpointHitsOf } from './watchpoint-hits';
+export { createWatchpointHoldAnswers, heldLandingOf } from './watchpoint-hold';
 export { createShipper, type Shipper } from './ship';
 export { subscribeShipTrigger } from './trigger';
 export { createPrWatch, subscribePrWatch, type PrWatch } from './pr-watch';

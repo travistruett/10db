@@ -4,6 +4,7 @@ import {
   WatchpointLoudness,
   WatchpointReadVerdict,
   type ProjectId,
+  type WatchpointDetail,
   type WatchpointHit,
   type WatchpointRead,
   type WorkstreamId,
@@ -58,6 +59,18 @@ export function holdsMerge(verdict: WatchpointReadVerdict): boolean {
     case WatchpointReadVerdict.Unread:
       return false;
   }
+}
+
+/**
+ * The hits of a reading that keep a pull request from merging: a watchpoint set to Hold, and a hit whose read
+ * acted and holds a merge. Only a hit holds: a reading's `reads` and `shadow` without one never do.
+ */
+export function holdingHits(detail: WatchpointDetail): WatchpointHit[] {
+  return detail.hits.filter((hit) => {
+    if (hit.watchpoint.loudness === WatchpointLoudness.Hold) return true;
+    const read = detail.reads?.find((r) => r.key === hit.watchpoint.key);
+    return read !== undefined && read.acted && holdsMerge(read.verdict);
+  });
 }
 
 const QUESTIONS: Readonly<Record<string, NoulQuestion>> = {
