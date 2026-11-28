@@ -32,7 +32,10 @@ export function readGateFix(db: DbReader, batchId: BatchId, maxFixAttempts: numb
   return { count: 0, allowed: maxFixAttempts, signature: null, forceInside: false };
 }
 
-/** Counts one more fix task, filed for the failure `signature`. */
+/**
+ * Counts one more fix task, filed for the failure `signature`.
+ * @public
+ */
 export function recordFix(
   w: WriteContext,
   batchId: BatchId,
@@ -48,7 +51,10 @@ export function recordFix(
   });
 }
 
-/** Allows `max` more fix tasks, as the builder asked. */
+/**
+ * Allows `max` more fix tasks, as the builder asked.
+ * @public
+ */
 export function grantMore(
   w: WriteContext,
   batchId: BatchId,
@@ -65,7 +71,10 @@ export function grantMore(
   });
 }
 
-/** Forgets the batch's gate fixes, once the batch ships or is abandoned. */
+/**
+ * Forgets the batch's gate fixes, once the batch ships or is abandoned.
+ * @public
+ */
 export function clearGateFix(w: WriteContext, batchId: BatchId): void {
   deleteAppSetting(w, gateFixKey(batchId));
 }
