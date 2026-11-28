@@ -32,17 +32,34 @@ const LIFECYCLE =
   /^\s*(?:Container|Network|Volume)\s+\S+\s+(?:Creating|Created|Starting|Started|Running|Waiting|Healthy|Stopping|Stopped|Removing|Removed)\b|\d+%\||\[[=#>\-\s]{6,}\]/;
 const WORRYING = /FAILED|Error|error:/;
 
+/** A gate's output with colour codes, trailing spaces, blank lines and container lifecycle lines dropped. */
+function readableLines(tail: string): string[] {
+  return plain(tail)
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim() !== '' && !LIFECYCLE.test(line));
+}
+
 /**
  * The lines of a gate's output worth quoting when nothing in it parsed: colour codes, blank lines and
  * container lifecycle lines dropped, then the last ten, preferring those that name a failure or an error.
  */
 export function gateTailLines(tail: string): string {
-  const lines = plain(tail)
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .filter((line) => line.trim() !== '' && !LIFECYCLE.test(line));
+  const lines = readableLines(tail);
   const worrying = lines.filter((line) => WORRYING.test(line));
   return (worrying.length > 0 ? worrying : lines).slice(-TAIL_LINES).join('\n');
+}
+
+/**
+ * The first line of a gate's output that names a failure or an error, read as `gateTailLines` reads it
+ * and trimmed; null when none does.
+ */
+export function firstWorryingLine(tail: string): string | null {
+  return (
+    readableLines(tail)
+      .find((line) => WORRYING.test(line))
+      ?.trim() ?? null
+  );
 }
 
 const TEST_FILE = /^\S+\.(?:test|spec)\.[cm]?[jt]sx?$/;
