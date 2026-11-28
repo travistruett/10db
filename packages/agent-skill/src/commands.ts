@@ -21,6 +21,7 @@ import {
 import type { Api } from './connection';
 import { TendbError, UnknownCommandError } from './errors';
 import { evalsCommand } from './evals-command';
+import { goalsCommand, openGoalsOf } from './goals-command';
 import { mergeHazards } from './hazards';
 import {
   KnowledgeItemView,
@@ -189,6 +190,7 @@ const context: Command = async (args, deps) => {
         repoPath: p.repoPath,
         areas: p.areas,
         defaultRigor: p.defaultRigor,
+        openGoals: await openGoalsOf(deps, p.id),
         openTasks: (await tasksOf(deps, p.id))
           .filter((t) => t.status === 'open')
           .map((t) => ({
@@ -665,12 +667,13 @@ const COMMANDS: Record<string, Command> = {
   hold,
   hazards,
   evals: evalsCommand,
+  goals: goalsCommand,
   'resave-account': resaveAccount,
   'account-settings': accountSettings,
 };
 
 const USAGE =
-  'usage: node tendb.mjs context|project|areas|create|goal|plan-import|knowledge|decision|principle|supersede|edit|remove|start|move|inbox|answer|ship|abandon|close|join|next|hazards|evals ... (commands and arguments: SKILL.md beside this file)';
+  'usage: node tendb.mjs context|project|areas|create|goal|plan-import|knowledge|decision|principle|supersede|edit|remove|start|move|inbox|answer|ship|abandon|close|join|next|hazards|evals|goals ... (commands and arguments: SKILL.md beside this file)';
 
 /** Runs one command line, as `node tendb.mjs <argv>` does. */
 export async function runCommand(argv: readonly string[], deps: CommandDeps): Promise<void> {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { InboxOption, Title } from './entities';
 import { WatchpointNotes } from './watchpoint-hit';
+import { WatchpointProposal } from './watchpoints';
 import { BriefKey } from './goals';
 import { HandoffDto, HandoffInput } from './handoff';
 import {
@@ -279,6 +280,9 @@ export const McpToolInputs = {
     joinsRunningBatch: z.boolean().optional(),
     principle: PrincipleDraft.optional().describe(
       'For kind "principle": the rule itself. Without it, the body is used as the statement.',
+    ),
+    watchpoint: WatchpointProposal.optional().describe(
+      'For kind "watchpoint": the watchpoint to add, or to replace by its key, in this project (scope "project", where an entry may also be { key, off: true }) or for every project (scope "you"). The body says why.',
     ),
   }),
   report_deviation: z.object({

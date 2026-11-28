@@ -16,7 +16,8 @@
         "new_task",
         "change_task",
         "principle",
-        "note"
+        "note",
+        "watchpoint"
       ]
     },
     "title": {

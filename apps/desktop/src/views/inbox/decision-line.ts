@@ -40,7 +40,7 @@ function acceptanceLine(item: InboxItemDto): string {
 
 /** The card's body already names the areas the change touched, so the line says only what the answers do. */
 const WATCHPOINT_LINE =
-  'Nothing is waiting on this. Looks Right closes it; Send Back files a follow-up task.';
+  'Nothing is waiting on this. Looks Right records it as a decision; Send Back files a follow-up task.';
 
 function flagLine(item: InboxItemDto, facts: DecisionFacts): string | null {
   const { retry, abandon } = facts.batch ?? { retry: false, abandon: false };
@@ -58,12 +58,13 @@ function flagLine(item: InboxItemDto, facts: DecisionFacts): string | null {
 
 const DISMISS_LINE = 'Dismiss only hides this card.';
 
-/** Only a new-task proposal files a task when accepted; a card that does not say its kind gets no line. */
+/** What accepting a proposal writes, by the kind it says; a card that does not say its kind gets no line. */
 function proposalLine(item: InboxItemDto): string | null {
   if (isPrincipleCard(item)) return 'Accepting adds a rule.';
-  return item.detail?.['proposalKind'] === ProposalKind.NewTask
-    ? 'Accepting creates a task.'
-    : null;
+  const kind = item.detail?.['proposalKind'];
+  if (kind === ProposalKind.NewTask) return 'Accepting creates a task.';
+  if (kind === ProposalKind.Watchpoint) return 'Accepting changes your watchpoints.';
+  return null;
 }
 
 /**
