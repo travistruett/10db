@@ -37,7 +37,6 @@ export type ProjectView = z.infer<typeof ProjectView>;
 export const TaskView = z.looseObject({
   id: z.string(),
   title: z.string(),
-  projectId: z.string().optional(),
   status: z.string().optional(),
   boardStatus: z.string().optional(),
   // The project's task list leaves out what a task has none of (no dependencies) and, for a task done and
