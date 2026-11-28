@@ -26,6 +26,11 @@ const approve = (opId: string) => ({
   args: { opId, summary: 'Looks right.', verdict: 'approve' },
 });
 const turn = { do: 'turn_complete' as const };
+/** A plan whose brief needs nothing from the builder. */
+const needsNothing = (opId: string) => ({
+  ...planResult(opId, 'PLAN: edit src/api/a.txt.'),
+  args: { opId, summary: 'PLAN: edit src/api/a.txt.', verdict: null, builderCalls: [] },
+});
 const implement = (opId: string) => [
   { do: 'tool' as const, toolName: 'Write', input: { file_path: 'src/api/a.txt', content: opId } },
   { do: 'mcp' as const, tool: 'commit', args: { opId, paths: ['src/api/a.txt'], message: opId } },
@@ -106,11 +111,6 @@ describe('parking a task for the builder to approve its plan', () => {
 });
 
 describe('a plan whose brief needs nothing from the builder', () => {
-  const needsNothing = (opId: string) => ({
-    ...planResult(opId, 'PLAN: edit src/api/a.txt.'),
-    args: { opId, summary: 'PLAN: edit src/api/a.txt.', verdict: null, builderCalls: [] },
-  });
-
   it('goes ahead after its plan review with no card and one Activity row, and one naming a call of the builder’s still cards', async () => {
     engine = await createTestEngine({
       Alpha: [
@@ -189,6 +189,44 @@ describe('a row with Plan and no Plan Review', () => {
     await runWhileQueued(workstream.id);
     expect(ws(workstream.id).state).toBe('DONE');
     expect(engine.adapter.prompts).toHaveLength(4);
+  });
+
+  it('adds a Plan Review the planner proposes on Core work, with no card, and the plan goes ahead after it', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          {
+            do: 'mcp' as const,
+            tool: 'propose',
+            args: {
+              opId: 'op-plan-0141',
+              kind: 'plan_review',
+              title: 'Review my plan',
+              body: 'The plan touches the claim tables.',
+            },
+          },
+          needsNothing('op-plan-0142'),
+          turn,
+        ],
+        [approve('op-plan-0143'), turn],
+        implement('op-plan-0144'),
+        [approve('op-plan-0145'), turn],
+        [approve('op-plan-0146'), turn],
+      ],
+    });
+    const { workstream } = critical(true, []);
+    await runWhileQueued(workstream.id);
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual([
+      'plan',
+      'plan_review',
+      'implement',
+      'review',
+      'qa',
+    ]);
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(listInbox(engine.store.db, {}).filter((i) => i.state === 'OPEN')).toEqual([]);
+    const rows = pageActivity(engine.store.db, { pageSize: 50 }).rows;
+    expect(rows.filter((r) => r.decision?.rule === 'plan-review-step')).toHaveLength(1);
   });
 });
 
