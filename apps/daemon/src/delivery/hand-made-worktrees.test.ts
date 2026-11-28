@@ -1,23 +1,51 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
-import type { InboxItemDto } from '@10db/contracts';
-import { getInboxItem } from '@10db/db';
+import {
+  ConflictError,
+  DecisionRule,
+  type InboxItemDto,
+  type NoticeDecision,
+  type UndoAction,
+} from '@10db/contracts';
+import { getInboxItem, setRuleAsking } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { handMadeWorktreeFolders } from '../git';
 import { PrState } from '../github';
 import { createInboxService, type InboxService } from '../inbox';
 import { WorktreeChoice } from './cards';
-import { offerHandMadeFolders } from './hand-made-worktrees';
+import { undoHandMadeRemoval } from './hand-made-undo';
+import {
+  HAND_MADE_IDLE_MS,
+  mergedHandMadeWorktrees,
+  offerHandMadeFolders,
+  removeIdleMergedHandMade,
+  removeMergedHandMade,
+} from './hand-made-worktrees';
 import { createWorktreeCardAnswers } from './index';
 
 let h: DeliveryHarness;
 let inbox: InboxService;
 let folder: string;
+/** What the process check answers: how many processes work in any worktree, or null when unreadable. */
+let processes: number | null;
 const signal = new AbortController().signal;
 
 beforeEach(() => {
-  h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+  processes = 0;
+  h = createDeliveryHarness(
+    { workspaceMode: 'worktree' },
+    { trigger: false, processesIn: () => Promise.resolve(processes) },
+  );
   inbox = createInboxService({
     state: h.state,
     onParkedAnswer: () => undefined,
@@ -53,7 +81,16 @@ const cardTitled = (start: string): InboxItemDto => {
   return found;
 };
 
+/** Sets the rule that removes merged worktrees to ask, so the look raises the card. */
+function askBeforeRemoving(): void {
+  h.state.write((c) => {
+    setRuleAsking(c, h.project.id, DecisionRule.MergedWorktree, true);
+  });
+}
+
 describe('the hand-made worktree folder', () => {
+  beforeEach(askBeforeRemoving);
+
   it('offers the merged worktrees for removal and removes them on one answer, leaving the branches', async () => {
     const merged = handMade('done', PrState.Merged);
     const open = handMade('going', PrState.Open);
@@ -199,5 +236,142 @@ describe('the hand-made worktree folder', () => {
     expect(existsSync(worktree.path)).toBe(true);
     expect(h.only(h.notices()).body).toContain('Nothing was removed');
     expect(titles().filter((t) => t.startsWith('Removed'))).toEqual([]);
+  });
+});
+
+/** Sets every time a worktree is read by (its admin files, root and top-level entries) to `age` before now. */
+function idleFor(path: string, age: number): void {
+  const at = new Date(h.ctx.clock.now().getTime() - age);
+  const gitDir = h.git$('-C', path, 'rev-parse', '--absolute-git-dir');
+  for (const file of ['HEAD', 'index', join('logs', 'HEAD')])
+    utimesSync(join(gitDir, file), at, at);
+  for (const entry of readdirSync(path)) utimesSync(join(path, entry), at, at);
+  utimesSync(path, at, at);
+}
+
+/** What the rule's one notice says Undo does. */
+function undoOf(
+  decision: NoticeDecision | undefined,
+): Extract<UndoAction, { kind: 'restore_worktree' }> {
+  if (decision?.undo.state !== 'undoable' || decision.undo.action.kind !== 'restore_worktree')
+    throw new Error('the notice has no restore_worktree undo');
+  return decision.undo.action;
+}
+
+const restore = (action: Extract<UndoAction, { kind: 'restore_worktree' }>): Promise<void> =>
+  undoHandMadeRemoval({ state: h.state, git: h.git, keptRoot: h.keptRoot }, action);
+
+describe('the rule that removes merged hand-made worktrees nobody is using', () => {
+  beforeEach(() => {
+    writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n', { flag: 'a' });
+  });
+
+  it('removes a merged, clean worktree idle 24 hours with no process in it, saves its .env and keeps its branch, and Undo puts both back', async () => {
+    const done = handMade('done', PrState.Merged);
+    writeFileSync(join(done.path, '.env'), 'SECRET=1', { mode: 0o600 });
+
+    idleFor(done.path, HAND_MADE_IDLE_MS - 60_000);
+    await expect(removeIdleMergedHandMade(h.ctx, h.project, signal)).resolves.toEqual([]);
+    expect(existsSync(done.path)).toBe(true);
+
+    idleFor(done.path, HAND_MADE_IDLE_MS);
+    processes = 1;
+    await expect(removeIdleMergedHandMade(h.ctx, h.project, signal)).resolves.toEqual([]);
+    processes = null;
+    await expect(removeIdleMergedHandMade(h.ctx, h.project, signal)).resolves.toEqual([]);
+    expect(existsSync(done.path)).toBe(true);
+    expect(h.notices()).toEqual([]);
+
+    processes = 0;
+    await expect(removeIdleMergedHandMade(h.ctx, h.project, signal)).resolves.toEqual([done.path]);
+
+    expect(existsSync(done.path)).toBe(false);
+    expect(h.git$('branch', '--list', done.branch)).toContain(done.branch);
+    const notice = h.only(h.notices());
+    expect(notice.line).toBe('Removed the merged worktree done; its branch is kept');
+    expect(notice.key).toBe(`hand-made-removed:${done.path}`);
+    expect(notice.decision).toMatchObject({ by: 'rule', rule: DecisionRule.MergedWorktree });
+    const action = undoOf(notice.decision);
+    expect(action).toMatchObject({ path: done.path, branch: done.branch });
+    const kept = action.keptDir ?? '';
+    expect(kept.startsWith(h.keptRoot)).toBe(true);
+    expect(readFileSync(join(kept, '.env'), 'utf8')).toBe('SECRET=1');
+
+    await restore(action);
+
+    expect(h.git$('-C', done.path, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(done.branch);
+    expect(readFileSync(join(done.path, '.env'), 'utf8')).toBe('SECRET=1');
+    expect(statSync(join(done.path, '.env')).mode & 0o777).toBe(0o600);
+    expect(existsSync(join(kept, '.env'))).toBe(true);
+  });
+
+  it('removes a worktree with nothing only it holds with no kept folder, and leaves what is not merged, changed, locked or kept', async () => {
+    const plain = handMade('plain', PrState.Merged);
+    const open = handMade('open', PrState.Open);
+    const dirty = handMade('dirty', PrState.Merged);
+    const locked = handMade('locked', PrState.Merged);
+    writeFileSync(join(dirty.path, 'wip.txt'), 'x');
+    h.git$('worktree', 'lock', locked.path);
+    for (const w of [plain, open, dirty, locked]) idleFor(w.path, HAND_MADE_IDLE_MS + 1);
+
+    await expect(removeIdleMergedHandMade(h.ctx, h.project, signal)).resolves.toEqual([plain.path]);
+
+    expect([plain, open, dirty, locked].map((w) => existsSync(w.path))).toEqual([
+      false,
+      true,
+      true,
+      true,
+    ]);
+    expect(undoOf(h.only(h.notices()).decision).keptDir).toBeNull();
+  });
+
+  it('answers a conflict and changes nothing when Undo finds the path taken or the branch gone', async () => {
+    const done = handMade('done', PrState.Merged);
+    idleFor(done.path, HAND_MADE_IDLE_MS);
+    await removeIdleMergedHandMade(h.ctx, h.project, signal);
+    const action = undoOf(h.only(h.notices()).decision);
+
+    mkdirSync(done.path);
+    writeFileSync(join(done.path, 'mine.txt'), 'not yours');
+    await expect(restore(action)).rejects.toBeInstanceOf(ConflictError);
+    expect(readdirSync(done.path)).toEqual(['mine.txt']);
+    rmSync(done.path, { recursive: true });
+
+    h.git$('branch', '-D', done.branch);
+    await expect(restore(action)).rejects.toBeInstanceOf(ConflictError);
+    expect(existsSync(done.path)).toBe(false);
+    expect(h.git$('worktree', 'list', '--porcelain')).not.toContain(done.path);
+  });
+
+  it('is run by the look in the project’s queue, and raises and offers no card', async () => {
+    const done = handMade('done', PrState.Merged);
+    idleFor(done.path, HAND_MADE_IDLE_MS);
+
+    await offerHandMadeFolders(h.ctx, signal);
+    await h.jobs.idle();
+
+    expect(existsSync(done.path)).toBe(false);
+    expect(offers()).toEqual([]);
+  });
+
+  it('leaves it all to the card when the rule asks, which still leaves out a worktree holding a .env', async () => {
+    const plain = handMade('plain', PrState.Merged);
+    const holding = handMade('holding', PrState.Merged);
+    writeFileSync(join(holding.path, '.env'), 'SECRET=1');
+    for (const w of [plain, holding]) idleFor(w.path, HAND_MADE_IDLE_MS + 1);
+    askBeforeRemoving();
+
+    await expect(removeIdleMergedHandMade(h.ctx, h.project, signal)).resolves.toEqual([]);
+    await offerHandMadeFolders(h.ctx, signal);
+    await h.jobs.idle();
+    expect(existsSync(plain.path)).toBe(true);
+    expect(cardTitled('1 worktree in').body).toContain(plain.path);
+    expect(cardTitled('1 worktree in').body).not.toContain(holding.path);
+
+    await expect(mergedHandMadeWorktrees(h.ctx, h.project, signal)).resolves.toEqual([plain]);
+    await removeMergedHandMade(h.ctx, h.project, signal);
+    expect(existsSync(plain.path)).toBe(false);
+    expect(existsSync(holding.path)).toBe(true);
+    expect(existsSync(join(holding.path, '.env'))).toBe(true);
   });
 });

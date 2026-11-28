@@ -1,9 +1,10 @@
 import { existsSync, statSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { Delivery, type ProjectDto, type ProjectId } from '@10db/contracts';
+import { basename, dirname } from 'node:path';
+import { Delivery, DecisionRule, type ProjectDto, type ProjectId } from '@10db/contracts';
 import {
   getInboxItem,
   hasAnsweredByFoldKey,
+  isRuleAsking,
   listActiveProjects,
   listAnsweredByFoldKey,
   listOpenByFoldKeyPrefix,
@@ -31,7 +32,10 @@ import {
   mergedCardPaths,
   type MergedHandMade,
 } from './hand-made-cards';
+import { JobQueue } from './jobs';
+import { keptRoot, KeptCopyError, KeptPathError, onlyHere, saveKept } from './kept-files';
 import { ghDown } from './pr-watch';
+import { processesIn } from './processes-in';
 
 /** How long after a look the next one waits: each look asks GitHub about every worktree. */
 const LOOK_EVERY_MS = 6 * 60 * 60_000;
@@ -56,24 +60,33 @@ function foldersOf(project: ProjectDto): string[] {
 /** The folders named as one, for a card's text and key. */
 const labelOf = (folders: readonly string[]): string => folders.join(', ');
 
+/** How long a merged, clean hand-made worktree must be untouched before the rule removes it. */
+export const HAND_MADE_IDLE_MS = 24 * 60 * 60_000;
+
+/** A merged hand-made worktree and the git-ignored files in it that are not build output. */
+export interface MergedHandMadeCandidate extends MergedHandMade {
+  readonly loose: readonly string[];
+}
+
 /**
- * The worktrees in the project's hand-made folder that can go: git lists them there, they are
+ * The worktrees in the project's hand-made folder that merged: git lists them there, they are
  * unlocked, their branch's pull request merged and the branch holds nothing it lacks, and they have
- * no uncommitted change and no git-ignored file that is not build output or inside an ignored
- * directory. A worktree git or gh can't be read for stays, and the next look tries again. A gh that
- * is down ends the look and throws.
+ * no uncommitted change. Each says which git-ignored files it holds that are not build output or
+ * inside an ignored directory (`loose`), which is what only the rule, saving them first, may remove.
+ * A worktree git or gh can't be read for stays, and the next look tries again. A gh that is down ends
+ * the look and throws.
  */
-export async function mergedHandMadeWorktrees(
+export async function mergedHandMadeCandidates(
   ctx: DeliveryContext,
   project: ProjectDto,
   signal: AbortSignal,
-): Promise<MergedHandMade[]> {
+): Promise<MergedHandMadeCandidate[]> {
   const main = project.repoPath;
   const folders = foldersOf(project);
   if (folders.length === 0) return [];
   const repo = githubRepoOf(await ctx.git.pinnedPushUrl(main));
   if (repo === null) return [];
-  const found: MergedHandMade[] = [];
+  const found: MergedHandMadeCandidate[] = [];
   for (const entry of await ctx.git.listWorktrees(main)) {
     const { path, branch, head } = entry;
     if (entry.bare || entry.locked !== null || branch === null || head === null) continue;
@@ -90,14 +103,30 @@ export async function mergedHandMadeWorktrees(
           (await ctx.git.isAncestor(main, head, pullHead)));
       if (!carried) continue;
       if ((await ctx.git.handMadeWorktreeChanges(main, path)).length > 0) continue;
-      if (looseWork(await ctx.git.handMadeWorktreeIgnoredFiles(main, path)).length > 0) continue;
-      found.push({ path, branch });
+      const loose = looseWork(await ctx.git.handMadeWorktreeIgnoredFiles(main, path));
+      found.push({ path, branch, loose });
     } catch (error) {
       if (stopped(signal) || ghDown(error)) throw error;
       ctx.logger.warn({ path, err: detailOf(error) }, 'hand-made worktree not read');
     }
   }
   return found;
+}
+
+/**
+ * The merged worktrees that hold nothing only they have: `mergedHandMadeCandidates` without a loose
+ * ignored file. The merged card offers these and its Remove answer removes them, and neither saves
+ * anything, so a worktree holding a hand-made `.env` is never in this list.
+ */
+export async function mergedHandMadeWorktrees(
+  ctx: DeliveryContext,
+  project: ProjectDto,
+  signal: AbortSignal,
+): Promise<MergedHandMade[]> {
+  const candidates = await mergedHandMadeCandidates(ctx, project, signal);
+  return candidates
+    .filter((candidate) => candidate.loose.length === 0)
+    .map(({ path, branch }) => ({ path, branch }));
 }
 
 /**
@@ -132,6 +161,23 @@ export async function offerHandMadeFolders(
         if (!holdsWorktrees) withdraw(ctx.state, ctx.inbox, project.id, [spotlight]);
         else if (!hasAnsweredByFoldKey(ctx.state.db, project.id, spotlight))
           raise(ctx.inbox, project.id, handMadeCards.spotlight(folder));
+      }
+      if (!isRuleAsking(ctx.state.db, project.id, DecisionRule.MergedWorktree)) {
+        // The rule decides: it removes what is idle and unused, and what it leaves is not offered.
+        withdrawOtherMergedCards(ctx, project.id);
+        withdraw(ctx.state, ctx.inbox, project.id, [handMadeKey.merged]);
+        ctx.jobs.run(`${project.id}:${JobQueue.Ship}`, async (jobSignal) => {
+          try {
+            await removeIdleMergedHandMade(ctx, project, jobSignal);
+          } catch (error) {
+            if (jobSignal.aborted) return;
+            ctx.logger.warn(
+              { projectId: project.id, err: detailOf(error) },
+              'idle merged hand-made worktrees not removed',
+            );
+          }
+        });
+        continue;
       }
       const merged = await mergedHandMadeWorktrees(ctx, project, signal);
       // A look the daemon's stop cut short found only part of the set.
@@ -172,17 +218,22 @@ function withdrawOtherMergedCards(ctx: DeliveryContext, projectId: ProjectId): v
   );
 }
 
+/** The worktrees the builder answered Keep on, each on a merged card they kept. */
+function keptPaths(ctx: DeliveryContext, projectId: ProjectId): Set<string> {
+  return new Set(
+    listAnsweredByFoldKey(ctx.state.db, projectId, handMadeKey.merged)
+      .filter((card) => card.answer?.choice === WorktreeChoice.Keep)
+      .flatMap((card) => mergedCardPaths(card) ?? []),
+  );
+}
+
 /** Whether the builder answered Keep on the worktrees `merged` lists, each on a card they kept. */
 function allKept(
   ctx: DeliveryContext,
   projectId: ProjectId,
   merged: readonly MergedHandMade[],
 ): boolean {
-  const kept = new Set(
-    listAnsweredByFoldKey(ctx.state.db, projectId, handMadeKey.merged)
-      .filter((card) => card.answer?.choice === WorktreeChoice.Keep)
-      .flatMap((card) => mergedCardPaths(card) ?? []),
-  );
+  const kept = keptPaths(ctx, projectId);
   return merged.every((w) => kept.has(w.path));
 }
 
@@ -252,4 +303,88 @@ export async function removeMergedHandMade(
   ctx.logger.info({ projectId: project.id, folder, removed }, 'merged hand-made worktrees removed');
   post(ctx.inbox, project.id, handMadeNotices.removed(folder, removed));
   return removed;
+}
+
+/**
+ * The rule that removes the merged hand-made worktrees nobody is using, run in the project's ship
+ * queue from the look. A worktree goes only when it is still merged, carried, unlocked and clean, was
+ * last touched at least `HAND_MADE_IDLE_MS` ago, and no process has its working directory in it; a
+ * check that can't be read leaves it. The files only it holds (ignored, not build output, with no
+ * identical copy in the checkout) are saved and verified under the kept folder before the removal, and
+ * a copy that fails leaves the worktree. Its branch stays, and one notice per worktree carries an
+ * Undo. A rule set to ask removes nothing: the look raises today's card instead, and a worktree the
+ * builder answered Keep is never removed. Resolves with the paths removed.
+ */
+export async function removeIdleMergedHandMade(
+  ctx: DeliveryContext,
+  project: ProjectDto,
+  signal: AbortSignal,
+): Promise<string[]> {
+  if (isRuleAsking(ctx.state.db, project.id, DecisionRule.MergedWorktree)) return [];
+  const kept = keptPaths(ctx, project.id);
+  const removed: string[] = [];
+  for (const candidate of await mergedHandMadeCandidates(ctx, project, signal)) {
+    if (stopped(signal)) break;
+    if (kept.has(candidate.path)) continue;
+    try {
+      if (await removeWhenIdle(ctx, project, candidate)) removed.push(candidate.path);
+    } catch (error) {
+      if (stopped(signal)) throw error;
+      ctx.logger.warn(
+        { projectId: project.id, path: candidate.path, err: detailOf(error) },
+        'idle merged hand-made worktree not removed',
+      );
+    }
+  }
+  return removed;
+}
+
+/** Removes `candidate` if it is idle and unused now; true when it was removed. */
+async function removeWhenIdle(
+  ctx: DeliveryContext,
+  project: ProjectDto,
+  candidate: MergedHandMadeCandidate,
+): Promise<boolean> {
+  const main = project.repoPath;
+  const { path, branch } = candidate;
+  const idleSince = await ctx.git.handMadeWorktreeIdleSince(main, path);
+  if (ctx.clock.now().getTime() - idleSince.getTime() < HAND_MADE_IDLE_MS) return false;
+  if ((await (ctx.processesIn ?? processesIn)(path)) !== 0) return false;
+  // The listing is older than these checks: read what the worktree holds again before it is saved.
+  if ((await ctx.git.handMadeWorktreeChanges(main, path)).length > 0) return false;
+  const loose = looseWork(await ctx.git.handMadeWorktreeIgnoredFiles(main, path));
+  const files = await onlyHere({ worktree: path, checkout: main, files: loose });
+  let keptDir: string | null = null;
+  if (files.length > 0) {
+    try {
+      const saved = await saveKept({
+        root: ctx.keptRoot ?? keptRoot(),
+        name: basename(path),
+        worktree: path,
+        files,
+        at: ctx.clock.now(),
+      });
+      keptDir = saved.dir;
+    } catch (error) {
+      if (!(error instanceof KeptCopyError || error instanceof KeptPathError)) throw error;
+      ctx.logger.warn(
+        { projectId: project.id, path, err: detailOf(error) },
+        'merged hand-made worktree not saved, so kept',
+      );
+      return false;
+    }
+  }
+  if ((await ctx.git.removeHandMadeWorktree(main, path)) !== 'removed') return false;
+  ctx.logger.info({ projectId: project.id, path, branch, keptDir }, 'idle merged worktree removed');
+  post(
+    ctx.inbox,
+    project.id,
+    handMadeNotices.removedByRule({
+      projectId: project.id,
+      path,
+      branch,
+      keptDir,
+    }),
+  );
+  return true;
 }

@@ -56,6 +56,11 @@ export interface DeliveryContext {
   readonly worktreeRoot: string;
   /** Where a finished worktree's only-here files are saved before it is removed; `~/.10db/kept` when absent. */
   readonly keptRoot?: string | undefined;
+  /**
+   * How many processes have a directory as their working directory; null when that can't be read.
+   * `processesIn` (from `lsof`) when absent.
+   */
+  readonly processesIn?: ((path: string) => Promise<number | null>) | undefined;
   /** Brings a new worktree's seeded packages in line with its lockfile. */
   readonly dependencies: WorktreeDependencies;
   /** Regenerates the generated files of a worktree after a merge with its base took the base's. */

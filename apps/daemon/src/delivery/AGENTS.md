@@ -17,7 +17,7 @@
   `BISECT_LOG`, and `workstream-changes.ts` reads a pass's kept turns by `ChangesScope`.
 - A switch back, branch cut or settle waiting on a chat's terminal (`folder-wait.ts`) ends on shutdown, so quitting never hangs, and waits again next start; no branch settles while a terminal holds the folder; each wait names the chat and keeps the project's delivery slot.
 - A session's worktree is cut by `chat-worktree-cut.ts`; `worktree-sweep.ts` keeps one with unsaved files.
-- `hand-made-worktrees.ts` (`decisions/2026-11-17-hand-made-worktrees-are-offered-for-removal-and-kept-out-of-spotlight.md`) raises `hand-made-cards.ts`'s cards from the watch's `afterRound` (`createHandMadeFolderLook`, at most six-hourly); `worktree-card.ts` answers through the scoped `Git.handMade*` calls, and nothing is removed unanswered.
+- `hand-made-worktrees.ts` (`decisions/2026-11-17-hand-made-worktrees-are-offered-for-removal-and-kept-out-of-spotlight.md`) raises `hand-made-cards.ts`'s cards from `afterRound` (`createHandMadeFolderLook`, six-hourly at most); `worktree-card.ts` answers via scoped `Git.handMade*`. Unless `merged-worktree` asks, `removeIdleMergedHandMade` removes them (`decisions/2026-11-27-a-stuck-run-restarts-once-and-worktree-leftovers-are-saved-then-removed.md`; Undo: `hand-made-undo.ts`).
 - A `Card` needs `tier`, `urgency` and `closesWhen` (`decisions/2026-11-17-every-card-has-a-tier.md`); a notice
   goes through `post` or `postIn`.
 - `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`), else `autoTestBudgetLine` (`test-budget-reason.ts`) writes one from value cards (`decisions/2026-11-25-a-pull-request-over-its-test-budget-says-why-from-its-value-cards.md`).

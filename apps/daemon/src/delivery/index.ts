@@ -80,6 +80,7 @@ export { createStartCardAnswers } from './start-card';
 export { createLostMigrationsAnswers } from './lost-migrations';
 export { removeMergedBranches } from './branch-sweep';
 export { closeGoneMergedWorktreeCards, createHandMadeFolderLook } from './hand-made-worktrees';
+export { undoHandMadeRemoval } from './hand-made-undo';
 export {
   batchLaunchVerdict,
   flagWorktreeMissing,

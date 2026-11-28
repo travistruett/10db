@@ -2587,8 +2587,10 @@ export function createApp(deps: ApiDeps) {
       validator('query', (query) => ActivityPageQuery.parse(query)),
       (c) => c.json(deps.services.pageActivity(c.req.valid('query'))),
     )
-    .post('/activity/:seq/undo', (c) => {
-      deps.services.undoActivity(ActivityRowRef.parse({ seq: Number(c.req.param('seq')) }).seq);
+    .post('/activity/:seq/undo', async (c) => {
+      await deps.services.undoActivity(
+        ActivityRowRef.parse({ seq: Number(c.req.param('seq')) }).seq,
+      );
       return c.body(null, 204);
     })
     .put('/activity/:seq/ask-next-time', (c) => {

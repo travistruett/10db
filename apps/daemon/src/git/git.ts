@@ -9,7 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { lstat, readdir, rm } from 'node:fs/promises';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, posix, resolve, sep } from 'node:path';
@@ -1155,6 +1155,23 @@ export interface Git extends ChatGit {
   handMadeWorktreeChanges(repo: string, path: string): Promise<string[]>;
   handMadeWorktreeIgnoredFiles(repo: string, path: string): Promise<string[]>;
   removeHandMadeWorktree(repo: string, path: string): Promise<'removed' | 'absent'>;
+  /**
+   * Makes a removed hand-made worktree again at `path` on the existing local branch `branch`: `git
+   * worktree add` with no new branch and no force. Anything at `path` is `path_exists` and a missing
+   * branch is `branch_gone`; neither changes anything. A path outside the hand-made folders is refused
+   * with `WorktreeNotOursError`.
+   */
+  restoreHandMadeWorktree(
+    repo: string,
+    path: string,
+    branch: string,
+  ): Promise<'restored' | 'path_exists' | 'branch_gone'>;
+  /**
+   * When the hand-made worktree was last touched: the newest modification time of its git dir's
+   * `HEAD`, `index` and `logs/HEAD`, its root directory and the entries directly in it (links not
+   * followed, nothing deeper). Checked as `handMadeWorktreeChanges` is.
+   */
+  handMadeWorktreeIdleSince(repo: string, path: string): Promise<Date>;
   /** Drops the entries of worktrees whose directory is gone, but not a locked one. */
   pruneWorktrees(repo: string): Promise<void>;
   /**
@@ -4741,6 +4758,95 @@ export function createGit(opts: GitOptions = {}): Git {
     return changes(await lockedWorktree(repo, path, scope));
   }
 
+  /** The newest modification time of `paths`, each read as a link would be (never followed); a missing one counts for nothing. */
+  async function newestTouch(paths: readonly string[]): Promise<number> {
+    let newest = 0;
+    for (const file of paths) {
+      try {
+        newest = Math.max(newest, (await lstat(file)).mtimeMs);
+      } catch (error) {
+        if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+      }
+    }
+    return newest;
+  }
+
+  /**
+   * When the hand-made worktree was last touched: the newest time of its git dir's `HEAD`, `index` and
+   * `logs/HEAD`, its root directory and the entries directly in that root. Nothing deeper is read, so a
+   * tree of `node_modules` costs one directory listing.
+   */
+  async function worktreeIdleSince(repo: string, path: string): Promise<Date> {
+    const wt = await lockedWorktree(repo, path, handMadeScope(repo, path));
+    const entries = await readdir(wt.real);
+    const newest = await newestTouch([
+      join(wt.dirs.gitDir, 'HEAD'),
+      join(wt.dirs.gitDir, 'index'),
+      join(wt.dirs.gitDir, 'logs', 'HEAD'),
+      wt.real,
+      ...entries.map((entry) => join(wt.real, entry)),
+    ]);
+    return new Date(newest);
+  }
+
+  /**
+   * Makes the hand-made worktree at `path` again on the existing branch `branch`. Nothing at `path` is
+   * overwritten and the branch is never made, moved or forced: a taken path or a missing branch is
+   * answered and changes nothing. The checkout is `read-tree`, so no hook or filter runs, and the
+   * gitfile is absolute, as every read through the worktree needs.
+   */
+  async function restoreHandMade(
+    repo: string,
+    path: string,
+    branch: string,
+  ): Promise<'restored' | 'path_exists' | 'branch_gone'> {
+    const target = realisticPath(path);
+    const folders = handMadeWorktreeFolders(realpathSync(repo));
+    const root = folders.find(
+      (folder) =>
+        equalOrUnder(target, realisticPath(folder)) && !samePath(target, realisticPath(folder)),
+    );
+    if (root === undefined)
+      throw new WorktreeNotOursError(path, 'it is not under a hand-made worktree folder');
+    if (branch === '' || branch.startsWith('-'))
+      throw new InvalidError(`${branch} is not a branch name`);
+    return withRepoLock(realpathSync(repo), async () => {
+      if (existsAsEntry(target)) return 'path_exists';
+      const main = await pinned(repo);
+      const ref = `refs/heads/${branch}`;
+      if ((await revParse(main, `${ref}^{commit}`)) === null) return 'branch_gone';
+      let added = false;
+      try {
+        await git(main, ['worktree', 'add', '--no-checkout', '--', target, branch], {
+          config: ['-c', 'worktree.useRelativePaths=false'],
+        });
+        added = true;
+        const gitDir = readGitfile(target);
+        if (!surelyInside(gitDir, join(main.dirs.commonDir, 'worktrees')))
+          throw new InvalidError(
+            `git put ${target}'s git dir at ${gitDir}, outside the repository's worktrees`,
+          );
+        const wt: Pinned = {
+          real: target,
+          dirs: { gitDir, commonDir: main.dirs.commonDir },
+          pin: main.pin,
+          env: { GIT_DIR: gitDir, GIT_COMMON_DIR: main.dirs.commonDir, GIT_WORK_TREE: target },
+        };
+        await git(wt, ['read-tree', '-m', '-u', 'HEAD']);
+        return 'restored';
+      } catch (error) {
+        // Leave nothing behind: the entry and its directory.
+        if (added) {
+          await git(main, ['worktree', 'remove', '--force', '--force', '--', target]).catch(
+            () => undefined,
+          );
+          await rm(target, { recursive: true, force: true });
+        }
+        throw error;
+      }
+    });
+  }
+
   async function worktreeIgnoredFiles(
     repo: string,
     path: string,
@@ -5307,6 +5413,8 @@ export function createGit(opts: GitOptions = {}): Git {
     worktreeChanges: (repo, path) => worktreeChanges(repo, path),
     worktreeIgnoredFiles: (repo, path) => worktreeIgnoredFiles(repo, path),
     removeHandMadeWorktree: (repo, path) => removeWorktree(repo, path, handMadeScope(repo, path)),
+    restoreHandMadeWorktree: restoreHandMade,
+    handMadeWorktreeIdleSince: worktreeIdleSince,
     handMadeWorktreeChanges: (repo, path) => worktreeChanges(repo, path, handMadeScope(repo, path)),
     handMadeWorktreeIgnoredFiles: (repo, path) =>
       worktreeIgnoredFiles(repo, path, handMadeScope(repo, path)),
