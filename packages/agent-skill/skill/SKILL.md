@@ -11,7 +11,7 @@ through it: never `cat`, echo or interpolate `ui-token` (not even in `$(...)`), 
 
 ```
 T=~/.10db/skills/10db-task/tendb.mjs
-node $T context                          # projects for this repo: areas, default rigor, kinds, open tasks
+node $T context                          # projects for this repo: areas, default rigor, kinds, open tasks and open goals
                                          #   (each with dependsOn, rigor, effectiveRigor and kinds)
 node $T project <projectId|name>         # one project's settings; reads only
 node $T areas <projectId> <path>...      # which areas repo-relative paths fall in
@@ -21,6 +21,7 @@ node $T remove <taskId>                  # a task that has never started
 node $T start <taskId>                   # as the card menu's Start does
 node $T join <taskId> <batchId>          # start a task inside an open batch: one branch, one PR
 node $T goal <projectId> <brief.md> [--dry-run]  # adopt a goal brief (goals spec §11)
+node $T goals <projectId|name> [goalId]  # list a project's goals (id, status, title, open and done tasks), or read one in full
 node $T plan-import <projectId> <bundle.json> [--dry-run]  # import a planning effort's bundle into one Plan
 node $T hazards <projectId> [additions.json] [--dry-run]  # print hazards, or add to them (never removes)
 node $T evals <projectId> [manifest.json]  # print the project's eval suites, or record an assessment's manifest
@@ -29,6 +30,8 @@ node $T decision <projectId> <decision.json> [--dry-run]   # record a decision
 node $T principle <projectId> <principle.json> [--dry-run] # record a principle
 node $T supersede <dec_…|pri_…> <changes.json> [--dry-run] # replace a current decision or principle
 ```
+
+**Finding a goal:** the builder names a goal by its title: run `context` (each project lists its open goals with ids), then `goals <project> <goalId>` to read it in full: objective, notes, criteria and tasks. `goals <project>` also lists done goals.
 
 **Landing:** related tasks go in one batch by default (start the first, `join` the rest), not one PR
 per task. The builder works in big shifts and prefers fewer, larger landings.

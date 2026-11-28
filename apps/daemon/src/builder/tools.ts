@@ -35,6 +35,8 @@ export type BuilderServices = Pick<
   | 'listProjects'
   | 'listKinds'
   | 'listTasks'
+  | 'listGoals'
+  | 'getGoal'
   | 'createTask'
   | 'patchTask'
   | 'startTask'
@@ -129,6 +131,41 @@ export function createBuilderTools(
       }));
     },
     // Finished tasks keep their full text; after a few days of filing they would flood the client.
+    [BuilderToolName.ListGoals]: (args) =>
+      services.listGoals(BuilderToolInputs.list_goals.parse(args).projectId).goals.map((row) => ({
+        id: row.goal.id,
+        title: row.goal.title,
+        status: row.digest.status,
+        openTasks:
+          row.digest.progress.total - row.digest.progress.merged - row.digest.progress.inReview,
+        doneTasks: row.digest.progress.merged + row.digest.progress.inReview,
+      })),
+    [BuilderToolName.GetGoal]: (args) => {
+      const goal = services.getGoal(BuilderToolInputs.get_goal.parse(args).goalId);
+      // The list's digest is computed without marking the goal as viewed; the digest route would.
+      const status =
+        services.listGoals(goal.projectId).goals.find((row) => row.goal.id === goal.id)?.digest
+          .status ?? null;
+      const tasks = new Map(services.listTasks(goal.projectId).map((task) => [task.id, task]));
+      return {
+        id: goal.id,
+        title: goal.title,
+        status,
+        objective: goal.objective,
+        caresMost: goal.caresMost,
+        description: goal.description,
+        criteria: goal.criteria.map((c) => ({ text: c.text, check: c.check, state: c.state })),
+        tasks: goal.taskIds.map((id) => {
+          const task = tasks.get(id);
+          return {
+            id,
+            title: task?.title ?? null,
+            boardStatus: task?.boardStatus ?? null,
+            dependsOn: task?.dependsOn ?? [],
+          };
+        }),
+      };
+    },
     [BuilderToolName.ListTasks]: (args) =>
       services
         .listTasks(BuilderToolInputs.list_tasks.parse(args).projectId)

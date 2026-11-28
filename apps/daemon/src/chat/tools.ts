@@ -220,6 +220,8 @@ export function createChatTools(deps: ChatToolsDeps): ChatToolsFor {
       [ChatToolName.ListProjects]: (args) => run(BuilderToolName.ListProjects, args),
       [ChatToolName.ListKinds]: (args) => run(BuilderToolName.ListKinds, args),
       [ChatToolName.ListTasks]: () => run(BuilderToolName.ListTasks, { projectId }),
+      [ChatToolName.ListGoals]: () => run(BuilderToolName.ListGoals, { projectId }),
+      [ChatToolName.GetGoal]: (args) => run(BuilderToolName.GetGoal, args),
       [ChatToolName.CreateTask]: async (args) => {
         const { id } = FiledTask.parse(
           await run(BuilderToolName.CreateTask, inProject(args, projectId)),

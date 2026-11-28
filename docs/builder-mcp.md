@@ -37,10 +37,13 @@ Any other client that starts stdio servers (Claude Desktop, say) takes the same 
 }
 ```
 
-Start a new session in the client; the tools are `list_projects`, `list_kinds`, `list_tasks`, `create_task`,
-`edit_task`, `remove_task`, `start_task`, `move_task`, `run_next`, `list_inbox`, `start_shape`, `search_knowledge`,
+Start a new session in the client; the tools are `list_projects`, `list_kinds`, `list_tasks`, `list_goals`,
+`get_goal`, `create_task`, `edit_task`, `remove_task`, `start_task`, `move_task`, `run_next`, `list_inbox`, `start_shape`, `search_knowledge`,
 `save_decision`, `save_principle`, `supersede_knowledge`, `retire_knowledge`, `withdraw_knowledge` and
 `list_proposals`.
+
+The goal tools read the goal list's own digest, never the digest route, so reading a goal does not mark it as
+viewed in the app.
 
 The server starts and lists its tools whether or not 10db is open. A call made while 10db is closed answers
 "10db is not running: open the 10db app and try again"; open the app and call again, with no restart of the
@@ -66,6 +69,8 @@ The bridge reads no other 10db variable.
 | `list_projects` | Projects with their areas, hazards, isolate list, board columns (ids for `move_task`), default rigor and delivery.                                               |
 | `list_kinds`    | The kinds a task can have, each with its key, its lowest rigor and what it changes (review, own copy, Inbox).                                                    |
 | `list_tasks`    | A project's **open** tasks. Finished and removed tasks are left out.                                                                                             |
+| `list_goals`    | A project's goals with their status and open and done task counts. Read-only.                                                                                    |
+| `get_goal`      | One goal in full: objective, notes, criteria and its tasks with their dependencies. Read-only.                                                                   |
 | `create_task`   | Makes a task from a title, why, description, criteria, areas, dependencies, rigor, kinds and landing; returns its id. A rigor below a kind's minimum is refused. |
 | `edit_task`     | Changes a task's title, why, description, criteria, rigor, kinds, areas or landing (areas while no run holds a claim; landing only before it starts).            |
 | `remove_task`   | Removes a task that has not started, or one whose every run was cancelled, in no pass and with no saved work.                                                    |
