@@ -2,10 +2,17 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ConflictError,
+  EvidenceKind,
   GUARDRAIL_DIFF_DETAIL,
   GuardrailDiffDetail,
+  InboxAnswerRefused,
+  InboxKind,
+  WatchpointLoudness,
   type BatchDto,
   type TaskDto,
+  type WatchpointDetail,
+  type WatchpointHit,
+  type WorkstreamId,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -18,20 +25,23 @@ import {
   getBatchRow,
   getTask,
   getWorkstream,
+  insertEvidence,
+  listInbox,
   listTasks,
   listWorkstreams,
   transitionBatch,
   transitionWorkstream,
+  updateInboxItem,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
-import { onOrigin } from '../../test/delivery-worlds';
+import { committed, onOrigin, shipped } from '../../test/delivery-worlds';
 import { waitFor } from '../../test/fixtures';
 import { alive } from '../../test/orphan-gate';
 import { writeHook } from '../../test/git-hooks';
 import { hangingSsh } from '../../test/hanging-ssh';
 import { GitNetworkError, GitNetworkFailure, type Git } from '../git';
-import { GhError } from '../github';
+import { GhError, PrMergeable } from '../github';
 import {
   createInboxService,
   GUARDRAIL_HOLD_DETAIL,
@@ -41,6 +51,7 @@ import {
 import { listNetworkHosts } from '../permissions';
 import { guardrailHoldKey } from './guardrail-hold';
 import { createGuardrailHoldAnswers, guardrailHoldCardKey } from './guardrail-hold-card';
+import { createWatchpointHoldAnswers } from './watchpoint-hold';
 
 /** The repo's template, as a repository commits it at `.github/pull_request_template.md`. */
 const PR_TEMPLATE = [
@@ -1033,5 +1044,204 @@ describe('a pull request that touches a guardrail path', () => {
     await finishAll(batch);
     expect(h.gh.autoMerged).toEqual([]);
     expect(holdCardOf(batch)).toMatchObject({ title: 'A change to your git guard is ready' });
+  });
+});
+
+describe('a pull request whose change hit a watchpoint set to Hold', () => {
+  const WATCHED = 'src/api/watched.txt';
+
+  /** A hit on the watchpoint; null for a hash means its diff could not be read in full. */
+  const hitOf = (hash: string | null = 'hash-1'): WatchpointHit => ({
+    watchpoint: {
+      key: 'migrations',
+      label: 'Migrations',
+      why: 'A revert cannot undo one',
+      guidance: 'Check it runs on existing data',
+      loudness: WatchpointLoudness.Hold,
+    },
+    files: [{ path: WATCHED, status: 'A', added: 1, removed: 0, patch: '', clipped: false }],
+    ...(hash === null ? {} : { hash }),
+  });
+
+  /** Stores a run's reading as the runner's write does, for the run's workstream. */
+  function readingOf(workstreamId: WorkstreamId, detail: Partial<WatchpointDetail> = {}): void {
+    h.state.write((w) => {
+      insertEvidence(w, {
+        workstreamId,
+        kind: EvidenceKind.Watchpoint,
+        command: null,
+        exitCode: null,
+        summary: 'A watchpoint file changed.',
+        logPath: null,
+        commitShas: [],
+        detail: { hits: [hitOf()], head: 'head', skipped: null, ...detail },
+      });
+    });
+  }
+
+  const lookCards = () =>
+    listInbox(h.store.db, { states: ['OPEN'] }).filter((i) => i.kind === InboxKind.Watchpoint);
+
+  function openLookCard() {
+    const [card] = lookCards();
+    if (card === undefined || lookCards().length !== 1)
+      throw new Error('the pull request has no single open Look card');
+    return card;
+  }
+
+  /** The inbox the builder answers through, with a Look card's answers wired to `h` as the daemon does. */
+  function answering(): InboxService {
+    const answers = createWatchpointHoldAnswers(h.ctx, h.shipper);
+    return createInboxService({
+      state: h.state,
+      onParkedAnswer: () => undefined,
+      onWatchpointAnswer: (ctx, item, answer) => answers.onAnswerInWrite(ctx, item, answer),
+    });
+  }
+
+  /** A batch of one task with a reading that hits the watchpoint, shipped and held. */
+  async function heldPullRequest(detail: Partial<WatchpointDetail> = {}) {
+    h = createDeliveryHarness();
+    const { batch, workstreams } = await openBatch('Add a migration', 'Alpha');
+    h.commit(WATCHED);
+    const workstreamId = h.only(workstreams).id;
+    readingOf(workstreamId, detail);
+    const shipped = await finishAll(batch);
+    return { batch, workstreamId, prUrl: shipped.prUrl ?? '' };
+  }
+
+  it('opens with no auto-merge and raises one Look card with Merge on it', async () => {
+    h = createDeliveryHarness();
+    const { batch, workstreams } = await openBatch('Add a migration', 'Alpha');
+    h.commit(WATCHED);
+    readingOf(h.only(workstreams).id);
+    const shipped = await finishAll(batch);
+    expect(shipped).toMatchObject({
+      state: 'SHIPPED',
+      prUrl: 'https://github.com/acme/widgets/pull/1',
+    });
+    expect(h.gh.autoMerged).toEqual([]);
+    expect(h.gh.merged).toEqual([]);
+    expect(lookCards()).toHaveLength(1);
+    expect(lookCards()[0]?.options.map((o) => o.label)).toEqual(['merge', 'send_back']);
+    expect(lookCards()[0]?.detail).toMatchObject({
+      held: { batchId: batch.id, prUrl: shipped.prUrl },
+    });
+  });
+
+  it('arms auto-merge when the builder answers Merge, and holds again for a later change to the files', async () => {
+    const { batch, workstreamId, prUrl } = await heldPullRequest();
+
+    answering().answer(openLookCard().id, { choice: 'merge' });
+    await h.jobs.idle();
+    expect(h.gh.autoMerged).toEqual([prUrl]);
+    expect(lookCards()).toEqual([]);
+
+    // The files change again: a new hash, which no Merge covers.
+    readingOf(workstreamId, { hits: [hitOf('hash-2')] });
+    h.shipper.retryMerge(batch.id, { catchUpCardWasOpen: true });
+    await h.jobs.idle();
+    expect(h.gh.autoMerged).toEqual([prUrl]);
+    expect(lookCards()).toHaveLength(1);
+  });
+
+  it('refuses Merge for a diff 10db could not read in full, and arms nothing', async () => {
+    await heldPullRequest({ hits: [hitOf(null)] });
+    const card = openLookCard();
+    expect(card.body).toContain("10db could not read this whole diff, so it can't approve it");
+
+    expect(() => answering().answer(card.id, { choice: 'merge' })).toThrow(InboxAnswerRefused);
+    await h.jobs.idle();
+    expect(h.gh.autoMerged).toEqual([]);
+    expect(openLookCard().id).toBe(card.id);
+  });
+
+  it('holds nothing for the base files a catch-up merges into the branch', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    h.commit('src/index.ts', 'export {};\n');
+    h.git$('push', '-q', 'origin', 'main');
+    // The run changed no watched file, so its reading has no hit.
+    const world = await committed(h, { path: 'src/api/alpha.txt' });
+    readingOf(world.ws.id, { hits: [] });
+    const { batch, prUrl } = await shipped(h, { from: world });
+    expect(h.gh.autoMerged).toEqual([prUrl]);
+
+    h.teammatePush('main', WATCHED);
+    h.gh.setHead(prUrl, h.origin$('rev-parse', `refs/heads/${batch.branch ?? ''}`));
+    h.gh.setMergeBlocked(prUrl, 'conflicts');
+    h.gh.setMergeable(prUrl, PrMergeable.Conflicting);
+    h.shipper.catchUp(batch.id);
+    await h.jobs.idle();
+
+    expect(h.origin$('ls-tree', '-r', '--name-only', `refs/heads/${batch.branch ?? ''}`)).toContain(
+      WATCHED,
+    );
+    expect(h.gh.autoMergeOff).toEqual([]);
+    expect(lookCards()).toEqual([]);
+  });
+
+  it('holds nothing for a reading with a judge answer or a question and no hit', async () => {
+    h = createDeliveryHarness();
+    const { batch, workstreams } = await openBatch('Add a migration', 'Alpha');
+    h.commit(WATCHED);
+    readingOf(h.only(workstreams).id, {
+      hits: [],
+      reads: [{ key: 'migrations', verdict: 'finding', meets: 0, destructive: 0, acted: true }],
+      shadow: [{ key: 'migrations', label: 'Migrations', asked: [WATCHED], more: 0, yes: 0 }],
+    });
+    const shipped = await finishAll(batch);
+    expect(h.gh.autoMerged).toEqual([shipped.prUrl]);
+    expect(lookCards()).toEqual([]);
+  });
+
+  it('is still held after a restart: a retry arms nothing and the card stays open', async () => {
+    const { batch } = await heldPullRequest();
+    const card = openLookCard();
+
+    h.restartShipper();
+    h.shipper.retryMerge(batch.id, { catchUpCardWasOpen: true });
+    await h.jobs.idle();
+
+    expect(h.gh.autoMerged).toEqual([]);
+    expect(openLookCard().id).toBe(card.id);
+  });
+
+  it('closes the pull request and files a task naming it when the builder sends it back', async () => {
+    const { prUrl } = await heldPullRequest();
+
+    answering().answer(openLookCard().id, { choice: 'send_back', note: 'Make it reversible' });
+    await waitFor(() => h.gh.closed.length > 0);
+
+    expect(h.gh.closed).toEqual([prUrl]);
+    expect(h.gh.autoMerged).toEqual([]);
+    const followUp = h.only(
+      listTasks(h.store.db, h.project.id).filter((t) => t.title.startsWith('Revisit')),
+    );
+    expect(followUp.description).toContain('Make it reversible');
+    expect(followUp.description).toContain(prUrl);
+  });
+
+  it('raises the card again when it was resolved by hand and the pull request is still held', async () => {
+    const { batch, prUrl } = await heldPullRequest();
+    const card = openLookCard();
+    h.state.write((w) => updateInboxItem(w, card.id, { state: 'RESOLVED' }));
+    expect(lookCards()).toEqual([]);
+
+    h.shipper.retryMerge(batch.id, { catchUpCardWasOpen: true });
+    await h.jobs.idle();
+
+    expect(h.gh.autoMerged).toEqual([]);
+    expect(openLookCard()).toMatchObject({ detail: { held: { prUrl } } });
+  });
+
+  it('is not released by a later reading that could not be read', async () => {
+    const { batch, workstreamId } = await heldPullRequest();
+
+    readingOf(workstreamId, { hits: [], skipped: 'the changes could not be read' });
+    h.shipper.retryMerge(batch.id, { catchUpCardWasOpen: true });
+    await h.jobs.idle();
+
+    expect(h.gh.autoMerged).toEqual([]);
+    expect(lookCards()).toHaveLength(1);
   });
 });

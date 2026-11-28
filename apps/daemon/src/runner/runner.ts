@@ -258,6 +258,7 @@ import {
   finalCheck,
   stepCheck,
   uncarriedSaid,
+  heldLandingOf,
   type BaseUpdate,
   type BaseUpdates,
   type DeliveryJobs,
@@ -1956,6 +1957,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       taskId: task.id,
       taskTitle: task.title,
       detail,
+      landing: heldLandingOf(ctx.tx, id),
     });
     const files = detail.hits.reduce((n, h) => n + h.files.length, 0);
     const asked = detail.shadow?.length ?? 0;

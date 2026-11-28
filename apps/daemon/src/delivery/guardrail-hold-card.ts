@@ -115,6 +115,35 @@ export function clearGuardrailHold(w: WriteContext, root: BatchDto): void {
   deleteAppSetting(w, guardrailHoldKey(root.id));
 }
 
+/**
+ * Closes the held pull request once the answer that dropped it is committed. A refusal from GitHub clears the drop,
+ * so the watch raises its own card for a close it did not expect, and raises a card saying 10db could not close it.
+ */
+export function closeHeldPullRequest(ctx: DeliveryContext, rootId: BatchId, prUrl: string): void {
+  const root = getBatch(ctx.state.db, rootId);
+  if (root.repo === null) return;
+  const call = ghCall(ctx, new AbortController().signal);
+  ctx.gh.closePullRequest({ repo: root.repo, url: prUrl }, call).catch((error: unknown) => {
+    ctx.logger.warn(
+      { batchId: rootId, err: detailOf(error) },
+      'could not close a held pull request',
+    );
+    ctx.state.write((w) => {
+      patchCiOutOfMoves(w, rootId, { dropped: false });
+      raiseIn(w, root.projectId, {
+        tier: CardTier.Ask,
+        urgency: Urgency.Normal,
+        closesWhen: BY_ANSWER,
+        decision: decidedByBuilder(BuilderOwns.Guardrails),
+        title: `Could not close the pull request for ${root.title}`,
+        body: `GitHub did not close it: ${detailOf(error)}\n\nPull request: ${prUrl}\n\n10db has not merged it. Close it on GitHub.`,
+        foldKey: `${guardrailHoldCardKey(rootId)}:close`,
+        detail: { batchId: rootId, prUrl, link: prUrl },
+      });
+    });
+  });
+}
+
 /** What answering the card needs of the shipper. */
 export interface GuardrailHoldArming {
   /**
@@ -140,31 +169,6 @@ export function createGuardrailHoldAnswers(
     answer: InboxAnswer,
   ): (() => void) | undefined;
 } {
-  function close(rootId: BatchId, prUrl: string): void {
-    const root = getBatch(ctx.state.db, rootId);
-    if (root.repo === null) return;
-    const call = ghCall(ctx, new AbortController().signal);
-    ctx.gh.closePullRequest({ repo: root.repo, url: prUrl }, call).catch((error: unknown) => {
-      ctx.logger.warn(
-        { batchId: rootId, err: detailOf(error) },
-        'could not close a held pull request',
-      );
-      ctx.state.write((w) => {
-        patchCiOutOfMoves(w, rootId, { dropped: false });
-        raiseIn(w, root.projectId, {
-          tier: CardTier.Ask,
-          urgency: Urgency.Normal,
-          closesWhen: BY_ANSWER,
-          decision: decidedByBuilder(BuilderOwns.Guardrails),
-          title: `Could not close the pull request for ${root.title}`,
-          body: `GitHub did not close it: ${detailOf(error)}\n\nPull request: ${prUrl}\n\n10db has not merged it. Close it on GitHub.`,
-          foldKey: `${guardrailHoldCardKey(rootId)}:close`,
-          detail: { batchId: rootId, prUrl, link: prUrl },
-        });
-      });
-    });
-  }
-
   return {
     onAnswerInWrite(w, item, answer) {
       const held = GuardrailHoldDetail.safeParse(item.detail?.[GUARDRAIL_HOLD_DETAIL]);
@@ -183,7 +187,7 @@ export function createGuardrailHoldAnswers(
         case GuardrailPrChoice.Close:
           patchCiOutOfMoves(w, batchId, { dropped: true });
           return () => {
-            close(batchId, prUrl);
+            closeHeldPullRequest(ctx, batchId, prUrl);
           };
         default:
           return undefined;

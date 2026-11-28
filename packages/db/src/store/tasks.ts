@@ -666,23 +666,32 @@ export function insertAcceptanceFollowUp(
 
 /**
  * Files what the builder sent back from a Look card: a task in the project's Ready column touching the source's
- * areas, with the builder's note and the watchpoints the card named. The source run is untouched.
+ * areas, with the builder's note and the watchpoints the card named. The source run is untouched. A card that held
+ * a pull request names it and its branch, which 10db closes, so the follow-up can start from the work on it.
  */
 export function insertWatchpointFollowUp(
   ctx: WriteContext,
   sourceId: TaskId,
-  input: { readonly watchpoints: readonly string[]; readonly note: string },
+  input: {
+    readonly watchpoints: readonly string[];
+    readonly note: string;
+    readonly pullRequest?: { readonly url: string; readonly branch: string | null };
+  },
 ): TaskDto {
   const source = getTask(ctx.tx, sourceId);
   const project = getProject(ctx.tx, source.projectId);
   const what = input.watchpoints.length > 0 ? input.watchpoints.join(', ') : 'the watched changes';
   const title = `Revisit ${what} in ${source.title}`;
+  const closed =
+    input.pullRequest === undefined
+      ? ''
+      : `\n\nIts pull request ${input.pullRequest.url}${input.pullRequest.branch === null ? '' : ` (branch ${input.pullRequest.branch})`} is being closed; the work is still on that branch.`;
   return writeTask(ctx, source.projectId, {
     landing: taskLandingFor(project),
     workspaceMode: placementFor(project, undefined),
     reason: null,
     title: Title.parse(title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title),
-    description: `${input.note}\n\nSent back from the Look card for ${what} on the task "${source.title}" (${source.id}).`,
+    description: `${input.note}\n\nSent back from the Look card for ${what} on the task "${source.title}" (${source.id}).${closed}`,
     acceptanceCriteria: [`The note is answered: ${input.note}`],
     areas: source.areas,
     dependsOn: [],

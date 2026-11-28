@@ -4044,6 +4044,7 @@ describe('a worktree batch two tasks share', () => {
           taskId: task.id,
           taskTitle: task.title,
           detail: { hits, head: 'h', skipped: null },
+          landing: null,
         });
       });
     };

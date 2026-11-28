@@ -1,6 +1,5 @@
 import { createEvalCandidateList } from './eval-candidate-list';
 import { applyAcceptanceAnswer } from '../acceptance';
-import { applyWatchpointAnswer } from '../watchpoints';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -198,6 +197,7 @@ import {
   createBranchCardAnswers,
   createCiStopAnswers,
   createGuardrailHoldAnswers,
+  createWatchpointHoldAnswers,
   createGhCardAnswers,
   createStartCardAnswers,
   createLostMigrationsAnswers,
@@ -1111,6 +1111,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let guardrailAnswers: ReturnType<typeof createGuardrailAnswers> | null = null;
   // Made once the shipper is, below the inbox service that routes the answers to it.
   let guardrailHoldAnswers: ReturnType<typeof createGuardrailHoldAnswers> | null = null;
+  let watchpointHoldAnswers: ReturnType<typeof createWatchpointHoldAnswers> | null = null;
   let answerSelfUpdateCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   // Started once recovery is through; a launch before then waits for no before picture.
   let pictures: Pictures | null = null;
@@ -1279,7 +1280,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       applyAcceptanceAnswer(ctx, item, answer);
     },
     onWatchpointAnswer: (ctx, item, answer) => {
-      applyWatchpointAnswer(ctx, item, answer);
+      // Merge or Send Back on a Look card that holds a pull request: the shipper arms it or closes it once committed.
+      if (watchpointHoldAnswers === null)
+        throw new ConflictError('The shipper has not started, so the card cannot be answered yet');
+      return watchpointHoldAnswers.onAnswerInWrite(ctx, item, answer);
     },
     onPlanAnswer: (ctx, item, answer) => {
       if (!runner) throw new RunnerNotStartedError('plan');
@@ -1812,6 +1816,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     load: loadGuard,
   });
   guardrailHoldAnswers = createGuardrailHoldAnswers(delivery, shipper);
+  watchpointHoldAnswers = createWatchpointHoldAnswers(delivery, shipper);
   // Where a project's pictures go in Slack: a pass's pull request and a finished task each post once.
   const picturePost: SlackPicturePost | null =
     slackClients === null
