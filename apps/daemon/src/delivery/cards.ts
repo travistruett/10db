@@ -1428,6 +1428,56 @@ export const prCards = {
     };
   },
   /**
+   * Fixing stopped at the limit or on an unchanged head, and the checks still failed half an hour on:
+   * the out-of-moves card. It asks Spend More Attempts, Change the Task or Drop It (close the pull
+   * request), and names each failing check with its link. `fixes` is how many ran.
+   */
+  ciOutOfMoves: (
+    root: BatchDto,
+    reason: CiStopped,
+    failing: readonly RequiredCheckJobDto[],
+    fixes: number,
+  ): Card => {
+    const prUrl = root.prUrl ?? '(no pull request)';
+    const link = failing[0]?.link ?? prUrl;
+    const fields = outOfMovesFields({
+      kind: OutOfMovesKind.Ci,
+      more: maxCiFixes,
+      batchId: root.id,
+      workstreamId: null,
+    });
+    return {
+      tier: CardTier.Ask,
+      urgency: Urgency.High,
+      closesWhen: {
+        by: 'withdrawn',
+        when: "the pull request's CI passes or it ends (clearCiStop)",
+      },
+      decision: decidedByBuilder(BuilderOwns.OutOfMoves),
+      title: `Out of moves: CI failing on ${root.title}: ${failing.map((job) => job.name).join(', ') || 'a required check'}`,
+      body: [
+        link,
+        `Failing:\n${failing.map((c) => `- ${c.name}${c.link ? `: ${c.link}` : ' (no link)'}`).join('\n')}`,
+        CI_STOP_REASON[reason](fixes, null),
+        `Pull request: ${prUrl}`,
+      ].join('\n\n'),
+      foldKey: prCardKey.ciStopped(root.id),
+      options: fields.options,
+      detail: { ...prDetail(root, link), ...fields.detail },
+    };
+  },
+  /** Drop It asked GitHub to close the pull request, and it refused. */
+  closeFailed: (root: BatchDto, error: unknown): Card => ({
+    tier: CardTier.Ask,
+    urgency: Urgency.Normal,
+    closesWhen: BY_ANSWER,
+    decision: decidedByBuilder(BuilderOwns.OutOfMoves),
+    title: `Could not close the pull request for ${root.title}`,
+    body: `GitHub did not close it: ${detailOf(error)}\n\nPull request: ${root.prUrl ?? '(none)'}\n\nClose it on GitHub, or answer the out-of-moves card again.`,
+    foldKey: `${prCardKey.ciStopped(root.id)}:close`,
+    detail: prDetail(root, root.prUrl ?? ''),
+  }),
+  /**
    * GitHub keeps cancelling a required job because no hosted runner picks it up, and 10db's reruns for
    * this head are used up. `names` are the jobs, `attempts` the reruns made. One card per head.
    */

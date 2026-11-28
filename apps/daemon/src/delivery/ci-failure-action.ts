@@ -22,8 +22,10 @@ type CiFailureAction =
  * - Nothing to fix yet (the checks do not fail, or GitHub gave no head): wait.
  * - A stop the root already holds stays: a refused fix cut deleted the batch that guards the head.
  * - A fix still running: wait, whatever head it fixes.
- * - A finished fix for this head: it changed nothing or did not fix it, so stop.
- * - The limit of fixes: stop.
+ * - Only fixes made after `ignoreFixesBefore` count from here (all of them when it is null): the
+ *   builder spent more attempts then.
+ * - A counted fix for this head: it changed nothing or did not fix it, so stop.
+ * - The limit of counted fixes: stop.
  * - No failing check is an Actions job: there is no log to read, so stop.
  */
 export function ciFailureAction(
@@ -31,13 +33,18 @@ export function ciFailureAction(
   required: RequiredChecksDto,
   fixes: readonly BatchDto[],
   head: string | null,
+  ignoreFixesBefore: string | null,
 ): CiFailureAction {
   if (required.state !== 'failing' || head === null) return { kind: 'wait' };
   if (root.ciStopped !== null) return { kind: 'stop', reason: root.ciStopped };
   if (fixes.some((fix) => UNFINISHED_BATCH_STATES.includes(fix.state))) return { kind: 'wait' };
-  if (fixes.some((fix) => fix.ciFixHead === head))
+  const counted =
+    ignoreFixesBefore === null
+      ? fixes
+      : fixes.filter((fix) => Date.parse(fix.createdAt) > Date.parse(ignoreFixesBefore));
+  if (counted.some((fix) => fix.ciFixHead === head))
     return { kind: 'stop', reason: CiStopped.NoChange };
-  if (fixes.length >= maxCiFixes) return { kind: 'stop', reason: CiStopped.Limit };
+  if (counted.length >= maxCiFixes) return { kind: 'stop', reason: CiStopped.Limit };
   if (!required.failing.some((job) => job.jobId !== null))
     return { kind: 'stop', reason: CiStopped.NoLog };
   return { kind: 'fix' };

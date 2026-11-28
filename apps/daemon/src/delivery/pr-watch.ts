@@ -43,7 +43,14 @@ import { startCiFix } from './ci-fix';
 import { CHECKS_START_MS, ciRerunStep } from './ci-rerun';
 import { queuePassSettle, settleClosedPass } from './pass-settle';
 import { recordPassPullRequest, watchedAsPass } from './pass-watch';
-import { clearCiStop, endFixesOfEndedPullRequests, type FixEnds } from './ci-stop';
+import {
+  clearCiStop,
+  deleteCiOutOfMoves,
+  endFixesOfEndedPullRequests,
+  raiseCiOutOfMovesWhenDue,
+  readCiOutOfMoves,
+  type FixEnds,
+} from './ci-stop';
 import { ghCall, postIn, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
 import {
   baseNotices,
@@ -422,7 +429,12 @@ export function createPrWatch(input: {
     ) {
       withdrawIn(write, batch.projectId, [prCardKey.checks(batch.id)]);
     }
-    if (next.state === PullRequestState.Closed && wasState !== PullRequestState.Closed)
+    // The builder's Drop It closed it, so it needs no card saying so.
+    if (
+      next.state === PullRequestState.Closed &&
+      wasState !== PullRequestState.Closed &&
+      !readCiOutOfMoves(write.tx, batch.id).dropped
+    )
       raiseIn(write, batch.projectId, prCards.closed(batch));
   }
 
@@ -1563,6 +1575,8 @@ export function createPrWatch(input: {
           followConflict(write, batch, read);
         }
         if (read !== null) storeRequired(write, root, read, required, queue);
+        // Last, after `record` read `dropped` and `clearCiStop` ran: nothing after it re-creates it.
+        if (read !== null && read.state !== PrState.Open) deleteCiOutOfMoves(write, root.id);
         // The catch-up card closes when the pull request merges cleanly or is gone. Not while it is
         // behind: the merge below is asked only of a clean one, and the card is what says it is due.
         if (
@@ -1649,6 +1663,14 @@ export function createPrWatch(input: {
       } else {
         waitingOnBase.delete(root.id);
         clearWaitingNotices(root, null);
+      }
+      // A stop at the limit or on an unchanged head gets its out-of-moves card once its wait is over.
+      if (read?.state === PrState.Open && root.ciFixOf === null) {
+        const now = getBatch(ctx.state.db, root.id);
+        if (now.ciStopped !== null && now.notices.some((n) => n.key === NOTICE_KEY.ciOutOfMoves))
+          ctx.state.write((write) => {
+            raiseCiOutOfMovesWhenDue(write, root.id);
+          });
       }
       if (root.repo !== null && read?.baseRef != null)
         seenBases.set(prCardKey.baseRed(root.repo, read.baseRef), root.projectId);
