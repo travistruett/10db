@@ -18,6 +18,10 @@ The watchdog (`decisions/2026-11-25-queue-waits-live-in-the-scheduler.md`).
   `admission.held()` (load, low disk or an update's drain), so a STARTING run waiting for the hold to clear is
   not flagged the moment its session launches. The lane cap needs no entry: a queued run waiting for a lane is
   an uncounted wait.
+- A run with a gate process recorded (`gate_pid`) is not idle while its newest log (`logs/gate/<run id>-*.log`,
+  `live-gate.ts`) is still growing: the later of the run's own activity and the log's last write is its
+  activity. A gate past its own timeout (`gateTimeoutFor`) no longer counts, so a gate that hangs is still
+  stuck; its card says how long the gate wrote for, or its limit, as fixed text (never the time since).
 - `card.ts` builds the card (Ask, high, a condition card folded by its key) and its answers. The body names the time
   the item stopped ("since …", in the Mac's own time), never a duration: the card is rewritten only when its
   fingerprint changes, so a duration would go stale. The answers act;

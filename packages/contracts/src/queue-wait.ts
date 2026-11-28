@@ -27,6 +27,8 @@ export const QueueWaitKind = {
   Parked: 'parked',
   /** Its task's saved Workbench work is being put back first. */
   KeptWork: 'kept_work',
+  /** It gave up a claim to another task twice and waits for that task. */
+  Turn: 'turn',
 } as const;
 export type QueueWaitKind = (typeof QueueWaitKind)[keyof typeof QueueWaitKind];
 

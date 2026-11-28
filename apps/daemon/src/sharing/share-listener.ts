@@ -21,9 +21,12 @@ export async function startShareListener(input: {
   readonly fetch: (req: Request, env: ApiBindings) => Response | Promise<Response>;
   readonly port: number;
   readonly sockets: SocketRegistry;
+  /** Watches the listener's sockets for as long as its WebSocket server is open. */
+  readonly keepAlive: (wss: WebSocketServer) => void;
   readonly holderOf: (port: number) => Promise<string | null>;
 }): Promise<ShareListenResult> {
   const wss = new WebSocketServer({ noServer: true });
+  input.keepAlive(wss);
   const server = serve({
     // The env is marked in place: the server reads back what the upgrade helper writes on this very object.
     fetch: (req, env) => input.fetch(req, Object.assign(env, { listener: Listener.Share })),

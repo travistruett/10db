@@ -28,8 +28,12 @@ export const AcceptanceDetail = z.object({
 });
 export type AcceptanceDetail = z.infer<typeof AcceptanceDetail>;
 
-/** The two answers to an acceptance card: ship the work as it is, or send it back with a note. */
-export const AcceptanceChoice = { Accept: 'accept', SendBack: 'send_back' } as const;
+/**
+ * The answers to an acceptance card: accept the criteria without proof, send the work back with a note, or drop
+ * the criteria from the task. Only the builder gives Accept or Drop: the daemon refuses both from an agent or a
+ * rule, since either one lowers the bar. A card raised before Drop existed offers only the first two.
+ */
+export const AcceptanceChoice = { Accept: 'accept', SendBack: 'send_back', Drop: 'drop' } as const;
 export type AcceptanceChoice = (typeof AcceptanceChoice)[keyof typeof AcceptanceChoice];
 
 /** Whether acceptance is checking, and when it is not, why. */

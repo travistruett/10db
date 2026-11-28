@@ -30,7 +30,10 @@ function setup() {
   const moves: { projectId: ProjectId; accountId: AccountId }[] = [];
   const actions = createActivityActions({
     state,
-    moves: { moveProject: (projectId, accountId) => moves.push({ projectId, accountId }) },
+    moves: {
+      moveProject: (projectId, accountId) => moves.push({ projectId, accountId }),
+      forgetClaimDeadlock: () => undefined,
+    },
   });
   /** Posts a rule-decided notice and returns its row's seq. */
   function decide(key: string, decision: NoticeDecision): number {

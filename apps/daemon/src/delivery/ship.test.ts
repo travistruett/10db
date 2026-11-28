@@ -12,6 +12,7 @@ import {
   getWorkstream,
   listWorkstreams,
   transitionBatch,
+  transitionWorkstream,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
@@ -774,6 +775,27 @@ describe('a push the remote declines by repository rule or hook', () => {
 });
 
 describe('Ship anyway, Retry and Abandon', () => {
+  it('refuses Ship anyway from the Board and the card alike until work a reviewer rejected is reviewed again', async () => {
+    h = createDeliveryHarness();
+    const { batch, workstreams } = await openBatch('Greetings', 'Alpha', 'Beta');
+    const [alpha, beta] = workstreams;
+    if (!alpha || !beta) throw new Error('two workstreams expected');
+    h.commit('src/api/alpha.txt');
+    h.settle(alpha.id, 'DONE');
+    h.settle(beta.id, 'RUNNING');
+    h.state.write((c) =>
+      transitionWorkstream(c, beta.id, {
+        to: 'FAILED',
+        fence: null,
+        patch: { failureKind: 'rejected_at_limit' },
+      }),
+    );
+    for (const ask of [() => h.shipper.ship(batch.id), () => h.shipper.shipAnyway(batch.id)])
+      expect(ask).toThrow(/Beta failed review, and 10db reviews it again/);
+    expect(getBatch(h.store.db, batch.id).state).toBe('OPEN');
+    expect(h.jobs.pending()).toBe(0);
+  });
+
   it('ships anyway only when every workstream is done, cancelled or failed, listing the failed one', async () => {
     h = createDeliveryHarness();
     const { batch, workstreams } = await openBatch('Greetings', 'Alpha', 'Beta');

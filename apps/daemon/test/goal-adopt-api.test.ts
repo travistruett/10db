@@ -1,9 +1,10 @@
-import { GoalDto, GoalListDto, ProjectDto, TaskDto, type ProjectId } from '@10db/contracts';
+import { GoalDto, GoalListDto, ProjectDto, type ProjectId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
+import { taskListOf } from './task-list';
 import { createTempRepo, tempDir } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
@@ -84,7 +85,7 @@ Notes below the front matter.
 const adopt = (projectId: ProjectId, body: unknown) =>
   post(`/projects/${projectId}/goals/adopt`, body);
 const tasksOf = (projectId: ProjectId) =>
-  api().get(`/projects/${projectId}/tasks`, z.array(TaskDto));
+  api().get(`/projects/${projectId}/tasks`, taskListOf(projectId));
 const goalsOf = async (projectId: ProjectId) =>
   (await api().get(`/projects/${projectId}/goals`, GoalListDto)).goals.map((s) => s.goal);
 

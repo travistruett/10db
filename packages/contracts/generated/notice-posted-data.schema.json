@@ -60,7 +60,8 @@
           "enum": [
             "stray-write",
             "flaky-check",
-            "move-back-after-limit"
+            "move-back-after-limit",
+            "claim-deadlock"
           ]
         },
         "confidence": {
@@ -106,6 +107,29 @@
                         "kind",
                         "projectId",
                         "accountId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "forget_claim_deadlock"
+                        },
+                        "a": {
+                          "type": "string",
+                          "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                        },
+                        "b": {
+                          "type": "string",
+                          "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "a",
+                        "b"
                       ],
                       "additionalProperties": false
                     }

@@ -162,6 +162,7 @@ import {
   type CatalogueSync,
 } from '../catalogue';
 import { linearLinkOf } from '../linear';
+import { dropPair } from '../mcp';
 import { placementAfterEdit, proposePlacement } from '../placement';
 import type { SizingService } from '../sizing';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
@@ -566,6 +567,11 @@ export function createServices(deps: {
     moves: {
       moveProject: (projectId, accountId) => {
         deps.moves.move(projectId, accountId, { cause: MoveCause.Builder });
+      },
+      // Undo forgets the pair's record only; no claim moves back.
+      forgetClaimDeadlock: (a, b) => {
+        const found = deps.state.write((ctx) => dropPair(ctx, a, b));
+        if (!found) throw new ConflictError('This claim deadlock has no record any more');
       },
     },
   });

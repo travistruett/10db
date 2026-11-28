@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { CardDecider } from './card-decider';
 import { Notice } from './entities';
-import { AccountId, ProjectId, TaskId } from './ids';
+import { AccountId, ProjectId, TaskId, WorkstreamId } from './ids';
 
 /** Rows on one Activity page when the query names no size. */
 export const ACTIVITY_PAGE_SIZE = 50;
@@ -25,6 +25,7 @@ export const DecisionRule = {
   StrayWrite: 'stray-write',
   FlakyCheck: 'flaky-check',
   MoveBack: 'move-back-after-limit',
+  ClaimDeadlock: 'claim-deadlock',
 } as const;
 export type DecisionRule = (typeof DecisionRule)[keyof typeof DecisionRule];
 
@@ -32,6 +33,7 @@ export const DECISION_RULE_NAMES: Record<DecisionRule, string> = {
   [DecisionRule.StrayWrite]: 'A write outside every claim, left to be committed',
   [DecisionRule.FlakyCheck]: 'A flaky check, rerun once',
   [DecisionRule.MoveBack]: 'A project moved back after its account’s limit reset',
+  [DecisionRule.ClaimDeadlock]: 'A claim deadlock, ended by the later task yielding',
 };
 
 /** A move 10db can take back, with what the daemon needs to do it. */
@@ -41,6 +43,12 @@ export const UndoAction = z.discriminatedUnion('kind', [
     kind: z.literal('move_project'),
     projectId: ProjectId,
     accountId: AccountId,
+  }),
+  /** Forgets a claim deadlock's yield between two tasks, so their next deadlock counts as the first. */
+  z.strictObject({
+    kind: z.literal('forget_claim_deadlock'),
+    a: WorkstreamId,
+    b: WorkstreamId,
   }),
 ]);
 export type UndoAction = z.infer<typeof UndoAction>;

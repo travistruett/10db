@@ -103,6 +103,37 @@ describe('findStalls', () => {
     expect(findStalls(input({ active: [run(21)] }))).toHaveLength(1);
   });
 
+  it('does not call a verifying run stuck while its gate is still writing, and says how long a quiet gate ran', () => {
+    const verifying = (gate: { startedMin: number; outputMin: number; timeoutMin: number }) => ({
+      id: mintId('Workstream'),
+      projectId,
+      taskTitle: 'Build it',
+      state: WorkstreamState.Verifying,
+      lastActivityAt: ago(60),
+      updatedAt: ago(60),
+      gate: {
+        startedAt: ago(gate.startedMin),
+        lastOutputAt: ago(gate.outputMin),
+        timeoutMs: gate.timeoutMin * 60_000,
+      },
+    });
+    // The agent has been silent for an hour, but the gate wrote a minute ago.
+    expect(
+      findStalls(input({ active: [verifying({ startedMin: 40, outputMin: 1, timeoutMin: 60 })] })),
+    ).toHaveLength(0);
+    // The gate ran for 25 minutes, then went quiet for 25 more.
+    const [quiet] = findStalls(
+      input({ active: [verifying({ startedMin: 50, outputMin: 25, timeoutMin: 60 })] }),
+    );
+    expect(quiet?.reason).toContain('Its gate ran for 25 minutes and then printed nothing.');
+    expect(quiet?.since).toBe(ago(25));
+    // A gate still writing past its own timeout does not hold the stall off.
+    const [late] = findStalls(
+      input({ active: [verifying({ startedMin: 50, outputMin: 1, timeoutMin: 30 })] }),
+    );
+    expect(late?.reason).toContain('Its gate has run past its limit of 30 minutes.');
+  });
+
   it('counts an active run silence from the daemon start or the last admission hold, whichever is later', () => {
     const run = {
       id: mintId('Workstream'),

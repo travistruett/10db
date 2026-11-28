@@ -163,8 +163,8 @@ runs the new commit within the wait limit plus the time the running steps take p
 Apple event to the window's bundle id (`app.10db.desktop`), which runs the shell's exit path so the supervisor
 stops the daemon cleanly, and needs no process listing to find it. When the Apple event is refused (no Automation
 permission for a script started by the daemon, or no GUI session) it falls back to a SIGTERM to the window alone;
-the daemon then stops on seeing its stdin close. A signal to the daemon would not do: it exits 0, the supervisor
-stops, and the window stays. It then waits, within `TENDB_INSTALL_QUIT_SECONDS` (90), until no process that holds
+the daemon then stops on seeing its stdin close. A signal to the daemon would not do: the supervisor starts it
+again, and the window stays. It then waits, within `TENDB_INSTALL_QUIT_SECONDS` (90), until no process that holds
 the database is left (the builder's MCP bridge, `builder-mcp.mjs`, holds none and is neither waited for nor
 signalled) **and** every `--quit-pid` is gone. The daemon passes its own pid, and its parent's when the window
 started it (`TENDB_PARENT_STDIN`), as a second check beside the listing. If any is still there at the bound the
