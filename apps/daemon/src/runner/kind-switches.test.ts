@@ -55,4 +55,15 @@ describe('the seeded kinds carry the behaviour the risk tags had', () => {
       expect.soft(!filing.file, `${key}: card`).toBe(before.card);
     }
   });
+
+  it('files a prerequisite over the size limit, and still cards one that carries a kind asking for a card', () => {
+    const long = { kind: 'new_task' as const, title: 'Add the index first', body: 'x'.repeat(2000) };
+    const base = { ...long, known: seeded, limit: 1200, prerequisite: true };
+    expect(proposalFiling({ ...long, known: seeded, limit: 1200 }).file).toBe(false);
+    expect(proposalFiling(base).file).toBe(true);
+    expect(proposalFiling({ ...base, kinds: ['migration'] })).toMatchObject({
+      file: false,
+      reason: 'it carries the migration kind',
+    });
+  });
 });

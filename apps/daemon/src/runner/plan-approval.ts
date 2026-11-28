@@ -21,6 +21,7 @@ import {
   type WorkstreamRow,
   type WriteContext,
 } from '@10db/db';
+import { raisedAsCardLine } from '../inbox';
 
 /** What the builder is asked to approve before a task's Build starts. */
 export interface PlanApproval {
@@ -49,7 +50,7 @@ export function livePlanCard(db: DbReader, workstreamId: WorkstreamId): InboxIte
 const planBody = (approval: PlanApproval): string =>
   [
     approval.plan,
-    ...(approval.reason === undefined ? [] : [`Raised as a card because ${approval.reason}.`]),
+    ...(approval.reason === undefined ? [] : [raisedAsCardLine(approval.reason)]),
     'Approve to start the build, or send the plan back with a note.',
   ].join('\n\n');
 

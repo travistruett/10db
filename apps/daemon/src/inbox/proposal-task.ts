@@ -2,6 +2,8 @@ import { z } from 'zod';
 import {
   InvalidError,
   ProposalKind,
+  Rigor,
+  StepRole,
   kindsOfTask,
   withKindsNamed,
   type KindDto,
@@ -11,8 +13,10 @@ import {
 } from '@10db/contracts';
 import {
   areasForProposal,
+  findOpenTaskByFirstLine,
   getProject,
   getProposal,
+  getTask,
   listKinds,
   insertTaskFromProposal,
   proposalSourceTask,
@@ -39,13 +43,15 @@ const RISK_WORDS: Readonly<Record<string, RegExp>> = {
 /**
  * Files a pending new-task proposal to the Icebox without a card and marks it accepted, in the
  * caller's write. The task's description opens with a line, shown in the task drawer, saying 10db filed
- * it and which task's lane proposed it.
+ * it and which task's lane proposed it. A prerequisite is filed once: proposed again while the first is
+ * open, it is that task (`again`), and nothing new is filed.
  */
 export function fileProposalByItself(
   ctx: WriteContext,
   proposalId: ProposalId,
   kinds: readonly TaskKind[] = [],
-): TaskDto {
+  prerequisite = false,
+): { readonly task: TaskDto; readonly again: boolean } {
   const proposal = getProposal(ctx.tx, proposalId);
   const lane = proposalSourceTask(ctx.tx, proposalId);
   const fields = taskFieldsFromProposal(proposal);
@@ -53,13 +59,27 @@ export function fileProposalByItself(
   const origin = lane
     ? `proposed by the lane working on the task "${lane.title}" (${lane.id})`
     : 'proposed by a lane';
+  // A prerequisite's first line names it and the task it is for, so a lane that proposes it again files nothing.
+  const first = prerequisite
+    ? `Filed by 10db without an Inbox card: "${fields.title}" is a prerequisite of ${lane ? `the task "${lane.title}" (${lane.id})` : 'a lane’s task'}.`
+    : `Filed by 10db without an Inbox card, ${origin}. It is small and none of its kinds needs a card.`;
+  if (prerequisite) {
+    const filed = findOpenTaskByFirstLine(ctx.tx, proposal.projectId, first);
+    if (filed !== null) {
+      resolveProposal(ctx, proposalId, {
+        status: 'accepted',
+        rationale: `Already filed by 10db as task ${filed}`,
+      });
+      return { task: getTask(ctx.tx, filed), again: true };
+    }
+  }
   const task = insertTaskFromProposal(
     ctx,
     {
       proposalId,
       projectId: proposal.projectId,
       title: fields.title,
-      description: `Filed by 10db without an Inbox card, ${origin}. It is small and none of its kinds needs a card.\n\n${fields.description}`,
+      description: `${first}\n\n${fields.description}`,
       parkInIcebox: true,
       kinds,
     },
@@ -71,9 +91,11 @@ export function fileProposalByItself(
   );
   resolveProposal(ctx, proposalId, {
     status: 'accepted',
-    rationale: 'Filed by 10db: small and no kind that needs a card',
+    rationale: prerequisite
+      ? 'Filed by 10db: a prerequisite of its task, and no kind that needs a card'
+      : 'Filed by 10db: small and no kind that needs a card',
   });
-  return task;
+  return { task, again: false };
 }
 
 /**
@@ -88,9 +110,14 @@ export function raisedAsCardLine(reason: string): string {
   return `Raised as a card because ${reason}.`;
 }
 
-/** The card's body: the proposal's own text, then the line saying why it reached the Inbox. */
-export function proposalCardBody(body: string, reason: string): string {
-  return `${body}\n\n${raisedAsCardLine(reason)}`;
+/**
+ * The card's body: the proposal's own text (what it adds), what the lane says it costs, then the line saying
+ * why it reached the Inbox.
+ */
+export function proposalCardBody(body: string, reason: string, costs?: string): string {
+  const cost =
+    costs === undefined ? 'The lane did not say what it costs.' : `What it costs: ${costs}`;
+  return `${body}\n\n${cost}\n\n${raisedAsCardLine(reason)}`;
 }
 
 const KeyList = z.array(z.string().min(1));
@@ -136,6 +163,12 @@ export function proposalFiling(proposal: {
   readonly limit: number;
   /** Set when the step the lane is in has already filed as many tasks as a step may. */
   readonly stepCapReached?: boolean | undefined;
+  /**
+   * Set when the lane says its task can't meet its criteria without this work, inside its goal. A
+   * prerequisite is filed whatever its size; a kind, a risk word, filing off, a batch or the step cap still
+   * send it to a person.
+   */
+  readonly prerequisite?: boolean | undefined;
 }): ProposalFiling {
   const carries = carriesKinds(proposal.kinds, proposal.known);
   const structural = structuralReason(proposal);
@@ -144,6 +177,7 @@ export function proposalFiling(proposal: {
   const named = namesRisks(undeclaredRisksNamed(proposal));
   // Over the limit only counts when nothing else already sends the proposal to a person.
   const size =
+    proposal.prerequisite !== true &&
     structural === null &&
     named === null &&
     proposal.title.length + proposal.body.length > proposal.limit
@@ -157,6 +191,35 @@ export function proposalFiling(proposal: {
   if (clauses.length === 0 && proposal.stepCapReached === true)
     return { file: false, reason: STEP_CAP_REASON };
   return clauses.length === 0 ? { file: true } : { file: false, reason: clauses.join(', and ') };
+}
+
+/** What 10db does with a planner's ask for its plan to be reviewed. */
+export type PlanReviewRoute =
+  | { readonly kind: 'step' }
+  | { readonly kind: 'already' }
+  | { readonly kind: 'card'; readonly reason: string };
+
+/**
+ * Routes a `plan_review` proposal (spec 2026-11-27 §3, "Agent's proposal"). Core work (Careful or Critical)
+ * asked from its Plan step gets a Plan Review step after the plan, with no card; one that already has a Plan
+ * Review ahead needs nothing. Any other ask is a person's, as is every one while the builder asked to decide
+ * them (`asking`).
+ */
+export function planReviewRoute(input: {
+  readonly rigor: Rigor;
+  readonly current: StepRole;
+  readonly reviewAhead: boolean;
+  readonly asking: boolean;
+}): PlanReviewRoute {
+  if (input.asking) return { kind: 'card', reason: 'you asked to decide these yourself' };
+  if (input.rigor !== Rigor.Careful && input.rigor !== Rigor.Critical)
+    return { kind: 'card', reason: 'the task is not Core work, so a person decides' };
+  if (input.current !== StepRole.Plan)
+    return {
+      kind: 'card',
+      reason: 'it came from outside the Plan step, so no review step can follow the plan',
+    };
+  return input.reviewAhead ? { kind: 'already' } : { kind: 'step' };
 }
 
 const STEP_CAP_REASON =

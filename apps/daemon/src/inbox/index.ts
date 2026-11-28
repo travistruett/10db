@@ -27,6 +27,7 @@ export { createProjectMcpReader, flagMcpFailure } from './project-mcp-reader';
 export {
   carriesKinds,
   fileProposalByItself,
+  planReviewRoute,
   proposalCardBody,
   proposalFiling,
   raisedAsCardLine,
