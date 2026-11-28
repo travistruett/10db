@@ -238,7 +238,7 @@ describe('a shipping gate that fails only in tests the batch could not have caus
     );
   });
 
-  it('says the failure looks unrelated when the second run fails too, offers Retry and Abandon, and starts no fix', async () => {
+  it('raises the out-of-moves card when the second run fails too, with no Retry or Abandon, and starts no fix', async () => {
     h = createDeliveryHarness({ gateCommand: fakeGate(9, ['src/ui/other.test.ts > flakes']) });
     const batch = await openBatch();
     const workstreams = listWorkstreams(h.store.db, {}).length;
@@ -247,18 +247,21 @@ describe('a shipping gate that fails only in tests the batch could not have caus
     expect(ended).toMatchObject({ state: 'FAILED', failure: 'gate_failed' });
     expect(gateRuns()).toBe(2);
     const card = h.only(h.cards());
-    expect(card.title).toBe(
-      'Batch "Greetings" not shipped: the gate failed twice, in tests the batch didn\'t change',
+    expect(card.title).toBe('Out of moves: 1 test fails in test · Greetings');
+    expect(card.body).toMatch(
+      /^The gate fails in files the batch did not change, and 10db ran it twice\./,
     );
-    expect(card.body).toContain('looks unrelated to the batch');
-    expect(card.body).toContain('10db ran the gate again by itself');
     expect(card.body).toContain('- src/ui/other.test.ts > flakes');
-    expect(card.body).not.toContain('Start a fix task');
+    expect(card.options.map((o) => o.label)).toEqual([
+      'Spend More Attempts',
+      'Change the Task',
+      'Drop It',
+    ]);
     expect(card.detail).toMatchObject({
-      batchId: batch.id,
       logPath: join(h.repo, '.gate', 'test.log'),
-      actions: ['retry', 'abandon'],
+      outOfMoves: { kind: 'gate', batchId: batch.id, outside: true },
     });
+    expect(card.detail).not.toHaveProperty('actions');
     expect(listWorkstreams(h.store.db, {})).toHaveLength(workstreams);
     expect(h.ticks.count).toBe(ticks);
   });
