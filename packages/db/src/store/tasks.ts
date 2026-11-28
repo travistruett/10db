@@ -696,6 +696,20 @@ export function appendRetryLimitFindings(
   });
 }
 
+/**
+ * Takes the named criteria off a task: the builder dropped them from an acceptance card. A task may end with none,
+ * which `patchTask` refuses, so this writes the list itself.
+ */
+export function dropTaskCriteria(ctx: WriteContext, id: TaskId, criteria: readonly string[]): void {
+  const dropped = new Set(criteria);
+  const kept = getTask(ctx.tx, id).acceptanceCriteria.filter((c) => !dropped.has(c));
+  ctx.tx
+    .update(schema.tasks)
+    .set({ acceptanceCriteria: kept, updatedAt: ctx.now })
+    .where(eq(schema.tasks.id, id))
+    .run();
+}
+
 /** Writes a task the caller has already validated, at the end of the board, and announces it with its proposal, if any. */
 function writeTask(
   ctx: WriteContext,

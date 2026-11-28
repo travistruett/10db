@@ -233,6 +233,8 @@ import {
   allCheckouts,
   batchCardFields,
   checkoutOf,
+  secondReviewRequested,
+  shipAnywayOffered,
   diffOfRanges,
   runCommits,
   sharesBatchWorktree,
@@ -1399,8 +1401,22 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   /** The task's failed card; `review` is the reviewer's rejection that ended the workstream, when one did. */
-  function flagFailed(row: WorkstreamRow, reason: string, review?: ReviewCardDetail): void {
-    const batch = batchCardFields(row);
+  function flagFailed(
+    row: WorkstreamRow,
+    reason: string,
+    review?: ReviewCardDetail,
+    kind?: WorkstreamFailure,
+  ): void {
+    // Work a reviewer rejected is offered Ship anyway only once 10db's second review has rejected it too.
+    const batch = batchCardFields(
+      row,
+      undefined,
+      undefined,
+      shipAnywayOffered(
+        { state: S.Failed, failureKind: kind ?? null },
+        secondReviewRequested(db, row.id),
+      ),
+    );
     // Where a lane run's work went is added to the card by its take-out, once it has moved it.
     const lane = laneBranchOf(row);
     opts.state.write((ctx) => {
@@ -1447,7 +1463,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     opts.state.write((ctx) => {
       failIn(ctx, id, fence, row, failure);
     });
-    flagFailed(row, failure.reason, review);
+    flagFailed(row, failure.reason, review, failure.kind);
   }
 
   /** A step entered now; its floor is the sessions this workstream has run so far. */

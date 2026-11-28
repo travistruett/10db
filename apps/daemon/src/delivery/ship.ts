@@ -98,6 +98,7 @@ import {
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { returnCheckout } from './checkout-return';
 import { keptRevertOf, settleLeftOutCards } from './left-out-settle';
+import { shipAnywayRefusal } from './second-review';
 import { resolveShipCards } from './stale-cards';
 import {
   ghCall,
@@ -2549,8 +2550,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
     resume,
     ship,
     shipAnyway(batchId) {
-      const unfinished = unfinishedWork(getBatch(db, batchId));
+      const batch = getBatch(db, batchId);
+      const unfinished = unfinishedWork(batch);
       if (unfinished) throw unfinished;
+      // Work a reviewer rejected waits for 10db's second review, which Ship anyway never skips.
+      const waiting = shipAnywayRefusal(db, batchId, batch.title);
+      if (waiting) throw waiting;
       return ship(batchId);
     },
     shipWithout(batchId, workstreamId, kept) {

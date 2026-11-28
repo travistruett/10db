@@ -36,8 +36,9 @@ const evidenceHeader = (unmet: number, extra: boolean): string =>
     .join(', ');
 
 /**
- * Criteria the acceptance check could not confirm on work that shipped: the builder accepts them as they are or
- * sends them back with a note, which files a follow-up task. The run never waits on this card.
+ * Criteria 10db could not prove on work that went on, after sending it back for proof as often as its budget
+ * allows, or that only the builder can prove: the builder accepts them without proof, drops them from the task,
+ * or sends them back with a note, which files a follow-up task. The run never waits on this card.
  */
 export function AcceptanceCard({
   item,
@@ -117,8 +118,21 @@ export function AcceptanceCard({
           },
           pending: answer.pending,
         }}
+        secondary={
+          item.options.some((o) => o.label === AcceptanceChoice.Drop)
+            ? [
+                {
+                  label: 'Drop It',
+                  disabled: answer.pending,
+                  onClick: () => {
+                    answer.respond({ choice: AcceptanceChoice.Drop });
+                  },
+                },
+              ]
+            : []
+        }
         primary={{
-          label: 'Keep As Is',
+          label: 'Accept Without Proof',
           loading: answer.pending,
           onClick: () => {
             answer.respond({ choice: AcceptanceChoice.Accept });

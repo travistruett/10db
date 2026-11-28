@@ -34,7 +34,7 @@ import {
   type AccountId,
   type Effort,
   type ConnectableService,
-  type BatchId,
+  BatchId,
   type ProjectId,
   type ShapeId,
   type SystemCheckDto,
@@ -222,6 +222,7 @@ import {
   recoverBatches,
   closeFinishedSkippedCards,
   resolveOverBatchCards,
+  runSecondReviews,
   closeGoneMergedWorktreeCards,
   createHandMadeFolderLook,
   removeMergedBranches,
@@ -2570,12 +2571,32 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const skippedRaises = new Set<Promise<void>>();
   // A card for a task's skipped calls, or for a write nobody could own, has nothing left to do once the
   // task is finished or abandoned, or its run ends.
+  // Work a reviewer rejected is reviewed once more when the rest of its batch has settled. It runs after the
+  // failing write's own card is raised, which the retry would otherwise close first.
+  const reviewRejectedAgain = (batchId: BatchId | null): void => {
+    if (batchId === null) return;
+    queueMicrotask(() => {
+      runSecondReviews(
+        {
+          state,
+          retryForReview: (id) => {
+            starter.retry(id, undefined, { reviewOnly: true });
+            createdScheduler.requestTick();
+          },
+          log: logger,
+        },
+        batchId,
+      );
+    });
+  };
   const unsubscribeSettled = bus.subscribe((event) => {
     if (event.type === EventType.TaskChanged) {
       closeFinishedSkippedCards(state.db, inbox);
     } else if (event.type === EventType.BatchUpdated) {
       // A failed run's card has nothing left to decide once its pull request merged or its batch is gone.
       resolveOverBatchCards(state.db, inbox);
+      const batchId = BatchId.safeParse(event.entityId);
+      if (batchId.success) reviewRejectedAgain(batchId.data);
     } else if (
       event.type === EventType.WorkstreamChanged &&
       [WorkstreamState.Done, WorkstreamState.Failed, WorkstreamState.Cancelled].some(
@@ -2585,6 +2606,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       watcher?.resolveSettledStrays().catch((error: unknown) => {
         logger.warn({ err: error }, 'could not close the stray-write cards of an ended run');
       });
+      const ended = WorkstreamId.safeParse(event.entityId);
+      if (ended.success) reviewRejectedAgain(getWorkstreamRow(state.db, ended.data).batchId);
     }
   });
   const unsubscribeSkipped = bus.subscribe((event) => {

@@ -266,12 +266,15 @@ function revertStillOn(
  * whatever failed it, and the retry starts the send-back count over
  * (decisions/2026-10-29-review-findings-on-the-builders-screens.md). `keptRevert` is the revert the
  * batch's open left-out card holds when it covers this run (see `revertStillOn`); the caller reads it.
+ * `reviewOnly` is 10db's second review of work a reviewer rejected: only the rejecting step runs again, on the
+ * branch as it stands now, and its send-back count is kept so a repeated rejection fails the run again.
  */
 export function retryWorkstream(
   state: StateStore,
   id: WorkstreamId,
   note?: string,
   keptRevert: string | null = null,
+  options: { readonly reviewOnly?: boolean } = {},
 ): WorkstreamDto {
   const row = getWorkstreamRow(state.db, id);
   if (row.state !== WorkstreamState.Failed)
@@ -342,9 +345,10 @@ export function retryWorkstream(
     // tells of a revert restarts the implement step before a read-only one, as a rejection would.
     // A step before the first implement step restarts as usual, told only what happened, and the
     // implement step gets the note when the run enters it (`actionEntering`).
-    const reworkAt =
-      retryTargetAfterRejection(row.steps, row.stepIndex) ??
-      (revert ? implementBefore(row.steps, row.stepIndex) : null);
+    const reworkAt = options.reviewOnly
+      ? null
+      : (retryTargetAfterRejection(row.steps, row.stepIndex) ??
+        (revert ? implementBefore(row.steps, row.stepIndex) : null));
     const reworked = reworkAt === null ? undefined : row.steps[reworkAt];
     const runsNext = reworked ?? row.steps[row.stepIndex];
     // The builder's note is a fix for whichever step runs next, as when they send the work back. It
@@ -391,12 +395,13 @@ export function retryWorkstream(
     }
     // A step restarted to act on an earlier note keeps its start, which is how the note stays
     // outstanding for a session that starts fresh: the note was written after that start.
-    const restarted =
+    // A second review keeps the send-back count, so a rejection it repeats fails the run at once instead of
+    // starting another round of fixes.
+    const restartedSteps =
       row.steps.length > 0
-        ? clearSendBacks(
-            restartStep(row.steps, row.stepIndex, ctx.now, listSessions(ctx.tx, id).length),
-          )
+        ? restartStep(row.steps, row.stepIndex, ctx.now, listSessions(ctx.tx, id).length)
         : row.steps;
+    const restarted = options.reviewOnly ? restartedSteps : clearSendBacks(restartedSteps);
     const steps =
       keptFix && !evidence
         ? restarted.map((s, i) =>
