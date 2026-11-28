@@ -261,6 +261,15 @@ export interface Gh {
    */
   prAutoMerge(input: { readonly repo: string; readonly url: string }, call: GhCall): Promise<void>;
   /**
+   * Turns auto-merge off for the pull request, so a push to its branch can never be merged by GitHub on
+   * its own. Auto-merge not being on already is success. Throws a GhError with GitHub's reason for any
+   * other failure.
+   */
+  prDisableAutoMerge(
+    input: { readonly repo: string; readonly url: string },
+    call: GhCall,
+  ): Promise<void>;
+  /**
    * Squash-merges the pull request now, for one with nothing to wait for. Throws a GhError when
    * GitHub refuses, with its reason, such as a conflict or a branch rule.
    */
@@ -287,6 +296,8 @@ const NO_PR = /no pull requests found/i;
  */
 const PR_NOT_FOUND = /could not resolve to a (pullrequest|repository)\b/i;
 const SIGNED_OUT = /gh auth login|not logged in|HTTP 401|Bad credentials/i;
+/** What GitHub says when asked to turn off auto-merge that was never on: nothing to do. */
+const AUTO_MERGE_NOT_ENABLED = /auto.?merge is not enabled/i;
 /**
  * gh's words when it never reached GitHub: its own line for a DNS failure, or the network error Go
  * gave it (`dial tcp ...: i/o timeout`, `connection refused`, a TLS handshake that timed out, a
@@ -952,6 +963,12 @@ export function createGh(exec: GhExec): Gh {
     },
     async prAutoMerge({ repo, url }, call) {
       await ok(['pr', 'merge', url, '-R', repo, '--auto', '--squash'], call);
+    },
+    async prDisableAutoMerge({ repo, url }, call) {
+      const args = ['pr', 'merge', url, '-R', repo, '--disable-auto'];
+      const out = await exec(args, call);
+      if (out.exitCode === 0 || AUTO_MERGE_NOT_ENABLED.test(out.stderr)) return;
+      throw failure(args, out);
     },
     async prMerge({ repo, url }, call) {
       await ok(['pr', 'merge', url, '-R', repo, '--squash'], call);

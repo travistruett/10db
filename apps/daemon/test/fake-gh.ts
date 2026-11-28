@@ -33,6 +33,7 @@ export type GhMethod =
   | 'baseFailingChecks'
   | 'prCreate'
   | 'prAutoMerge'
+  | 'prDisableAutoMerge'
   | 'prMerge'
   | 'prReady'
   | 'closePullRequest'
@@ -60,6 +61,8 @@ export class FakeGh implements Gh {
   noRequiredChecks = false;
   /** The pull requests auto-merge was turned on for, in order. */
   readonly autoMerged: string[] = [];
+  /** The pull requests auto-merge was turned off for, in order. */
+  readonly autoMergeOff: string[] = [];
   /** The pull requests merged directly, in order. */
   readonly merged: string[] = [];
   /** The pull requests closed without a merge, in order. */
@@ -307,6 +310,12 @@ export class FakeGh implements Gh {
           )
         : undefined,
     );
+  }
+
+  prDisableAutoMerge(input: { readonly repo: string; readonly url: string }): Promise<void> {
+    return this.call('prDisableAutoMerge', input, () => {
+      this.autoMergeOff.push(input.url);
+    });
   }
 
   prMerge(input: { readonly repo: string; readonly url: string }): Promise<void> {

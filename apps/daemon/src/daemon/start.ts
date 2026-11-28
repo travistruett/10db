@@ -197,6 +197,7 @@ import {
   createBatchCardAnswers,
   createBranchCardAnswers,
   createCiStopAnswers,
+  createGuardrailHoldAnswers,
   createGhCardAnswers,
   createStartCardAnswers,
   createLostMigrationsAnswers,
@@ -1107,6 +1108,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   // Made once `git` is, below the inbox service that routes the answers to it.
   let guardrailAnswers: ReturnType<typeof createGuardrailAnswers> | null = null;
+  // Made once the shipper is, below the inbox service that routes the answers to it.
+  let guardrailHoldAnswers: ReturnType<typeof createGuardrailHoldAnswers> | null = null;
   let answerSelfUpdateCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   // Started once recovery is through; a launch before then waits for no before picture.
   let pictures: Pictures | null = null;
@@ -1256,10 +1259,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       }
       // A Revert on a guardrail stray-write card runs as a job once the answer is committed.
       const reverting = guardrailAnswers?.onAnswer(ctx, item, answer);
-      if (retried === null && reverting === undefined) return after;
+      // Merge or Close on a held pull request's card: the approval is stored in this write.
+      const holding = guardrailHoldAnswers?.onAnswerInWrite(ctx, item, answer);
+      if (retried === null && reverting === undefined && holding === undefined) return after;
       return () => {
         after?.();
         reverting?.();
+        holding?.();
         if (retried !== null) lateLinearReporter?.wake(retried);
       };
     },
@@ -1802,6 +1808,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     isRunning: (id) => runner?.isRunning(id) ?? false,
     load: loadGuard,
   });
+  guardrailHoldAnswers = createGuardrailHoldAnswers(delivery, shipper);
   // Where a project's pictures go in Slack: a pass's pull request and a finished task each post once.
   const picturePost: SlackPicturePost | null =
     slackClients === null

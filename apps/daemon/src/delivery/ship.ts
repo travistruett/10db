@@ -129,6 +129,8 @@ import {
   gateFixDescription,
   gateFixTitle,
 } from './gate-fix-text';
+import { guardrailHoldCardKey, raiseGuardrailHold } from './guardrail-hold-card';
+import { holdRootOf, readGuardrailHold, type GuardrailReading } from './guardrail-hold';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck, type LocalCheck } from './local-check';
 import {
@@ -288,6 +290,12 @@ export interface Shipper {
    * that stopped (`catchUpCardWasOpen`). Does nothing when no merge is due.
    */
   retryMerge(batchId: BatchId, opts?: RetryMergeOptions): void;
+  /**
+   * The builder answered Merge on a held pull request's card: reads its diff at its head now and turns
+   * auto-merge on for the root batch when the approval covers it, or raises the card again for a diff that
+   * moved. Queued in the ship queue.
+   */
+  armApproved(rootId: BatchId, prUrl: string): void;
 }
 
 type ConflictedUpdate = Extract<BaseUpdate, { readonly kind: 'conflicted' }>;
@@ -1172,6 +1180,101 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
+   * Reads whether the root's pull request is held for the builder at `head`: the path list over the
+   * pull request's whole change, never the shipping batch's own range. No judge answer is read.
+   */
+  function readHold(
+    batch: BatchDto,
+    checkout: string,
+    head: string | null,
+  ): Promise<GuardrailReading> {
+    return readGuardrailHold(
+      { git: deps.git, db },
+      { checkout, root: getBatch(db, holdRootOf(batch)), head },
+    );
+  }
+
+  /**
+   * What a read of a held pull request leaves behind: the card for the diff held now when it holds, and
+   * no card of an earlier diff when it does not.
+   */
+  function showHold(batch: BatchDto, prUrl: string, reading: GuardrailReading): void {
+    const root = getBatch(db, holdRootOf(batch));
+    if (reading.action === 'hold') raiseGuardrailHold(deps, root, prUrl, reading);
+    else withdraw(deps.state, deps.inbox, root.projectId, [guardrailHoldCardKey(root.id)]);
+  }
+
+  /**
+   * Turns auto-merge off before a push to a pull request that is held, every time and whatever this run
+   * remembers of arming it: a restart forgets that, and a push onto an armed pull request could merge a
+   * diff the builder has not seen. GitHub refusing stops the push.
+   */
+  async function disarmBeforePush(
+    batch: BatchDto,
+    repo: string,
+    prUrl: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    await deps.gh.prDisableAutoMerge({ repo, url: prUrl }, ghCall(deps, signal));
+    autoMergeArmed.delete(batch.id);
+    autoMergeArmed.delete(holdRootOf(batch));
+  }
+
+  /**
+   * The head GitHub has for the pull request, fetched when this checkout lacks it; the branch's own tip
+   * when GitHub names none. `open` is false for a pull request that merged or closed meanwhile.
+   */
+  async function pullRequestHeadOf(
+    batch: BatchDto,
+    repo: string,
+    prUrl: string,
+    checkout: string,
+    signal: AbortSignal,
+  ): Promise<{ readonly head: string | null; readonly open: boolean }> {
+    const status = await deps.gh.prStatus({ repo, ref: prUrl }, ghCall(deps, signal));
+    const head =
+      status?.headSha ??
+      (batch.branch === null ? null : await deps.git.branchTip(checkout, batch.branch));
+    if (head !== null && !(await deps.git.hasCommit(checkout, head)))
+      await deps.git.fetchCommit(checkout, head, networkCall(deps, signal));
+    return { head, open: status?.state === PrState.Open };
+  }
+
+  /**
+   * The builder answered Merge: reads the root's pull request at its head now and, when the approval
+   * covers that diff, turns auto-merge on as the ship would have (merging at once where it is
+   * unavailable). A head that moved holds again, with a card for the new diff.
+   */
+  function armApproved(rootId: BatchId, prUrl: string): void {
+    const root = getBatch(db, rootId);
+    const project = getProject(db, root.projectId);
+    deps.jobs.run(jobKey(root, JobQueue.Ship), async (signal) => {
+      // A function, so the check in the catch below is not narrowed away by this one.
+      const stopped = (): boolean => signal.aborted;
+      const now = getBatch(db, rootId);
+      const { repo } = now;
+      if (stopped() || repo === null) return;
+      try {
+        const { head, open } = await pullRequestHeadOf(now, repo, prUrl, project.repoPath, signal);
+        if (!open) return;
+        const reading = await readHold(now, project.repoPath, head);
+        if (reading.action === 'hold') {
+          showHold(now, prUrl, reading);
+          return;
+        }
+        await turnOnAutoMerge(now, repo, prUrl, signal, shipCheck(project)?.kind === 'precheck');
+      } catch (error) {
+        if (stopped()) return;
+        deps.logger.warn(
+          { batchId: rootId, prUrl, err: detailOf(error) },
+          'approved pull request not armed',
+        );
+        tellMerge(now, mergeNotices.refused(prUrl, error));
+      }
+    });
+  }
+
+  /**
    * Has GitHub merge the batch's pull request by itself once its required checks pass, when the
    * batch asked for that. The pull request is open either way, so a repository that doesn't allow
    * auto-merge, or a refusal from GitHub, is a notice on the batch's tasks and the pull request waits for
@@ -1621,12 +1724,21 @@ export function createShipper(deps: ShipperDeps): Shipper {
           return;
         }
       }
+      // Any PR for the branch, in any state, read before the push: a push never creates one, and a
+      // pull request that exists may be armed already, which a held one must not be when it is pushed to.
+      step = 'gh pr view';
+      const existing = fixPr ?? (await deps.gh.prView({ repo, ref: branch }, ghCall(deps, signal)));
+      // Whether the pull request's whole change touches a guardrail path, read for the head about to go.
+      step = 'reading the pull request for guardrail changes';
+      const hold = await readHold(batch, checkout, await deps.git.branchTip(checkout, branch));
+      if (hold.action === 'hold' && existing?.state === PrState.Open) {
+        step = 'gh pr merge --disable-auto';
+        await disarmBeforePush(batch, repo, existing.url, signal);
+      }
       // 3. Push, never forced.
       step = 'git push';
       await pushBranch(deps, batch, project, branch, signal);
-      // 4. Any PR for the branch, in any state; create one only when there is none.
-      step = 'gh pr view';
-      const existing = fixPr ?? (await deps.gh.prView({ repo, ref: branch }, ghCall(deps, signal)));
+      // 4. Create a PR only when there is none.
       step = 'gh pr create';
       // The base the branch holds now: a merge before the gate moved it.
       const base = getBatch(db, batchId).baseSha ?? baseSha;
@@ -1640,16 +1752,21 @@ export function createShipper(deps: ShipperDeps): Shipper {
       }
       // 4b. A pull request the batch wants merged by itself, unless an earlier run already closed
       // or merged it.
-      if (batch.autoMerge && (existing === null || existing.state === PrState.Open)) {
-        step = 'gh pr merge --auto';
-        await turnOnAutoMerge(
-          batch,
-          repo,
-          prUrl,
-          signal,
-          check?.kind === 'precheck',
-          fixPr !== null,
-        );
+      if (existing === null || existing.state === PrState.Open) {
+        // A pull request that touches a guardrail path is armed and merged only by the builder's answer.
+        step = 'raising the guardrail card';
+        showHold(batch, prUrl, hold);
+        if (batch.autoMerge && hold.action !== 'hold') {
+          step = 'gh pr merge --auto';
+          await turnOnAutoMerge(
+            batch,
+            repo,
+            prUrl,
+            signal,
+            check?.kind === 'precheck',
+            fixPr !== null,
+          );
+        }
       }
       // 5. Record it.
       deps.state.write((w) => {
@@ -2574,8 +2691,24 @@ export function createShipper(deps: ShipperDeps): Shipper {
           return;
         }
       }
+      // A pull request that touches a guardrail path is never left armed under a push: auto-merge goes off
+      // first, whatever this run remembers, and a refusal from GitHub stops the push.
+      const hold = await readHold(batch, main, await deps.git.branchTip(main, branch));
+      if (hold.action === 'hold') {
+        try {
+          await disarmBeforePush(batch, repo, prUrl, signal);
+        } catch (error) {
+          if (stopped()) return;
+          stop({
+            kind: 'other',
+            why: `10db could not turn auto-merge off for this pull request, which changes a guardrail, so it pushed nothing: ${detailOf(error)}`,
+          });
+          return;
+        }
+      }
       await pushBranch(deps, getBatch(db, batchId), project, branch, signal);
       pushed = true;
+      showHold(batch, prUrl, hold);
       const resolved = brought.kind === 'merged' ? (brought.resolved ?? []) : [];
       // The base update left this to the push: a merge put back renumbered nothing the batch holds.
       const renumbered = brought.kind === 'merged' ? (brought.renumbered ?? []) : [];
@@ -2599,7 +2732,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
       );
       hideNotices(deps.state, batchId, [NOTICE_KEY.baseConflict]);
       withdraw(deps.state, deps.inbox, batch.projectId, [prCardKey.catchUp(batchId)]);
-      mergeAgain.add(batchId);
+      // A held pull request is not armed again: only the builder's Merge does that.
+      if (hold.action !== 'hold') mergeAgain.add(batchId);
       deps.logger.info(
         { batchId, prUrl, files: resolved.map((r) => r.path) },
         'base merged into the pull request',
@@ -2707,11 +2841,43 @@ export function createShipper(deps: ShipperDeps): Shipper {
     retrying.add(batchId);
     const project = getProject(db, batch.projectId);
     deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
+      // A function, so the check in the catch below is not narrowed away by this one.
+      const stopped = (): boolean => signal.aborted;
       try {
         const now = getBatch(db, batchId);
         const { repo, prUrl } = now;
-        if (signal.aborted || !landsItself(now) || repo === null || prUrl === null) return;
+        if (stopped() || !landsItself(now) || repo === null || prUrl === null) return;
         mergeAgain.delete(batchId);
+        // Never armed or merged here while the pull request touches a guardrail the builder has not merged.
+        let hold: GuardrailReading;
+        try {
+          const { head, open } = await pullRequestHeadOf(
+            now,
+            repo,
+            prUrl,
+            project.repoPath,
+            signal,
+          );
+          if (!open) return;
+          hold = await readHold(now, project.repoPath, head);
+        } catch (error) {
+          if (stopped()) return;
+          // Nothing says the pull request is clear of guardrails, so it is asked again once GitHub answers.
+          mergeAgain.add(batchId);
+          deps.logger.warn(
+            { batchId, prUrl, err: detailOf(error) },
+            'pull request not read for guardrail changes; merge not retried',
+          );
+          return;
+        }
+        if (hold.action === 'hold') {
+          showHold(now, prUrl, hold);
+          deps.logger.info(
+            { batchId, prUrl },
+            'pull request held for a guardrail change: merge not retried',
+          );
+          return;
+        }
         await turnOnAutoMerge(
           now,
           repo,
@@ -2747,6 +2913,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     restartCi,
     catchUpToBase,
     retryMerge,
+    armApproved,
     checkBatch,
     checkOpenBatches() {
       for (const batch of listBatches(db, { states: [BatchState.Open] })) checkBatch(batch.id);

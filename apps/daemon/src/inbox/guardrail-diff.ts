@@ -33,6 +33,16 @@ function capped(text: string): { text: string; cut: boolean; lines: number } {
   return { text: short, cut: true, lines: short.split('\n').length };
 }
 
+/** A patch of several files as the card carries it, cut to the same cap as one file's. */
+export function guardrailPatchDetail(patch: string): GuardrailDiffDetail {
+  return { shown: 'text', ...capped(patch), isNew: false };
+}
+
+/** The card's words for a diff that is not shown, and why. */
+export function guardrailNoDiffDetail(reason: string): GuardrailDiffDetail {
+  return { shown: 'none', reason };
+}
+
 /**
  * The file's diff against `HEAD` in the checkout `root`, or its whole text marked as new when git does not hold
  * it, cut to a cap. A file that is not text (binary, a link, too big) says so instead of a diff. The working

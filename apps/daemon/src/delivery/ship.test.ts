@@ -1,11 +1,19 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConflictError, type BatchDto, type TaskDto } from '@10db/contracts';
+import {
+  ConflictError,
+  GUARDRAIL_DIFF_DETAIL,
+  GuardrailDiffDetail,
+  type BatchDto,
+  type TaskDto,
+} from '@10db/contracts';
 import {
   activeClaims,
   acquireClaims,
   claimRequestsForTask,
   deleteAppSetting,
+  findOpenByFoldKey,
+  getAppSetting,
   getBatch,
   getBatchRow,
   getTask,
@@ -24,7 +32,15 @@ import { writeHook } from '../../test/git-hooks';
 import { hangingSsh } from '../../test/hanging-ssh';
 import { GitNetworkError, GitNetworkFailure, type Git } from '../git';
 import { GhError } from '../github';
+import {
+  createInboxService,
+  GUARDRAIL_HOLD_DETAIL,
+  GuardrailHoldDetail,
+  type InboxService,
+} from '../inbox';
 import { listNetworkHosts } from '../permissions';
+import { guardrailHoldKey } from './guardrail-hold';
+import { createGuardrailHoldAnswers, guardrailHoldCardKey } from './guardrail-hold-card';
 
 /** The repo's template, as a repository commits it at `.github/pull_request_template.md`. */
 const PR_TEMPLATE = [
@@ -898,4 +914,124 @@ describe('Ship anyway, Retry and Abandon', () => {
       expect(() => h.shipper.abandon(batch.id)).toThrow(ConflictError);
     },
   );
+});
+
+describe('a pull request that touches a guardrail path', () => {
+  const WORKFLOW = '.github/workflows/x.yml';
+  const GIT_GUARD = '.claude/hooks/git-guard.mjs';
+
+  /** The inbox the builder answers through, with the held pull request's answers wired to `h`. */
+  function answering(): InboxService {
+    const answers = createGuardrailHoldAnswers(h.ctx, h.shipper);
+    return createInboxService({
+      state: h.state,
+      onParkedAnswer: () => undefined,
+      onFlagAnswerInWrite: (ctx, item, answer) => answers.onAnswerInWrite(ctx, item, answer),
+    });
+  }
+
+  const holdCardOf = (batch: BatchDto) =>
+    findOpenByFoldKey(h.store.db, h.project.id, guardrailHoldCardKey(batch.id));
+
+  function openHoldCard(batch: BatchDto) {
+    const card = holdCardOf(batch);
+    if (card === undefined) throw new Error('the pull request has no open hold card');
+    return card;
+  }
+
+  it('opens with no auto-merge and no merge, and raises one card with the diff, Merge and Close', async () => {
+    h = createDeliveryHarness();
+    const { batch } = await openBatch('Add CI', 'Alpha');
+    h.commit(WORKFLOW);
+    const shipped = await finishAll(batch);
+    expect(shipped).toMatchObject({
+      state: 'SHIPPED',
+      prUrl: 'https://github.com/acme/widgets/pull/1',
+    });
+    expect(h.gh.autoMerged).toEqual([]);
+    expect(h.gh.merged).toEqual([]);
+    const card = holdCardOf(batch);
+    expect(card).toMatchObject({
+      title: 'A change to your CI workflows is ready',
+      options: [{ label: 'Merge' }, { label: 'Close' }],
+    });
+    expect(card?.body).toContain(WORKFLOW);
+    const diff = GuardrailDiffDetail.parse(card?.detail?.[GUARDRAIL_DIFF_DETAIL]);
+    expect(diff).toMatchObject({ shown: 'text' });
+    expect(diff.shown === 'text' ? diff.text : '').toContain(`+${WORKFLOW}`);
+    expect(h.cards()).toHaveLength(1);
+  });
+
+  it('arms auto-merge for exactly the diff the builder merged', async () => {
+    h = createDeliveryHarness();
+    const { batch } = await openBatch('Add CI', 'Alpha');
+    h.commit(WORKFLOW);
+    const shipped = await finishAll(batch);
+    const card = openHoldCard(batch);
+    const hash = GuardrailHoldDetail.parse(card.detail?.[GUARDRAIL_HOLD_DETAIL]).hash;
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+
+    answering().answer(card.id, { choice: 'Merge' });
+    await h.jobs.idle();
+
+    expect(h.gh.autoMerged).toEqual([shipped.prUrl]);
+    expect(getAppSetting(h.store.db, guardrailHoldKey(batch.id))).toEqual({ approved: hash });
+    expect(holdCardOf(batch)).toBeUndefined();
+  });
+
+  it('holds a pull request whose diff changed since the builder merged, and asks again', async () => {
+    h = createDeliveryHarness();
+    const { batch } = await openBatch('Add CI', 'Alpha');
+    h.commit(WORKFLOW);
+    const shipped = await finishAll(batch);
+    answering().answer(openHoldCard(batch).id, { choice: 'Merge' });
+    await h.jobs.idle();
+    expect(h.gh.autoMerged).toEqual([shipped.prUrl]);
+
+    // The approved diff moves on: a retry reads the pull request again and arms nothing.
+    h.commit(WORKFLOW, 'name: changed\n');
+    h.git$('push', '-q', 'origin', batch.branch ?? '');
+    h.gh.setHead(shipped.prUrl ?? '', h.git$('rev-parse', 'HEAD'));
+    h.shipper.retryMerge(batch.id, { catchUpCardWasOpen: true });
+    await h.jobs.idle();
+
+    expect(h.gh.autoMerged).toEqual([shipped.prUrl]);
+    expect(holdCardOf(batch)).toMatchObject({ title: 'A change to your CI workflows is ready' });
+  });
+
+  it('turns auto-merge off before it pushes, and pushes nothing when it cannot', async () => {
+    h = createDeliveryHarness();
+    const { batch } = await openBatch('Add CI', 'Alpha');
+    h.commit(WORKFLOW);
+    // An earlier ship armed the pull request and failed before it recorded it: the batch has no URL.
+    const url = h.gh.openPr(batch.branch ?? '');
+    h.gh.failNext.set('prDisableAutoMerge', new GhError('failed', 'GitHub refused'));
+
+    const failed = await finishAll(batch);
+
+    expect(failed.state).toBe('FAILED');
+    expect(onOrigin(h, batch.branch)).toBeNull();
+    expect(h.gh.autoMerged).toEqual([]);
+
+    h.shipper.ship(batch.id);
+    await h.jobs.idle();
+
+    expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'SHIPPED', prUrl: url });
+    expect(h.gh.autoMergeOff).toEqual([url]);
+    expect(onOrigin(h, batch.branch)).toBe(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`));
+    expect(h.gh.autoMerged).toEqual([]);
+  });
+
+  it('holds a change that moves a guardrail file out of its folder', async () => {
+    h = createDeliveryHarness();
+    h.commit(GIT_GUARD, 'guard\n');
+    h.git$('push', '-q', 'origin', 'main');
+    const { batch } = await openBatch('Move the guard', 'Alpha');
+    h.commit('tools/git-guard.mjs', 'guard\n');
+    h.git$('rm', '-q', GIT_GUARD);
+    h.git$('commit', '-q', '-m', 'Move the git guard');
+    await finishAll(batch);
+    expect(h.gh.autoMerged).toEqual([]);
+    expect(holdCardOf(batch)).toMatchObject({ title: 'A change to your git guard is ready' });
+  });
 });
