@@ -39,5 +39,6 @@ export const FIELD_HOMES: Readonly<Record<keyof GeneralValues, FieldHome>> = {
   devLoginCommand: { label: 'Dev Login Command', section: PagesAndPictures },
   previewCommand: { label: 'Preview Command', section: PagesAndPictures },
   appStartCommand: { label: 'App Start Command', section: PagesAndPictures },
+  migrateCommand: { label: 'Migrate Command', section: PagesAndPictures },
   screens: { label: 'Screenshot Matrix', section: PagesAndPictures },
 };

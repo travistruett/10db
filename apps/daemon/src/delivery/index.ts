@@ -98,6 +98,7 @@ export { createWorktreeDependencies } from './worktree-dependencies';
 export { createNodeModulesTemplates, templatesRoot } from './node-modules-template';
 export { createWorktreeGenerators } from './worktree-generated';
 export { createCopyTeardown } from './copy-teardown-run';
+export { createDevMigrate, DEV_MIGRATE_TIMEOUT_MS } from './dev-migrate';
 export { readPnpmVersion, resolvePnpm } from './pnpm-binary';
 export {
   applySkippedChoice,

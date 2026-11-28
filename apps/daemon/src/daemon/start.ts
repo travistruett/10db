@@ -213,6 +213,8 @@ import {
   createWorktreeDependencies,
   createWorktreeGenerators,
   createCopyTeardown,
+  createDevMigrate,
+  DEV_MIGRATE_TIMEOUT_MS,
   DEFAULT_DELIVERY_LIMITS,
   flagWorktreeMissing,
   flagWrongBranch,
@@ -1722,6 +1724,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       sessionEnv: () => launcher.projectEnv(),
       rules: (project) => listPermissionRules(state.db, project.id, null),
       checkouts: () => allCheckouts(state.db),
+    }),
+    // The builder's declared migrate command, in their own folder: the project's dev database only.
+    devMigrate: createDevMigrate({
+      gate: gateRunner,
+      clock,
+      dataDir: opts.dataDir,
+      logger: logger.child({ component: 'dev-migrate' }),
+      timeoutMs: DEV_MIGRATE_TIMEOUT_MS,
+      sessionEnv: () => launcher.projectEnv(),
+      rules: (project) => listPermissionRules(state.db, project.id, null),
+      checkouts: () => allCheckouts(state.db),
+      usesDocker: (project, command) => commandCallsDocker(git, project, command),
     }),
   };
   answerBranchCard = createBranchCardAnswers(delivery);
