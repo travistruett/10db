@@ -10,6 +10,7 @@ import {
   getBatchRow,
   getTask,
   getWorkstream,
+  listTasks,
   listWorkstreams,
   transitionBatch,
   transitionWorkstream,
@@ -159,19 +160,21 @@ describe('shipping', () => {
     expect(h.git$('status', '--porcelain', '--untracked-files=all')).toBe('');
   });
 
-  it("runs the project's full gate before the push, never its changed-packages check, and says in a failed gate's card how far the builder's own checkout is behind the base", async () => {
+  it("runs the project's full gate before the push, never its changed-packages check, and says in a failed gate's fix task how far the builder's own checkout is behind the base", async () => {
     h = createDeliveryHarness({ gateCommand: 'false', changedCheckCommand: 'true' });
     const { batch } = await openBatch('Add greetings', 'Alpha');
     h.commit('src/api/alpha.txt');
     h.teammatePush('main', 'src/ui/teammate.txt');
     const failed = await finishAll(batch);
-    expect(failed.state).toBe('FAILED');
+    expect(failed.state).toBe('OPEN');
     expect(onOrigin(h, batch.branch)).toBeNull();
     expect(batchLines(batch.id).find((line) => line['msg'] === 'gate started')).toMatchObject({
       command: 'false',
     });
-    const card = h.only(h.cards().filter((c) => c.title.includes('the gate failed')));
-    expect(card.body).toMatch(/^origin\/main has 1 commit this branch doesn't\./);
+    const fix = h.only(
+      listTasks(h.store.db, h.project.id).filter((t) => t.title.startsWith('Fix the gate')),
+    );
+    expect(fix.description).toMatch(/^origin\/main has 1 commit this branch doesn't\./);
   });
 
   it('runs no gate on a broken install and fails the batch with a card that names the install, not the gate', async () => {
@@ -257,7 +260,7 @@ describe('shipping', () => {
 
     const failed = await finishAll(batch);
 
-    expect(failed.state).toBe('FAILED');
+    expect(failed.state).toBe('OPEN');
     const hostCards = h.cards().filter((c) => c.title.startsWith('Allow network access to'));
     expect(hostCards.map((c) => c.title)).toEqual([
       'Allow network access to index.crates.io?',
@@ -294,7 +297,7 @@ describe('shipping', () => {
 
     const failed = await finishAll(batch);
 
-    expect(failed.state).toBe('FAILED');
+    expect(failed.state).toBe('OPEN');
     const card = h.only(
       h.cards().filter((c) => c.title === 'Allow network access to index.crates.io?'),
     );
@@ -324,18 +327,18 @@ describe('shipping', () => {
     expect(body).not.toContain('FULL-GATE-RAN');
   });
 
-  it('fails the batch with a card naming the pre-check when it fails, and pushes nothing', async () => {
+  it('reopens the batch with a fix task naming the pre-check when it fails, and pushes nothing', async () => {
     h = createDeliveryHarness({ gateCommand: 'true', precheckCommand: 'echo LINT-BROKE; exit 3' });
     const { batch } = await openBatch('Add greetings', 'Alpha');
     h.commit('src/api/alpha.txt');
     const failed = await finishAll(batch);
-    expect(failed).toMatchObject({ state: 'FAILED', failure: 'gate_failed' });
+    expect(failed).toMatchObject({ state: 'OPEN', failure: null });
     expect(onOrigin(h, batch.branch)).toBeNull();
     expect(h.gh.prCreates()).toEqual([]);
-    const card = h.only(h.cards());
-    expect(card.title).toContain('the pre-check failed');
-    expect(card.title).not.toContain('the gate failed');
-    expect(card.body).toContain('LINT-BROKE');
+    const fix = h.only(
+      listTasks(h.store.db, h.project.id).filter((t) => t.title.startsWith('Fix the pre-check')),
+    );
+    expect(fix.description).toContain('LINT-BROKE');
   });
 
   it('ships a batch without a gate step when the project has none', async () => {
@@ -439,12 +442,6 @@ describe('shipping', () => {
       },
       failure: 'wrong_branch',
       title: 'checkout is on main, the batch branch is',
-    },
-    {
-      name: 'a failing gate',
-      gate: 'echo broken >&2; exit 3',
-      failure: 'gate_failed',
-      title: 'the gate failed',
     },
     {
       name: 'a gate that times out',

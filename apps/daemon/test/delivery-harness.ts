@@ -295,6 +295,8 @@ export function createDeliveryHarness(
   project: Partial<ProjectInput> = {},
   opts: {
     readonly gateTimeoutMs?: number;
+    /** The fix tasks a failing ship gate may file; 0 keeps the batch FAILED with the gate's card. */
+    readonly maxFixAttempts?: number;
     readonly networkTimeoutMs?: number;
     readonly pushTimeoutMs?: number;
     /** Added to the network calls' environment, such as an ssh command for a hanging transport. */
@@ -384,6 +386,7 @@ export function createDeliveryHarness(
       // The harness's clock never advances by itself, so a test waits for no retry.
       pushRetryWaitMs: 0,
       gateTimeoutMs: opts.gateTimeoutMs ?? 20_000,
+      maxFixAttempts: opts.maxFixAttempts ?? DEFAULT_DELIVERY_LIMITS.maxFixAttempts,
     },
     networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global, ...opts.networkEnv }),
     onWorkQueued: () => {
