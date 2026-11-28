@@ -13,6 +13,8 @@ export {
 } from './hits-after';
 export { agentNotesOf, newestWatchpointRow, reviewerNotesOf, withNotes } from './notes';
 export { askWatchpointQuestions, questionDiff } from './question';
+export { holdsMerge, readVerdict, readWatchpointHits } from './read';
+export { watchpointReadAgreement } from './read-agreement';
 export type { QuestionCandidates } from './covers';
 export {
   coverageSubjects,

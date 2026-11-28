@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EvalDefinitionHit } from './eval-definition-change';
+import { BatchId } from './ids';
 
 /** How loudly a watchpoint tells the builder: shown in the task, asked about in the Inbox, or held before merge. */
 export const WatchpointLoudness = { Show: 'show', Ask: 'ask', Hold: 'hold' } as const;
@@ -60,8 +61,39 @@ export type WatchpointFileHit = z.infer<typeof WatchpointFileHit>;
 export const WatchpointHit = z.object({
   watchpoint: WatchpointSnapshot,
   files: z.array(WatchpointFileHit),
+  /**
+   * The sha256 of the unclipped diff of the hit's files over the run's own range, so an approval names the change it
+   * saw. Absent when that diff could not be read in full.
+   */
+  hash: z.string().optional(),
 });
 export type WatchpointHit = z.infer<typeof WatchpointHit>;
+
+/** What the judge made of a watchpoint hit: whether its hunks meet the guidance and whether it is destructive. */
+export const WatchpointReadVerdict = {
+  Clean: 'clean',
+  Finding: 'finding',
+  Doubt: 'doubt',
+  Destructive: 'destructive',
+  /** The watchpoint is set to Hold: no judge was asked. */
+  Hold: 'hold',
+  /** The watchpoint is set to Ask and no judge was ready. */
+  Unread: 'unread',
+} as const;
+export type WatchpointReadVerdict =
+  (typeof WatchpointReadVerdict)[keyof typeof WatchpointReadVerdict];
+
+/** One hit's read. `acted` false: asked in shadow, and nothing acts on it. */
+export const WatchpointRead = z.object({
+  key: z.string(),
+  verdict: z.enum(WatchpointReadVerdict),
+  /** The probability the hunks meet the watchpoint's guidance; null when none was asked or answered. */
+  meets: z.number().min(0).max(1).nullable(),
+  /** The probability the change is destructive; null when none was asked or answered. */
+  destructive: z.number().min(0).max(1).nullable(),
+  acted: z.boolean(),
+});
+export type WatchpointRead = z.infer<typeof WatchpointRead>;
 
 /**
  * A watchpoint's question as the judge answered it in shadow: the files whose hunks it read (of those its globs cover
@@ -87,6 +119,8 @@ export const WatchpointDetail = z.object({
   skipped: z.string().nullable(),
   /** The questions asked in shadow; absent when none was. Never a hit, and nothing reads it to act. */
   shadow: z.array(WatchpointShadow).optional(),
+  /** The judge's read of each hit, when one was taken; absent on a row from before reads. */
+  reads: z.array(WatchpointRead).optional(),
 });
 export type WatchpointDetail = z.infer<typeof WatchpointDetail>;
 
@@ -127,7 +161,11 @@ export const WatchpointHitsDto = z.object({
 export type WatchpointHitsDto = z.infer<typeof WatchpointHitsDto>;
 
 /** What the builder answers on a Look card. */
-export const WatchpointChoice = { LooksRight: 'looks_right', SendBack: 'send_back' } as const;
+export const WatchpointChoice = {
+  LooksRight: 'looks_right',
+  SendBack: 'send_back',
+  Merge: 'merge',
+} as const;
 export type WatchpointChoice = (typeof WatchpointChoice)[keyof typeof WatchpointChoice];
 
 /**
@@ -135,6 +173,17 @@ export type WatchpointChoice = (typeof WatchpointChoice)[keyof typeof Watchpoint
  * `GET /workstreams/:id/watchpoint-hits`.
  */
 export const WatchpointCardDetail = z.object({
-  watchpoints: z.array(z.object({ key: z.string(), label: z.string() })),
+  watchpoints: z.array(
+    z.object({
+      key: z.string(),
+      label: z.string(),
+      /** What the judge read of the hit, when it was read. */
+      verdict: z.enum(WatchpointReadVerdict).optional(),
+      /** The hash of the diff the card showed; Merge approves that diff only. */
+      hash: z.string().optional(),
+    }),
+  ),
+  /** Set when the card holds a pull request: its batch and its URL once it is open. */
+  held: z.object({ batchId: BatchId, prUrl: z.string().nullable() }).optional(),
 });
 export type WatchpointCardDetail = z.infer<typeof WatchpointCardDetail>;

@@ -107,6 +107,7 @@ export function settleSecondOpinionModel(ctx: WriteContext, account: AccountRow 
   for (const decision of [
     JudgeDecision.Acceptance,
     JudgeDecision.WatchpointQuestion,
+    JudgeDecision.WatchpointRead,
     JudgeDecision.OwnershipTest,
   ] as const) {
     const first = decisions[decision].model;

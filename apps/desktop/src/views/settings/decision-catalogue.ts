@@ -95,6 +95,18 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
     mode: DecisionMode.Shadow,
     note: 'Each question goes to the model with its watchpoint’s files and up to 60 000 characters of their changes. A watchpoint with a question but no lines makes no match of its own.',
   },
+  [JudgeDecision.WatchpointRead]: {
+    group: DecisionGroup.Delivery,
+    label: 'Watchpoint Read',
+    asks: 'After a gate passes: for each file set that hit a watchpoint set to Ask, do the changes meet the watchpoint’s guidance, and is the change destructive? Two yes/no questions in one call per hit.',
+    onAnswer:
+      'Logged, and kept with the task’s watchpoint reading; nothing is shown on the task, and it never changes a card, forces a review or holds anything yet.',
+    whenUnsure:
+      'The answer is logged as it came; with no answer the read is kept as a doubt, and with no Decisions account nothing is asked.',
+    fellBack: 'the hit was left unread',
+    mode: DecisionMode.Shadow,
+    note: 'Each hit goes to the model with its watchpoint’s guidance and up to 60 000 characters of its changes.',
+  },
   [JudgeDecision.OwnershipTest]: {
     group: DecisionGroup.Delivery,
     label: 'Whether a Change Is Yours to Decide',
