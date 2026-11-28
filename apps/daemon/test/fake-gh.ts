@@ -35,6 +35,7 @@ export type GhMethod =
   | 'prAutoMerge'
   | 'prMerge'
   | 'prReady'
+  | 'closePullRequest'
   | 'prEditBase'
   | 'prEditBody';
 export interface PrCreateCall {
@@ -61,6 +62,8 @@ export class FakeGh implements Gh {
   readonly autoMerged: string[] = [];
   /** The pull requests merged directly, in order. */
   readonly merged: string[] = [];
+  /** The pull requests closed without a merge, in order. */
+  readonly closed: string[] = [];
   /** One error per method, thrown by its next call only. */
   readonly failNext = new Map<GhMethod, GhError>();
   /**
@@ -254,6 +257,15 @@ export class FakeGh implements Gh {
   prReady(input: { readonly repo: string; readonly url: string }): Promise<void> {
     return this.call('prReady', input, () => {
       this.found(input.url).isDraft = false;
+    });
+  }
+
+  closePullRequest(input: { readonly repo: string; readonly url: string }): Promise<void> {
+    return this.call('closePullRequest', input, () => {
+      const found = this.byRef.get(input.url);
+      if (!found) throw new Error(`no PR ${input.url}`);
+      found.pr.state = PrState.Closed;
+      this.closed.push(input.url);
     });
   }
 

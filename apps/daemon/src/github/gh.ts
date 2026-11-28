@@ -221,6 +221,11 @@ export interface Gh {
   ): Promise<string>;
   /** Marks a draft pull request ready for review. Throws a GhError with GitHub's reason when it refuses. */
   prReady(input: { readonly repo: string; readonly url: string }, call: GhCall): Promise<void>;
+  /** Closes the pull request without merging it. Throws a GhError with GitHub's reason when it refuses. */
+  closePullRequest(
+    input: { readonly repo: string; readonly url: string },
+    call: GhCall,
+  ): Promise<void>;
   /**
    * Moves the pull request onto another base branch, as a stacked pass's does once the pass it was
    * based on merges (D24). Throws a GhError with GitHub's reason when it refuses.
@@ -953,6 +958,9 @@ export function createGh(exec: GhExec): Gh {
     },
     async prReady({ repo, url }, call) {
       await ok(['pr', 'ready', url, '-R', repo], call);
+    },
+    async closePullRequest({ repo, url }, call) {
+      await ok(['pr', 'close', url, '-R', repo], call);
     },
     async prEditBase({ repo, url, base }, call) {
       await ok(['pr', 'edit', url, '-R', repo, '--base', base], call);
