@@ -171,7 +171,8 @@
             "type": "string",
             "enum": [
               "shape_record",
-              "shape_elsewhere"
+              "shape_elsewhere",
+              "watchpoint_read"
             ]
           },
           "answered": {
