@@ -4,7 +4,8 @@ import {
   type Watchpoint,
   type WatchpointCoverage,
 } from '@10db/contracts';
-import { Alert, Box, Menu, Stack, Text } from '@mantine/core';
+import { Alert, Box, Button, Group, Menu, Stack, Text } from '@mantine/core';
+import { IconEye } from '@tabler/icons-react';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
 import {
@@ -13,36 +14,20 @@ import {
   useYourWatchpoints,
 } from '../../daemon/watchpoint-queries';
 import { ConfirmModal } from '../../shell/confirm-modal';
+import { EmptyState } from '../../shell/empty-state';
+import { usePageGuide } from '../../shell/page-guide';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RaisedPanel } from '../../shell/raised-panel';
-import { SectionHeading } from './section-heading';
+import { SettingsSectionKey } from './sections';
+import { SettingsPageHeader } from './settings-page';
 import { SplitButton, SplitButtonLoading } from './split-button';
 import { RowActions } from './table-cells';
 import { WatchpointMatches, WatchpointName } from './watchpoint-cells';
 import { WatchpointDrawer } from './watchpoint-drawer';
 import { refusal, useJustAdded, useWatchpointEditing } from './watchpoint-editing';
 import { coverageLookup, withItem, withoutKey } from './watchpoint-lists';
-import { LOUDNESS_WORDS, LoudnessControl } from './watchpoint-loudness';
-
-export const WATCHPOINTS_LINE = 'Changes you want to judge yourself.';
-
-/** The long text behind both pages' info button. */
-export function WatchpointsHelp() {
-  return (
-    <>
-      <Text size="sm">
-        A watchpoint names files whose changes you want to see. A task whose changes touch one shows
-        you just those changes in its For You, with the agent&apos;s reason and the reviewer&apos;s
-        check.
-      </Text>
-      <Text size="sm">When It Matches decides how loud it is. {LOUDNESS_WORDS}</Text>
-      <Text size="sm">
-        All Projects › Watchpoints holds yours. A project can set one to Show or Ask, turn it off
-        there, or add its own, without changing any other project.
-      </Text>
-    </>
-  );
-}
+import { LoudnessControl } from './watchpoint-loudness';
+import { WATCHPOINTS_GUIDE, WatchpointsGuide, WhenItMatchesHelp } from './watchpoints-guide';
 
 /** What a starter covers, as the menu says it: "Fits · 14 files", "Asks the judge · every file", or "Counting…". */
 function fitLine(coverage: WatchpointCoverage): string {
@@ -188,8 +173,8 @@ export function LibraryItems({
 const WATCHPOINT_COLUMNS = {
   label: { title: 'Watchpoint' },
   globs: { title: 'Matches' },
-  // Wide enough for its header at the window's 1200 px; the control itself is narrower.
-  loudness: { title: 'When It Matches', width: 160 },
+  // Wide enough for its header and its info button at the window's 1200 px; the control itself is narrower.
+  loudness: { title: 'When It Matches', width: 184 },
   actions: { title: '', width: 90 },
 } as const;
 
@@ -201,26 +186,23 @@ export function AllWatchpointsSection() {
   const added = useJustAdded();
   const edit = useWatchpointEditing<Watchpoint>((w) => w.label);
   const [removing, setRemoving] = useState<Watchpoint | null>(null);
+  const guide = usePageGuide(WATCHPOINTS_GUIDE);
   if (yours.data === undefined)
     return (
       <Stack gap="sm" component="section" aria-label="Watchpoints">
+        <SettingsPageHeader
+          sectionKey={SettingsSectionKey.AllWatchpoints}
+          guide={guide.opener}
+          actions={
+            <SplitButtonLoading label="Add Watchpoint" menuLabel="More ways to add a watchpoint" />
+          }
+        />
         {yours.isError ? (
           <Alert color="red" title="Couldn't read the watchpoints">
             {yours.error.message}
           </Alert>
         ) : (
           <>
-            <SectionHeading
-              title="Watchpoints"
-              line={WATCHPOINTS_LINE}
-              help={<WatchpointsHelp />}
-              action={
-                <SplitButtonLoading
-                  label="Add Watchpoint"
-                  menuLabel="More ways to add a watchpoint"
-                />
-              }
-            />
             <PageLoading
               shape={PageLoadingShape.Table}
               label="Reading the watchpoints"
@@ -258,6 +240,12 @@ export function AllWatchpointsSection() {
     {
       accessor: 'loudness',
       ...WATCHPOINT_COLUMNS.loudness,
+      title: (
+        <Group gap={4} wrap="nowrap">
+          {WATCHPOINT_COLUMNS.loudness.title}
+          <WhenItMatchesHelp guide={guide} scope={null} />
+        </Group>
+      ),
       noWrap: true,
       render: (row) => (
         // A press on the control is not a press on the row.
@@ -296,65 +284,81 @@ export function AllWatchpointsSection() {
       ),
     },
   ];
+  const add = () => {
+    edit.request(null);
+  };
+  const addButton = (
+    <SplitButton label="Add Watchpoint" menuLabel="More ways to add a watchpoint" onClick={add}>
+      <LibraryItems
+        taken={new Set(list.map((w) => w.key))}
+        disabled={set.isPending}
+        coverage={countFor}
+        into="your list"
+        where="All Projects"
+        onAdd={(starter) => {
+          void save([...list, starter], () => {
+            added.mark(starter);
+          });
+        }}
+      />
+    </SplitButton>
+  );
   return (
     <Stack gap="sm" component="section" aria-label="Watchpoints">
-      <SectionHeading
-        title="Watchpoints"
-        line={WATCHPOINTS_LINE}
-        help={<WatchpointsHelp />}
-        action={
-          <SplitButton
-            label="Add Watchpoint"
-            menuLabel="More ways to add a watchpoint"
-            onClick={() => {
-              edit.request(null);
-            }}
-          >
-            <LibraryItems
-              taken={new Set(list.map((w) => w.key))}
-              disabled={set.isPending}
-              coverage={countFor}
-              into="your list"
-              where="All Projects"
-              onAdd={(starter) => {
-                void save([...list, starter], () => {
-                  added.mark(starter);
-                });
+      {/* While the list is empty, the empty state holds the add and the guide; the header holds them after. */}
+      <SettingsPageHeader
+        sectionKey={SettingsSectionKey.AllWatchpoints}
+        {...(list.length === 0 ? {} : { guide: guide.opener, actions: addButton })}
+      />
+      {list.length === 0 ? (
+        <EmptyState
+          icon={IconEye}
+          title="Nothing watched yet"
+          extra={
+            <>
+              {addButton}
+              <Button variant="default" onClick={guide.opener.onOpen}>
+                {WATCHPOINTS_GUIDE}
+              </Button>
+            </>
+          }
+        >
+          Name the files you want to judge yourself, and 10db shows you every change to them.
+        </EmptyState>
+      ) : (
+        <>
+          {added.note}
+          <RaisedPanel>
+            <DataTable<Watchpoint>
+              aria-label="Watchpoints"
+              records={list}
+              columns={columns}
+              idAccessor="key"
+              backgroundColor="transparent"
+              verticalSpacing="xs"
+              horizontalSpacing="md"
+              highlightOnHover
+              noRecordsText="No watchpoints yet"
+              rowStyle={(row) => ({
+                cursor: 'pointer',
+                ...(row.key === added.key
+                  ? {
+                      background: 'var(--mantine-primary-color-light-hover)',
+                      boxShadow: 'inset 3px 0 0 var(--mantine-primary-color-filled)',
+                    }
+                  : {}),
+              })}
+              customRowAttributes={(row) => ({
+                'data-keeps-drawer': '',
+                'data-watchpoint-key': row.key,
+              })}
+              onRowClick={({ record }) => {
+                edit.request(record);
               }}
             />
-          </SplitButton>
-        }
-      />
-      {added.note}
-      <RaisedPanel>
-        <DataTable<Watchpoint>
-          aria-label="Watchpoints"
-          records={list}
-          columns={columns}
-          idAccessor="key"
-          backgroundColor="transparent"
-          verticalSpacing="xs"
-          horizontalSpacing="md"
-          highlightOnHover
-          noRecordsText="No watchpoints yet"
-          rowStyle={(row) => ({
-            cursor: 'pointer',
-            ...(row.key === added.key
-              ? {
-                  background: 'var(--mantine-primary-color-light-hover)',
-                  boxShadow: 'inset 3px 0 0 var(--mantine-primary-color-filled)',
-                }
-              : {}),
-          })}
-          customRowAttributes={(row) => ({
-            'data-keeps-drawer': '',
-            'data-watchpoint-key': row.key,
-          })}
-          onRowClick={({ record }) => {
-            edit.request(record);
-          }}
-        />
-      </RaisedPanel>
+          </RaisedPanel>
+        </>
+      )}
       {edit.problem !== null && !edit.opened && removing === null ? (
         <Alert color="red" title="Couldn't save the watchpoint">
           {edit.problem}
@@ -395,6 +399,7 @@ export function AllWatchpointsSection() {
       >
         {`Remove ${removing?.label ?? 'this watchpoint'} from every project? Tasks stop showing you its changes.`}
       </ConfirmModal>
+      <WatchpointsGuide guide={guide} scope={null} {...(list.length === 0 ? { onAdd: add } : {})} />
     </Stack>
   );
 }

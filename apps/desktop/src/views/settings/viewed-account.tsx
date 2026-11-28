@@ -45,13 +45,20 @@ export function useViewedAccount(): ViewedAccount {
 }
 
 /** The Account select of the Playbook and Language Models pages. */
-export function ViewedAccountSelect({ viewed }: { readonly viewed: ViewedAccount }) {
+export function ViewedAccountSelect({
+  viewed,
+  width = 240,
+}: {
+  readonly viewed: ViewedAccount;
+  /** Narrower where it shares a row with a page's tabs. */
+  readonly width?: number;
+}) {
   const { accounts, live, account } = viewed;
   return (
     <Select
       aria-label="Account"
       size="xs"
-      w={240}
+      w={width}
       leftSection={ACCOUNT_LABEL}
       leftSectionWidth={72}
       leftSectionPointerEvents="none"

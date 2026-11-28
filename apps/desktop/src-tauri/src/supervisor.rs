@@ -184,13 +184,18 @@ pub enum ExitPolicy {
 }
 
 /// What to do when the daemon exits with `code` (`None` when a signal killed it).
+///
+/// A clean exit (0) is restarted too unless the shell is quitting. The daemon exits 0 only on
+/// SIGTERM, SIGINT or its stdin closing; the shell sets `quitting` before it sends its own SIGTERM,
+/// and the self-update quits the window rather than signalling the daemon. A clean exit while the
+/// window stays open was asked for by something else, and would leave the window with no daemon.
 #[must_use]
 pub const fn exit_policy(code: Option<i32>, quitting: bool) -> ExitPolicy {
     if quitting {
         return ExitPolicy::Stop;
     }
     match code {
-        Some(0 | EXIT_SCHEMA_MISMATCH | EXIT_REFUSED_CONFIG) => ExitPolicy::Stop,
+        Some(EXIT_SCHEMA_MISMATCH | EXIT_REFUSED_CONFIG) => ExitPolicy::Stop,
         Some(EXIT_ALREADY_RUNNING) => ExitPolicy::WaitForHolder,
         _ => ExitPolicy::Restart,
     }
@@ -776,12 +781,12 @@ mod tests {
     }
 
     #[test]
-    fn exit_policy_restarts_crashes_and_stops_otherwise() {
+    fn exit_policy_restarts_unless_quitting_or_refused() {
         // A crash (exit 1) or a signal death (kill -9: no code) is restarted.
         assert_eq!(exit_policy(Some(1), false), ExitPolicy::Restart);
         assert_eq!(exit_policy(None, false), ExitPolicy::Restart);
-        // A clean shutdown is not.
-        assert_eq!(exit_policy(Some(0), false), ExitPolicy::Stop);
+        // So is a clean shutdown the shell did not ask for: a SIGTERM from outside.
+        assert_eq!(exit_policy(Some(0), false), ExitPolicy::Restart);
         // Another daemon owns the data directory: watch it, and start again once it is gone.
         assert_eq!(
             exit_policy(Some(EXIT_ALREADY_RUNNING), false),
@@ -802,6 +807,7 @@ mod tests {
             ExitPolicy::Stop
         );
         // Quitting wins over everything.
+        assert_eq!(exit_policy(Some(0), true), ExitPolicy::Stop);
         assert_eq!(exit_policy(Some(1), true), ExitPolicy::Stop);
         assert_eq!(exit_policy(None, true), ExitPolicy::Stop);
     }

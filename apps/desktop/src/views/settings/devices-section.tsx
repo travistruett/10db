@@ -11,7 +11,8 @@ import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { EmptyState } from '../../shell/empty-state';
 import { RaisedPanel } from '../../shell/raised-panel';
 import { fromNow, absoluteTime } from '../../shell/relative';
-import { SectionHeading } from './section-heading';
+import { SettingsSectionKey } from './sections';
+import { SettingsPageHeader } from './settings-page';
 
 const PLATFORM_LABEL: Readonly<Record<DevicePlatform, string>> = {
   [DevicePlatform.Android]: 'Android',
@@ -41,10 +42,9 @@ export function DevicesSection() {
   const rows = devices.data ?? [];
   return (
     <Stack gap="md">
-      <SectionHeading
-        title="Devices"
-        line="Phones and Macs that can use this Mac's 10db. Each has full access. Revoke cuts one off at once."
-        action={
+      <SettingsPageHeader
+        sectionKey={SettingsSectionKey.Devices}
+        actions={
           <Button
             disabled={!ready}
             onClick={() => {

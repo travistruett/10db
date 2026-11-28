@@ -166,7 +166,8 @@ export function RecentDecisions({
   const filtered = decisionFilter !== null || outcome !== null;
   return (
     <Stack gap="xs">
-      <Title order={decision === undefined ? 4 : 5}>Recent Decisions</Title>
+      {/* On the page the Recent tab names the table; in a decision's drawer it needs its own heading. */}
+      {decision === undefined ? null : <Title order={5}>Recent Decisions</Title>}
       {/* On the page the table is a raised thing; in a decision's drawer it stays flat. */}
       <Raised when={decision === undefined}>
         <DataTable<JudgeCallDto>

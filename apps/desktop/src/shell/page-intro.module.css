@@ -1,0 +1,25 @@
+/* The toolbar of a page with tabs: one hairline under the whole row, which the active tab's underline sits on,
+   so the page's controls at the right read as part of the same band. */
+.tabbed {
+  border-bottom: 1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4));
+}
+
+/* The row draws the line, so the tab list draws none of its own and lets its underline overlap the row's. */
+.tabList {
+  margin-bottom: -1px;
+  flex-wrap: nowrap;
+}
+
+.tabList::before {
+  display: none;
+}
+
+/* The page's controls sit clear of the hairline, centred on the tabs' text. */
+.tabbedActions {
+  padding-bottom: 6px;
+}
+
+.guide {
+  flex: none;
+  white-space: nowrap;
+}

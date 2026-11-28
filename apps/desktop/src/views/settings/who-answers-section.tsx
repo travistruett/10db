@@ -1,15 +1,5 @@
 import type { ProjectDto } from '@10db/contracts';
-import {
-  Alert,
-  ActionIcon,
-  Button,
-  Group,
-  Stack,
-  Table,
-  Text,
-  Title,
-  Tooltip,
-} from '@mantine/core';
+import { Alert, ActionIcon, Button, Group, Stack, Table, Text, Tooltip } from '@mantine/core';
 import { IconPencil, IconRoute, IconTrash, IconUsers } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -25,6 +15,7 @@ import { HelpHint } from './help-hint';
 import { RouteScope, routeRows, ruleInputs, type RouteRow } from './route-rows';
 import { SettingsSectionKey } from './sections';
 import { RaisedPanel } from '../../shell/raised-panel';
+import { SettingsPageHeader } from './settings-page';
 
 /** The table's column titles and widths, which its placeholder draws too while the routes load. */
 const ROUTE_COLUMNS = {
@@ -66,48 +57,37 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Stack gap={2}>
-          <Group gap={4}>
-            <Title order={4}>Routes</Title>
-            <HelpHint label="Routes">
-              <Text size="sm" mb={4}>
-                A question goes to the first route that matches, most specific first.
-              </Text>
-              <Text size="sm">
-                {judgeOn
-                  ? "When none does, Jev picks from the project's categories and topics. Anything left comes to you."
-                  : "Without Jev, the lane's own category and topic decide. Anything left comes to you."}
-              </Text>
-            </HelpHint>
-          </Group>
-          <Text size="sm" c="dimmed">
-            Who answers each kind of question; the rest come to you.
-          </Text>
-        </Stack>
-        <Group gap="xs" wrap="nowrap" style={{ flex: 'none' }}>
-          <Button
-            variant="default"
-            leftSection={<IconUsers size={16} />}
-            renderRoot={(props) => (
-              <Link
-                {...props}
-                to="/settings/$section"
-                params={{ section: SettingsSectionKey.People }}
-              />
-            )}
-          >
-            Manage People
-          </Button>
-          <Button
-            onClick={() => {
-              setAdding(true);
-            }}
-          >
-            Add Route
-          </Button>
-        </Group>
-      </Group>
+      <SettingsPageHeader
+        sectionKey={SettingsSectionKey.RoutingRules}
+        project={project}
+        actions={
+          <>
+            <Button
+              variant="default"
+              leftSection={<IconUsers size={16} />}
+              renderRoot={(props) => (
+                <Link
+                  {...props}
+                  to="/settings/$section"
+                  params={{ section: SettingsSectionKey.People }}
+                />
+              )}
+            >
+              Manage People
+            </Button>
+            {/* While there are no routes, the empty state holds the add. */}
+            {rules.isSuccess && rows.length > 0 ? (
+              <Button
+                onClick={() => {
+                  setAdding(true);
+                }}
+              >
+                Add Route
+              </Button>
+            ) : null}
+          </>
+        }
+      />
       {rules.isPending ? (
         <PageLoading
           shape={PageLoadingShape.Table}
@@ -145,7 +125,21 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
                 <Table.Tr>
                   <Table.Th w={ROUTE_COLUMNS.scope.width}>{ROUTE_COLUMNS.scope.title}</Table.Th>
                   <Table.Th>{ROUTE_COLUMNS.subject.title}</Table.Th>
-                  <Table.Th>{ROUTE_COLUMNS.questions.title}</Table.Th>
+                  <Table.Th>
+                    <Group gap={4} wrap="nowrap">
+                      {ROUTE_COLUMNS.questions.title}
+                      <HelpHint label="Routes">
+                        <Text size="sm" mb={4}>
+                          A question goes to the first route that matches, most specific first.
+                        </Text>
+                        <Text size="sm">
+                          {judgeOn
+                            ? "When none does, Jev picks from the project's categories and topics. Anything left comes to you."
+                            : "Without Jev, the lane's own category and topic decide. Anything left comes to you."}
+                        </Text>
+                      </HelpHint>
+                    </Group>
+                  </Table.Th>
                   <Table.Th>{ROUTE_COLUMNS.goesTo.title}</Table.Th>
                   <Table.Th w={ROUTE_COLUMNS.actions.width} />
                 </Table.Tr>

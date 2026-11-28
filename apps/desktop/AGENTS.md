@@ -63,7 +63,8 @@ tokens; the app still uses the main listener.
   `data-tauri-drag-region` move the window. The native window's theme follows the app's color scheme
   (`setWindowTheme`), not the system's.
 - The supervisor (`src-tauri/src/supervisor.rs`, `decisions/2026-11-25-a-silent-daemon-is-killed-and-replaced.md`)
-  stops only on a clean exit, a schema mismatch (3) or a refused setting (4). On exit 2 it watches the daemon that
+  stops only when the shell is quitting, on a schema mismatch (3) or on a refused setting (4); a clean exit (0)
+  while the window stays open came from a signal from outside and is restarted like a crash. On exit 2 it watches the daemon that
   holds `daemon.lock` and starts its own once that one is gone or silent on `/health` for 30 s; it never signals
   the holder, the new daemon's instance lock does. Its own daemon is asked for `/health` every 5 s once
   `daemon.json` names it, and one silent for 30 s is killed and replaced. Each freeze kill within 10 minutes of
@@ -112,7 +113,8 @@ Read the ones for what you touch, and write a view's notes there, not here. This
 
 - The window's frame is `src/shell/app-frame.tsx` (`src/shell/AGENTS.md`): a sidebar (a 200 px labelled rail, or 76 px icons only, and an
   optional panel the builder can resize (340 px until dragged), all bg1) beside a content column (bg0) with its own 44 px title row. A view draws its title and actions
-  into the title row with `TitleRow`, and what sits under it at the top of its content with `PageIntro` (an
+  into the title row with `TitleRow` (a Settings page only its title and project badge, through
+  `SettingsPageHeader`), and what sits under it at the top of its content with `PageIntro` (an
   optional one-line byline cut to one line with its text as a tooltip, an optional toolbar of tabs and filters);
   workspaces keep compact headers.
   `src/shell/page-loading.tsx` is what a page, panel, drawer or modal body shows while its data loads: animated

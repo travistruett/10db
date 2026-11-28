@@ -9,7 +9,6 @@ import {
   Stack,
   Text,
   TextInput,
-  Title,
   Tooltip,
 } from '@mantine/core';
 import { IconTrash, IconWand, IconWorld } from '@tabler/icons-react';
@@ -21,8 +20,8 @@ import {
   useRemoveNetworkHost,
   useScanNetworkHosts,
 } from '../../daemon/network-host-queries';
-import { HelpHint } from './help-hint';
 import { networkHostSourceText } from './network-host-source';
+import { SectionHeading } from './section-heading';
 
 /**
  * The hosts a look at the project's files found that are not allowed, each with its file and an Allow
@@ -107,59 +106,52 @@ export function NetworkHostsSection({ project }: { readonly project: ProjectDto 
   return (
     <Stack gap="xl">
       <Stack gap="xs">
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Stack gap={2}>
-            <Group gap={4}>
-              <Title order={4}>Allowed Hosts</Title>
-              <HelpHint label="Allowed hosts">
-                The hosts this project&apos;s tasks and checks may reach: the same rules an Inbox
-                card&apos;s Always Allow stores. A name can start with * to cover a domain.
-              </HelpHint>
-            </Group>
-            <Text size="sm" c="dimmed">
-              What this project&apos;s tasks and checks may reach.
-            </Text>
-          </Stack>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              add();
-            }}
-          >
-            <Group align="flex-start" gap="xs" wrap="nowrap">
-              <TextInput
-                aria-label="Host"
-                placeholder="index.crates.io or *.crates.io"
-                w={260}
-                value={host}
-                onChange={(e) => {
-                  setHost(e.currentTarget.value);
-                }}
-              />
-              <Button type="submit" loading={allow.isPending}>
-                Add Host
-              </Button>
-              <Tooltip
-                position="left"
-                multiline
-                w={240}
-                label="Look Again: read the project's files for hosts they name that aren't allowed yet."
-              >
-                <ActionIcon
-                  variant="default"
-                  size="input-sm"
-                  aria-label="Look Again"
-                  loading={scan.isPending}
-                  onClick={() => {
-                    scan.mutate();
+        <SectionHeading
+          title="Allowed Hosts"
+          line="What this project's tasks and checks may reach."
+          help="The hosts this project's tasks and checks may reach: the same rules an Inbox card's Always Allow stores. A name can start with * to cover a domain."
+          action={
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                add();
+              }}
+            >
+              <Group align="flex-start" gap="xs" wrap="nowrap">
+                <TextInput
+                  aria-label="Host"
+                  placeholder="index.crates.io or *.crates.io"
+                  w={260}
+                  value={host}
+                  onChange={(e) => {
+                    setHost(e.currentTarget.value);
                   }}
+                />
+                <Button type="submit" loading={allow.isPending}>
+                  Add Host
+                </Button>
+                <Tooltip
+                  position="left"
+                  multiline
+                  w={240}
+                  label="Look Again: read the project's files for hosts they name that aren't allowed yet."
                 >
-                  <IconWand size={18} stroke={1.5} />
-                </ActionIcon>
-              </Tooltip>
-            </Group>
-          </form>
-        </Group>
+                  <ActionIcon
+                    variant="default"
+                    size="input-sm"
+                    aria-label="Look Again"
+                    loading={scan.isPending}
+                    onClick={() => {
+                      scan.mutate();
+                    }}
+                  >
+                    <IconWand size={18} stroke={1.5} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            </form>
+          }
+        />
         {allow.error ? (
           <Text size="sm" c="red" role="alert">
             {allow.error.message}
@@ -222,12 +214,10 @@ export function NetworkHostsSection({ project }: { readonly project: ProjectDto 
 
       {scan.isIdle ? null : (
         <Stack gap="xs">
-          <Stack gap={2}>
-            <Title order={4}>Found in Project Files</Title>
-            <Text size="sm" c="dimmed">
-              Hosts the files name that aren&apos;t allowed yet.
-            </Text>
-          </Stack>
+          <SectionHeading
+            title="Found in Project Files"
+            line="Hosts the files name that aren't allowed yet."
+          />
           {scan.isError ? (
             <Text size="sm" c="red" role="alert">
               Couldn't read the project's files: {scan.error.message}

@@ -1,8 +1,5 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Anchor, Badge, Text } from '@mantine/core';
-import { Link } from '@tanstack/react-router';
-import { ProjectTile } from '../../shell/project-tile';
-import { TitleRow } from '../../shell/title-row';
+import { Text } from '@mantine/core';
 import { AccountsSection } from './accounts/accounts-section';
 import { AgentSkillSection } from './agent-skill-section';
 import { AllWatchpointsSection } from './all-watchpoints-section';
@@ -23,7 +20,7 @@ import { ModelsSection } from './models-section';
 import { PlaybookSection } from './playbook-section';
 import { OverviewSection } from './overview-section';
 import { PlanningSection } from './planning-section';
-import { ScopeLine } from './scope-line';
+import { SettingsPageHeader } from './settings-page';
 import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
 import { ProjectGeneralForm } from './project-general-form';
@@ -32,27 +29,11 @@ import { ProjectPagesForm } from './project-pages-form';
 import { SandboxSection } from './sandbox-section';
 import { ProjectTrustSection } from './project-trust-section';
 import { WatchpointsSection } from './watchpoints-section';
-import { sectionByKey, SettingsScope, SettingsSectionKey } from './sections';
+import { sectionByKey, SettingsSectionKey } from './sections';
 import { ProjectPlaybook } from './project-playbook';
 import { SessionsSection } from './sessions-section';
 import { SelfUpdateSection } from './self-update-section';
 import { TrustSection } from './trust-section';
-
-/** The project a This Project page applies to, beside its title; an All Projects page shows none. */
-function ScopeBadge({ tile, children }: { readonly tile: string; readonly children: string }) {
-  return (
-    <Badge
-      variant="light"
-      color="gray"
-      tt="none"
-      fw={500}
-      size="md"
-      leftSection={<ProjectTile name={tile} size={14} />}
-    >
-      {children}
-    </Badge>
-  );
-}
 
 function NoProject() {
   return <Text c="dimmed">Create a project on the board first.</Text>;
@@ -66,16 +47,8 @@ export function SectionBody({
   readonly project: ProjectDto | null;
 }) {
   const section = sectionByKey(sectionKey);
-  const heading = (
-    <TitleRow
-      title={section.label}
-      meta={
-        section.scope === SettingsScope.App || project === null ? undefined : (
-          <ScopeBadge tile={project.name}>{project.name}</ScopeBadge>
-        )
-      }
-    />
-  );
+  // A page with its own controls, tabs or guide draws this header itself, with them in it.
+  const heading = <SettingsPageHeader sectionKey={sectionKey} project={project} />;
   switch (sectionKey) {
     case SettingsSectionKey.General:
       return (
@@ -120,52 +93,34 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.BoardColumns:
-      return (
+      return project ? (
+        <BoardColumnsSection key={project.id} project={project} />
+      ) : (
         <>
           {heading}
-          {project ? <BoardColumnsSection key={project.id} project={project} /> : <NoProject />}
+          <NoProject />
         </>
       );
     case SettingsSectionKey.Areas:
-      return (
+      return project ? (
+        <ProjectAreas key={project.id} project={project} />
+      ) : (
         <>
           {heading}
-          {project ? <ProjectAreas key={project.id} project={project} /> : <NoProject />}
+          <NoProject />
         </>
       );
     case SettingsSectionKey.Watchpoints:
-      return (
+      return project ? (
+        <WatchpointsSection key={project.id} project={project} />
+      ) : (
         <>
           {heading}
-          {project ? (
-            <ScopeLine>
-              {'Default follows '}
-              <Anchor
-                size="sm"
-                renderRoot={(props) => (
-                  <Link
-                    {...props}
-                    to="/settings/$section"
-                    params={{ section: SettingsSectionKey.AllWatchpoints }}
-                  />
-                )}
-              >
-                All Projects › Watchpoints
-              </Anchor>
-              .
-            </ScopeLine>
-          ) : null}
-          {project ? <WatchpointsSection key={project.id} project={project} /> : <NoProject />}
+          <NoProject />
         </>
       );
     case SettingsSectionKey.AllWatchpoints:
-      return (
-        <>
-          {heading}
-          <ScopeLine>For every project; a project can override one or add its own.</ScopeLine>
-          <AllWatchpointsSection />
-        </>
-      );
+      return <AllWatchpointsSection />;
     case SettingsSectionKey.NetworkHosts:
       return (
         <>
@@ -188,54 +143,31 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.People:
-      return (
-        <>
-          {heading}
-          <PeopleSection />
-        </>
-      );
+      return <PeopleSection />;
     case SettingsSectionKey.RemoteAccess:
-      return (
-        <>
-          {heading}
-          <RemoteAccessSection />
-        </>
-      );
+      return <RemoteAccessSection />;
     case SettingsSectionKey.Devices:
       return (
         <>
-          {heading}
           <DevicesSection />
           <PlannedRemainder section={section} />
         </>
       );
     case SettingsSectionKey.ProjectTrust:
-      return (
+      return project ? (
+        <ProjectTrustSection key={project.id} project={project} />
+      ) : (
         <>
           {heading}
-          {project ? (
-            <ScopeLine>
-              Default follows All Projects › Trust. Changes apply from the next session.
-            </ScopeLine>
-          ) : null}
-          {project ? <ProjectTrustSection key={project.id} project={project} /> : <NoProject />}
+          <NoProject />
         </>
       );
     case SettingsSectionKey.Trust:
-      return (
-        <>
-          {heading}
-          <ScopeLine>
-            For every project; a project can override it. Changes apply from the next session.
-          </ScopeLine>
-          <TrustSection />
-        </>
-      );
+      return <TrustSection />;
     case SettingsSectionKey.Sessions:
       return (
         <>
           {heading}
-          <ScopeLine>For every project.</ScopeLine>
           <SessionsSection />
         </>
       );
@@ -276,43 +208,32 @@ export function SectionBody({
         </>
       );
     case SettingsSectionKey.Accounts:
-      return (
-        <>
-          {heading}
-          <AccountsSection />
-        </>
-      );
+      return <AccountsSection />;
     case SettingsSectionKey.Decisions:
-      return (
-        <>
-          {heading}
-          <DecisionsSection />
-        </>
-      );
+      return <DecisionsSection />;
     case SettingsSectionKey.Playbook:
-      // The page carries its own title, so the Account select sits beside it.
       return <PlaybookSection />;
     case SettingsSectionKey.Models:
-      // The page carries its own title, so the data sources and the refresh button sit beside it.
       return <ModelsSection />;
     case SettingsSectionKey.Team:
-      return (
+      return project ? (
+        <>
+          <ProjectPlaybook key={project.id} project={project} />
+          <PlannedRemainder section={section} />
+        </>
+      ) : (
         <>
           {heading}
-          {project ? (
-            <ScopeLine>
-              {`For ${project.name} only. Use global follows All Projects › Playbook.`}
-            </ScopeLine>
-          ) : null}
-          {project ? <ProjectPlaybook key={project.id} project={project} /> : <NoProject />}
-          <PlannedRemainder section={section} />
+          <NoProject />
         </>
       );
     case SettingsSectionKey.RoutingRules:
-      return (
+      return project ? (
+        <WhoAnswersSection key={project.id} project={project} />
+      ) : (
         <>
           {heading}
-          {project ? <WhoAnswersSection key={project.id} project={project} /> : <NoProject />}
+          <NoProject />
         </>
       );
   }

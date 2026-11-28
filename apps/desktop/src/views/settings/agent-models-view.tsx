@@ -110,17 +110,18 @@ export function AgentModelsView({ account }: { readonly account: AccountDto }) {
   return (
     <Stack gap="xl">
       <Stack gap="sm">
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <SectionHeading
-            title="Intelligence and Cost"
-            line={`Blue is the most intelligence for its cost. Rings mark what ${rigorLabel(rigor)} runs on.`}
-            help={`Blue: the most Intelligence for its cost. Rings: each role's pick on this account at the rigor chosen.${
-              result.omitted > 0
-                ? ` ${String(result.omitted)} ${result.omitted === 1 ? 'effort' : 'efforts'} with no score yet ${result.omitted === 1 ? 'is' : 'are'} not drawn.`
-                : ''
-            }`}
-          />
-          <Group gap="xs" wrap="nowrap" style={{ flex: 'none' }}>
+        <SectionHeading
+          title="Intelligence and Cost"
+          line={`Blue is the most intelligence for its cost. Rings mark what ${rigorLabel(rigor)} runs on.`}
+          help={`Blue: the most Intelligence for its cost. Rings: each role's pick on this account at the rigor chosen.${
+            result.omitted > 0
+              ? ` ${String(result.omitted)} ${result.omitted === 1 ? 'effort' : 'efforts'} with no score yet ${result.omitted === 1 ? 'is' : 'are'} not drawn.`
+              : ''
+          }`}
+        />
+        {/* The chart's own controls sit on its top edge, apart from the page's controls in the toolbar. */}
+        <RaisedPanel padded>
+          <Group justify="space-between" align="center" wrap="nowrap" gap="md" mb="md">
             <Select
               aria-label="Rigor for the rings"
               size="xs"
@@ -149,8 +150,6 @@ export function AgentModelsView({ account }: { readonly account: AccountDto }) {
               }}
             />
           </Group>
-        </Group>
-        <RaisedPanel padded>
           <RightsizingChart
             result={result}
             costLabel={`Cost per task (USD, log scale). ${note}`}

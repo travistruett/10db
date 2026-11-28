@@ -11,7 +11,6 @@ import {
   IconCoin,
   IconCpu,
   IconDeviceMobile,
-  IconWifi,
   IconDownload,
   IconKey,
   IconLock,
@@ -29,6 +28,7 @@ import {
   IconUserPlus,
   IconUsers,
 } from '@tabler/icons-react';
+import { SharingIcon } from '../../shell/sharing-indicator';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useId } from 'react';
 import {
@@ -57,7 +57,7 @@ const SECTION_ICON: Readonly<Record<SettingsSectionKey, typeof IconSettings>> = 
   [SettingsSectionKey.Linear]: IconListDetails,
   [SettingsSectionKey.Integrations]: IconPlug,
   [SettingsSectionKey.People]: IconUserPlus,
-  [SettingsSectionKey.RemoteAccess]: IconWifi,
+  [SettingsSectionKey.RemoteAccess]: SharingIcon,
   [SettingsSectionKey.Devices]: IconDeviceMobile,
   [SettingsSectionKey.KeepAwake]: IconCoffee,
   [SettingsSectionKey.Appearance]: IconPalette,
