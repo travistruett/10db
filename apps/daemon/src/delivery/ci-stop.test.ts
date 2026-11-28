@@ -21,8 +21,9 @@ const watches: PrWatch[] = [];
 /** The workstreams the fake runner was asked to cancel, in order. */
 let cancelled: WorkstreamId[];
 beforeEach(() => {
-  h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
   clock = new ManualClock();
+  // The store's writes read the watch's clock, so a stop's time moves with the rounds.
+  h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false, clock });
   cancelled = [];
 });
 afterEach(async () => {
@@ -82,6 +83,41 @@ const fixBatches = (root: BatchDto): BatchDto[] =>
   listBatches(h.store.db, {}).filter((b) => b.ciFixOf === root.id);
 const stopCards = (): InboxItemDto[] =>
   h.cards().filter((c) => c.title.startsWith('CI still failing on'));
+const outOfMovesCards = (): InboxItemDto[] =>
+  h.cards().filter((c) => c.title.startsWith('Out of moves: CI failing on'));
+/** Whether the root's tasks show that 10db will ask about the stop later. */
+const hasPendingNotice = (root: BatchDto): boolean =>
+  getBatch(h.store.db, root.id).notices.some((n) => n.key === 'ci-out-of-moves');
+
+/** Moves the clock to `minutes` after `from` and runs one round of the watch then. */
+async function roundAt(w: PrWatch, from: number, minutes: number): Promise<void> {
+  clock.advance(from + minutes * 60_000 - clock.now().getTime());
+  await w.idle();
+  w.poke();
+  await w.idle();
+  await h.jobs.idle();
+}
+
+/** Fixes twice without help, so the third failing head stops at the limit; resolves the stop's time. */
+async function stoppedAtLimit(root: BatchDto, w: PrWatch): Promise<number> {
+  const prUrl = root.prUrl ?? '';
+  for (const id of ['77', '78']) h.gh.setJobLog(id, { kind: 'ready', log: 'boom\n' });
+  await failsAfterRerun(w, prUrl, () => begin(w), job('build', '76'), job('build'));
+  await finishFix(h.only(fixBatches(root)));
+  pushedHead(root, 'one.txt');
+  // Each new head is run again once too.
+  await failsAfterRerun(w, prUrl, () => round(w), job('build'), job('build', '78'));
+  expect(fixBatches(root)).toHaveLength(2);
+  await finishFix(fixBatches(root).find((b) => b.state === 'OPEN') ?? root);
+  pushedHead(root, 'two.txt');
+  expect(getBatch(h.store.db, root.id).ciStopped).toBeNull();
+  expect(stopCards()).toEqual([]);
+
+  await failsAfterRerun(w, prUrl, () => round(w), job('build', '78'), job('build'));
+
+  expect(getBatch(h.store.db, root.id).ciStopped).toBe('limit');
+  return clock.now().getTime();
+}
 /** Whether the open card folds under `ci-stopped:<root>`. */
 const hasStopKey = (root: BatchDto): boolean =>
   findOpenByFoldKey(h.store.db, h.project.id, `ci-stopped:${root.id}`) !== undefined;
@@ -127,34 +163,55 @@ function pushedHead(root: BatchDto, message: string): string {
 }
 
 describe('stopping after fixes that did not help', () => {
-  it('stops after two fixes: Blocked, and one card naming the job, its link and a Retry', async () => {
+  it('stops after two fixes: Blocked, a notice, and one out-of-moves card 30 minutes later', async () => {
     const { batch: root } = await shipped(h);
-    const prUrl = root.prUrl ?? '';
-    for (const id of ['77', '78']) h.gh.setJobLog(id, { kind: 'ready', log: 'boom\n' });
     const w = watcher();
-    await failsAfterRerun(w, prUrl, () => begin(w), job('build', '76'), job('build'));
-    await finishFix(h.only(fixBatches(root)));
-    pushedHead(root, 'one.txt');
-    // Each new head is run again once too.
-    await failsAfterRerun(w, prUrl, () => round(w), job('build'), job('build', '78'));
-    expect(fixBatches(root)).toHaveLength(2);
-    await finishFix(fixBatches(root).find((b) => b.state === 'OPEN') ?? root);
-    pushedHead(root, 'two.txt');
-    expect(getBatch(h.store.db, root.id).ciStopped).toBeNull();
-    expect(stopCards()).toEqual([]);
-
-    await failsAfterRerun(w, prUrl, () => round(w), job('build', '78'), job('build'));
+    const stop = await stoppedAtLimit(root, w);
 
     expect(fixBatches(root)).toHaveLength(2);
-    expect(getBatch(h.store.db, root.id).ciStopped).toBe('limit');
     expect(alphaStatus()).toBe(BoardStatus.Blocked);
-    const card = h.only(stopCards());
+    expect(h.cards().filter((c) => c.title.includes('CI'))).toEqual([]);
+    expect(hasPendingNotice(root)).toBe(true);
+
+    await roundAt(w, stop, 29);
+    expect(outOfMovesCards()).toEqual([]);
+
+    await roundAt(w, stop, 30);
+    const card = h.only(outOfMovesCards());
     expect(hasStopKey(root)).toBe(true);
+    expect(hasPendingNotice(root)).toBe(false);
     expect(card.title).toContain('Alpha');
     expect(card.title).toContain('build');
     expect(card.body).toContain('https://github.com/acme/widgets/actions/runs/1/job/77');
     expect(card.body).toContain('2 fixes');
-    expect(card.options.map((o) => o.label)).toEqual(['Retry']);
+    expect(card.options.map((o) => o.label)).toEqual([
+      'Spend More Attempts',
+      'Change the Task',
+      'Drop It',
+    ]);
+
+    await round(w);
+    expect(outOfMovesCards()).toHaveLength(1);
+  });
+
+  it('raises no out-of-moves card when the checks pass inside the 30 minutes', async () => {
+    const { batch: root } = await shipped(h);
+    const w = watcher();
+    const stop = await stoppedAtLimit(root, w);
+    expect(h.cards().filter((c) => c.title.includes('CI'))).toEqual([]);
+
+    h.gh.setRequiredChecks(root.prUrl ?? '', {
+      state: 'passing',
+      failing: [],
+      pending: [],
+      cancelled: [],
+    });
+    await roundAt(w, stop, 10);
+    expect(getBatch(h.store.db, root.id).ciStopped).toBeNull();
+    expect(hasPendingNotice(root)).toBe(false);
+
+    await roundAt(w, stop, 30);
+    expect(outOfMovesCards()).toEqual([]);
   });
 
   it('stops when a fix changed nothing, and starts no more however many rounds pass', async () => {
@@ -171,7 +228,9 @@ describe('stopping after fixes that did not help', () => {
     expect(fixBatches(root)).toHaveLength(1);
     expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_change');
     expect(alphaStatus()).toBe(BoardStatus.Blocked);
-    expect(h.only(stopCards()).body).toContain('1 fix ');
+    // The rounds took minutes, not the 30 the card waits.
+    expect(h.cards().filter((c) => c.title.includes('CI'))).toEqual([]);
+    expect(hasPendingNotice(root)).toBe(true);
   });
 });
 

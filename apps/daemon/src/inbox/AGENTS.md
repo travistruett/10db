@@ -129,11 +129,19 @@
   recovery when its attempts are. A run's card keeps `BATCH_CARD_DETAIL` beside it, so `left-out-settle.ts` and the
   shipper's withdrawals still find it; `createBatchCardAnswers` ignores its labels. `createOutOfMovesAnswers` acts in
   `onFlagAnswer`: Change the Task without a note throws `InboxAnswerRefused`, so the card stays. The CI kind's
-  answers are not built yet; its card does nothing on an answer.
+  answers live in `delivery/ci-stop.ts` (`createCiStopAnswers`): More and Change rerun the failed jobs and lift the
+  stop, counting no fix made before the answer; Drop closes the pull request (`Gh.closePullRequest`), and a refused
+  close raises the out-of-moves card again beside a card saying why.
 - A flag answer whose own move closes the card (a retry cancels its run's cards, an abandon its batch's) is still
   recorded on it: `InboxService.answer` writes the answer to a flag `onFlagAnswer` closed instead of refusing it.
-- The CI cap card replaces "Pull request checks failed": `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's
-  `prCardKey.checks` card in the stop card's write, and `pr-watch` raises none while `ciStopped` is set.
+- A CI stop has its card or its pending notice, never neither, and replaces "Pull request checks failed":
+  `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's `prCardKey.checks` card in the stop's write, and
+  `pr-watch` raises none while `ciStopped` is set. A stop at the limit or on an unchanged head shows the
+  `ci-out-of-moves` notice, and `pr-watch` replaces it with the out-of-moves card in one write 30 minutes later; a
+  missing log or a refused cut raises its card at once. `clearCiStop` lifts a stop and its notice before then. The
+  `ci_out_of_moves.<root id>` setting holds the stop time, More's `ignoreFixesBefore`, Change's note (the next fix
+  task opens with it) and Drop's `dropped`, which keeps the close's "pull request closed" card away; the write that
+  records the merge or close deletes it, last. (Kept here: `delivery/AGENTS.md` is at its word budget.)
 - A lane's proposal is routed in `proposal-task.ts` (`decisions/2026-11-27-a-lanes-proposal-is-routed-by-rule.md`):
   `planReviewRoute` turns `plan_review` on Core work into a step, `proposalFiling` lets a `prerequisite` past the size
   rule only, and `fileProposalByItself` files a prerequisite once, matched by its first description line. Each move

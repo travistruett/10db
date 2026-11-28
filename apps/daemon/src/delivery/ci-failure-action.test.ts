@@ -52,8 +52,12 @@ const failing = (...jobs: ReturnType<typeof job>[]): RequiredChecksDto => ({
 });
 
 const root = batch({});
-const fixOf = (head: string, state: BatchDto['state']): BatchDto =>
-  batch({ ciFixOf: root.id, ciFixHead: head, state });
+const fixOf = (head: string, state: BatchDto['state'], createdAt = AT): BatchDto =>
+  batch({ ciFixOf: root.id, ciFixHead: head, state, createdAt });
+
+/** When the builder spent more attempts: fixes made before it no longer count. */
+const MORE_AT = '2026-10-21T13:00:00.000Z';
+const SINCE = '2026-10-21T14:00:00.000Z';
 
 interface Row {
   readonly name: string;
@@ -61,6 +65,7 @@ interface Row {
   readonly checks?: RequiredChecksDto;
   readonly fixes?: readonly BatchDto[];
   readonly head?: string | null;
+  readonly ignoreFixesBefore?: string;
 }
 
 const decide = (row: Row) =>
@@ -69,6 +74,7 @@ const decide = (row: Row) =>
     row.checks ?? failing(job('build')),
     row.fixes ?? [],
     row.head === undefined ? HEAD : row.head,
+    row.ignoreFixesBefore ?? null,
   );
 
 const RUNNING_FIX_STATES = ['CUTTING', 'OPEN', 'SHIPPING', 'FAILED'] as const;
@@ -83,6 +89,16 @@ describe('ciFailureAction', () => {
         checks: failing(job('lint', null), job('build')),
       },
       { name: 'the next head after a finished fix', fixes: [fixOf(HEAD, 'SHIPPED')], head: OTHER },
+      {
+        name: 'two fixes before more attempts, none since',
+        fixes: [fixOf('1'.repeat(40), 'SHIPPED'), fixOf('2'.repeat(40), 'CLOSED')],
+        ignoreFixesBefore: MORE_AT,
+      },
+      {
+        name: 'a fix for this head before more attempts',
+        fixes: [fixOf(HEAD, 'CLOSED')],
+        ignoreFixesBefore: MORE_AT,
+      },
     ];
     for (const row of rows) expect.soft(decide(row), row.name).toEqual({ kind: 'fix' });
   });
@@ -107,6 +123,12 @@ describe('ciFailureAction', () => {
     const rows: (Row & { reason: string })[] = [
       { name: 'a closed fix for this head', fixes: [fixOf(HEAD, 'CLOSED')], reason: 'no_change' },
       { name: 'a shipped fix for this head', fixes: [fixOf(HEAD, 'SHIPPED')], reason: 'no_change' },
+      {
+        name: 'a fix for this head since more attempts',
+        fixes: [fixOf(HEAD, 'CLOSED', SINCE)],
+        ignoreFixesBefore: MORE_AT,
+        reason: 'no_change',
+      },
       {
         name: 'two fixes made',
         fixes: [fixOf('1'.repeat(40), 'SHIPPED'), fixOf('2'.repeat(40), 'CLOSED')],

@@ -76,6 +76,8 @@ export const NOTICE_KEY = {
    * run and how the rerun came out, so a restart never runs the head's checks a second time.
    */
   checksFailedRerun: 'checks-failed-rerun',
+  /** 10db stopped fixing the pull request's CI and asks the builder later, unless the checks recover first. */
+  ciOutOfMoves: 'ci-out-of-moves',
   /** A task started over from a failed attempt whose commits are still on the batch's branch. */
   supersededAttempt: 'superseded-attempt',
   /** The install before a gate left the copy broken, and 10db removed node_modules and installed again. */
@@ -532,6 +534,16 @@ export const ciNotices = {
       body: `GitHub waits for the required checks of ${batch.baseBranch}, but the head of ${named}${prUrl === null ? '' : ` (${prUrl})`} has no run of them, minutes after it was pushed. GitHub skips a pull request's workflows when it cannot build the merge commit at push time, so the pull request waits for checks that will never come.\n\n${batch.autoMerge ? '10db tried to start them again by merging the base into the pull request, and they still did not start. ' : 'This pull request is held for you, so 10db pushes nothing to it. '}Push a commit to the branch, or merge ${batch.baseBranch} into it on GitHub (Update branch), to start the checks. This notice goes once any check appears on the head.`,
     };
   },
+  /**
+   * 10db stopped fixing the pull request's failing checks after `fixes` fixes, and raises its
+   * out-of-moves card `afterMinutes` later unless the checks pass or run again first.
+   */
+  outOfMovesPending: (batch: BatchDto, fixes: number, afterMinutes: number): Notice => ({
+    key: NOTICE_KEY.ciOutOfMoves,
+    tone: 'warning',
+    line: `CI still fails after ${String(fixes)} ${fixes === 1 ? 'fix' : 'fixes'}; 10db asks you in ${String(afterMinutes)} minutes`,
+    body: `10db made ${String(fixes)} ${fixes === 1 ? 'fix' : 'fixes'} for ${batch.prUrl ?? 'the pull request'} and its required checks still fail, so it starts no more. In ${String(afterMinutes)} minutes it asks you whether to spend more attempts, change the task, or close the pull request. If the checks pass or run again before then (a rerun, or a commit someone pushed), it asks nothing.`,
+  }),
 };
 
 /** Why 10db stopped trying to get a cancelled required check to run. */
