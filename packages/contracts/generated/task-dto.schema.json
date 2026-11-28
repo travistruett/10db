@@ -25,6 +25,9 @@
         "type": "string"
       }
     },
+    "criteriaCount": {
+      "type": "number"
+    },
     "areas": {
       "type": "array",
       "items": {
