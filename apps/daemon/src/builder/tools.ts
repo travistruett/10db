@@ -130,7 +130,6 @@ export function createBuilderTools(
         toInbox: kind.toInbox,
       }));
     },
-    // Finished tasks keep their full text; after a few days of filing they would flood the client.
     [BuilderToolName.ListGoals]: (args) =>
       services.listGoals(BuilderToolInputs.list_goals.parse(args).projectId).goals.map((row) => ({
         id: row.goal.id,
@@ -166,6 +165,7 @@ export function createBuilderTools(
         }),
       };
     },
+    // Finished tasks keep their full text; after a few days of filing they would flood the client.
     [BuilderToolName.ListTasks]: (args) =>
       services
         .listTasks(BuilderToolInputs.list_tasks.parse(args).projectId)

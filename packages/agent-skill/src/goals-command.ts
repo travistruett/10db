@@ -1,8 +1,8 @@
-import { GoalDto, GoalListDto, GoalStatus, type GoalSummaryDto } from '@10db/contracts';
+import { GoalDto, GoalStatus } from '@10db/contracts';
 import { z } from 'zod';
 import type { CommandDeps } from './commands';
 import { TendbError } from './errors';
-import { ProjectView, TaskView } from './api-views';
+import { GoalListView, ProjectView, TaskView } from './api-views';
 
 async function read<S extends z.ZodType>(
   deps: CommandDeps,
@@ -23,7 +23,7 @@ const statusWords = (status: string): string => status.replaceAll('_', ' ');
 
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
-function counts(row: GoalSummaryDto): { open: number; done: number } {
+function counts(row: GoalListView['goals'][number]): { open: number; done: number } {
   const { merged, inReview, total } = row.digest.progress;
   return { open: total - merged - inReview, done: merged + inReview };
 }
@@ -32,8 +32,17 @@ function counts(row: GoalSummaryDto): { open: number; done: number } {
  * A project's goals that are not done, for `context`. The list's digest is read, never the digest
  * route, which marks the goal as viewed.
  */
-export async function openGoalsOf(deps: CommandDeps, projectId: string) {
-  const list = await read(deps, `/projects/${projectId}/goals`, GoalListDto);
+export async function openGoalsOf(
+  deps: CommandDeps,
+  projectId: string,
+): Promise<{ id: string; title: string; status: string }[] | string> {
+  // `context` is every session's first read, so a goals answer it can't read is said, not fatal.
+  let list: GoalListView;
+  try {
+    list = await read(deps, `/projects/${projectId}/goals`, GoalListView);
+  } catch (error) {
+    return `couldn't read goals: ${error instanceof Error ? error.message : String(error)}`;
+  }
   return list.goals
     .filter((row) => row.digest.status !== GoalStatus.Done)
     .map((row) => ({
@@ -78,7 +87,7 @@ export async function goalsCommand(args: readonly string[], deps: CommandDeps): 
       `No project ${ref}. Projects: ${projects.map((p) => `${p.name} (${p.id})`).join(', ')}`,
     );
   }
-  const list = await read(deps, `/projects/${project.id}/goals`, GoalListDto);
+  const list = await read(deps, `/projects/${project.id}/goals`, GoalListView);
   if (goalId === undefined) {
     if (list.goals.length === 0) deps.out(`${project.name} has no goals.`);
     for (const row of list.goals) {

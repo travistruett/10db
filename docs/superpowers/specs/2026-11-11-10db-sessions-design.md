@@ -634,7 +634,7 @@ auto mode's `allow` and 10db's judge's prompt. Until T5, a card offers Allow onc
 | --- | --- |
 | `create_task`, `set_title`, `write_brief`, `edit_task` | runs. Each shows as a tool row with Undo. Undo removes an unstarted task (the existing route), puts back an edit's old values, or restores the title |
 | `start_task`, `run_next`, `move_task`, `start_shape`, `save_decision`, `save_principle` | runs. The row links what it started or changed |
-| knowledge search and reads, `list_tasks`, `list_flows`, `list_projects`, `list_inbox`, `list_proposals` | runs |
+| knowledge search and reads, `list_tasks`, `list_goals`, `get_goal` (a goal of the chat's own project), `list_flows`, `list_projects`, `list_inbox`, `list_proposals` | runs |
 | `remove_task` | runs on a task this chat made (`chat_tasks`). On any other task the tool itself asks with a card: removing work the chat didn't make is limit 1. The handler decides, since a judge can't know which tasks the chat made |
 | `retire_knowledge`, `withdraw_knowledge`, `supersede_knowledge` | the tool asks with a card, every time: limit 1 |
 | `make_branch`, `switch_branch`, `pull`, `commit_changes` (§7.3) | runs, and refuses unless the chat's turn holds the folder. The project's git hooks don't run. The row names the branch or commit |
