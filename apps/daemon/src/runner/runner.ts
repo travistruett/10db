@@ -211,6 +211,7 @@ import {
   PackReason,
   recordPlanPacked,
   RESULT_NUDGE,
+  type TakenWhileQueued,
 } from '../briefing';
 import {
   isLaneLinearRead,
@@ -300,7 +301,13 @@ import {
 } from '../inbox';
 import type { Judge } from '../judge';
 import type { Logger } from '../log';
-import { mintSessionToken, TOOL_PICTURES_CAPTION, type ToolImages } from '../mcp';
+import {
+  mintSessionToken,
+  queuedBehind,
+  takenFrom,
+  TOOL_PICTURES_CAPTION,
+  type ToolImages,
+} from '../mcp';
 import {
   closeHoldsOf,
   foldHandEdits,
@@ -2500,6 +2507,13 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   /** Back to the queue with the next action as it was, and the lease released. */
+  const taskTitleOf = (workstreamId: WorkstreamId): string =>
+    getTask(db, getWorkstreamRow(db, workstreamId).taskId).title;
+
+  /** The claims taken from `id` while it was queued, for its brief, each named by the taking task's title. */
+  const takenForBrief = (id: WorkstreamId): TakenWhileQueued[] =>
+    takenFrom(db, id).map((record) => ({ title: taskTitleOf(record.to), claims: record.claims }));
+
   function requeue(id: WorkstreamId, ctl: Control, pausedFor: string, queuedFor: string): void {
     opts.state.write((ctx) => {
       // The state machine has no shorter way back to the queue.
@@ -3703,6 +3717,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       uncarried: uncarried === undefined ? null : uncarriedSaid(uncarried),
       task,
       claims: claims(),
+      taken: takenForBrief(id),
       action,
       handoff: contextPack.handoff,
       answer: permission?.prompt ?? contextPack.pendingAnswer,
@@ -4639,6 +4654,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                   answeredCards: answeredCardsForTask(db, row.taskId),
                 },
                 opts.laneBrief ?? LaneBrief.Full,
+                takenForBrief(id),
               ),
             );
             break;
@@ -5963,6 +5979,13 @@ export function createRunner(opts: RunnerOptions): Runner {
         }
         if (verifying) {
           await verify(id, ctl);
+          return;
+        }
+        // A task queued behind another after a repeat deadlock starts no session until its turn; its
+        // handoff stays the next action, and the scheduler launches it when the turn is over.
+        const behind = queuedBehind(db, id);
+        if (behind !== null) {
+          requeue(id, ctl, `queued behind ${taskTitleOf(behind)}`, 'waits its turn');
           return;
         }
         const lane = getProject(db, getWorkstreamRow(db, id).projectId);

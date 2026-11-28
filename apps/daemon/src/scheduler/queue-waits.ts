@@ -197,4 +197,14 @@ export const queueWait = {
     endless: input.holderEnded,
     on: input.holder,
   }),
+  /** Queued behind the task it deadlocked with twice, until that task ends or frees what they fought over. */
+  turn: (input: {
+    readonly title: string;
+    readonly on: { readonly taskId: TaskId; readonly workstreamId: WorkstreamId };
+  }): FoundWait => ({
+    kind: QueueWaitKind.Turn,
+    line: `Waits its turn behind "${input.title}", which it deadlocked with twice`,
+    endless: false,
+    on: input.on,
+  }),
 } as const;

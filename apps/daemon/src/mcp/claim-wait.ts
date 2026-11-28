@@ -43,7 +43,13 @@ import { claimScopeOf } from '../delivery';
 import type { EventBus, StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import { DEADLOCK_DETAIL, deadlockAnswers, taskLetter } from './claim-deadlock';
-import { readPair, recordBreak } from './claim-deadlock-pairs';
+import {
+  addContested,
+  readPair,
+  recordBreak,
+  recordTaken,
+  type DeadlockPair,
+} from './claim-deadlock-pairs';
 import { DeadlockMove, deadlockMove } from './claim-deadlock-rule';
 import { CardTier, decidedByBuilder, postNotice } from '../inbox';
 
@@ -197,6 +203,8 @@ export interface Asking {
    * with this task, once this wait takes the claim `from` held, and answers their paths.
    */
   handOver(from: WorkstreamId): Promise<readonly string[]>;
+  /** A third deadlock between the same pair is reported, in the write that yields and queues. */
+  reportRepeat(pair: DeadlockPair): void;
 }
 
 /** Where a wait in progress stands: who holds the claim now. */
@@ -464,23 +472,54 @@ function heldNow(a: Asking): AcquireResult | null {
     ...(areaScope ? { areaScope } : {}),
   });
   if (holder === null) return null;
-  if (holder === a.workstreamId) return tryAcquire(a);
+  if (holder === a.workstreamId) return tryAcquire(a).outcome;
   return { ok: false, conflict: { kind: a.kind, name: a.name, heldBy: holder } };
 }
 
-/** One try, in one write: the claim shares the workstream's lease, which the scheduler's heartbeat renews. */
-function tryAcquire(a: Asking): AcquireResult {
+/**
+ * One try, in one write: the claim shares the workstream's lease, which the scheduler's heartbeat renews.
+ * A claim held by a task queued behind this one is taken in the same write, but only while that task can't
+ * run: its pair's record queues it behind this task, its row is `Queued` and it holds no lease. The take
+ * adds the claim to the pair's contested claims and records it for the queued task's next brief
+ * (`recordTaken`); `takenFrom` names the task it was taken from.
+ */
+function tryAcquire(a: Asking): {
+  readonly outcome: AcquireResult;
+  readonly takenFrom: WorkstreamId | null;
+} {
   return a.state.write((ctx) => {
-    const row = getWorkstreamRow(ctx.tx, a.workstreamId);
+    const me = a.workstreamId;
+    const row = getWorkstreamRow(ctx.tx, me);
     const areaScope = claimScopeOf(ctx.tx, row);
-    return acquireClaims(ctx, {
+    const ask = {
       projectId: a.projectId,
-      workstreamId: a.workstreamId,
+      workstreamId: me,
       requests: [{ kind: a.kind, name: a.name }],
       leaseExpiresAt: row.leaseExpiresAt ?? ctx.now,
       copyHazards: copyHazardNames(getProject(ctx.tx, a.projectId)),
       ...(areaScope ? { areaScope } : {}),
-    });
+    };
+    const outcome = acquireClaims(ctx, ask);
+    if (outcome.ok) return { outcome, takenFrom: null };
+    const holder = outcome.conflict.heldBy;
+    const queued = readPair(ctx.tx, me, holder)?.queued;
+    const holderRow = getWorkstreamRow(ctx.tx, holder);
+    if (
+      queued?.yielder !== holder ||
+      queued.behind !== me ||
+      holderRow.state !== WorkstreamState.Queued ||
+      holderRow.leaseOwner !== null
+    )
+      return { outcome, takenFrom: null };
+    const held = activeClaims(ctx.tx, holder).find(
+      (claim) => claim.kind === a.kind && claim.name === a.name,
+    );
+    if (held === undefined) return { outcome, takenFrom: null };
+    releaseClaim(ctx, held.id);
+    const claim = { kind: a.kind, name: a.name };
+    addContested(ctx, me, holder, claim);
+    recordTaken(ctx, { from: holder, to: me, claim });
+    return { outcome: acquireClaims(ctx, ask), takenFrom: holder };
   });
 }
 
@@ -537,8 +576,10 @@ function breakDeadlock(
   holder: WorkstreamId,
   gives: readonly { readonly kind: ClaimKind; readonly name: string }[],
   waits: ClaimWaits,
+  move: DeadlockMove,
 ): boolean {
   const me = a.workstreamId;
+  const queue = move !== DeadlockMove.Yield;
   const released = a.state.write((ctx) => {
     const rows = activeClaims(ctx.tx, me).filter((row) =>
       gives.some((c) => c.kind === row.kind && c.name === row.name),
@@ -550,8 +591,9 @@ function breakDeadlock(
       yielder: me,
       other: holder,
       contested: [...claims, { kind: a.kind, name: a.name }],
-      queue: false,
+      queue,
     });
+    if (move === DeadlockMove.YieldQueueAndReport) a.reportRepeat(pair);
     const yielder = taskTitleOf(ctx.tx, me);
     const other = taskTitleOf(ctx.tx, holder);
     const list = claims.map((c) => `${c.kind} ${c.name}`).join(', ');
@@ -565,7 +607,9 @@ function breakDeadlock(
       body: [
         `Task "${yielder}" waited for ${a.kind} ${a.name}, which task "${other}" holds, while "${other}" waited for ${list}, which "${yielder}" held.`,
         `After 2 minutes "${yielder}", the later to ask, gave up ${list}. "${other}" got its committed work only: the uncommitted edits there stay "${yielder}"'s own.`,
-        'Undo forgets this yield: the two tasks count as never having deadlocked.',
+        queue
+          ? `Undo ends the queue: "${yielder}" may start and ask again now.`
+          : 'Undo forgets this yield: the two tasks count as never having deadlocked.',
       ].join('\n\n'),
       decision: {
         by: CardDecider.Rule,
@@ -580,7 +624,7 @@ function breakDeadlock(
     return claims;
   });
   if (released.length === 0) return false;
-  waits.yielded(me, { claims: released, inboxId: null, to: holder, queued: false });
+  waits.yielded(me, { claims: released, inboxId: null, to: holder, queued: queue });
   return true;
 }
 
@@ -641,6 +685,16 @@ export function yieldRefusal(
   asked: { readonly kind: ClaimKind; readonly name: string },
 ): ClaimResult {
   const list = given.claims.map((c) => `${c.kind} ${c.name}`).join(', ');
+  if (given.queued && given.to !== null)
+    return {
+      granted: false,
+      heldBy: null,
+      inboxId: given.inboxId,
+      yielded: true,
+      queued: true,
+      parked: false,
+      instruction: `You gave up ${list} to task "${taskTitleOf(db, given.to)}" and are queued behind it. Commit what you changed in the claims you still hold. Your uncommitted edits in ${list} stay in your folder and stay yours; do not commit them. Call write_handoff naming what is left, then end your turn. 10db starts you again when that task finishes.`,
+    };
   const opening =
     given.to === null
       ? `The builder answered a claim deadlock: this task gave up ${list}, which was released so the other task could go on.`
@@ -654,6 +708,23 @@ export function yieldRefusal(
     parked: false,
     instruction: `${opening} You no longer hold ${list}: edit nothing there until request_claim grants it to you again. Your uncommitted edits there stay as they are and are still your own: the other task does not commit them, and to commit them you ask for ${list} again. You did not get ${asked.kind} ${asked.name} either. Call request_claim with a new opId for each claim you still need.`,
   };
+}
+
+/**
+ * What a task queued behind `behind` is answered at once when it asks for any claim: the contested claims
+ * it no longer holds, and that it hands off.
+ */
+export function queuedRefusal(
+  db: DbReader,
+  me: WorkstreamId,
+  behind: WorkstreamId,
+  asked: { readonly kind: ClaimKind; readonly name: string },
+): ClaimResult {
+  const held = activeClaims(db, me);
+  const claims = (readPair(db, me, behind)?.contested ?? []).filter(
+    (claim) => !held.some((row) => row.kind === claim.kind && row.name === claim.name),
+  );
+  return yieldRefusal(db, { claims, inboxId: null, to: behind, queued: true }, asked);
 }
 
 /**
@@ -800,12 +871,17 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
       if (given) return yieldRefusal(a.state.db, given, a);
       // A shared area is held for a turn: a wait outlived by its turn takes nothing.
       if (shared && !shared.turnOpen()) return turnEndedRefusal(a, null);
-      const outcome = shared === undefined ? tryAcquire(a) : (heldNow(a) ?? (await shared.grant()));
+      const tried =
+        shared === undefined
+          ? tryAcquire(a)
+          : { outcome: heldNow(a) ?? (await shared.grant()), takenFrom: null };
+      const outcome = tried.outcome;
       if (outcome === null) return turnEndedRefusal(a, null);
       if (outcome.ok) {
         withdrawDeadlock(a);
-        // Recorded inside the wait, so a grant that lands between two calls still records it.
-        const from = heldBy;
+        // Recorded inside the wait, so a grant that lands between two calls still records it. A claim
+        // taken from a queued task hands over its edits as a release would.
+        const from = tried.takenFrom ?? heldBy;
         const handed =
           from === null
             ? null
@@ -860,8 +936,8 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
             case DeadlockMove.Yield:
             case DeadlockMove.YieldAndQueue:
             case DeadlockMove.YieldQueueAndReport:
-              // Until the queue is built, a repeat yields as a first does. The loop's top answers the refusal.
-              if (breakDeadlock(a, holder, gives, waits)) continue;
+              // The loop's top answers the refusal.
+              if (breakDeadlock(a, holder, gives, waits, move)) continue;
               break;
           }
         }

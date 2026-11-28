@@ -50,6 +50,20 @@ interface PriorResult {
   readonly result: StepResult;
 }
 
+/** Claims a task took from this one while it was queued behind it. */
+export interface TakenWhileQueued {
+  readonly title: string;
+  readonly claims: readonly { readonly kind: ClaimKind; readonly name: string }[];
+}
+
+/** One line per task that took claims, written after `Your claims:`. */
+function takenLines(taken: readonly TakenWhileQueued[]): string[] {
+  return taken.map(
+    (record) =>
+      `While you were queued, task "${record.title}" took ${record.claims.map((c) => `${c.kind} ${c.name}`).join(', ')}. You no longer hold them, whatever your handoff says. Your uncommitted edits there stay in your folder and stay yours; do not commit them or edit there. Ask with request_claim if you still need them.`,
+  );
+}
+
 export interface PromptInput {
   /** The agent the account this session runs on uses; never the project's, which can move between accounts. */
   readonly provider: Provider;
@@ -57,6 +71,8 @@ export interface PromptInput {
   readonly brief?: LaneBrief;
   readonly task: Pick<TaskDto, 'title' | 'description' | 'acceptanceCriteria'>;
   readonly claims: readonly { readonly kind: ClaimKind; readonly name: string }[];
+  /** Claims other tasks took while this one was queued, each named by the taking task's title. */
+  readonly taken?: readonly TakenWhileQueued[];
   readonly action: NextAction;
   readonly handoff: HandoffDto | null;
   readonly answer: {
@@ -1167,6 +1183,7 @@ export function buildSessionPrompt(input: PromptInput): string {
     ...renderMockups(input.contextPack.mockups),
     '',
     `Your claims: ${claims}.`,
+    ...takenLines(input.taken ?? []),
     '',
     'Rules:',
     bullets(rules),
@@ -1189,6 +1206,7 @@ export function compactionReinjection(
   denials: readonly Denial[] = [],
   answered?: { readonly role: StepRole; readonly answeredCards: readonly AnsweredCard[] },
   brief: LaneBrief = LaneBrief.Full,
+  taken: readonly TakenWhileQueued[] = [],
 ): string {
   const claims = pack.claims.map((c) => `${c.kind} ${c.name}`).join(', ') || '(none)';
   return [
@@ -1203,6 +1221,7 @@ export function compactionReinjection(
     ...renderMockups(pack.mockups),
     '',
     `Your claims: ${claims}.`,
+    ...takenLines(taken),
     '',
     renderKnowledge(pack, brief),
     ...(pack.handoff ? ['', 'Latest handoff:', renderHandoff(pack.handoff)] : []),

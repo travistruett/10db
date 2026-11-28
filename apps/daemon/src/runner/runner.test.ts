@@ -102,6 +102,10 @@ import {
   RESULT_NUDGE,
 } from '../briefing';
 import { createLauncher } from '../environment';
+import { createEventBus } from '../events';
+import { createFolderHold } from '../folder-hold';
+import { recordBreak } from '../mcp';
+import { createQueueWaits, createScheduler } from '../scheduler';
 import { startTaskWithPlan } from '../team';
 import { setProjectLiveSystems } from '../trust';
 import { announceWatchpointReading } from '../watchpoints';
@@ -7025,5 +7029,97 @@ describe("a task's plan anchors at session start", () => {
     expect(prompt).toContain('Anchor moved: src/runner.ts:3→6');
     expect(prompt).not.toContain('checked at');
     await engine.runner.cancel(workstream.id);
+  });
+});
+
+describe('a repeat claim deadlock', () => {
+  it('queues the yielder after its handoff, and launches it with the handoff once the other is done', async () => {
+    const ask = (opId: string, name: string) => ({
+      do: 'mcp' as const,
+      tool: 'request_claim',
+      args: { opId, kind: 'area', name, reason: `needs ${name}` },
+    });
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [
+            { do: 'await_signal', name: 'beta-waits' },
+            ask('op-alpha-ui', 'ui'),
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-alpha-handoff', 'Finish the api change'),
+            },
+            turn,
+          ],
+          [write('src/api/a.txt'), commit('op-alpha-after', ['src/api/a.txt']), turn],
+        ],
+        Beta: [
+          [
+            ask('op-beta-api', 'api'),
+            { do: 'await_signal', name: 'beta-done' },
+            write('src/ui/b.txt'),
+            commit('op-beta-ui', ['src/ui/b.txt']),
+            turn,
+          ],
+        ],
+      },
+      {},
+      {},
+      { claims: { sliceMs: 60_000, pollMs: 10 } },
+    );
+    const alpha = engine.addTask('Alpha', ['api']).workstream;
+    const beta = engine.addTask('Beta', ['ui']).workstream;
+    // The two deadlocked once before, so the next deadlock between them also queues the yielder.
+    engine.state.write((ctx) =>
+      recordBreak(ctx, {
+        yielder: alpha.id,
+        other: beta.id,
+        contested: [
+          { kind: 'area', name: 'api' },
+          { kind: 'area', name: 'ui' },
+        ],
+        queue: false,
+      }),
+    );
+    engine.launch(alpha.id);
+    engine.launch(beta.id);
+    await waitFor(() => ws(beta.id).notice?.line.startsWith('Waiting for area api'));
+    engine.adapter.signal('beta-waits');
+    await waitFor(() => ws(alpha.id).notice?.line.includes('waits for a claim this one holds'));
+    // Past the 2 minutes a deadlock stands before the later asker yields.
+    engine.clock.advance(2 * 60_000);
+    await waitFor(() => ws(alpha.id).state === 'QUEUED' && !engine.runner.isRunning(alpha.id));
+
+    const waits = createQueueWaits({ state: engine.state, clock: engine.clock });
+    const scheduler = createScheduler({
+      folderHold: createFolderHold({ state: engine.state, bus: createEventBus() }),
+      state: engine.state,
+      clock: engine.clock,
+      caps: { global: 4 },
+      instanceId: 'test-daemon',
+      leaseMs: 60_000,
+      tickMs: 2_000,
+      logger: silentLogger,
+      runner: engine.runner,
+      accounts: { ...engine.accounts, prepare: () => undefined },
+      branches: createGit(),
+      onWrongBranch: () => undefined,
+      onWorktreeMissing: () => undefined,
+      keptWork: { ready: () => true },
+      waits,
+    });
+    expect(await scheduler.tick()).toBe(0);
+    expect(waits.get(alpha.id)?.kind).toBe('turn');
+    expect(listSessions(engine.store.db, alpha.id)).toHaveLength(1);
+
+    engine.adapter.signal('beta-done');
+    await waitFor(() => ws(beta.id).state === 'DONE');
+    expect(ws(alpha.id).nextAction.kind).toBe('continue_from_handoff');
+    expect(await scheduler.tick()).toBe(1);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, alpha.id)).toHaveLength(2);
+    // The queue is the same run waiting: no new run is made for it.
+    expect(listWorkstreams(engine.store.db, {})).toHaveLength(2);
   });
 });

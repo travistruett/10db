@@ -1,5 +1,14 @@
 export { createClaimDeadlockAnswers } from './claim-deadlock';
-export { dropPair, forgetEndedPairs } from './claim-deadlock-pairs';
+export {
+  dropPair,
+  endTurn,
+  forgetEndedPairs,
+  queuedBehind,
+  queuingPairs,
+  recordBreak,
+  takenFrom,
+  turnOver,
+} from './claim-deadlock-pairs';
 export { ClaimWaits, forgetEndedYields, withdrawStaleClaimWaits } from './claim-wait';
 export { createMcpHandler } from './server';
 export { mintSessionToken } from './tokens';
