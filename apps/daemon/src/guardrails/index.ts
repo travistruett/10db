@@ -1,1 +1,1 @@
-export { guardrailOf } from './paths';
+export { GUARDRAIL_PATHS, guardrailHits, guardrailOf } from './paths';

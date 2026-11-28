@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId, type BatchDto, type WorkstreamDto } from '@10db/contracts';
 import {
+  findOpenByFoldKey,
   getBatch,
   insertBatch,
   listBatches,
@@ -15,6 +16,8 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { branchOf, commitIn, onOrigin, pathOf, shipped } from '../../test/delivery-worlds';
 import { createTempClone, isolatedGitEnv } from '../../test/fixtures';
 import { GhError, PrState } from '../github';
+import { createInboxService, type InboxService } from '../inbox';
+import { createGuardrailHoldAnswers, guardrailHoldCardKey } from './guardrail-hold-card';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import { insertPlannedWorkstream, planForStart } from '../team';
@@ -392,4 +395,69 @@ describe('shipping a fix batch', () => {
       expect(local(branch)).not.toBeNull();
     },
   );
+});
+
+describe('shipping a fix batch into a held pull request', () => {
+  const WORKFLOW = '.github/workflows/x.yml';
+
+  const holdCard = (root: BatchDto) =>
+    findOpenByFoldKey(h.store.db, h.project.id, guardrailHoldCardKey(root.id));
+
+  /** The inbox the builder answers through, with the held pull request's answers wired to `h`. */
+  function answering(): InboxService {
+    const answers = createGuardrailHoldAnswers(h.ctx, h.shipper);
+    return createInboxService({
+      state: h.state,
+      onParkedAnswer: () => undefined,
+      onFlagAnswerInWrite: (ctx, item, answer) => answers.onAnswerInWrite(ctx, item, answer),
+    });
+  }
+
+  it('arms nothing for a fix with no guardrail change, and keeps the card open', async () => {
+    const { batch: root, head, prUrl } = await shipped(h, { path: WORKFLOW });
+    expect(h.gh.autoMerged).toEqual([]);
+    const card = holdCard(root);
+    const { fix, ws } = await cutFix(root, head);
+    await commitIn(h, fix, 'src/api/fix.txt');
+    h.settle(ws.id, 'DONE');
+
+    h.shipper.checkBatch(fix.id);
+    await h.jobs.idle();
+
+    expect(getBatch(h.store.db, fix.id).state).toBe('SHIPPED');
+    expect(h.gh.autoMerged).toEqual([]);
+    // Held, so auto-merge went off before the push, whatever the run remembered.
+    expect(h.gh.autoMergeOff).toEqual([prUrl]);
+    expect(holdCard(root)?.id).toBe(card?.id);
+  });
+
+  it('turns auto-merge off before a push that changes the approved diff, and pushes nothing when it cannot', async () => {
+    const { batch: root, head, prUrl } = await shipped(h, { path: WORKFLOW });
+    const branch = branchOf(root);
+    const open = holdCard(root);
+    if (open === undefined) throw new Error('the pull request has no open hold card');
+    answering().answer(open.id, { choice: 'Merge' });
+    await h.jobs.idle();
+    expect(h.gh.autoMerged).toEqual([prUrl]);
+    const { fix, ws } = await cutFix(root, head);
+    await commitIn(h, fix, WORKFLOW, 'name: changed\n');
+    h.settle(ws.id, 'DONE');
+    h.gh.failNext.set('prDisableAutoMerge', new GhError('failed', 'GitHub refused'));
+
+    h.shipper.checkBatch(fix.id);
+    await h.jobs.idle();
+
+    expect(getBatch(h.store.db, fix.id).state).toBe('FAILED');
+    expect(onOrigin(h, branch)).toBe(head);
+
+    h.shipper.ship(fix.id);
+    await h.jobs.idle();
+
+    expect(getBatch(h.store.db, fix.id).state).toBe('SHIPPED');
+    expect(h.gh.autoMergeOff).toEqual([prUrl]);
+    expect(onOrigin(h, branch)).not.toBe(head);
+    // The new diff was not approved: it is held again, with a card of its own.
+    expect(h.gh.autoMerged).toEqual([prUrl]);
+    expect(holdCard(root)).toBeDefined();
+  });
 });

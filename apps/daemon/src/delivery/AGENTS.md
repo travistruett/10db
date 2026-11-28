@@ -23,4 +23,15 @@
 - `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`), else `autoTestBudgetLine` (`test-budget-reason.ts`) writes one from value cards (`decisions/2026-11-25-a-pull-request-over-its-test-budget-says-why-from-its-value-cards.md`).
 - A check red on the base too waits, not fixes (`ci-failure-class.ts`, `decisions/2026-11-24-a-red-base-is-one-fix-not-a-fix-per-pull-request.md`); one the change failed reruns once first (`ci-rerun.ts`, `decisions/2026-11-25-a-failed-required-check-is-rerun-once-before-a-fix.md`).
 - Work rejected at its last review round is reviewed again before Ship Anyway is offered (`second-review.ts`).
+- A pull request whose whole change (`pullRequestBase` to the head, read without rename detection) touches a guardrail
+  path (`guardrails/paths.ts`) is never armed or merged by 10db until the builder answers Merge for that exact diff
+  (`guardrail-hold.ts`: `holdAction`, the setting `guardrailHoldKey(root)` keyed by `holdRootOf`; `guardrail-hold-card.ts`:
+  the card and its answers). The hold is the path list alone: no judge answer is an input, and an unreadable diff holds.
+  It is read for the head about to be pushed at ship step 4b (a root's ship and a CI fix alike), in `catchUpSteps` and
+  in `retryMerge` (so `landing.retryMerge` in `pr-watch.ts` is refused too), and nowhere else arms: `turnOnAutoMerge`
+  and `mergeNow` stay the only callers of `gh.prAutoMerge` and `gh.prMerge`. While held, `gh.prDisableAutoMerge` runs
+  before every push, whatever `autoMergeArmed` holds, and a failed turn-off pushes nothing; so a root's `gh pr view`
+  runs before the push. Merge stores the card's hash in its answer's write and `Shipper.armApproved` re-reads the head as a
+  job; Close closes the pull request and sets `dropped` so the watch raises no closed card; the watch's merged/closed
+  write clears the card and the setting. A pass's pull request and a local-copy landing are not held.
 - Failed ship gate (`decisions/2026-11-27-a-failing-ship-gate-is-fixed-by-10db-until-it-is-out-of-moves.md`): `gate-failure-action.ts` decides; `sendToFix` reopens the batch with one counted fix task (`gate-fix.ts`) and withdraws the card in one write; pass, copy and out-of-moves batches keep the card; SHIPPED and abandon run `clearGateFix`.

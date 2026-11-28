@@ -6,9 +6,19 @@ export {
 } from './docker-card';
 export { createJudgeOutageCard } from './judge-outage-card';
 export { createGuardrailAnswers } from './guardrail-revert';
-export { guardrailDiffOf, type GuardrailDiff } from './guardrail-diff';
+export {
+  guardrailDiffOf,
+  guardrailNoDiffDetail,
+  guardrailPatchDetail,
+  type GuardrailDiff,
+} from './guardrail-diff';
 export {
   GUARDRAIL_DIFF_DETAIL,
+  GUARDRAIL_HOLD_DETAIL,
+  GuardrailHoldDetail,
+  GuardrailPrChoice,
+  guardrailPrOptions,
+  guardrailPrTitle,
   guardrailStrayOptions,
   guardrailStrayTitle,
 } from './guardrail-card';
