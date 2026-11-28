@@ -1,11 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
 import { DESKTOP_DIR, E2E_DATA, E2E_DIR } from './paths';
+import { test } from './routed-test';
 import { auth } from './shape-project';
 
 // Activity against the real daemon: abandoning a batch whose branch holds nothing makes 10db delete the branch
