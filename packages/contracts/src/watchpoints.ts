@@ -82,6 +82,43 @@ export const ProjectWatchpoints = z
   .refine(keysAreUnique, KEYS_UNIQUE);
 export type ProjectWatchpoints = z.infer<typeof ProjectWatchpoints>;
 
+/** Which list a proposed watchpoint change is for: the project's own, or the builder's for every project. */
+export const WatchpointProposalScope = { Project: 'project', You: 'you' } as const;
+export type WatchpointProposalScope =
+  (typeof WatchpointProposalScope)[keyof typeof WatchpointProposalScope];
+
+/** Hold is not built, so it is never proposed: until it is, a watchpoint set to hold would do less than ask. */
+const notHold = (entry: ProjectWatchpointEntry): boolean =>
+  isWatchpointOff(entry) || entry.loudness !== WatchpointLoudness.Hold;
+const NOT_HOLD = { message: 'Hold is not available yet; propose show or ask' };
+
+/**
+ * A change an agent proposes to a watchpoint list: the entry is added, or replaces the one with its key. A project
+ * entry may be `off`, which turns one of the builder's watchpoints off there. Nothing changes until the builder
+ * accepts it. A union, not a discriminated one, so the MCP schema reads as `anyOf`, as every tool's does.
+ */
+export const WatchpointProposal = z.union([
+  z.strictObject({
+    scope: z.literal(WatchpointProposalScope.Project),
+    entry: ProjectWatchpointEntry.refine(notHold, NOT_HOLD),
+  }),
+  z.strictObject({
+    scope: z.literal(WatchpointProposalScope.You),
+    entry: Watchpoint.refine(notHold, NOT_HOLD),
+  }),
+]);
+export type WatchpointProposal = z.infer<typeof WatchpointProposal>;
+
+/** A list with `entry` in place of the one with its key, or added at the end when none has it. */
+export function withWatchpointEntry<T extends { readonly key: string }>(
+  list: readonly T[],
+  entry: T,
+): T[] {
+  return list.some((e) => e.key === entry.key)
+    ? list.map((e) => (e.key === entry.key ? entry : e))
+    : [...list, entry];
+}
+
 /** Where an effective watchpoint came from: the builder's list, the project's own, or the project's replacement of one. */
 export const WatchpointOrigin = { You: 'you', Project: 'project', Override: 'override' } as const;
 export type WatchpointOrigin = (typeof WatchpointOrigin)[keyof typeof WatchpointOrigin];

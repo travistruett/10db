@@ -22,6 +22,7 @@ import {
   chatMadeTask,
   chatView,
   getDecision,
+  getGoal,
   getInboxItem,
   getPrinciple,
   getProject,
@@ -128,6 +129,12 @@ export function createChatTools(deps: ChatToolsDeps): ChatToolsFor {
         throw new ConflictError('That task is in another project; this chat works in its own.');
       return task;
     };
+    /** Refuses a goal of another project, as `ownTask` refuses a task. */
+    const ownGoal = (args: unknown): void => {
+      const { goalId } = ChatToolInputs[ChatToolName.GetGoal].parse(args);
+      if (getGoal(state.db, goalId).projectId !== projectId)
+        throw new ConflictError('That goal is in another project; this chat works in its own.');
+    };
     /**
      * The record a knowledge tool names, as its card quotes it: its words and its id. A record of
      * another project is refused; one that holds everywhere (scope you) has no project and is the chat's too.
@@ -220,6 +227,11 @@ export function createChatTools(deps: ChatToolsDeps): ChatToolsFor {
       [ChatToolName.ListProjects]: (args) => run(BuilderToolName.ListProjects, args),
       [ChatToolName.ListKinds]: (args) => run(BuilderToolName.ListKinds, args),
       [ChatToolName.ListTasks]: () => run(BuilderToolName.ListTasks, { projectId }),
+      [ChatToolName.ListGoals]: () => run(BuilderToolName.ListGoals, { projectId }),
+      [ChatToolName.GetGoal]: (args) => {
+        ownGoal(args);
+        return run(BuilderToolName.GetGoal, args);
+      },
       [ChatToolName.CreateTask]: async (args) => {
         const { id } = FiledTask.parse(
           await run(BuilderToolName.CreateTask, inProject(args, projectId)),
