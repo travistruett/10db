@@ -183,6 +183,8 @@ export const ProposalKind = {
   ChangeTask: 'change_task',
   Principle: 'principle',
   Note: 'note',
+  /** A change to a watchpoint: only the builder's accept writes it. */
+  Watchpoint: 'watchpoint',
 } as const;
 export type ProposalKind = ValueOf<typeof ProposalKind>;
 

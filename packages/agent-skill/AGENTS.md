@@ -14,4 +14,6 @@ API.
 - `src/build.ts` bundles `main.ts` with esbuild into `tendb.mjs` beside the two skill files and a `VERSION`
   (a digest of all three). The daemon's build script calls it; the daemon's runtime never imports this package.
 - The bundle runs on the builder's own `node` (22+), so its esbuild target is `node22`, not the daemon's.
+- `goals` reads goals from the list route (`GET /projects/:id/goals`), never `/goals/:id/digest`: opening the
+  digest marks the goal as viewed and moves its Δ window, and a read-only command must not.
 - The CLI never prints the app's `ui-token`.
