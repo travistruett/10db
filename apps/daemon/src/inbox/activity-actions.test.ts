@@ -8,17 +8,28 @@ import {
   type NoticeDecision,
   type ProjectId,
 } from '@10db/contracts';
-import { createTestStore, isRuleAsking, pageActivity, seedProject, type Store } from '@10db/db';
+import {
+  createTestStore,
+  findOpenByFoldKey,
+  isRuleAsking,
+  listOpenByFoldKeyPrefix,
+  pageActivity,
+  seedProject,
+  type Store,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore } from '../events';
 import { createActivityActions } from './activity-actions';
 import { CardTier } from './card-tier';
 import { postNotice } from './notice';
+import { applyRuleAsksAnswer, RuleAsksChoice, ruleAsksFoldKey } from './rule-asks-card';
 
 let close: () => void;
 let store: Store;
+let now: Date;
 beforeEach(() => {
-  ({ store, close } = createTestStore());
+  now = new Date('2026-11-01T09:00:00.000Z');
+  ({ store, close } = createTestStore(() => now));
 });
 afterEach(() => {
   close();
@@ -37,11 +48,15 @@ function setup(restoreWorktree: () => Promise<void> = () => Promise.resolve()) {
     },
   });
   /** Posts a rule-decided notice and returns its row's seq. */
-  function decide(key: string, decision: NoticeDecision): number {
+  function decide(
+    key: string,
+    decision: NoticeDecision,
+    projectId: ProjectId | null = project.id,
+  ): number {
     state.write((ctx) => {
       postNotice(ctx, {
         tier: CardTier.Notice,
-        projectId: project.id,
+        projectId,
         taskId: null,
         key,
         tone: 'info',
@@ -50,14 +65,38 @@ function setup(restoreWorktree: () => Promise<void> = () => Promise.resolve()) {
         decision,
       });
     });
-    const row = pageActivity(store.db, { project: project.id, pageSize: 50 }).rows.find(
-      (entry) => entry.key === key,
-    );
+    const row = pageActivity(store.db, { pageSize: 50 }).rows.find((entry) => entry.key === key);
     if (row === undefined) throw new Error(`no row for ${key}`);
     return row.seq;
   }
-  return { project, actions, moves, decide, rows: () => pageActivity(store.db, { pageSize: 50 }) };
+  /** Posts a decision that can be undone, and returns its row's seq. */
+  function undoable(key: string, projectId: ProjectId | null = project.id): number {
+    return decide(
+      key,
+      {
+        by: CardDecider.Rule,
+        rule: DecisionRule.MoveBack,
+        confidence: null,
+        undo: {
+          state: 'undoable',
+          action: { kind: 'move_project', projectId: project.id, accountId: mintId('Account') },
+        },
+      },
+      projectId,
+    );
+  }
+  return {
+    project,
+    state,
+    actions,
+    moves,
+    decide,
+    undoable,
+    rows: () => pageActivity(store.db, { pageSize: 50 }),
+  };
 }
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 describe('Activity actions', () => {
   it('undoes a move once, marks the row undone and posts a notice saying so', async () => {
@@ -137,5 +176,72 @@ describe('Activity actions', () => {
 
     actions.askNextTime(seq, false);
     expect(isRuleAsking(store.db, project.id, DecisionRule.StrayWrite)).toBe(false);
+    // The builder switched it themselves: no card says so.
+    expect(listOpenByFoldKeyPrefix(store.db, 'rule-asks:')).toEqual([]);
+  });
+
+  describe('a rule undone twice in 30 days', () => {
+    const rule = DecisionRule.MoveBack;
+
+    it('asks in that project with one card, and a third undo raises no second', async () => {
+      const { project, actions, undoable } = setup();
+      await actions.undo(undoable('first'));
+      expect(isRuleAsking(store.db, project.id, rule)).toBe(false);
+      expect(listOpenByFoldKeyPrefix(store.db, 'rule-asks:')).toEqual([]);
+
+      now = new Date(now.getTime() + 2 * DAY_MS);
+      await actions.undo(undoable('second'));
+      expect(isRuleAsking(store.db, project.id, rule)).toBe(true);
+      const card = findOpenByFoldKey(store.db, project.id, ruleAsksFoldKey(project.id, rule));
+      expect(card?.title).toContain('now asks you in');
+      expect(card?.body).toContain('Line first (2026-11-01)');
+      expect(card?.body).toContain('Line second (2026-11-03)');
+      expect(card?.options.map((option) => option.label)).toEqual([
+        RuleAsksChoice.Keep,
+        RuleAsksChoice.Decide,
+      ]);
+
+      await actions.undo(undoable('third'));
+      expect(listOpenByFoldKeyPrefix(store.db, 'rule-asks:')).toHaveLength(1);
+    });
+
+    it('does not switch when the undos are 31 days apart', async () => {
+      const { project, actions, undoable } = setup();
+      await actions.undo(undoable('first'));
+      now = new Date(now.getTime() + 31 * DAY_MS);
+      await actions.undo(undoable('second'));
+
+      expect(isRuleAsking(store.db, project.id, rule)).toBe(false);
+      expect(listOpenByFoldKeyPrefix(store.db, 'rule-asks:')).toEqual([]);
+    });
+
+    it("records nothing for an app's rows, which have no project", async () => {
+      const { project, actions, undoable } = setup();
+      await actions.undo(undoable('first', null));
+      await actions.undo(undoable('second', null));
+      // A later undo in the project is its first.
+      await actions.undo(undoable('third'));
+
+      expect(isRuleAsking(store.db, project.id, rule)).toBe(false);
+      expect(listOpenByFoldKeyPrefix(store.db, 'rule-asks:')).toEqual([]);
+    });
+
+    it('decides again on Let 10db Decide Again, and counts afresh', async () => {
+      const { project, state, actions, undoable } = setup();
+      await actions.undo(undoable('first'));
+      await actions.undo(undoable('second'));
+      const card = findOpenByFoldKey(store.db, project.id, ruleAsksFoldKey(project.id, rule));
+      if (card === undefined) throw new Error('no card');
+
+      state.write((ctx) => {
+        applyRuleAsksAnswer(ctx, card, { choice: RuleAsksChoice.Decide });
+      });
+      expect(isRuleAsking(store.db, project.id, rule)).toBe(false);
+
+      await actions.undo(undoable('third'));
+      expect(isRuleAsking(store.db, project.id, rule)).toBe(false);
+      await actions.undo(undoable('fourth'));
+      expect(isRuleAsking(store.db, project.id, rule)).toBe(true);
+    });
   });
 });

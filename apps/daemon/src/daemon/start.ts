@@ -306,6 +306,7 @@ import {
 import { createGithubServices } from './github-services';
 import {
   applyPrecedentConflictAnswer,
+  applyRuleAsksAnswer,
   applySignInSetupChoice,
   cannotSignInCard,
   CardTier,
@@ -1246,6 +1247,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       applyPrecedentConflictAnswer(ctx, item, answer);
       // Let It Act or Keep Asking Me on the watchpoint read's card is stored for its project in this write.
       applyReadAllowedAnswer(ctx, item, answer);
+      // Let 10db Decide Again on a rule-asks card sets the rule back to deciding and clears its undos.
+      applyRuleAsksAnswer(ctx, item, answer);
       const madeRoutine: { programKey: string; scope: PrecedentScope }[] = [];
       let after: (() => void) | undefined;
       if (
