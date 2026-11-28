@@ -8,10 +8,14 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
   acquireClaims,
+  acquireLease,
   activeClaims,
+  clearLease,
   createTestStore,
   endSession,
   getPostedNotice,
+  getTask,
+  getWorkstream,
   getWorkstreamRow,
   insertBatch,
   insertKind,
@@ -21,16 +25,19 @@ import {
   listInbox,
   pageActivity,
   patchWorkstream,
+  releaseClaim,
   releaseClaims,
   seedProject,
   setRuleAsking,
   transitionBatch,
+  transitionWorkstream,
   type Store,
 } from '@10db/db';
 import {
   ConflictError,
   DecisionRule,
   InboxState,
+  WorkstreamState,
   type BatchId,
   type ProjectDto,
   type WorkstreamId,
@@ -46,7 +53,8 @@ import { protectedPaths } from '../guard';
 import { createActivityActions, createInboxService, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { AwayLane } from '../trust';
-import { readPair } from './claim-deadlock-pairs';
+import { buildContextPack, compactionReinjection, LaneBrief } from '../briefing';
+import { readPair, takenFrom } from './claim-deadlock-pairs';
 import { DEADLOCK_YIELD_AFTER_MS } from './claim-deadlock-rule';
 import {
   ClaimWaits,
@@ -380,8 +388,19 @@ describe('edits left behind in a shared checkout', () => {
   });
 
   it('the later asker yields after 2 minutes, keeping its uncommitted edits', async () => {
-    const alpha = await seedSession(['api']);
+    const project = seedProject(base, {
+      repoPath: repo.path,
+      areas: ['api', 'ui', 'docs', 'web'].map((name) => ({ name, globs: [`src/${name}/**`] })),
+    });
+    const alpha = await seedSession(['api', 'docs', 'web'], undefined, { project, title: 'Alpha' });
     const beta = await seedSession(['ui'], undefined, { project: alpha.project, title: 'Beta' });
+    // Alpha's lane is running: a claim is never taken from a task that holds a lease.
+    const alphaFence = state.write((ctx) => {
+      const fence = acquireLease(ctx, alpha.workstream.id, 'test', ctx.now);
+      transitionWorkstream(ctx, alpha.workstream.id, { to: WorkstreamState.Starting, fence });
+      transitionWorkstream(ctx, alpha.workstream.id, { to: WorkstreamState.Running, fence });
+      return fence;
+    });
     mkdirSync(join(repo.path, 'src/api'), { recursive: true });
     writeFileSync(join(repo.path, 'src/api/half.ts'), 'half done\n');
     const betaAsks = beta.call('request_claim', {
@@ -428,6 +447,85 @@ describe('edits left behind in a shared checkout', () => {
     expect(getPostedNotice(state.db, seq)?.data.decision?.undo.state).toBe('undoable');
     expect(readPair(state.db, alpha.workstream.id, beta.workstream.id)?.breaks).toBe(1);
 
+    // A second deadlock between the two also queues the later asker behind the other.
+    const betaDocs = beta.call('request_claim', {
+      opId: 'beta-docs',
+      kind: 'area',
+      name: 'docs',
+      reason: 'needs docs',
+    });
+    await waitFor(() => claimWaits.holdersAwaitedBy(beta.workstream.id).length > 0);
+    const alphaAgain = alpha.call('request_claim', {
+      opId: 'alpha-api',
+      kind: 'area',
+      name: 'api',
+      reason: 'needs api again',
+    });
+    await waitFor(() =>
+      getWorkstreamRow(state.db, alpha.workstream.id).notice?.line.includes(
+        'waits for a claim this one holds',
+      ),
+    );
+    nowMs += DEADLOCK_YIELD_AFTER_MS;
+    const queued = String((await alphaAgain).json?.['instruction']);
+    expect(queued).toContain('You gave up area docs to task "Beta" and are queued behind it.');
+    expect(readPair(state.db, alpha.workstream.id, beta.workstream.id)?.queued).toEqual({
+      yielder: alpha.workstream.id,
+      behind: beta.workstream.id,
+    });
+    expect((await betaDocs).json).toMatchObject({ granted: true });
+    // A queued task's ask is answered at once, without a wait.
+    const asksQueued = await alpha.call('request_claim', {
+      opId: 'alpha-ui-queued',
+      kind: 'area',
+      name: 'ui',
+      reason: 'needs ui',
+    });
+    expect(String(asksQueued.json?.['instruction'])).toContain('are queued behind it');
+
+    // The other task's ask for a claim the queued task holds waits while that task holds a lease,
+    // and takes it once the task is queued with none.
+    const betaWeb = beta.call('request_claim', {
+      opId: 'beta-web',
+      kind: 'area',
+      name: 'web',
+      reason: 'needs web',
+    });
+    await waitFor(() => claimWaits.holdersAwaitedBy(beta.workstream.id).length > 0);
+    expect(activeClaims(state.db, alpha.workstream.id).map((c) => c.name)).toContain('web');
+    state.write((ctx) => {
+      transitionWorkstream(ctx, alpha.workstream.id, {
+        to: WorkstreamState.PausedLimit,
+        fence: alphaFence,
+      });
+      transitionWorkstream(ctx, alpha.workstream.id, {
+        to: WorkstreamState.Queued,
+        fence: alphaFence,
+      });
+      clearLease(ctx, alpha.workstream.id);
+    });
+    expect((await betaWeb).json).toMatchObject({ granted: true });
+    const tookLine = 'While you were queued, task "Beta" took area web.';
+    const briefOfAlpha = (): string =>
+      compactionReinjection(
+        buildContextPack(state.db, getWorkstream(state.db, alpha.workstream.id)),
+        [],
+        undefined,
+        LaneBrief.Full,
+        takenFrom(state.db, alpha.workstream.id).map((record) => ({
+          title: getTask(state.db, getWorkstream(state.db, record.to).taskId).title,
+          claims: record.claims,
+        })),
+      );
+    expect(takenFrom(state.db, alpha.workstream.id)).toEqual([
+      {
+        from: alpha.workstream.id,
+        to: beta.workstream.id,
+        claims: [{ kind: 'area', name: 'web' }],
+      },
+    ]);
+    expect(briefOfAlpha()).toContain(tookLine);
+
     const actions = createActivityActions({
       state,
       moves: {
@@ -438,10 +536,33 @@ describe('edits left behind in a shared checkout', () => {
         },
       },
     });
-    actions.undo(seq);
+    // Undo on the queue's row ends the queue and keeps the record of the claim taken.
+    const queueSeq = Math.max(
+      ...pageActivity(state.db, { project: alpha.project.id, pageSize: 50 })
+        .rows.filter((r) => r.key.startsWith('claim-deadlock:'))
+        .map((r) => r.seq),
+    );
+    expect(queueSeq).toBeGreaterThan(seq);
+    actions.undo(queueSeq);
     expect(readPair(state.db, alpha.workstream.id, beta.workstream.id)).toBeNull();
+    expect(takenFrom(state.db, alpha.workstream.id)).toHaveLength(1);
+    expect(briefOfAlpha()).toContain(tookLine);
+
+    // Granted the claim again, the queued task is told of the take no more.
+    state.write((ctx) => {
+      const web = activeClaims(ctx.tx, beta.workstream.id).find((c) => c.name === 'web');
+      if (web) releaseClaim(ctx, web.id);
+      acquireClaims(ctx, {
+        projectId: alpha.project.id,
+        workstreamId: alpha.workstream.id,
+        requests: [{ kind: 'area', name: 'web' }],
+        leaseExpiresAt: ctx.now,
+      });
+    });
+    expect(takenFrom(state.db, alpha.workstream.id)).toEqual([]);
+    expect(briefOfAlpha()).not.toContain('While you were queued');
     expect(() => {
-      actions.undo(seq);
+      actions.undo(queueSeq);
     }).toThrow(ConflictError);
   });
 

@@ -191,6 +191,31 @@ export function queuedBehind(db: DbReader, id: WorkstreamId): WorkstreamId | nul
   return pair?.queued?.behind ?? null;
 }
 
+/**
+ * Every pair whose record queues `yielder`, whether or not its turn is over: the scheduler ends a turn that
+ * is over (`endTurn`) before it launches the yielder.
+ */
+export function queuingPairs(db: DbReader, yielder: WorkstreamId): readonly DeadlockPair[] {
+  return readPairs(db).filter((pair) => pair.queued?.yielder === yielder);
+}
+
+/** Adds `claim` to the pair's contested claims, counting no break. Nothing when the pair has no record. */
+export function addContested(
+  w: WriteContext,
+  x: WorkstreamId,
+  y: WorkstreamId,
+  claim: ClaimRef,
+): void {
+  const pairs = readPairs(w.tx);
+  if (!pairs.some((pair) => isPair(pair, x, y))) return;
+  writePairs(
+    w,
+    pairs.map((pair) =>
+      isPair(pair, x, y) ? { ...pair, contested: union(pair.contested, [claim]) } : pair,
+    ),
+  );
+}
+
 /** @public */
 export function endTurn(w: WriteContext, pair: DeadlockPair): void {
   const pairs = readPairs(w.tx);

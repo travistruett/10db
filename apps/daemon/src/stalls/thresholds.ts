@@ -20,6 +20,8 @@ export const STALL = {
  * status line, or is the builder's own choice. A claim or a dependency is a run waiting its turn behind
  * live work, which the Board's Waiting line already shows; a holder that stops moving is caught by the
  * active-idle rule on the holder itself. A wait that can never end counts at once, whatever its kind.
+ * A turn behind a task deadlocked with twice is left out on purpose: one that never ends reaches the Stuck
+ * card by time.
  */
 export const UNCOUNTED_WAITS: ReadonlySet<QueueWaitKind> = new Set([
   QueueWaitKind.Lane,

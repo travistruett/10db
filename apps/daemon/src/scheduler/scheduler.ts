@@ -71,6 +71,7 @@ import { holderWords, type FolderBlocker, type FolderHold } from '../folder-hold
 import { existsAsEntry, GitTrustError } from '../git';
 import type { Logger } from '../log';
 import { folderCardOpen, folderSeenOn } from '../pass';
+import { endTurn, queuingPairs, turnOver } from '../mcp';
 import { untakenMessages } from '../runner';
 import { roomForLane } from './lane-room';
 import { passLaunch, PassLaunch } from './pass-launch';
@@ -736,6 +737,19 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       const ask = claimAskOf(ws, task, project, inPass);
       // Last, just before the claim, and only with the claim free: a put-back starts only for a run
       // that would launch now, and never writes where another lane holds the area.
+      // A task queued behind the one it deadlocked with twice waits its turn; the launch ends a turn that is over.
+      const turn = queuingPairs(db, ws.id).find((pair) => !turnOver(db, pair))?.queued ?? null;
+      if (turn !== null) {
+        const other = getTask(db, getWorkstreamRow(db, turn.behind).taskId);
+        found(
+          ws.id,
+          queueWait.turn({
+            title: other.title,
+            on: { taskId: other.id, workstreamId: turn.behind },
+          }),
+        );
+        continue;
+      }
       const conflict = claimConflict(db, ask);
       if (conflict !== null) {
         waitForClaim(ws.id, conflict);
@@ -749,6 +763,10 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       const fence = opts.state.write((ctx) => {
         // The take and the start are both synchronous: read again here, a chat can't slip between.
         if (firstInFolder && chatHolders(project.id).length > 0) return null;
+        // The turn is read again in the launch's write, so a take or a new queue between the two waits.
+        const pairs = queuingPairs(ctx.tx, ws.id);
+        if (pairs.some((pair) => !turnOver(ctx.tx, pair))) return null;
+        for (const pair of pairs) endTurn(ctx, pair);
         const claimed = acquireClaims(ctx, { ...ask, leaseExpiresAt: leaseUntil });
         if (!claimed.ok) return null;
         const f = acquireLease(ctx, ws.id, opts.instanceId, leaseUntil);

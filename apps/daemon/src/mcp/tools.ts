@@ -125,10 +125,12 @@ import {
   CLAIM_WAIT_SLICE_MS,
   ClaimWaits,
   deadlockWaitInstruction,
+  queuedRefusal,
   yieldRefusal,
   type ClaimResult,
   type SharedGrant,
 } from './claim-wait';
+import { queuedBehind } from './claim-deadlock-pairs';
 import { createPlanToolHandlers, PLAN_TOOL_DESCRIPTIONS } from './plan-tools';
 import { judgeReportedRoutes } from './report-pages';
 import type { LinearReporter } from '../linear';
@@ -780,9 +782,21 @@ export function createToolHandlers(
         );
       }
       // Claims the builder made this task give up are told before anything else is granted.
+      // A queued refusal asks for a handoff: the task waits its turn behind the other one.
       const given = claimWaits.pendingYield(workstreamId);
-      if (given)
+      if (given) {
+        if (given.queued) deps.askedToHandOff(sessionId);
         return recordClaim(input.opId, yieldRefusal(db, given, { kind, name: input.name }));
+      }
+      // A task queued behind another gets nothing until its turn: it is answered at once, without a wait.
+      const behind = queuedBehind(db, workstreamId);
+      if (behind !== null) {
+        deps.askedToHandOff(sessionId);
+        return recordClaim(
+          input.opId,
+          queuedRefusal(db, workstreamId, behind, { kind, name: input.name }),
+        );
+      }
       // A pass page asking for migrations or deps leaves Your folder for a copy where the project
       // allows copies: the builder is asked to move it, and the claim is refused meanwhile. A page
       // never holds one: its launch claims only its pass's areas.
@@ -830,6 +844,7 @@ export function createToolHandlers(
         ...(shared ? { shared } : {}),
         handOver: (from) =>
           deps.handOverClaim({ grantee: workstreamId, from, claim: { kind, name: input.name } }),
+        reportRepeat: () => undefined,
       });
       let timer: NodeJS.Timeout | undefined;
       // The slice listens to no signal: a session that stops ends the wait itself, with its error. It
@@ -906,6 +921,7 @@ export function createToolHandlers(
             instruction: settled.instruction,
           };
         }
+        if (!settled.granted && settled.queued) deps.askedToHandOff(sessionId);
         return recordClaim(
           input.opId,
           settled,
