@@ -24,6 +24,13 @@ import type { Logger } from '../log';
 // What reaches the builder spec §3, "Shipping work that failed review": a reviewer's rejection that used up its
 // rounds is reviewed again, once the rest of the batch has settled and a later task may have fixed the finding.
 // Ship Anyway is offered only when that second review rejects the work too.
+//
+// `runSecondReviews` runs from `daemon/start.ts` after the failing write's own card is raised. It records the
+// request (`second_review.<id>` in `app_settings`) and calls `starter.retry(id, undefined, { reviewOnly: true })`:
+// only the rejecting step runs again, with its send-back count kept, so a repeated rejection fails the run at once.
+// The failed card then offers Ship Anyway (`batchCardFields(..., shipAnyway)`); until then it does not, and
+// `Shipper.shipAnyway` refuses with `shipAnywayRefusal`. A builder's own Retry forgets the request. The batch
+// strip's Ship Anyway button still shows (it reads only run states) and the refusal explains why.
 
 const key = (id: WorkstreamId): string => `second_review.${id}`;
 
