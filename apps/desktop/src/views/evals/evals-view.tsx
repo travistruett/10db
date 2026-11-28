@@ -37,6 +37,7 @@ import { EvalFilter, EvalsTable, evalRows, rowMatches, suiteFilter } from './eva
 import { EvalsSkeleton } from './evals-skeleton';
 import { NewEvalModal, type NewEvalPrefill } from './new-eval-modal';
 import { SuiteDrawer } from './suite-drawer';
+import { ControlSize } from '../../shell/control-size';
 
 const EvalsPage = { Evals: 'evals', Models: 'models' } as const;
 type EvalsPage = (typeof EvalsPage)[keyof typeof EvalsPage];
@@ -48,25 +49,23 @@ const EVALS_TABS: readonly PageTab<EvalsPage>[] = [
 /** How many unlinked eval files show before the rest fold away. */
 const UNLINKED_SHOWN = 6;
 
-/** When the evals were last assessed, in words, with the exact time and commit in a tooltip. */
-function Byline({ evals }: { readonly evals: EvalsDto }) {
+/**
+ * When the evals were last assessed, in words, with the exact time and commit in a tooltip. Before the first
+ * assessment there is no byline: the notice or the empty state below already says so.
+ */
+function Byline({
+  evals,
+  assessedAt,
+}: {
+  readonly evals: EvalsDto;
+  readonly assessedAt: NonNullable<EvalsDto['assessedAt']>;
+}) {
   const now = useNow();
   const assessing = evals.assessment.state === EvalAssessmentState.Assessing;
-  const when = assessing
-    ? 'Assessing…'
-    : evals.assessedAt === null
-      ? 'Not assessed yet'
-      : `Assessed ${fromNow(evals.assessedAt, now)}`;
   const commit = evals.commit === null ? null : evals.commit.slice(0, 7);
   return (
-    <Tooltip
-      label={
-        evals.assessedAt === null
-          ? 'Suites are found by file names until the evals are assessed.'
-          : `${absoluteTime(evals.assessedAt)}${commit === null ? '' : ` · read at ${commit}`}`
-      }
-    >
-      <span>{when}</span>
+    <Tooltip label={`${absoluteTime(assessedAt)}${commit === null ? '' : ` · read at ${commit}`}`}>
+      <span>{assessing ? 'Assessing…' : `Assessed ${fromNow(assessedAt, now)}`}</span>
     </Tooltip>
   );
 }
@@ -241,9 +240,9 @@ function NoEvals({
       icon={IconFlask}
       title="No evals yet"
       action={{ label: 'New Eval', icon: IconPlus, emphasis: 'filled', onClick: onNewEval }}
-      extra={<AssessAction assessment={assessment} project={project} />}
+      extra={<AssessAction assessment={assessment} project={project} size="sm" />}
     >
-      {said ?? 'Write one with New Eval, or Assess Now to find the ones this project already has.'}
+      {said ?? 'Write one, or Assess to find the evals this project already has.'}
     </EmptyState>
   );
 }
@@ -332,6 +331,7 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
         tabs={<PageTabs label="Evals view" tabs={EVALS_TABS} value={page} onChange={setPage} />}
         actions={
           <Button
+            size={ControlSize.Toolbar}
             leftSection={<IconPlus size={14} stroke={1.5} />}
             onClick={() => {
               setNewEval({ origin: NewEvalOrigin.Page });
@@ -384,7 +384,9 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
   const nothing = rows.length === 0;
   return (
     <>
-      {header(<Byline evals={data} />)}
+      {header(
+        data.assessedAt === null ? undefined : <Byline evals={data} assessedAt={data.assessedAt} />,
+      )}
       {page === EvalsPage.Models ? (
         <ByModel projectId={project.id} />
       ) : (
@@ -416,7 +418,7 @@ function ProjectEvals({ project }: { readonly project: ProjectViewDto }) {
             <Stack gap={6}>
               {filter === EvalFilter.NoEval && notAssessed ? (
                 <Text size="xs" c="dimmed">
-                  Not assessed yet. Assess Now finds the LLM work with no eval.
+                  Not assessed yet. Assess finds the LLM work with no eval.
                 </Text>
               ) : null}
               {filter === EvalFilter.NoEval && data.callSites.length > 0 ? (

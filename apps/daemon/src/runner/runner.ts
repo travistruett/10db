@@ -1748,7 +1748,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     )
       return null;
     // With the decision off or no account to answer it, there is nothing to ask: no git work either.
-    if (!(await opts.judge.ready(JudgeDecision.Acceptance))) return null;
+    if (!(await opts.judge.ready(JudgeDecision.Acceptance, { projectId: task.projectId })))
+      return null;
     const reading = new AbortController();
     ctl.acceptAbort = reading;
     if (ctl.stopReason !== null && ctl.stopReason !== 'paused') reading.abort();

@@ -148,6 +148,7 @@ export async function askWatchpointQuestions(
   ids: { readonly workstreamId?: WorkstreamId; readonly taskId?: TaskId } = {},
 ): Promise<WatchpointShadow[]> {
   if (candidates.length === 0) return [];
-  if (!(await deps.judge.ready(JudgeDecision.WatchpointQuestion).catch(() => false))) return [];
+  if (!(await deps.judge.ready(JudgeDecision.WatchpointQuestion, ids).catch(() => false)))
+    return [];
   return Promise.all(candidates.map((candidate) => askOne(deps, candidate, ids)));
 }

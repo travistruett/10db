@@ -2,6 +2,7 @@ import type { AccountDto, AccountId } from '@10db/contracts';
 import { Select, Text } from '@mantine/core';
 import { useSyncExternalStore } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
+import { ControlSize } from '../../shell/control-size';
 
 const ACCOUNT_LABEL = (
   <Text size="xs" c="dimmed">
@@ -57,7 +58,7 @@ export function ViewedAccountSelect({
   return (
     <Select
       aria-label="Account"
-      size="xs"
+      size={ControlSize.Toolbar}
       w={width}
       leftSection={ACCOUNT_LABEL}
       leftSectionWidth={72}

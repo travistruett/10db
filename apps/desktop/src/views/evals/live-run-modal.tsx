@@ -28,7 +28,8 @@ import { costText, dayTimeText } from './eval-figures';
 const RefusalBody = z.object({ refusal: z.string() });
 
 export const REFUSAL_WORDS: Readonly<Record<EvalLiveRefusal, string>> = {
-  [EvalLiveRefusal.NoLive]: '10db does not know how this command runs yet. Assess Now to find out.',
+  [EvalLiveRefusal.NoLive]:
+    '10db does not know how this command runs yet. Assess the evals to find out.',
   [EvalLiveRefusal.NoSandbox]: "This 10db runs no sandbox, so it can't run a live eval.",
   [EvalLiveRefusal.DockerOff]: "This runs in Docker and the project's Docker switch is off.",
   [EvalLiveRefusal.ManifestChanged]: 'What the suite runs changed since this window opened.',

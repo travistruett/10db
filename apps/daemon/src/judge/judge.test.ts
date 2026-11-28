@@ -16,7 +16,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
-import { createJudge, type JudgeCredential, type JudgeRequest } from './index';
+import {
+  createJudge,
+  DECISIONS_ACCOUNT_WOULD_SETTLE,
+  SESSION_JUDGE_TIMEOUT_MS,
+  type JudgeCredential,
+  type JudgeRequest,
+  type SessionAsker,
+  type SessionScope,
+} from './index';
 
 const KEY = 'router-test-key-0123';
 const DECISIONS_URL = 'https://openrouter.ai/api/alpha/decisions';
@@ -68,8 +76,11 @@ let keyHangs: boolean;
 /** OpenRouter's decision models as the judge's list reads them; null when the list can't be read. */
 let decisionModels: ReadonlySet<string> | null;
 
-function build(options: { off?: boolean } = {}) {
+function build(
+  options: { off?: boolean; sessionJudge?: (scope: SessionScope) => SessionAsker | null } = {},
+) {
   return createJudge({
+    ...(options.sessionJudge === undefined ? {} : { sessionJudge: options.sessionJudge }),
     state,
     clock,
     fetch: async (input, init) => {
@@ -732,5 +743,99 @@ describe('judge.test', () => {
       patchJudgeConfig(ctx, { decisions: { shape_record: { enabled: false } } }),
     );
     expect((await build().test(mintId('Account'))).ok).toBe(true);
+  });
+});
+
+describe('a session on the project account, with no Decisions account', () => {
+  const SESSION_MODEL = 'claude-haiku-5-5';
+  let prompts: string[];
+  let scopes: SessionScope[];
+  let reply: (prompt: string) => Promise<string>;
+  const sessionJudge = (scope: SessionScope): SessionAsker => {
+    scopes.push(scope);
+    return {
+      model: SESSION_MODEL,
+      ask: (prompt) => {
+        prompts.push(prompt);
+        return reply(prompt);
+      },
+    };
+  };
+
+  beforeEach(() => {
+    prompts = [];
+    scopes = [];
+    reply = () => Promise.resolve('```json\n{"choice":"skip","confidence":0.9}\n```');
+  });
+
+  it('answers through the session, logs it like a direct call, and marks a low confidence below the floor', async () => {
+    const projectId = mintId('Project');
+    const judge = build({ sessionJudge });
+    expect(await judge.ready('shape_record', { projectId })).toBe(true);
+    const answer = await judge.choose({ ...request, projectId });
+    expect(answer).toMatchObject({
+      kind: 'answered',
+      choice: 'skip',
+      confidence: 0.9,
+      model: SESSION_MODEL,
+      costUsd: null,
+    });
+    expect(seen).toEqual([]);
+    expect(scopes[0]).toMatchObject({ projectId });
+    expect(prompts[0]).toContain('Question: Does this change need a review?');
+    expect(logged()[0]).toMatchObject({
+      decision: 'shape_record',
+      model: SESSION_MODEL,
+      outcome: 'acted',
+      answer: 'skip',
+      confidence: 0.9,
+      costUsd: null,
+      attempts: 1,
+    });
+
+    reply = () => Promise.resolve('{"choice":"review","confidence":0.2}');
+    expect(await judge.choose(request)).toMatchObject({ kind: 'answered', confidence: 0.2 });
+    expect(logged()[0]).toMatchObject({ outcome: 'below_floor', model: SESSION_MODEL });
+  });
+
+  it('falls back with the Decisions account note when the session fails or never answers', async () => {
+    reply = () => Promise.reject(new Error('Claude Code exited.'));
+    const failed = await build({ sessionJudge }).choose(request);
+    expect(failed).toMatchObject({ kind: 'fallback', reason: 'error' });
+    expect(failed.kind === 'fallback' ? failed.detail : '').toBe(
+      `Claude Code exited. ${DECISIONS_ACCOUNT_WOULD_SETTLE}`,
+    );
+    expect(logged()[0]).toMatchObject({ outcome: 'fallback_error', model: SESSION_MODEL });
+
+    reply = () => new Promise<string>(() => undefined);
+    const pending = build({ sessionJudge }).choose(request);
+    clock.advance(SESSION_JUDGE_TIMEOUT_MS);
+    expect(await pending).toMatchObject({ kind: 'fallback', reason: 'timeout' });
+    expect(logged()[0]).toMatchObject({ outcome: 'fallback_timeout', model: SESSION_MODEL });
+    expect(clock.pendingTimers()).toBe(0);
+    expect(seen).toEqual([]);
+  });
+
+  it('is never asked with a Decisions account set, or for a limits decision', async () => {
+    const account = seedAccount(store, { kind: 'openrouter', label: 'OpenRouter' });
+    store.write((ctx) => patchJudgeConfig(ctx, { accountId: account.id }));
+    expect(await build({ sessionJudge }).choose(request)).toMatchObject({
+      kind: 'answered',
+      model: 'typesafe/jev-1.13-20260917',
+    });
+    store.write((ctx) => patchJudgeConfig(ctx, { accountId: null }));
+    key = null;
+    const limits = await build({ sessionJudge }).assess({
+      decision: 'crosses_limit',
+      state: { command: 'rm -rf build' },
+      questions: {
+        crosses: { instructions: 'Does it cross a limit?', criteria: { true: 'yes', false: 'no' } },
+      },
+      read: () => ({ answer: 'no', confidence: 1, outcome: 'acted' }),
+    });
+    expect(limits).toMatchObject({ kind: 'fallback', reason: 'no_key' });
+    expect(await build({ sessionJudge }).ready('crosses_limit')).toBe(false);
+    expect(prompts).toEqual([]);
+    expect(seen).toHaveLength(1);
   });
 });

@@ -160,7 +160,7 @@ export async function checkAcceptance(
   signal: AbortSignal,
 ): Promise<Omit<AcceptanceDetail, 'sentBack'> | null> {
   const { judge, floors } = deps;
-  if (!(await judge.ready(JudgeDecision.Acceptance))) return null;
+  if (!(await judge.ready(JudgeDecision.Acceptance, { taskId: input.taskId }))) return null;
   const diff = cappedDiff(input.diff);
   const state = {
     task: input.task,

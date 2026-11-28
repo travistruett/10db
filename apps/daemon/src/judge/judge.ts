@@ -12,6 +12,7 @@ import {
   type JudgeCallId,
   type JudgeOutcome,
   type JudgeTestResultDto,
+  type ProjectId,
   type TaskId,
   type TrustPrecedentId,
   type WorkstreamId,
@@ -26,10 +27,46 @@ import type { BedrockClientFactory } from './bedrock';
 import { isTypeSafeModel, ModelApi, modelApi, optionsText } from './openrouter';
 import { NO_DECISION_CREDENTIAL, secretsOf, type JudgeCredential } from './credential';
 import type { JudgeCallHealth } from './outage';
+import {
+  parseSessionChoice,
+  parseSessionNouls,
+  sessionChoicePrompt,
+  sessionNoulsPrompt,
+} from './session-answer';
 import { untilAborted } from './until-aborted';
 
 /** Logged calls are kept this long; older rows are deleted when the daemon starts. */
 export const JUDGE_LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+/** How long a question asked in a session on the project's own account may take: a CLI start is slow. */
+export const SESSION_JUDGE_TIMEOUT_MS = 60_000;
+/** How much later a session's own deadline is than the call's, so the call's timeout is the one logged. */
+const SESSION_GRACE_MS = 5_000;
+/** What a failed session call's detail ends with. */
+export const DECISIONS_ACCOUNT_WOULD_SETTLE = 'A Decisions account would have settled it.';
+
+/** The decisions a session on the project's account never answers: limits block a live tool call. */
+const SESSION_EXCLUDED: ReadonlySet<JudgeDecision> = new Set([
+  JudgeDecision.CrossesLimit,
+  JudgeDecision.CrossesLimitSecond,
+]);
+
+/** What a call is about, so the session judge can find the project whose account it asks on. */
+export interface SessionScope {
+  readonly taskId?: TaskId | undefined;
+  readonly workstreamId?: WorkstreamId | undefined;
+  readonly projectId?: ProjectId | undefined;
+}
+
+/** A one-shot, tool-less question on a project's own account. */
+export interface SessionAsker {
+  /** The model it runs on, as the account launches it: the call's logged model. */
+  readonly model: string;
+  /** Answers the model's text; rejects on a timeout, a withdrawal or a failed start. */
+  ask(
+    prompt: string,
+    opts: { readonly signal: AbortSignal; readonly timeoutMs: number },
+  ): Promise<string>;
+}
 /** The connection test waits longer: it may be the first call to a cold model. */
 const TEST_TIMEOUT_MS = 15_000;
 
@@ -45,6 +82,8 @@ export interface JudgeRequest {
   readonly budget?: JudgeBudget;
   readonly workstreamId?: WorkstreamId;
   readonly taskId?: TaskId;
+  /** The project the call is about, when the caller has it: only for finding its account, never logged. */
+  readonly projectId?: ProjectId;
   readonly signal?: AbortSignal;
 }
 
@@ -85,6 +124,8 @@ export interface AssessRequest {
   readonly secondary?: boolean;
   readonly workstreamId?: WorkstreamId;
   readonly taskId?: TaskId;
+  /** The project the call is about, when the caller has it: only for finding its account, never logged. */
+  readonly projectId?: ProjectId;
   /** The precedent the state shows; the row names it only when the reading is `byPrecedent`. */
   readonly precedentId?: TrustPrecedentId;
   /** The program the call runs, written on every row of the call. */
@@ -155,9 +196,10 @@ export interface Judge {
   assess(req: AssessRequest): Promise<AssessAnswer>;
   /**
    * Whether `decision` can be asked now: the daemon isn't off, the master switch and the decision's are on, and
-   * the key reads within `JUDGE_TIMEOUT_MS`. Calls no model and logs nothing.
+   * the key reads within `JUDGE_TIMEOUT_MS`, or, with no Decisions account, the session judge can ask on the
+   * project of `scope`. Calls no model and logs nothing.
    */
-  ready(decision: JudgeDecision): Promise<boolean>;
+  ready(decision: JudgeDecision, scope?: SessionScope): Promise<boolean>;
 }
 
 export interface JudgeService extends Judge {
@@ -192,7 +234,28 @@ export interface JudgeDeps {
   readonly timeoutMs?: number;
   /** Told how each decision's call went, so an outage the builder must fix is raised once. */
   readonly onCallHealth?: (health: JudgeCallHealth) => void;
+  /**
+   * With no Decisions account, asks the call's project's own plan account in a one-shot session; null when the
+   * project's account can't. Absent: no call is asked that way.
+   */
+  readonly sessionJudge?: (scope: SessionScope) => SessionAsker | null;
 }
+
+/** What a session asks and how its reply is read. */
+interface SessionQuestion<T> {
+  readonly prompt: string;
+  readonly parse: (text: string, model: string) => T;
+}
+
+/** How a call bounded by a timeout and the caller's signal went. */
+type Bounded<T> =
+  | { readonly kind: 'answered'; readonly answer: T; readonly latencyMs: number }
+  | {
+      readonly kind: 'fallback';
+      readonly reason: 'timeout' | 'error' | 'stopped';
+      readonly detail: string;
+      readonly latencyMs: number;
+    };
 
 const FALLBACK_OUTCOME = {
   off: 'fallback_off',
@@ -299,6 +362,67 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     timeoutMs: number,
     send: (transport: Transport) => Promise<T>,
   ): Promise<Attempt<T>> {
+    const read: { credential: JudgeCredential | null } = { credential: null };
+    const result = await bounded(
+      q.signal,
+      timeoutMs,
+      async (signal) => {
+        // The credential read is part of the call: a slow Keychain counts against the same timeout.
+        const credential = await untilAborted(deps.readCredential(accountId), signal);
+        read.credential = credential;
+        // A call cut short while the key was read sends nothing.
+        signal.throwIfAborted();
+        if (credential === null) return null;
+        const price =
+          credential.kind === AccountKind.OpenRouter ? undefined : listedPrice(accountId, model);
+        const answer = await untilAborted(
+          send({
+            model,
+            api:
+              credential.kind === AccountKind.OpenRouter
+                ? modelApi(model, deps.decisionModelIds)
+                : ModelApi.Chat,
+            ...(price === undefined ? {} : { price }),
+            credential,
+            ...(deps.bedrockClient === undefined ? {} : { bedrockClient: deps.bedrockClient }),
+            fetch: deps.fetch,
+            signal,
+          }),
+          // A credential lookup the SDK makes before it reads the signal (an SSO profile) is bounded too.
+          signal,
+        );
+        return { answer };
+      },
+      (error) => scrub(messageOf(error), read.credential),
+    );
+    const accountKind = read.credential?.kind ?? null;
+    if (result.kind === 'fallback') return { ...result, accountKind };
+    if (result.answer === null)
+      return {
+        kind: 'fallback',
+        reason: 'no_key',
+        detail: NO_DECISION_CREDENTIAL,
+        latencyMs: null,
+        accountKind: null,
+      };
+    return {
+      kind: 'answered',
+      answer: result.answer.answer,
+      latencyMs: result.latencyMs,
+      accountKind,
+    };
+  }
+
+  /**
+   * Runs `run` bounded by `timeoutMs` on the injected clock and by the caller's signal: a timeout, a stop by the
+   * caller and an error each come back as a fallback, `errorText` giving an error's detail.
+   */
+  async function bounded<T>(
+    callerSignal: AbortSignal | undefined,
+    timeoutMs: number,
+    run: (signal: AbortSignal) => Promise<T>,
+    errorText: (error: unknown) => string,
+  ): Promise<Bounded<T>> {
     const controller = new AbortController();
     const timeout = { fired: false };
     const timer = deps.clock.setTimeout(() => {
@@ -308,72 +432,44 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     const onCallerAbort = (): void => {
       controller.abort();
     };
-    if (q.signal?.aborted) controller.abort();
-    q.signal?.addEventListener('abort', onCallerAbort, { once: true });
+    if (callerSignal?.aborted) controller.abort();
+    callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
     const started = deps.clock.now().getTime();
     const elapsed = (): number => deps.clock.now().getTime() - started;
-    let credential: JudgeCredential | null = null;
     try {
-      // The credential read is part of the call: a slow Keychain counts against the same timeout.
-      credential = await untilAborted(deps.readCredential(accountId), controller.signal);
-      // A call cut short while the key was read sends nothing.
-      controller.signal.throwIfAborted();
-      if (credential === null)
-        return {
-          kind: 'fallback',
-          reason: 'no_key',
-          detail: NO_DECISION_CREDENTIAL,
-          latencyMs: null,
-          accountKind: null,
-        };
-      const price =
-        credential.kind === AccountKind.OpenRouter ? undefined : listedPrice(accountId, model);
-      const answer = await untilAborted(
-        send({
-          model,
-          api:
-            credential.kind === AccountKind.OpenRouter
-              ? modelApi(model, deps.decisionModelIds)
-              : ModelApi.Chat,
-          ...(price === undefined ? {} : { price }),
-          credential,
-          ...(deps.bedrockClient === undefined ? {} : { bedrockClient: deps.bedrockClient }),
-          fetch: deps.fetch,
-          signal: controller.signal,
-        }),
-        // A credential lookup the SDK makes before it reads the signal (an SSO profile) is bounded too.
-        controller.signal,
-      );
-      return { kind: 'answered', answer, latencyMs: elapsed(), accountKind: credential.kind };
+      const answer = await run(controller.signal);
+      return { kind: 'answered', answer, latencyMs: elapsed() };
     } catch (error) {
-      const accountKind = credential?.kind ?? null;
       if (timeout.fired)
         return {
           kind: 'fallback',
           reason: 'timeout',
           detail: `No answer within ${String(timeoutMs / 1000)} s`,
           latencyMs: elapsed(),
-          accountKind,
         };
       // The caller's signal is a cancel or a shutdown: the call did not fail, it was stopped.
-      if (q.signal?.aborted)
+      if (callerSignal?.aborted)
         return {
           kind: 'fallback',
           reason: 'stopped',
           detail: 'Stopped by a cancel or a shutdown',
           latencyMs: elapsed(),
-          accountKind,
         };
-      return {
-        kind: 'fallback',
-        reason: 'error',
-        detail: scrub(messageOf(error), credential),
-        latencyMs: elapsed(),
-        accountKind,
-      };
+      return { kind: 'fallback', reason: 'error', detail: errorText(error), latencyMs: elapsed() };
     } finally {
       timer.cancel();
-      q.signal?.removeEventListener('abort', onCallerAbort);
+      callerSignal?.removeEventListener('abort', onCallerAbort);
+    }
+  }
+
+  /** The session judge's asker for a call's scope, or null when it has none or fails to find one. */
+  function sessionAskerFor(decision: JudgeDecision, scope: SessionScope): SessionAsker | null {
+    if (deps.sessionJudge === undefined || SESSION_EXCLUDED.has(decision)) return null;
+    try {
+      return deps.sessionJudge(scope);
+    } catch (error) {
+      deps.logger.warn({ err: error, decision }, 'session judge could not be prepared');
+      return null;
     }
   }
 
@@ -388,6 +484,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       readonly question: string;
       readonly workstreamId?: WorkstreamId | undefined;
       readonly taskId?: TaskId | undefined;
+      readonly projectId?: ProjectId | undefined;
       readonly signal?: AbortSignal | undefined;
       readonly timeoutMs?: number | undefined;
       readonly budget?: JudgeBudget | undefined;
@@ -396,6 +493,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       readonly programKey?: string | null | undefined;
     },
     send: (transport: Transport) => Promise<T>,
+    session: SessionQuestion<T>,
     logged: (answer: T, floor: number) => LoggedAnswer,
   ): Promise<Decided<T>> {
     let model = '';
@@ -453,6 +551,46 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       if (!config.enabled) health({ kind: 'off' });
       if (!config.enabled || !decision.enabled)
         return fallback('off', 'Switched off in Settings', null);
+
+      const asker = config.accountId === null ? sessionAskerFor(req.decision, req) : null;
+      if (asker !== null) {
+        // The project's own account answers: its health is not the Decisions account's, so it reports nothing.
+        model = asker.model;
+        const timeoutMs = Math.max(req.timeoutMs ?? 0, SESSION_JUDGE_TIMEOUT_MS);
+        const result = await bounded(
+          req.signal,
+          timeoutMs,
+          async (signal) =>
+            session.parse(
+              // The session's own deadline is later, so this call's timeout is the one that ends it.
+              await untilAborted(
+                asker.ask(session.prompt, { signal, timeoutMs: timeoutMs + SESSION_GRACE_MS }),
+                signal,
+              ),
+              asker.model,
+            ),
+          messageOf,
+        );
+        if (result.kind === 'fallback')
+          return fallback(
+            result.reason,
+            result.reason === 'stopped'
+              ? result.detail
+              : `${result.detail.replace(/\.$/, '')}. ${DECISIONS_ACCOUNT_WOULD_SETTLE}`,
+            result.latencyMs,
+          );
+        const callId = log({
+          ...logged(result.answer, decision.floor),
+          latencyMs: result.latencyMs,
+        });
+        return {
+          kind: 'answered',
+          answer: result.answer,
+          floor: decision.floor,
+          latencyMs: result.latencyMs,
+          callId,
+        };
+      }
 
       const unattended = req.budget === JudgeBudget.Unattended;
       const timeoutMs =
@@ -538,6 +676,10 @@ export function createJudge(deps: JudgeDeps): JudgeService {
             : `${req.question}\nOptions:${optionsText(req)}`,
       },
       (transport) => askModel({ ...transport, ...choiceOf(req) }),
+      {
+        prompt: sessionChoicePrompt(choiceOf(req)),
+        parse: (text, model) => parseSessionChoice(req, text, model),
+      },
       // Provisional: the decision that acts on the answer replaces it with `acted` or `below_floor`.
       (answer, floor) => ({
         answer: answer.choice,
@@ -575,6 +717,10 @@ export function createJudge(deps: JudgeDeps): JudgeService {
           state: req.state,
           questions: req.questions,
         }),
+      {
+        prompt: sessionNoulsPrompt(req),
+        parse: (text, model) => parseSessionNouls(req, text, model),
+      },
       (answer, floor) => ({
         ...req.read(answer.probabilities, floor),
         probabilities: answer.probabilities,
@@ -600,7 +746,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       : transport.api;
   }
 
-  async function ready(decision: JudgeDecision): Promise<boolean> {
+  async function ready(decision: JudgeDecision, scope: SessionScope = {}): Promise<boolean> {
     if (deps.off || !isAskedDecision(decision)) return false;
     const controller = new AbortController();
     const timer = deps.clock.setTimeout(() => {
@@ -609,6 +755,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     try {
       const config = getJudgeConfig(deps.state.db);
       if (!config.enabled || !config.decisions[decision].enabled) return false;
+      if (config.accountId === null && sessionAskerFor(decision, scope) !== null) return true;
       const credential = await untilAborted(
         deps.readCredential(config.accountId),
         controller.signal,
