@@ -282,6 +282,7 @@ rule on the agent. A lane can't edit a watchpoint: watchpoints live outside the 
 - A judge answer alone never holds. A hold needs a glob or line match.
 
 Its own index and cards come after S4, with plan review.
+Planned, with the judge's read of an Ask hit, in `docs/superpowers/plans/2026-11-28-watchpoint-ask-read-by-the-judge.md`.
 
 ## State table (design, not a test list)
 
