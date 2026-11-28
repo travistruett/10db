@@ -452,10 +452,36 @@ export function proposalSourceTask(tx: DbReader, proposalId: ProposalId): TaskDt
 }
 
 /** The project's Icebox column: its first column when the builder renamed it; null on the derived board. */
-function iceboxColumnId(tx: DbReader, projectId: ProjectId): BoardColumnId | null {
+export function iceboxColumnId(tx: DbReader, projectId: ProjectId): BoardColumnId | null {
   const iceboxKey = columnNameKey(DEFAULT_BOARD_COLUMN);
   const columns = listBoardColumns(tx, projectId);
   return (columns.find((c) => columnNameKey(c.name) === iceboxKey) ?? columns[0])?.id ?? null;
+}
+
+/**
+ * An open task of the project whose description is `line` or starts with it as its first line, or null.
+ * Compared exactly, not with LIKE, so `_` and `%` in the line are literal.
+ */
+export function findOpenTaskByFirstLine(
+  db: DbReader,
+  projectId: ProjectId,
+  line: string,
+): TaskId | null {
+  // SQLite's own length, in characters as substr counts them.
+  const head = sql`substr(${schema.tasks.description}, 1, length(${line}) + 1)`;
+  const row = db
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.projectId, projectId),
+        eq(schema.tasks.status, TaskStatus.Open),
+        or(eq(schema.tasks.description, line), sql`${head} = ${`${line}\n`}`),
+      ),
+    )
+    .limit(1)
+    .get();
+  return row?.id ?? null;
 }
 
 /**

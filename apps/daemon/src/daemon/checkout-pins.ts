@@ -11,7 +11,13 @@ import {
   type DbReader,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { chatWorktreePinKey, CheckoutPin, worktreePinKey, type PinStore } from '../git';
+import {
+  chatWorktreePinKey,
+  CheckoutPin,
+  projectPinKey,
+  worktreePinKey,
+  type PinStore,
+} from '../git';
 
 function realOrNull(path: string): string | null {
   try {
@@ -26,15 +32,13 @@ export function projectAt(db: DbReader, repo: string): ProjectDto | undefined {
   return pinOwner(db, repo)?.project;
 }
 
-const projectPinKey = (project: ProjectDto): string => `checkout_pin.${project.id}`;
-
 /** Who a pin at `repo` belongs to, and the setting that holds it. */
 function pinOwner(
   db: DbReader,
   repo: string,
 ): { readonly project: ProjectDto; readonly key: string } | undefined {
   const project = listProjects(db).find((candidate) => realOrNull(candidate.repoPath) === repo);
-  if (project) return { project, key: projectPinKey(project) };
+  if (project) return { project, key: projectPinKey(project.id) };
   const batch = findBatchByWorktreePath(db, repo);
   if (batch) return { project: getProject(db, batch.projectId), key: worktreePinKey(batch.id) };
   const chat = findChatByWorktreePath(db, repo);

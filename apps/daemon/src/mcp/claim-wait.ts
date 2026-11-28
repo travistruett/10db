@@ -38,6 +38,7 @@ import {
   type AcquireResult,
   type ClaimRow,
   type DbReader,
+  type WriteContext,
 } from '@10db/db';
 import { claimScopeOf } from '../delivery';
 import type { EventBus, StateStore } from '../events';
@@ -45,6 +46,7 @@ import type { InboxService } from '../inbox';
 import { DEADLOCK_DETAIL, deadlockAnswers, taskLetter } from './claim-deadlock';
 import {
   addContested,
+  deadlockNoticeKey,
   readPair,
   recordBreak,
   recordTaken,
@@ -203,8 +205,11 @@ export interface Asking {
    * with this task, once this wait takes the claim `from` held, and answers their paths.
    */
   handOver(from: WorkstreamId): Promise<readonly string[]>;
-  /** A third deadlock between the same pair is reported, in the write that yields and queues. */
-  reportRepeat(pair: DeadlockPair): void;
+  /**
+   * A third deadlock between the same pair is reported, in the write that yields and queues; `thisBreak` is
+   * the line of that write's notice. Answers the report when the notice's body must carry it, else null.
+   */
+  reportRepeat(w: WriteContext, pair: DeadlockPair, thisBreak: string): string | null;
 }
 
 /** Where a wait in progress stands: who holds the claim now. */
@@ -593,23 +598,26 @@ function breakDeadlock(
       contested: [...claims, { kind: a.kind, name: a.name }],
       queue,
     });
-    if (move === DeadlockMove.YieldQueueAndReport) a.reportRepeat(pair);
     const yielder = taskTitleOf(ctx.tx, me);
     const other = taskTitleOf(ctx.tx, holder);
     const list = claims.map((c) => `${c.kind} ${c.name}`).join(', ');
+    const line = `"${yielder}" gave up ${list} to "${other}" to end a claim deadlock`;
+    const report =
+      move === DeadlockMove.YieldQueueAndReport ? a.reportRepeat(ctx, pair, line) : null;
     postNotice(ctx, {
       tier: CardTier.Notice,
       projectId: a.projectId,
       taskId: getWorkstreamRow(ctx.tx, me).taskId,
-      key: `${DEADLOCK_CARD}:${pair.a}:${pair.b}`,
+      key: deadlockNoticeKey(pair.a, pair.b),
       tone: 'info',
-      line: `"${yielder}" gave up ${list} to "${other}" to end a claim deadlock`,
+      line,
       body: [
         `Task "${yielder}" waited for ${a.kind} ${a.name}, which task "${other}" holds, while "${other}" waited for ${list}, which "${yielder}" held.`,
         `After 2 minutes "${yielder}", the later to ask, gave up ${list}. "${other}" got its committed work only: the uncommitted edits there stay "${yielder}"'s own.`,
         queue
           ? `Undo ends the queue: "${yielder}" may start and ask again now.`
           : 'Undo forgets this yield: the two tasks count as never having deadlocked.',
+        ...(report === null ? [] : [report]),
       ].join('\n\n'),
       decision: {
         by: CardDecider.Rule,
