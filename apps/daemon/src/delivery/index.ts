@@ -65,6 +65,7 @@ export { createShipper, type Shipper } from './ship';
 export { subscribeShipTrigger } from './trigger';
 export { createPrWatch, subscribePrWatch, type PrWatch } from './pr-watch';
 export { createCiStopAnswers } from './ci-stop';
+export { createGuardrailHoldAnswers } from './guardrail-hold-card';
 export { createGhCardAnswers } from './gh-card';
 export { batchCardFields, createBatchCardAnswers } from './batch-card';
 export { createBranchCardAnswers } from './branch-card';

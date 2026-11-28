@@ -141,6 +141,12 @@
   transaction, and records what it did in the answered card's note (`updateInboxItem`) or raises the card again
   (`changedSinceCard`, `trusted-writes.ts`) when the file changed or could not be put back. `home` is injected, the
   builder's home by default.
+- A pull request that touches a guardrail path is held with one flag card, "A change to your `<label>` is ready"
+  (`guardrail-card.ts`: `guardrailPrTitle`, `GuardrailPrChoice` Merge and Close, `guardrailPrOptions`,
+  `GUARDRAIL_HOLD_DETAIL` holding the root batch, the diff hash and the pull request), with the capped diff in
+  `detail.guardrailDiff` (`guardrailPatchDetail`). It is raised and answered from `delivery/guardrail-hold-card.ts`;
+  `createGuardrailHoldAnswers(...).onAnswerInWrite` is called from `onFlagAnswerInWrite` in `daemon/start.ts`. A diff
+  that could not be read offers only Close, since no hash can be approved.
 - A CI stop has its card or its pending notice, never neither, and replaces "Pull request checks failed":
   `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's `prCardKey.checks` card in the stop's write, and
   `pr-watch` raises none while `ciStopped` is set. A stop at the limit or on an unchanged head shows the
