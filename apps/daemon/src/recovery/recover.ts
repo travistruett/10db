@@ -42,7 +42,13 @@ import {
 } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
-import { flagFailedRun, raiseStartHoldCard, type InboxService } from '../inbox';
+import {
+  flagFailedRun,
+  OutOfMovesKind,
+  outOfMovesFields,
+  raiseStartHoldCard,
+  type InboxService,
+} from '../inbox';
 import type { Logger } from '../log';
 import type { Clock } from '../clock';
 import {
@@ -355,10 +361,19 @@ export async function recoverOnStartup(opts: {
       }
     });
     if (failed) {
+      // The out-of-moves answers replace the batch card's; its detail stays so the batch's settling finds it.
+      const batch = batchCardFields(row);
+      const oom = outOfMovesFields({
+        kind: OutOfMovesKind.Recovery,
+        more: opts.maxRecoveryAttempts,
+        batchId: row.batchId,
+        workstreamId: row.id,
+      });
       opts.state.write((ctx) => {
         flagFailedRun(ctx, row, {
           body: `Recovery failed ${String(attempts)} times.`,
-          ...batchCardFields(row),
+          options: oom.options,
+          detail: { ...batch?.detail, ...oom.detail },
         });
       });
       report.failed.push(ws.id);

@@ -25,6 +25,7 @@ import {
   type BatchId,
   type Notice,
   type ProjectDto,
+  type TaskDto,
   type WorkstreamDto,
   type WorkstreamId,
   type TaskId,
@@ -57,6 +58,7 @@ import {
   transitionBatch,
   transitionWorkstream,
   type DbReader,
+  type WriteContext,
 } from '@10db/db';
 import type { Clock } from '../clock';
 import { comparablePath, GitNetworkError, GitNetworkFailure, samePath } from '../git';
@@ -120,7 +122,7 @@ import {
 import { fileFlakyTests, rerunFlaky, type FlakyTest } from './flaky-tests';
 import { gateFailureAction, failureSignature } from './gate-failure-action';
 import { failureReasons, readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
-import { clearGateFix, readGateFix, recordFix } from './gate-fix';
+import { clearGateFix, grantMore, readGateFix, recordFix } from './gate-fix';
 import {
   GATE_FIX_TITLE_PREFIX,
   gateFixCriterion,
@@ -245,6 +247,17 @@ export interface Shipper {
    */
   shipWithout(batchId: BatchId, workstreamId: WorkstreamId, kept?: KeptRevert): BatchDto;
   abandon(batchId: BatchId): BatchDto;
+  /**
+   * The gate's out-of-moves card, Spend More Attempts: allows `more` fix tasks for the failed batch's gate
+   * (`forceInside` files them even for a failure outside the batch), then ships it again as Retry does.
+   */
+  moreFixes(batchId: BatchId, more: number, forceInside: boolean): BatchDto;
+  /**
+   * The gate's out-of-moves card, Change the Task: in one write the failed batch reopens with one fix
+   * task whose description opens with the builder's `note`, then `failure`; the fix is not counted
+   * against the batch's budget.
+   */
+  fixWithNote(batchId: BatchId, note: string, failure: string): void;
   /**
    * The open pull request of a shipped batch that merges by itself conflicts with its base: merges the
    * base into its branch in a worktree made for it, checks the result as shipping does, pushes it onto
@@ -690,6 +703,33 @@ export function createShipper(deps: ShipperDeps): Shipper {
     fail(batch, shipCards.baseConflict(batch, update.paths, outcome.why));
   }
 
+  /** One fix task in the batch, beside its `tasks` (`first` gives its landing), with a queued workstream. */
+  function insertFixTask(
+    w: WriteContext,
+    batch: BatchDto,
+    first: TaskDto,
+    tasks: readonly TaskDto[],
+    text: { readonly title: string; readonly description: string; readonly check: ShipCheckName },
+  ): TaskId {
+    const task = insertTask(
+      w,
+      batch.projectId,
+      {
+        title: text.title,
+        description: text.description,
+        acceptanceCriteria: [gateFixCriterion(text.check)],
+        areas: [...new Set(tasks.flatMap((t) => t.areas))],
+        landing: first.landing,
+      },
+      {
+        workspaceMode: batch.worktreePath === null ? WorkspaceMode.Shared : WorkspaceMode.Worktree,
+        reason: 'works in its batch',
+      },
+    );
+    insertPlannedWorkstream(w, task.id, planForStart(w.tx, task.id), batch.id);
+    return task.id;
+  }
+
   /**
    * The ship check failed in the batch's own change: in one write the batch goes SHIPPING → FAILED →
    * OPEN, one fix task joins it with a queued workstream, the fix is counted against the batch's
@@ -733,35 +773,23 @@ export function createShipper(deps: ShipperDeps): Shipper {
           }),
         );
         resetCopyJournal(w, batch.id);
-        const task = insertTask(
-          w,
-          batch.projectId,
-          {
-            title: gateFixTitle(check, steps, batch.title),
-            description: gateFixDescription({
-              check,
-              note,
-              steps,
-              reasons,
-              gate,
-              earlier: tasks
-                .filter((t) => t.title.startsWith(GATE_FIX_TITLE_PREFIX))
-                .map((t) => ({ title: t.title, status: t.status })),
-            }),
-            acceptanceCriteria: [gateFixCriterion(check)],
-            areas: [...new Set(tasks.flatMap((t) => t.areas))],
-            landing: first.landing,
-          },
-          {
-            workspaceMode:
-              batch.worktreePath === null ? WorkspaceMode.Shared : WorkspaceMode.Worktree,
-            reason: 'works in its batch',
-          },
-        );
-        insertPlannedWorkstream(w, task.id, planForStart(w.tx, task.id), batch.id);
+        const task = insertFixTask(w, batch, first, tasks, {
+          title: gateFixTitle(check, steps, batch.title),
+          description: gateFixDescription({
+            check,
+            note,
+            steps,
+            reasons,
+            gate,
+            earlier: tasks
+              .filter((t) => t.title.startsWith(GATE_FIX_TITLE_PREFIX))
+              .map((t) => ({ title: t.title, status: t.status })),
+          }),
+          check,
+        });
         recordFix(w, batch.id, signature, deps.limits.maxFixAttempts);
         withdrawIn(w, batch.projectId, [shipFailureFoldKey(batch.id)]);
-        return { sent: task.id };
+        return { sent: task };
       });
     let outcome: ReturnType<typeof write>;
     try {
@@ -1449,9 +1477,21 @@ export function createShipper(deps: ShipperDeps): Shipper {
           case 'fix':
             await sendToFix(batch, steps, run.gate, signature, name, cardNote(run), reran);
             return false;
-          // Out of moves raises the gate's own cards until it has a card of its own.
-          case 'legacy_card':
           case 'out_of_moves':
+            fail(
+              batch,
+              shipCards.outOfMoves(
+                batch,
+                action.reason,
+                steps,
+                readGateFix(db, batchId, deps.limits.maxFixAttempts),
+                cardNote(run),
+                name,
+                deps.limits.maxFixAttempts,
+              ),
+            );
+            return false;
+          case 'legacy_card':
             fail(
               batch,
               outside && reran
@@ -1710,6 +1750,21 @@ export function createShipper(deps: ShipperDeps): Shipper {
     if (batch.passId != null)
       throw new ConflictError(
         `Batch "${batch.title}" is a UI Workbench pass's; it ships when the pass closes and is abandoned with the pass`,
+      );
+  }
+
+  /** A separate copy's reopened batch would lose the landing a failure reports, so it gets no gate fix. */
+  function refuseLocalCopyFix(batch: BatchDto): void {
+    if (getLocalCopy(db, batch.id) !== null)
+      throw new ConflictError(
+        `Batch "${batch.title}" lands in a separate local copy; 10db files no gate fix for it`,
+      );
+  }
+
+  function refuseUnlessFailed(batch: BatchDto): void {
+    if (batch.state !== BatchState.Failed)
+      throw new ConflictError(
+        `Batch "${batch.title}" is ${batch.state.toLowerCase()}; only a failed batch gets more attempts`,
       );
   }
 
@@ -2732,6 +2787,46 @@ export function createShipper(deps: ShipperDeps): Shipper {
         deps.git.operation(() => leaveOut(batchId, workstreamId, kept ?? null, signal)),
       );
       return batch;
+    },
+    moreFixes(batchId, more, forceInside) {
+      const batch = getBatch(db, batchId);
+      refusePassBatch(batch);
+      refuseLocalCopyFix(batch);
+      deps.state.write((w) => {
+        refuseUnlessFailed(getBatch(w.tx, batchId));
+        grantMore(w, batchId, more, forceInside);
+      });
+      return ship(batchId);
+    },
+    fixWithNote(batchId, note, failure) {
+      const batch = getBatch(db, batchId);
+      refusePassBatch(batch);
+      refuseLocalCopyFix(batch);
+      deps.state.write((w) => {
+        refuseUnlessFailed(getBatch(w.tx, batchId));
+        const tasks = members(w.tx, batchId).map((m) => getTask(w.tx, m.taskId));
+        const [first] = tasks;
+        if (!first) throw new ConflictError(`Batch "${batch.title}" has no task to work beside`);
+        settleLeftOutCards(
+          w,
+          transitionBatch(w, batchId, {
+            to: BatchState.Open,
+            patch: { failure: null },
+            reason: "a fix task works on the builder's note",
+          }),
+        );
+        resetCopyJournal(w, batchId);
+        // One more allowed and one more filed: the builder's fix leaves the budget as it was.
+        grantMore(w, batchId, 1, false);
+        recordFix(w, batchId, null, deps.limits.maxFixAttempts);
+        insertFixTask(w, batch, first, tasks, {
+          title: gateFixTitle('gate', [], batch.title),
+          description: `${note}\n\n${failure}`,
+          check: 'gate',
+        });
+        // The card this answers closes with the answer, so it is not withdrawn here.
+      });
+      deps.onWorkQueued();
     },
     abandon(batchId) {
       const batch = getBatch(db, batchId);
