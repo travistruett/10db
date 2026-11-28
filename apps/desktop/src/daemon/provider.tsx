@@ -98,6 +98,9 @@ function sameConnection(a: DaemonConnection, b: DaemonConnection): boolean {
 /** How long the connecting screen waits, from when it shows, before it adds its help to a failed connection. */
 const CONNECTING_HELP_AFTER_MS = 10_000;
 
+/** How long the first connection may take before the screen says it is slow: a launch is refused while 10db boots. */
+const SLOW_AFTER_MS = 4000;
+
 function ConnectingScreen({
   lastError,
   help,
@@ -108,6 +111,15 @@ function ConnectingScreen({
   readonly helpAfterMs: number;
 }) {
   const [helpDue, setHelpDue] = useState(false);
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSlow(true);
+    }, SLOW_AFTER_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, []);
   useEffect(() => {
     if (help === undefined || help === null) return undefined;
     const timer = setTimeout(() => {
@@ -127,9 +139,11 @@ function ConnectingScreen({
           </Text>
           {lastError !== null && (
             <>
-              <Text size="sm" c="dimmed" maw={420} ta="center">
-                Taking longer than usual. 10db keeps trying.
-              </Text>
+              {slow ? (
+                <Text size="sm" c="dimmed" maw={420} ta="center">
+                  Taking longer than usual. 10db keeps trying.
+                </Text>
+              ) : null}
               {/* The reason is for the curious; what the builder needs is that it keeps trying. */}
               <Tooltip label={lastError} multiline maw={480}>
                 {/* Focusable, so the reason is there for the keyboard and a screen reader as well. */}
