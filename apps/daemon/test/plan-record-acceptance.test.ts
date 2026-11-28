@@ -9,7 +9,6 @@ import {
   PlanExportResult,
   ProjectDto,
   ShapeViewDto,
-  TaskDto,
   TaskPlanContextDto,
   WorkstreamDto,
   type ProjectId,
@@ -20,6 +19,7 @@ import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
+import { taskListOf } from './task-list';
 import { createTempRepo, isolatedGitEnv, tempDir, waitForAsync } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
@@ -221,7 +221,7 @@ describe('a planning effort through 10db', () => {
     await api().post(`/shapes/${shapeId}/convert`, z.unknown(), {
       proposalIds: view.proposals.filter((p) => p.state === 'pending').map((p) => p.id),
     });
-    const tasks = await api().get(`/projects/${project.id}/tasks`, z.array(TaskDto));
+    const tasks = await api().get(`/projects/${project.id}/tasks`, taskListOf(project.id));
     const revoke = tasks.find((t) => t.title === 'Revoke a device');
     if (!revoke) throw new Error('Convert made no Revoke a device');
     await api().post(`/tasks/${revoke.id}/start`, WorkstreamDto);

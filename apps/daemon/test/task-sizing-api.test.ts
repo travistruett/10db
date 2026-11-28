@@ -13,6 +13,7 @@ import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
+import { taskListOf } from './task-list';
 import { noulAnswer } from './fake-noul-answers';
 import { createMemoryKeychain, createTempRepo, tempDir, waitForAsync } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
@@ -125,7 +126,11 @@ async function start(sizingWaitMs: number, extra: Record<string, unknown> = {}) 
 }
 
 const taskOf = async (api: ReturnType<typeof apiClient>, projectId: string, id: string) =>
-  (await api.get(`/projects/${projectId}/tasks`, z.array(TaskDto))).find((t) => t.id === id);
+  (await api.get(`/projects/${projectId}/tasks`, taskListOf(projectId))).find((t) => t.id === id);
+
+// The list leaves out who sized a task; its own read has it.
+const wholeTask = (api: ReturnType<typeof apiClient>, id: string) =>
+  api.get(`/tasks/${id}`, TaskDto);
 
 describe('POST /tasks/:id/start while the judge is sizing', () => {
   it('waits for the answer, then starts on the sized task', async () => {
@@ -135,7 +140,7 @@ describe('POST /tasks/:id/start while the judge is sizing', () => {
     expect(await taskOf(api, project.id, task.id)).toMatchObject({ workstreamId: null });
     answerAll();
     const run = await starting;
-    expect(await taskOf(api, project.id, task.id)).toMatchObject({
+    expect(await wholeTask(api, task.id)).toMatchObject({
       workstreamId: run.id,
       rigor: 'critical',
       rigorSource: 'judge',
@@ -154,7 +159,7 @@ describe('POST /tasks/:id/start while the judge is sizing', () => {
     expect(await taskOf(api, project.id, task.id)).toMatchObject({ workstreamId: null });
     answerAll();
     expect(await starting).toHaveLength(1);
-    expect(await taskOf(api, project.id, task.id)).toMatchObject({
+    expect(await wholeTask(api, task.id)).toMatchObject({
       rigor: 'critical',
       rigorSource: 'judge',
     });

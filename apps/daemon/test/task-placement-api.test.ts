@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
+import { taskListOf } from './task-list';
 import { createTempRepo, tempDir } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
@@ -90,7 +91,7 @@ async function makeBoth(projectId: string, made: Made) {
 }
 
 async function taskById(projectId: string, id: string) {
-  const found = (await api().get(`/projects/${projectId}/tasks`, z.array(TaskDto))).find(
+  const found = (await api().get(`/projects/${projectId}/tasks`, taskListOf(projectId))).find(
     (t) => t.id === id,
   );
   if (!found) throw new Error(`no task ${id}`);
