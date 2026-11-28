@@ -1,18 +1,40 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { APIRequestContext } from '@playwright/test';
 import { describe, expect, it } from 'vitest';
+import { RESET_RETRIES, withResetRetries } from './retrying-request';
 
-// Playwright retries only ECONNRESET, and only when a request sets maxRetries. A read can reuse a keep-alive
-// socket the daemon closed after its idle timeout, and a POST must never be retried: the daemon may have
-// applied it already.
+// Playwright retries only ECONNRESET, and only when a request sets maxRetries. A request can reuse a
+// keep-alive socket the daemon closed after its idle timeout, so every spec's API request, a write
+// included, takes the retry from the shared request fixture rather than from each call.
 const dir = import.meta.dirname;
 const RETRIES = /\bmaxRetries\s*:/;
 
-interface RequestCall {
-  /** The file and line of the call, for the failure message. */
-  where: string;
-  /** The call's arguments, from the opening parenthesis through the matching close. */
-  args: string;
+interface Sent {
+  method: string;
+  url: string;
+  options: { maxRetries?: number; data?: unknown } | undefined;
+}
+
+/** A request context that records each request, standing in for the one Playwright makes. */
+function recordingContext(): { request: APIRequestContext; sent: Sent[] } {
+  const sent: Sent[] = [];
+  const send = (method: string) => (url: string, options?: Sent['options']) => {
+    sent.push({ method, url, options });
+    return Promise.resolve({ ok: () => true });
+  };
+  const request = {
+    delete: send('delete'),
+    fetch: send('fetch'),
+    get: send('get'),
+    head: send('head'),
+    patch: send('patch'),
+    post: send('post'),
+    put: send('put'),
+    dispose: () => Promise.resolve(),
+  };
+  // A fake with only the members under test, in place of Playwright's own context.
+  return { request: request as unknown as APIRequestContext, sent };
 }
 
 /** The text from the `(` at `open` through its matching `)`. No call's arguments hold a parenthesis in a string. */
@@ -28,42 +50,60 @@ function argumentsOf(text: string, open: number): string {
   return text.slice(open);
 }
 
-/** Every `request.<method>(` call in the e2e specs and helpers; this harness's own tests are not requests. */
-function requestCalls(method: 'get' | 'post' | 'routeFetch'): RequestCall[] {
-  const calls: RequestCall[] = [];
-  const pattern = method === 'routeFetch' ? '\\broute\\.fetch\\(' : `\\brequest\\.${method}\\(`;
-  for (const file of readdirSync(dir)) {
-    if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue;
-    const text = readFileSync(join(dir, file), 'utf8');
-    for (const match of text.matchAll(new RegExp(pattern, 'g'))) {
-      const start = match.index;
-      calls.push({
-        where: `${file}:${String(text.slice(0, start).split('\n').length)}`,
-        args: argumentsOf(text, start + match[0].length - 1),
-      });
-    }
-  }
-  return calls;
-}
-
 describe('the e2e request fixture', () => {
-  it('gives every read a retry, so a socket the daemon closed while idle does not fail the spec', () => {
-    const reads = requestCalls('get');
-    expect(reads.length).toBeGreaterThan(0);
-    expect(reads.filter((call) => !RETRIES.test(call.args)).map((call) => call.where)).toEqual([]);
+  it('retries a reset connection on every method, and lets a call set its own retries', async () => {
+    const { request, sent } = recordingContext();
+    const retrying = withResetRetries(request);
+    await retrying.get('/a');
+    await retrying.post('/b', { data: { x: 1 } });
+    await retrying.patch('/c');
+    await retrying.put('/d');
+    await retrying.delete('/e');
+    await retrying.head('/f');
+    await retrying.fetch('/g');
+    await retrying.get('/h', { maxRetries: 0 });
+    await retrying.dispose();
+
+    expect(sent.map((call) => [call.method, call.options?.maxRetries])).toEqual([
+      ['get', RESET_RETRIES],
+      ['post', RESET_RETRIES],
+      ['patch', RESET_RETRIES],
+      ['put', RESET_RETRIES],
+      ['delete', RESET_RETRIES],
+      ['head', RESET_RETRIES],
+      ['fetch', RESET_RETRIES],
+      ['get', 0],
+    ]);
+    expect(sent[1]?.options?.data).toEqual({ x: 1 });
+  });
+
+  it('is the only test every spec runs on, so a new spec gets the retry', () => {
+    const own: string[] = [];
+    for (const file of readdirSync(dir)) {
+      if (!file.endsWith('.spec.ts')) continue;
+      const text = readFileSync(join(dir, file), 'utf8');
+      for (const match of text.matchAll(/import\s*\{([^}]*)\}\s*from\s*'@playwright\/test'/gu)) {
+        if (/\btest\b/u.test(match[1] ?? '')) own.push(file);
+      }
+    }
+    expect(own).toEqual([]);
   });
 
   it('gives every route.fetch a retry, since it reuses the same keep-alive sockets', () => {
-    const fetches = requestCalls('routeFetch');
-    expect(fetches.length).toBeGreaterThan(0);
-    expect(fetches.filter((call) => !RETRIES.test(call.args)).map((call) => call.where)).toEqual(
-      [],
-    );
-  });
-
-  it('gives no POST a retry', () => {
-    const posts = requestCalls('post');
-    expect(posts.length).toBeGreaterThan(0);
-    expect(posts.filter((call) => RETRIES.test(call.args)).map((call) => call.where)).toEqual([]);
+    const missing: string[] = [];
+    let seen = 0;
+    for (const file of readdirSync(dir)) {
+      if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue;
+      const text = readFileSync(join(dir, file), 'utf8');
+      for (const match of text.matchAll(/\broute\.fetch\(/gu)) {
+        seen += 1;
+        const args = argumentsOf(text, match.index + match[0].length - 1);
+        if (!RETRIES.test(args)) {
+          missing.push(`${file}:${String(text.slice(0, match.index).split('\n').length)}`);
+        }
+      }
+    }
+    expect(seen).toBeGreaterThan(0);
+    expect(missing).toEqual([]);
   });
 });

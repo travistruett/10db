@@ -1,11 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { E2E_DATA, E2E_DIR, E2E_REPO, E2E_TOKEN } from './paths';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
+import { test } from './routed-test';
 
 const Runs = z.array(z.object({ id: z.string(), taskTitle: z.string() }));
 const Changes = z.object({ commits: z.array(z.string()) });
