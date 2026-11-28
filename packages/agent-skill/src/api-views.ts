@@ -91,3 +91,17 @@ export const SavedHazards = z.object({ hazards: z.array(z.unknown()) });
 export const Adopted = z.looseObject({ id: z.string(), title: z.string() });
 export const Imported = z.looseObject({ created: z.boolean(), shapeId: z.string() });
 export const SavedAccount = z.object({ settings: z.unknown().optional() });
+
+/** A goal row of `GET /projects/:id/goals`, as far as `context` and the goal list read it. */
+export const GoalListView = z.looseObject({
+  goals: z.array(
+    z.looseObject({
+      goal: z.looseObject({ id: z.string(), title: z.string() }),
+      digest: z.looseObject({
+        status: z.string(),
+        progress: z.looseObject({ total: z.number(), merged: z.number(), inReview: z.number() }),
+      }),
+    }),
+  ),
+});
+export type GoalListView = z.infer<typeof GoalListView>;

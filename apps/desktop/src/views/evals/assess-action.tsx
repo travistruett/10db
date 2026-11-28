@@ -32,23 +32,26 @@ export function useEvalAssessment(assessment: EvalAssessmentDto, projectId: Proj
 }
 
 /**
- * The one way to have the evals assessed: Assess Now, busy while it runs. Where 10db can't ask a model for this
+ * The one way to have the evals assessed: Assess, busy while it runs. Where 10db can't ask a model for this
  * project it offers the prompt to paste in the builder's own session instead.
  */
 export function AssessAction({
   assessment,
   project,
   variant = 'default',
+  size = 'xs',
 }: {
   readonly assessment: EvalAssessment;
   readonly project: Pick<ProjectViewDto, 'id' | 'name'>;
   readonly variant?: 'default' | 'light';
+  /** `sm` beside an empty state's main button, which is that size. */
+  readonly size?: 'xs' | 'sm';
 }) {
   const clipboard = useClipboard({ timeout: 1500 });
   if (assessment.unavailable) {
     return (
       <Button
-        size="xs"
+        size={size}
         variant={variant}
         leftSection={<IconCopy size={14} stroke={1.5} />}
         onClick={() => {
@@ -61,13 +64,13 @@ export function AssessAction({
   }
   return (
     <Button
-      size="xs"
+      size={size}
       variant={variant}
       loading={assessment.busy}
       leftSection={<IconSparkles size={14} stroke={1.5} />}
       onClick={assessment.run}
     >
-      Assess Now
+      Assess
     </Button>
   );
 }
