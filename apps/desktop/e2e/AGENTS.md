@@ -48,9 +48,13 @@ highlights code) and `see-screen.spec.ts` (the screen a session draws is a real 
   `expectAccessible` call that blocks a change may be removed.
 - **Run time stays about where it was.** CI runs two shards (`GATE_E2E_ARGS: --shard=n/2`); files run in name
   order with one worker. A flow that adds minutes folds into one that exists.
-- **A spec that routes a request imports `test` from `./routed-test`**, whose page drops its routes when the
-  test ends; the app polls `/system`, and a route callback still running then fails the test or the next one.
-- **A read retries, a write never does.** Each `request.get` and `route.fetch` passes `maxRetries: 2`: a request can reuse a keep-alive socket the daemon closed after its 5 s timeout, and Playwright retries only ECONNRESET. No `request.post` passes `maxRetries`, since a POST the daemon already applied would run twice. `request-retries.test.ts` checks both.
+- **A spec imports `test` from `./routed-test`**, never from `@playwright/test`. Its page drops its routes when the
+  test ends (the app polls `/system`, and a route callback still running then fails the test or the next one), and
+  its `request` retries a reset connection on every method (`retrying-request.ts`).
+- **Every API request retries a reset connection.** The `request` fixture sets `maxRetries: 2` on each call that
+  doesn't set its own: a request can reuse a keep-alive socket the daemon closed after its 5 s timeout, and Playwright
+  retries only ECONNRESET. A reset on a stale socket means the daemon never read the request, so a write is safe to
+  resend too. `route.fetch` has no fixture and passes `maxRetries: 2` itself. `request-retries.test.ts` checks both.
 - **Specs share one daemon per shard.** `first-run.spec.ts` runs first in shard 1 because the first run shows only
   while the daemon has no project. The Board shows the first project by name, so the project it makes,
   `e2e-first-run`, sorts after `e2e`, which `loop.spec.ts` and the specs after it open. Every spec adds its own

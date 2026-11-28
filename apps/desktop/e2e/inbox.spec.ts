@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 import {
   chromium,
   expect,
-  test,
   type APIRequestContext,
   type Browser,
   type Page,
@@ -11,6 +10,7 @@ import {
 import { z } from 'zod';
 import { daemonUrl } from './daemon-url';
 import { E2E_DATA } from './paths';
+import { test } from './routed-test';
 import { auth, createProject } from './shape-project';
 import { freeLoopbackPort, startTlsStandIn, type TlsStandIn } from './tls-standin';
 
