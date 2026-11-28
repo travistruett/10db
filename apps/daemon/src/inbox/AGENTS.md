@@ -138,4 +138,7 @@
   `stopCiFixing` (`delivery/ci-stop.ts`) withdraws the root's `prCardKey.checks` card in the stop's write, and
   `pr-watch` raises none while `ciStopped` is set. A stop at the limit or on an unchanged head shows the
   `ci-out-of-moves` notice, and `pr-watch` replaces it with the out-of-moves card in one write 30 minutes later; a
-  missing log or a refused cut raises its card at once.
+  missing log or a refused cut raises its card at once. `clearCiStop` lifts a stop and its notice before then. The
+  `ci_out_of_moves.<root id>` setting holds the stop time, More's `ignoreFixesBefore`, Change's note (the next fix
+  task opens with it) and Drop's `dropped`, which keeps the close's "pull request closed" card away; the write that
+  records the merge or close deletes it, last. (Kept here: `delivery/AGENTS.md` is at its word budget.)
