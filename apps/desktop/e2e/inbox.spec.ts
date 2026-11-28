@@ -465,15 +465,12 @@ test('a run that stalled again asks Spend More Attempts, Change the Task or Drop
   await page.goto(inboxUrl(''));
   const row = rowsOf(page).filter({ hasText: `Out of moves: ${title} stalled again` });
   await row.click();
+  // The card body is one block of paragraphs, so each line is a substring of it, not an element of its own.
   await expect(
-    page.getByText('10db restarted it once from its handoff, and it stalled again.', {
-      exact: true,
-    }),
+    page.getByText('10db restarted it once from its handoff, and it stalled again.'),
   ).toBeVisible();
   await expect(
-    page.getByText('This looks like a 10db defect; the report could not be filed here.', {
-      exact: true,
-    }),
+    page.getByText('This looks like a 10db defect; the report could not be filed here.'),
   ).toBeVisible();
   await expect(page.getByRole('radio', { name: /Spend More Attempts/ })).toBeVisible();
   await expect(page.getByRole('radio', { name: /Change the Task/ })).toBeVisible();
